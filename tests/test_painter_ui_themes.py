@@ -60,7 +60,7 @@ def test_theme_values_normalize_and_resolve_alias_chain() -> None:
     document, base, alias, row = _themed_document()
     document["artboards"][0]["theme"] = "high contrast"
     normalized = normalize_ui_document(document)
-    assert normalized["version"] == 16
+    assert normalized["version"] == 17
     assert normalized["artboards"][0]["theme"] == "high_contrast"
     assert normalized["tokens"][0]["theme_values"]["high_contrast"] == "#000000"
 

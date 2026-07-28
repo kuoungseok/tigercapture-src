@@ -1,6 +1,7 @@
 """Paint / drawing action adapter methods."""
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -1278,6 +1279,248 @@ class PaintAdapterMixin(
         )
         dialog._push_undo_state("Update UI object")
         return self._paint_ui_commit(dialog, "Update UI object", document)
+
+    def _paint_ui_vector_target(self, dialog, object_id: str = ""):
+        selected = str(
+            object_id
+            or dialog._painter_ui_document["selection"]["object_id"]
+            or ""
+        )
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == selected
+            ),
+            None,
+        )
+        if row is None or row["kind"] != "path":
+            raise ValueError(
+                "Painter UI vector editing requires a selected path object"
+            )
+        from app.painter_ui_vector_network import (
+            create_vector_network,
+            normalize_vector_network,
+        )
+
+        content = copy.deepcopy(row["content"])
+        network = content.get("vector_network")
+        if not isinstance(network, dict):
+            network = create_vector_network()
+        return selected, content, normalize_vector_network(network)
+
+    def _paint_ui_vector_commit(
+        self,
+        dialog,
+        *,
+        object_id: str,
+        content: dict[str, Any],
+        network: dict[str, Any],
+        label: str,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.painter_ui_document import update_ui_object
+
+        content["vector_network"] = network
+        document, _row = update_ui_object(
+            dialog._painter_ui_document,
+            object_id,
+            {"content": content},
+        )
+        dialog._push_undo_state(label)
+        state = self._paint_ui_commit(dialog, label, document)
+        return {
+            **state,
+            "vector_edit": {
+                "object_id": object_id,
+                "network": copy.deepcopy(
+                    next(
+                        row["content"]["vector_network"]
+                        for row in document["objects"]
+                        if row["id"] == object_id
+                    )
+                ),
+                **dict(result or {}),
+            },
+        }
+
+    def paint_ui_vector_node_add(
+        self,
+        *,
+        object_id: str = "",
+        x: float,
+        y: float,
+        after_node_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import add_vector_node
+
+        network, node_id = add_vector_node(
+            network,
+            x=x,
+            y=y,
+            after_node_id=after_node_id,
+        )
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Add UI vector node",
+            result={"node_id": node_id},
+        )
+
+    def paint_ui_vector_node_update(
+        self,
+        *,
+        node_id: str,
+        changes: dict[str, Any],
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import update_vector_node
+
+        network = update_vector_node(network, node_id, changes)
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Update UI vector node",
+            result={"node_id": str(node_id)},
+        )
+
+    def paint_ui_vector_node_remove(
+        self,
+        *,
+        node_id: str,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import remove_vector_node
+
+        network = remove_vector_node(network, node_id)
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Remove UI vector node",
+            result={"node_id": str(node_id)},
+        )
+
+    def paint_ui_vector_segment_set(
+        self,
+        *,
+        segment_id: str,
+        kind: str,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import set_vector_segment_kind
+
+        network = set_vector_segment_kind(network, segment_id, kind)
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Set UI vector segment",
+            result={"segment_id": str(segment_id), "kind": str(kind)},
+        )
+
+    def paint_ui_vector_segment_split(
+        self,
+        *,
+        segment_id: str,
+        position: float = 0.5,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import split_vector_segment
+
+        network, node_id = split_vector_segment(
+            network,
+            segment_id,
+            position=position,
+        )
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Split UI vector segment",
+            result={"segment_id": str(segment_id), "node_id": node_id},
+        )
+
+    def paint_ui_vector_path_closed_set(
+        self,
+        *,
+        closed: bool,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import set_vector_path_closed
+
+        network = set_vector_path_closed(network, closed)
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Close UI vector path" if closed else "Open UI vector path",
+            result={"closed": bool(closed)},
+        )
+
+    def paint_ui_vector_path_join(
+        self,
+        *,
+        start_node_id: str,
+        end_node_id: str,
+        kind: str = "line",
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import join_vector_nodes
+
+        network = join_vector_nodes(
+            network,
+            start_node_id,
+            end_node_id,
+            kind=kind,
+        )
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Join UI vector nodes",
+            result={
+                "start_node_id": str(start_node_id),
+                "end_node_id": str(end_node_id),
+            },
+        )
 
     def paint_ui_object_properties_copy(
         self,

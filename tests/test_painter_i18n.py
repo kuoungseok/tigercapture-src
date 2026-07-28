@@ -49,6 +49,10 @@ def test_painter_context_inspector_labels_are_localized() -> None:
     from app.painter_i18n import painter_text
 
     assert painter_text("Artboard", "ko") == "아트보드"
+    assert painter_text("Vector", "ko") == "벡터"
+    assert painter_text("nodes", "ko") == "노드"
+    assert painter_text("Delete node", "ko") == "노드 삭제"
+    assert painter_text("Close path", "ko") == "패스 닫기"
     assert (
         painter_text("Select an object to edit its properties.", "ko")
         == "속성을 편집할 객체를 선택하세요."

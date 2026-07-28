@@ -31,6 +31,43 @@ _LANGUAGES = ("en", "ko", "ja", "zh", "fr", "de")
 
 # English source, Korean, Japanese, Simplified Chinese, French, German.
 _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
+    ("Vector", "벡터", "ベクター", "矢量", "Vecteur", "Vektor"),
+    ("nodes", "노드", "ノード", "节点", "nœuds", "Knoten"),
+    ("Straight", "직선", "直線", "直线", "Droit", "Gerade"),
+    ("Bezier", "베지어", "ベジェ", "贝塞尔", "Bézier", "Bézier"),
+    ("Split", "분할", "分割", "拆分", "Diviser", "Teilen"),
+    (
+        "Delete node",
+        "노드 삭제",
+        "ノードを削除",
+        "删除节点",
+        "Supprimer le nœud",
+        "Knoten löschen",
+    ),
+    (
+        "Exit vector edit",
+        "벡터 편집 종료",
+        "ベクター編集を終了",
+        "退出矢量编辑",
+        "Quitter l'édition vectorielle",
+        "Vektorbearbeitung beenden",
+    ),
+    (
+        "Open path",
+        "패스 열기",
+        "パスを開く",
+        "打开路径",
+        "Ouvrir le tracé",
+        "Pfad öffnen",
+    ),
+    (
+        "Close path",
+        "패스 닫기",
+        "パスを閉じる",
+        "闭合路径",
+        "Fermer le tracé",
+        "Pfad schließen",
+    ),
     ("Painter - Tiger Studio", "페인터 - Tiger Studio", "ペインター - Tiger Studio", "画板 - Tiger Studio", "Peinture - Tiger Studio", "Maler - Tiger Studio"),
     ("New Canvas", "새 캔버스", "新規キャンバス", "新建画布", "Nouveau canevas", "Neue Leinwand"),
     ("Image & Output Size", "이미지 및 출력 크기", "画像と出力サイズ", "图像与输出尺寸", "Taille de l'image et de sortie", "Bild- und Ausgabegröße"),

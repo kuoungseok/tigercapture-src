@@ -4,8 +4,10 @@ Status: canonical implementation backlog; P0-P10 local production foundation com
 
 P0-P2 completion checkpoint (2026-07-28):
 
-- Painter UI document schema is version 16.
-- Schema 16 adds normalized Polygon/Star/Arc parameters shared by canvas,
+- Painter UI document schema is version 17.
+- Schema 17 adds typed stable-ID Vector Networks shared by canvas, vector
+  editing, Action, PNG, and editable SVG output.
+- Schema 16 added normalized Polygon/Star/Arc parameters shared by canvas,
   Inspector, Action, PNG, and SVG paths.
 - Schema 15 introduced ordered per-artboard `layout_grids[]` with legacy
   `layout_grid` compatibility. Uniform, Columns, and Rows can render together;

@@ -898,6 +898,129 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.vector.node.add",
+        "Add a stable-ID node to a Painter UI vector path.",
+        "paint",
+        "paint_ui_vector_node_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "after_node_id": {"type": "string"},
+            },
+            required=("x", "y"),
+        ),
+        required=("x", "y"),
+        undo_label="Add UI vector node",
+        dry_summary="a vector node would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.node.update",
+        "Move a vector node or edit its Bezier handles and continuity.",
+        "paint",
+        "paint_ui_vector_node_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "node_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("node_id", "changes"),
+        ),
+        required=("node_id", "changes"),
+        undo_label="Update UI vector node",
+        dry_summary="a vector node or its handles would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.node.remove",
+        "Remove a vector node and its connected segments.",
+        "paint",
+        "paint_ui_vector_node_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "node_id": {"type": "string"},
+            },
+            required=("node_id",),
+        ),
+        required=("node_id",),
+        undo_label="Remove UI vector node",
+        dry_summary="a vector node would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.segment.set",
+        "Convert a Painter UI vector segment between straight and Bezier.",
+        "paint",
+        "paint_ui_vector_segment_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "segment_id": {"type": "string"},
+                "kind": {"type": "string", "enum": ["line", "cubic"]},
+            },
+            required=("segment_id", "kind"),
+        ),
+        required=("segment_id", "kind"),
+        undo_label="Set UI vector segment",
+        dry_summary="a vector segment would be converted",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.segment.split",
+        "Split a Painter UI vector segment while preserving its curve.",
+        "paint",
+        "paint_ui_vector_segment_split",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "segment_id": {"type": "string"},
+                "position": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 0.99,
+                },
+            },
+            required=("segment_id",),
+        ),
+        required=("segment_id",),
+        undo_label="Split UI vector segment",
+        dry_summary="a vector segment would be split",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.closed.set",
+        "Open or close a Painter UI vector path.",
+        "paint",
+        "paint_ui_vector_path_closed_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "closed": {"type": "boolean"},
+            },
+            required=("closed",),
+        ),
+        required=("closed",),
+        undo_label="Set UI vector path closure",
+        dry_summary="the vector path open/closed state would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.join",
+        "Join two stable-ID vector nodes with a straight or Bezier segment.",
+        "paint",
+        "paint_ui_vector_path_join",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "start_node_id": {"type": "string"},
+                "end_node_id": {"type": "string"},
+                "kind": {"type": "string", "enum": ["line", "cubic"]},
+            },
+            required=("start_node_id", "end_node_id"),
+        ),
+        required=("start_node_id", "end_node_id"),
+        undo_label="Join UI vector nodes",
+        dry_summary="two vector nodes would be joined",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.properties.copy",
         "Copy stable-ID-safe appearance and layout properties from one UI object.",
         "paint",

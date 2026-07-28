@@ -155,9 +155,10 @@ preview. The format preserves:
   `tigerstudio.painter.ui.template_package.v1` manifests. A manifest includes
   stable template ID, version, category, tags, artboard presets, feature list,
   author, source, and explicit license terms. Applying a built-in template
-  creates a normal version-9 UI document and stores immutable source
-  provenance in `linked_targets.template_source`; all template contents remain
-  ordinary editable artboards, objects, tokens, components, and interactions.
+  creates a normal current-version UI document (version 17 at this checkpoint)
+  and stores immutable source provenance in `linked_targets.template_source`;
+  all template contents remain ordinary editable artboards, objects, tokens,
+  components, and interactions.
   `paint.ui.template.catalog.inspect/apply` use the same instantiate service as
   the visual Template Gallery.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
@@ -197,6 +198,9 @@ Actions:
 - `paint.ui.artboard.add/update/remove`
 - `paint.ui.artboard.activate`
 - `paint.ui.object.add/update/remove`
+- `paint.ui.vector.node.add/update/remove`
+- `paint.ui.vector.segment.set/split`
+- `paint.ui.vector.path.closed.set/join`
 - `paint.ui.selection.set`
 - `paint.ui.object.arrange`
 - `paint.ui.object.group/ungroup/reorder`

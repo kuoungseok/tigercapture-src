@@ -48,6 +48,7 @@ _CREATE_TOOLS = {
     "polygon",
     "star",
     "arc",
+    "path",
     "text",
     "image",
     "button",
@@ -77,6 +78,7 @@ class PainterUIDesignOverlay(QWidget):
     text_change_requested = Signal(str, str)
     text_edit_started = Signal(str)
     text_edit_finished = Signal(str, bool)
+    vector_edit_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -125,6 +127,11 @@ class PainterUIDesignOverlay(QWidget):
         self._text_edit_object_id = ""
         self._auto_layout_active_target = ""
         self._auto_layout_drag_original: dict[str, Any] | None = None
+        self._vector_edit_object_id = ""
+        self._vector_active_node_id = ""
+        self._vector_active_handle = ""
+        self._vector_active_segment_id = ""
+        self._vector_original_content: dict[str, Any] | None = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -142,6 +149,24 @@ class PainterUIDesignOverlay(QWidget):
             row["id"] for row in self._document["objects"]
         }:
             self._edit_scope_id = ""
+        vector_row = next(
+            (
+                row
+                for row in self._document["objects"]
+                if row["id"] == self._vector_edit_object_id
+            ),
+            None,
+        )
+        if (
+            vector_row is None
+            or vector_row["kind"] != "path"
+            or self._document["selection"]["object_id"]
+            != self._vector_edit_object_id
+        ):
+            self._vector_edit_object_id = ""
+            self._vector_active_node_id = ""
+            self._vector_active_handle = ""
+            self._vector_active_segment_id = ""
         if self._text_edit_object_id and not any(
             row["id"] == self._text_edit_object_id
             and row["kind"] == "text"
@@ -969,6 +994,256 @@ class PainterUIDesignOverlay(QWidget):
                 ("se", rect.bottomRight()),
             )
         }
+
+    def _vector_control_positions(
+        self,
+        row: Mapping[str, Any],
+    ) -> tuple[dict[str, QPointF], dict[tuple[str, str], QPointF]]:
+        network = (row.get("content") or {}).get("vector_network")
+        if not isinstance(network, Mapping):
+            return {}, {}
+        from app.painter_ui_vector_network import normalize_vector_network
+
+        rect = self._object_rect(row)
+
+        def screen_point(value: Mapping[str, Any]) -> QPointF:
+            return QPointF(
+                rect.left() + float(value.get("x") or 0.0) * rect.width(),
+                rect.top() + float(value.get("y") or 0.0) * rect.height(),
+            )
+
+        normalized = normalize_vector_network(network)
+        nodes = {
+            str(node["id"]): screen_point(node)
+            for node in normalized["nodes"]
+        }
+        handles: dict[tuple[str, str], QPointF] = {}
+        for node in normalized["nodes"]:
+            node_id = str(node["id"])
+            for key in ("in_handle", "out_handle"):
+                value = node.get(key)
+                if isinstance(value, Mapping):
+                    handles[(node_id, key)] = screen_point(value)
+        return nodes, handles
+
+    def _vector_control_at(
+        self,
+        row: Mapping[str, Any],
+        position: QPointF,
+    ) -> tuple[str, str]:
+        nodes, handles = self._vector_control_positions(row)
+        for (node_id, handle), point in handles.items():
+            if math.hypot(position.x() - point.x(), position.y() - point.y()) <= 8.0:
+                return node_id, handle
+        for node_id, point in nodes.items():
+            if math.hypot(position.x() - point.x(), position.y() - point.y()) <= 8.0:
+                return node_id, "node"
+        return "", ""
+
+    def _vector_segment_at(
+        self,
+        row: Mapping[str, Any],
+        position: QPointF,
+    ) -> str:
+        from app.painter_ui_vector_network import normalize_vector_network
+
+        network = normalize_vector_network(
+            (row.get("content") or {}).get("vector_network")
+        )
+        nodes, handles = self._vector_control_positions(row)
+
+        def distance_to_line(point: QPointF, start: QPointF, end: QPointF) -> float:
+            dx = end.x() - start.x()
+            dy = end.y() - start.y()
+            length_sq = dx * dx + dy * dy
+            if length_sq <= 0.0001:
+                return math.hypot(point.x() - start.x(), point.y() - start.y())
+            amount = max(
+                0.0,
+                min(
+                    1.0,
+                    (
+                        (point.x() - start.x()) * dx
+                        + (point.y() - start.y()) * dy
+                    )
+                    / length_sq,
+                ),
+            )
+            closest = QPointF(start.x() + dx * amount, start.y() + dy * amount)
+            return math.hypot(point.x() - closest.x(), point.y() - closest.y())
+
+        best: tuple[float, str] | None = None
+        for segment in network["segments"]:
+            start_id = segment["start_node_id"]
+            end_id = segment["end_node_id"]
+            start = nodes.get(start_id)
+            end = nodes.get(end_id)
+            if start is None or end is None:
+                continue
+            points = [start]
+            if segment["kind"] == "cubic":
+                control_a = handles.get((start_id, "out_handle"), start)
+                control_b = handles.get((end_id, "in_handle"), end)
+                for index in range(1, 25):
+                    t = index / 24.0
+                    inv = 1.0 - t
+                    points.append(
+                        QPointF(
+                            inv**3 * start.x()
+                            + 3 * inv * inv * t * control_a.x()
+                            + 3 * inv * t * t * control_b.x()
+                            + t**3 * end.x(),
+                            inv**3 * start.y()
+                            + 3 * inv * inv * t * control_a.y()
+                            + 3 * inv * t * t * control_b.y()
+                            + t**3 * end.y(),
+                        )
+                    )
+            else:
+                points.append(end)
+            distance = min(
+                distance_to_line(position, first, second)
+                for first, second in zip(points, points[1:])
+            )
+            if distance <= 8.0 and (best is None or distance < best[0]):
+                best = (distance, str(segment["id"]))
+        return best[1] if best is not None else ""
+
+    def _vector_normalized_point(
+        self,
+        row: Mapping[str, Any],
+        position: QPointF,
+    ) -> dict[str, float]:
+        rect = self._object_rect(row)
+        return {
+            "x": (position.x() - rect.left()) / max(0.0001, rect.width()),
+            "y": (position.y() - rect.top()) / max(0.0001, rect.height()),
+        }
+
+    def _paint_vector_controls(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        nodes, handles = self._vector_control_positions(row)
+        if not nodes:
+            return
+        painter.save()
+        if self._vector_active_segment_id:
+            from app.painter_ui_vector_network import normalize_vector_network
+
+            network = normalize_vector_network(
+                (row.get("content") or {}).get("vector_network")
+            )
+            segment = next(
+                (
+                    item
+                    for item in network["segments"]
+                    if item["id"] == self._vector_active_segment_id
+                ),
+                None,
+            )
+            if segment is not None:
+                start = nodes.get(segment["start_node_id"])
+                end = nodes.get(segment["end_node_id"])
+                if start is not None and end is not None:
+                    highlight = QPainterPath(start)
+                    if segment["kind"] == "cubic":
+                        highlight.cubicTo(
+                            handles.get(
+                                (segment["start_node_id"], "out_handle"),
+                                start,
+                            ),
+                            handles.get(
+                                (segment["end_node_id"], "in_handle"),
+                                end,
+                            ),
+                            end,
+                        )
+                    else:
+                        highlight.lineTo(end)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.setPen(QPen(QColor("#FFD166"), 2.2))
+                    painter.drawPath(highlight)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#73A7F5"), 1.0))
+        for (node_id, _handle), point in handles.items():
+            origin = nodes.get(node_id)
+            if origin is not None:
+                painter.drawLine(origin, point)
+        for (node_id, handle), point in handles.items():
+            painter.setBrush(
+                QColor("#FFD166")
+                if node_id == self._vector_active_node_id
+                and handle == self._vector_active_handle
+                else QColor("#E9EEF7")
+            )
+            painter.setPen(QPen(QColor("#315F9F"), 1.0))
+            painter.drawEllipse(point, 3.5, 3.5)
+        for node_id, point in nodes.items():
+            active = node_id == self._vector_active_node_id
+            painter.setBrush(QColor("#FFD166") if active else QColor("#F5F8FD"))
+            painter.setPen(QPen(QColor("#2B67BC"), 1.2))
+            painter.drawRect(QRectF(point.x() - 4.5, point.y() - 4.5, 9.0, 9.0))
+        painter.restore()
+
+    def _vector_edit_state(
+        self,
+        row: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        target = row or next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == self._vector_edit_object_id
+            ),
+            None,
+        )
+        if target is None or target["kind"] != "path":
+            return {}
+        from app.painter_ui_vector_network import normalize_vector_network
+
+        network = normalize_vector_network(
+            (target.get("content") or {}).get("vector_network")
+        )
+        segment = next(
+            (
+                item
+                for item in network["segments"]
+                if item["id"] == self._vector_active_segment_id
+            ),
+            None,
+        )
+        if segment is None:
+            segment = next(
+                (
+                    item
+                    for item in network["segments"]
+                    if item["start_node_id"] == self._vector_active_node_id
+                    or item["end_node_id"] == self._vector_active_node_id
+                ),
+                None,
+            )
+        return {
+            "object_id": str(target["id"]),
+            "node_id": str(self._vector_active_node_id),
+            "handle": str(self._vector_active_handle),
+            "segment_id": str(segment["id"]) if segment is not None else "",
+            "segment_kind": (
+                str(segment["kind"]) if segment is not None else ""
+            ),
+            "node_count": len(network["nodes"]),
+            "segment_count": len(network["segments"]),
+            "closed": bool(network["closed"]),
+        }
+
+    def exit_vector_edit(self) -> None:
+        self._vector_edit_object_id = ""
+        self._vector_active_node_id = ""
+        self._vector_active_handle = ""
+        self._vector_active_segment_id = ""
+        self.vector_edit_changed.emit({})
+        self.update()
 
     @staticmethod
     def _rotation_handle_rect(
@@ -1859,22 +2134,28 @@ class PainterUIDesignOverlay(QWidget):
                 and row["id"] == selected
                 and not row["locked"]
             ):
-                painter.setBrush(QColor("#F4F7FC"))
-                painter.setPen(QPen(QColor("#356FC7"), 1.0))
-                for handle in self._handle_rects(rect).values():
-                    painter.drawRect(handle)
-                rotate_handle = self._rotation_handle_rect(
-                    rect,
-                    row.get("constraints"),
-                )
-                painter.drawLine(
-                    pivot,
-                    QPointF(pivot.x(), rotate_handle.bottom()),
-                )
-                painter.setBrush(QColor("#F4F7FC"))
-                painter.drawEllipse(rotate_handle)
-                painter.setBrush(QColor("#72A7FF"))
-                painter.drawEllipse(pivot, 3.0, 3.0)
+                if (
+                    row["kind"] == "path"
+                    and row["id"] == self._vector_edit_object_id
+                ):
+                    self._paint_vector_controls(painter, row)
+                else:
+                    painter.setBrush(QColor("#F4F7FC"))
+                    painter.setPen(QPen(QColor("#356FC7"), 1.0))
+                    for handle in self._handle_rects(rect).values():
+                        painter.drawRect(handle)
+                    rotate_handle = self._rotation_handle_rect(
+                        rect,
+                        row.get("constraints"),
+                    )
+                    painter.drawLine(
+                        pivot,
+                        QPointF(pivot.x(), rotate_handle.bottom()),
+                    )
+                    painter.setBrush(QColor("#F4F7FC"))
+                    painter.drawEllipse(rotate_handle)
+                    painter.setBrush(QColor("#72A7FF"))
+                    painter.drawEllipse(pivot, 3.0, 3.0)
             painter.restore()
         from app.painter_ui_auto_layout_overlay import (
             paint_auto_layout_canvas_controls,
@@ -2117,6 +2398,46 @@ class PainterUIDesignOverlay(QWidget):
                 float(selected_row.get("rotation", 0.0)),
                 selected_row.get("constraints"),
             )
+            if (
+                selected_row["kind"] == "path"
+                and selected_row["id"] == self._vector_edit_object_id
+            ):
+                node_id, handle = self._vector_control_at(
+                    selected_row,
+                    local_position,
+                )
+                if node_id:
+                    self._interaction = (
+                        "vector_node"
+                        if handle == "node"
+                        else "vector_handle"
+                    )
+                    self._active_object_id = str(selected_row["id"])
+                    self._vector_active_node_id = node_id
+                    self._vector_active_handle = handle
+                    self._vector_active_segment_id = ""
+                    self._vector_original_content = copy.deepcopy(
+                        selected_row["content"]
+                    )
+                    self.vector_edit_changed.emit(
+                        self._vector_edit_state(selected_row)
+                    )
+                    event.accept()
+                    return
+                segment_id = self._vector_segment_at(
+                    selected_row,
+                    local_position,
+                )
+                if segment_id:
+                    self._vector_active_node_id = ""
+                    self._vector_active_handle = ""
+                    self._vector_active_segment_id = segment_id
+                    self.vector_edit_changed.emit(
+                        self._vector_edit_state(selected_row)
+                    )
+                    self.update()
+                    event.accept()
+                    return
             if self._rotation_handle_rect(
                 selected_rect,
                 selected_row.get("constraints"),
@@ -2287,6 +2608,44 @@ class PainterUIDesignOverlay(QWidget):
                 position,
             ).normalized()
             self.update()
+            event.accept()
+            return
+        if self._interaction in {"vector_node", "vector_handle"}:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == self._active_object_id
+                ),
+                None,
+            )
+            if row is not None:
+                rect = self._object_rect(row)
+                local_position = self._unrotated_point(
+                    event.position(),
+                    rect,
+                    float(row.get("rotation", 0.0)),
+                    row.get("constraints"),
+                )
+                point = self._vector_normalized_point(row, local_position)
+                from app.painter_ui_vector_network import (
+                    normalize_vector_content,
+                    update_vector_node,
+                )
+
+                content = copy.deepcopy(row["content"])
+                changes = (
+                    {"x": point["x"], "y": point["y"]}
+                    if self._interaction == "vector_node"
+                    else {self._vector_active_handle: point}
+                )
+                content["vector_network"] = update_vector_node(
+                    content.get("vector_network"),
+                    self._vector_active_node_id,
+                    changes,
+                )
+                row["content"] = normalize_vector_content(content)
+                self.update()
             event.accept()
             return
         if self._interaction == "pan":
@@ -2589,6 +2948,20 @@ class PainterUIDesignOverlay(QWidget):
                     self._active_guide_position,
                     next_position,
                 )
+        elif interaction in {"vector_node", "vector_handle"} and object_id:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == object_id
+                ),
+                None,
+            )
+            if row is not None:
+                self.object_changes_requested.emit(
+                    object_id,
+                    {"content": copy.deepcopy(row["content"])},
+                )
         elif interaction == "auto_layout_drag" and object_id:
             row = next(
                 (
@@ -2702,6 +3075,9 @@ class PainterUIDesignOverlay(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
         self._resize_original_geometries = {}
+        self._vector_original_content = None
+        if self._vector_edit_object_id:
+            self.vector_edit_changed.emit(self._vector_edit_state())
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:
@@ -2748,6 +3124,32 @@ class PainterUIDesignOverlay(QWidget):
                 cursor_position=QPointF(event.position()),
             ):
                 self.object_selection_requested.emit(text_target, "replace")
+                event.accept()
+                return
+            path_target = next(
+                (
+                    object_id
+                    for object_id in candidates
+                    if next(
+                        (
+                            row["kind"]
+                            for row in self._document["objects"]
+                            if row["id"] == object_id
+                        ),
+                        "",
+                    )
+                    == "path"
+                ),
+                "",
+            )
+            if path_target:
+                self._vector_edit_object_id = path_target
+                self._vector_active_node_id = ""
+                self._vector_active_handle = ""
+                self._vector_active_segment_id = ""
+                self.object_selection_requested.emit(path_target, "replace")
+                self.vector_edit_changed.emit(self._vector_edit_state())
+                self.update()
                 event.accept()
                 return
             parent_ids = {
@@ -2815,7 +3217,40 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         if key == Qt.Key.Key_Delete:
+            if self._vector_edit_object_id and self._vector_active_node_id:
+                row = next(
+                    (
+                        item
+                        for item in self._document["objects"]
+                        if item["id"] == self._vector_edit_object_id
+                    ),
+                    None,
+                )
+                if row is not None:
+                    from app.painter_ui_vector_network import (
+                        normalize_vector_content,
+                        remove_vector_node,
+                    )
+
+                    content = copy.deepcopy(row["content"])
+                    content["vector_network"] = remove_vector_node(
+                        content.get("vector_network"),
+                        self._vector_active_node_id,
+                    )
+                    self.object_changes_requested.emit(
+                        row["id"],
+                        {"content": normalize_vector_content(content)},
+                    )
+                self._vector_active_node_id = ""
+                self._vector_active_handle = ""
+                self._vector_active_segment_id = ""
+                event.accept()
+                return
             self.key_command.emit("delete", False)
+            event.accept()
+            return
+        if key == Qt.Key.Key_Escape and self._vector_edit_object_id:
+            self.exit_vector_edit()
             event.accept()
             return
         if key == Qt.Key.Key_Escape and self._edit_scope_id:

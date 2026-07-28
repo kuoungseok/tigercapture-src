@@ -1,10 +1,10 @@
 # Painter UI Figma-Class Interface Specification
 
-Status: active UX contract; UI-P0 shell and core M1 canvas workflows implemented
+Status: active UX contract; UI-P0 shell and core M1 canvas/vector workflows implemented
 
 Date: 2026-07-29
 
-## Implementation Checkpoint (2026-07-28)
+## Implementation Checkpoint (2026-07-29)
 
 Implemented:
 
@@ -42,11 +42,21 @@ Implemented:
   raster export, and SVG export
 - UI/Action parity through `paint.ui.object.add/update`, with persistent
   `content` parameters and the existing Undo/Redo mutation path
-- Painter UI document schema version 16 for typed parametric shape content
+- typed stable-ID Vector Network content with node/segment selection,
+  straight/Bezier conversion, handle editing, segment split, node join/remove,
+  and open/closed path editing
+- dedicated Pen/Vector tool, double-click Vector Edit, and a canvas-local
+  contextual command bar that does not reserve Inspector space
+- shared vector rendering for Canvas, PNG, and editable SVG export
+- UI/Action parity through `paint.ui.vector.node.*`,
+  `paint.ui.vector.segment.*`, and `paint.ui.vector.path.*`
+- Painter UI document schema version 17; schema 16 remains the parametric
+  Polygon/Star/Arc checkpoint and schema 17 adds typed Vector Networks
 
 Still required by this contract:
 
-- vector-network node and segment editing beyond the parametric shape set
+- advanced Vector Edit commands: reverse path, outline stroke, simplify, and
+  broader non-destructive Boolean release UX
 - full M1+ interaction and delivery work tracked by the milestone document
 
 The left navigator and right Inspector are not permanently fixed sidebars.

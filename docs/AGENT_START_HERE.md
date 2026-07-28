@@ -158,7 +158,12 @@ Focused entry points:
   applies axes in Qt canvas/export paths, preserves them in Figma shared plugin
   metadata, and explicitly blocks Unreal UMG output until a real deterministic
   text-bake path exists.
-  Schema 16 adds persistent Polygon/Star/Arc parameters through the shared
+  Schema 17 adds typed stable-ID Vector Networks through
+  `app/painter_ui_vector_network.py`. The Pen/Vector tool, double-click Vector
+  Edit, canvas node/segment/Bezier-handle editing, contextual command bar,
+  Canvas/PNG/SVG paths, and `paint.ui.vector.*` Actions must share that
+  contract. Reverse Path, Outline Stroke, and Simplify remain follow-up work.
+  Schema 16 added persistent Polygon/Star/Arc parameters through the shared
   `app/painter_ui_parametric_shapes.py` geometry contract. The grouped Shape
   flyout, contextual Inspector, `paint.ui.object.add/update`, canvas hit
   testing, PNG, and SVG must remain behaviorally aligned.

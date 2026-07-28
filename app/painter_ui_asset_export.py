@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_image_renderer import draw_ui_image
+from app.painter_ui_style_renderer import draw_ui_vector_paths
 
 
 ASSET_EXPORT_SCHEMA = "tigerstudio.painter.ui.asset_export.v1"
@@ -26,6 +27,7 @@ _VECTOR_KINDS = {
     "polygon",
     "star",
     "arc",
+    "path",
     "text",
 }
 
@@ -210,6 +212,8 @@ def render_ui_artboard(
                 alignment | Qt.TextFlag.TextWordWrap,
                 str(content.get("text") or row["name"]),
             )
+        elif kind == "path":
+            draw_ui_vector_paths(painter, rect, content, style)
         elif kind == "progress":
             painter.drawRoundedRect(rect, radius, radius)
             progress = min(1.0, max(0.0, float(content.get("value", 0.5))))
@@ -342,6 +346,22 @@ def _svg_for_artboard(
                     common,
                 )
             )
+        elif row["kind"] == "path":
+            from app.painter_ui_vector_network import (
+                vector_network_to_svg_path,
+            )
+
+            path = vector_network_to_svg_path(
+                content.get("vector_network"),
+                QRectF(
+                    float(row["x"]),
+                    float(row["y"]),
+                    float(row["width"]),
+                    float(row["height"]),
+                ),
+            )
+            if path:
+                rows.append('<path d="%s" %s/>' % (path, common))
         elif row["kind"] == "text":
             rows.append(
                 '<text x="%s" y="%s" font-size="%s" %s>%s</text>'

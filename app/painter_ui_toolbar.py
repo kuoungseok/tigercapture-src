@@ -99,6 +99,14 @@ class PainterUIFloatingToolbar(QFrame):
             self.tool_buttons[kind] = shape_button
             self._tool_group_for_kind[kind] = shape_button
 
+        vector_button = self._tool_button("Pen / Vector", "pen-nib")
+        vector_button.clicked.connect(
+            lambda _checked=False: self.tool_requested.emit("path")
+        )
+        layout.addWidget(vector_button)
+        self.tool_buttons["path"] = vector_button
+        self._tool_group_for_kind["path"] = vector_button
+
         content_button = self._tool_group_button(
             (
                 ("Text", "text", "caption"),

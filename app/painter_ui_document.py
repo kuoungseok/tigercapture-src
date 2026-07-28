@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 16
+UI_DOCUMENT_VERSION = 17
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -263,6 +263,10 @@ def _normalize_object(
         kind,
         normalized_content,
     )
+    if kind == "path":
+        from app.painter_ui_vector_network import normalize_vector_content
+
+        normalized_content = normalize_vector_content(normalized_content)
     normalized_content["text_ranges"] = normalize_ui_text_ranges(
         normalized_content.get("text_ranges"),
         str(normalized_content.get("text") or ""),

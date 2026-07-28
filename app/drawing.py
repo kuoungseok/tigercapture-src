@@ -244,6 +244,36 @@ QWidget#PaintUIDesignToolHost {
     border-radius: 7px;
 }
 
+QFrame#PainterUIVectorContextBar {
+    background-color: #1b2129;
+    border: 1px solid #4b5b6d;
+    border-radius: 6px;
+}
+
+QLabel#PainterUIVectorContextSummary {
+    color: #dce6f2;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 0 3px;
+}
+
+QPushButton#PainterUIVectorContextButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0;
+}
+
+QPushButton#PainterUIVectorContextButton:hover {
+    background-color: #2b3541;
+    border-color: #566b83;
+}
+
+QPushButton#PainterUIVectorContextButton:disabled {
+    background-color: transparent;
+    border-color: transparent;
+}
+
 QFrame#PainterUIZoomPopover {
     background-color: #171c23;
     border: 1px solid #46566a;
@@ -9713,6 +9743,19 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.text_change_requested.connect(
             self._update_painter_ui_text_content
         )
+        from app.painter_ui_vector_context_bar import (
+            PainterUIVectorContextBar,
+        )
+
+        self._painter_ui_vector_context_bar = PainterUIVectorContextBar(
+            canvas_host
+        )
+        self._painter_ui_overlay.vector_edit_changed.connect(
+            self._sync_painter_ui_vector_context
+        )
+        self._painter_ui_vector_context_bar.command_requested.connect(
+            self._handle_painter_ui_vector_command
+        )
         self._painter_ui_overlay.hide()
         from app.painter_ui_selection_breadcrumb import (
             PainterUISelectionBreadcrumb,
@@ -13525,6 +13568,10 @@ class PaintDialog(QDialog):
             "rectangle",
             "ellipse",
             "line",
+            "polygon",
+            "star",
+            "arc",
+            "path",
             "text",
             "image",
             "button",
@@ -13811,6 +13858,8 @@ class PaintDialog(QDialog):
 
     @staticmethod
     def _painter_ui_object_preset(kind: str) -> dict:
+        from app.painter_ui_vector_network import create_vector_network
+
         presets = {
             "frame": {
                 "name": "Frame",
@@ -13866,6 +13915,19 @@ class PaintDialog(QDialog):
                     "start_angle": -90.0,
                     "sweep_angle": 270.0,
                     "inner_radius": 0.55,
+                },
+            },
+            "path": {
+                "name": "Vector Path",
+                "width": 240.0,
+                "height": 120.0,
+                "style": {
+                    "fill": "#00000000",
+                    "stroke": "#72A7FF",
+                    "stroke_width": 2.0,
+                },
+                "content": {
+                    "vector_network": create_vector_network(),
                 },
             },
             "text": {
@@ -14181,6 +14243,92 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _sync_painter_ui_vector_context(self, state: object) -> None:
+        bar = getattr(self, "_painter_ui_vector_context_bar", None)
+        if bar is None:
+            return
+        bar.set_state(state if isinstance(state, dict) else {})
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None:
+            bar.place_above(toolbar)
+
+    def _handle_painter_ui_vector_command(self, command: str) -> None:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        bar = getattr(self, "_painter_ui_vector_context_bar", None)
+        if overlay is None or bar is None:
+            return
+        value = str(command or "").strip().casefold()
+        if value == "exit":
+            overlay.exit_vector_edit()
+            return
+        state = bar.state()
+        object_id = str(state.get("object_id") or "")
+        current = getattr(self, "_painter_ui_document", None) or {}
+        row = next(
+            (
+                item
+                for item in current.get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        if row is None or row.get("kind") != "path":
+            overlay.exit_vector_edit()
+            return
+        from app.painter_ui_vector_network import (
+            normalize_vector_content,
+            remove_vector_node,
+            set_vector_path_closed,
+            set_vector_segment_kind,
+            split_vector_segment,
+        )
+
+        content = copy.deepcopy(dict(row.get("content") or {}))
+        network = content.get("vector_network")
+        label = "Edit UI vector"
+        if value in {"line", "curve"}:
+            segment_id = str(state.get("segment_id") or "")
+            if not segment_id:
+                return
+            network = set_vector_segment_kind(
+                network,
+                segment_id,
+                "cubic" if value == "curve" else "line",
+            )
+            label = "Convert UI vector segment"
+        elif value == "split":
+            segment_id = str(state.get("segment_id") or "")
+            if not segment_id:
+                return
+            network, node_id = split_vector_segment(
+                network,
+                segment_id,
+            )
+            overlay._vector_active_node_id = node_id
+            label = "Split UI vector segment"
+        elif value == "toggle_closed":
+            network = set_vector_path_closed(
+                network,
+                not bool(state.get("closed", False)),
+            )
+            label = "Toggle UI vector path"
+        elif value == "delete_node":
+            node_id = str(state.get("node_id") or "")
+            if not node_id:
+                return
+            network = remove_vector_node(network, node_id)
+            overlay._vector_active_node_id = ""
+            label = "Delete UI vector node"
+        else:
+            return
+        content["vector_network"] = network
+        self._update_painter_ui_object_changes(
+            object_id,
+            {"content": normalize_vector_content(content)},
+            label=label,
+        )
+        self._sync_painter_ui_vector_context(overlay._vector_edit_state())
 
     def _update_painter_ui_clip(
         self,
@@ -15357,6 +15505,11 @@ class PaintDialog(QDialog):
             self._painter_ui_stress_preview_document()
         )
         overlay.set_document(preview_document)
+        self._sync_painter_ui_vector_context(
+            overlay._vector_edit_state()
+            if overlay._vector_edit_object_id
+            else {}
+        )
         scope = self._painter_ui_edit_scope_state()
         overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
@@ -23600,6 +23753,13 @@ class PaintDialog(QDialog):
         if toolbar is not None and hasattr(toolbar, "sync_density"):
             toolbar.sync_density(int(host.width()))
             toolbar.place_in_parent()
+        vector_bar = getattr(self, "_painter_ui_vector_context_bar", None)
+        if (
+            vector_bar is not None
+            and vector_bar.isVisible()
+            and toolbar is not None
+        ):
+            vector_bar.place_above(toolbar)
         quick_actions = getattr(self, "_painter_ui_quick_actions", None)
         if quick_actions is not None and quick_actions.isVisible():
             quick_actions._place()
@@ -24427,6 +24587,13 @@ class PaintDialog(QDialog):
             and str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design"
         ):
             ui_toolbar.place_in_parent()
+            vector_bar = getattr(
+                self,
+                "_painter_ui_vector_context_bar",
+                None,
+            )
+            if vector_bar is not None and vector_bar.isVisible():
+                vector_bar.place_above(ui_toolbar)
         breadcrumb = getattr(
             self,
             "_painter_ui_selection_breadcrumb",

@@ -159,6 +159,46 @@ def draw_ui_vector_paths(
     """Render Figma SVG path geometry without substituting a bounding box."""
     if not isinstance(content, Mapping):
         return False
+    if isinstance(content.get("vector_network"), Mapping):
+        from app.painter_ui_vector_network import vector_network_to_qpath
+
+        path = vector_network_to_qpath(content["vector_network"], rect)
+        if path.isEmpty():
+            return False
+        fill = ui_color(style.get("fill"), "#506884")
+        stroke = ui_color(style.get("stroke"), "#00000000")
+        stroke_width = max(0.0, float(style.get("stroke_width") or 0.0))
+        painter.save()
+        if fill.alpha() > 0:
+            painter.fillPath(path, ui_fill_brush(style))
+        if stroke.alpha() > 0 and stroke_width > 0.0:
+            pen = QPen(stroke, stroke_width)
+            pen.setCapStyle(
+                {
+                    "round": Qt.PenCapStyle.RoundCap,
+                    "square": Qt.PenCapStyle.SquareCap,
+                }.get(
+                    str(style.get("stroke_cap") or "").casefold(),
+                    Qt.PenCapStyle.FlatCap,
+                )
+            )
+            pen.setJoinStyle(
+                {
+                    "round": Qt.PenJoinStyle.RoundJoin,
+                    "bevel": Qt.PenJoinStyle.BevelJoin,
+                }.get(
+                    str(style.get("stroke_join") or "").casefold(),
+                    Qt.PenJoinStyle.MiterJoin,
+                )
+            )
+            dash_values = style.get("stroke_dash")
+            if isinstance(dash_values, list):
+                pen.setDashPattern(
+                    [max(0.0, float(value)) for value in dash_values]
+                )
+            painter.strokePath(path, pen)
+        painter.restore()
+        return True
     fill_rows = _svg_geometry_rows(content.get("vector_fill_geometry"))
     stroke_rows = _svg_geometry_rows(content.get("vector_stroke_geometry"))
     if not fill_rows:

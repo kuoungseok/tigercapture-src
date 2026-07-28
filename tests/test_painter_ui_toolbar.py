@@ -104,6 +104,22 @@ def test_floating_toolbar_tracks_active_tool_without_emitting() -> None:
     toolbar.deleteLater()
 
 
+def test_floating_toolbar_exposes_dedicated_vector_pen_tool() -> None:
+    _app()
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    toolbar = PainterUIFloatingToolbar()
+    emitted: list[str] = []
+    toolbar.tool_requested.connect(emitted.append)
+
+    toolbar.tool_buttons["path"].click()
+
+    assert emitted == ["path"]
+    assert toolbar.tool_buttons["path"].isChecked()
+    assert toolbar.tool_buttons["path"] is not toolbar.tool_buttons["rectangle"]
+    toolbar.deleteLater()
+
+
 def test_floating_toolbar_group_flyouts_switch_tools() -> None:
     _app()
     from app.painter_ui_toolbar import PainterUIFloatingToolbar
