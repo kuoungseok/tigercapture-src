@@ -347,11 +347,39 @@ def main() -> int:
         navigator.DEFAULT_EXPANDED_WIDTH,
         user_initiated=True,
     )
+    dialog._resize_painter_workspace_panel(
+        navigator,
+        navigator.DEFAULT_EXPANDED_WIDTH,
+    )
     app.processEvents()
     navigator_screenshot_path = (
         output_dir / "painter_ui_designer_m1_navigator.png"
     )
     dialog.grab().save(str(navigator_screenshot_path), "PNG")
+    dialog._set_painter_ui_inspector_width(340, user_initiated=True)
+    app.processEvents()
+    splitter = dialog._paint_workspace_layout
+    navigator_before = navigator.width()
+    inspector_before = dialog._paint_inspector_frame.width()
+    splitter.moveSplitter(splitter.handle(2).x() + 28, 2)
+    splitter.moveSplitter(splitter.handle(3).x() - 24, 3)
+    app.processEvents()
+    flexible_workspace_ok = (
+        abs(navigator.width() - navigator_before) >= 4
+        and abs(dialog._paint_inspector_frame.width() - inspector_before) >= 4
+        and navigator.minimumWidth() == navigator.MIN_EXPANDED_WIDTH
+        and navigator.maximumWidth() == navigator.MAX_EXPANDED_WIDTH
+        and dialog._paint_inspector_frame.minimumWidth() == 240
+        and dialog._paint_inspector_frame.maximumWidth() == 420
+    )
+    navigator.set_expanded_width(
+        navigator.DEFAULT_EXPANDED_WIDTH,
+        user_initiated=True,
+    )
+    dialog._resize_painter_workspace_panel(
+        navigator,
+        navigator.DEFAULT_EXPANDED_WIDTH,
+    )
     dialog._set_painter_ui_inspector_width(340, user_initiated=True)
     app.processEvents()
     inspector_resized_screenshot_path = (
@@ -625,6 +653,7 @@ def main() -> int:
             and zoom_popover_screenshot_path.is_file()
             and compact_screenshot_path.is_file()
             and detached_round_trip
+            and flexible_workspace_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -668,6 +697,7 @@ def main() -> int:
         "navigator_width": navigator.expanded_width(),
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
+        "flexible_workspace_ok": flexible_workspace_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

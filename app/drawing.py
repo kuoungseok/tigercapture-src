@@ -72,6 +72,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QSplitter,
     QSpinBox,
     QStackedWidget,
     QTabWidget,
@@ -770,6 +771,19 @@ QFrame#PainterUINavigator {
     background-color: #1e2228;
     border: none;
     border-right: 1px solid #303741;
+}
+
+QSplitter#PainterWorkspaceSplitter {
+    background-color: #15191f;
+}
+
+QSplitter#PainterWorkspaceSplitter::handle {
+    background-color: #242a32;
+}
+
+QSplitter#PainterWorkspaceSplitter::handle:hover,
+QSplitter#PainterWorkspaceSplitter::handle:pressed {
+    background-color: #6d91bd;
 }
 
 QScrollArea#PainterUINavigatorScroll,
@@ -9159,10 +9173,12 @@ class PaintDialog(QDialog):
             top_layout.addWidget(buttons)
         root.addWidget(top_bar)
 
-        workspace = QHBoxLayout()
-        workspace.setContentsMargins(0, 0, 0, 0)
-        workspace.setSpacing(0)
-        root.addLayout(workspace, stretch=1)
+        workspace = QSplitter(Qt.Orientation.Horizontal)
+        workspace.setObjectName("PainterWorkspaceSplitter")
+        workspace.setChildrenCollapsible(False)
+        workspace.setHandleWidth(5)
+        workspace.setOpaqueResize(True)
+        root.addWidget(workspace, stretch=1)
         self._paint_workspace_layout = workspace
 
         tool_rail = QFrame()
@@ -9480,6 +9496,7 @@ class PaintDialog(QDialog):
 
         canvas_frame = QFrame()
         canvas_frame.setObjectName("PaintCanvasFrame")
+        self._canvas_frame = canvas_frame
         canvas_layout = QVBoxLayout(canvas_frame)
         canvas_layout.setContentsMargins(0, 0, 0, 0)
         canvas_layout.setSpacing(0)
@@ -9727,7 +9744,9 @@ class PaintDialog(QDialog):
 
         canvas_layout.addWidget(canvas_mode_bar)
         canvas_layout.addWidget(canvas_host, stretch=1)
-        workspace.addWidget(canvas_frame, stretch=1)
+        canvas_frame.setMinimumWidth(280)
+        workspace.addWidget(canvas_frame)
+        workspace.setStretchFactor(workspace.indexOf(canvas_frame), 1)
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
@@ -9754,9 +9773,12 @@ class PaintDialog(QDialog):
         )
         if not self._standalone and not self._persist_painter_ui_panel_state:
             self._paint_inspector_expanded_width = 280
-        inspector.setMinimumWidth(self._paint_inspector_expanded_width)
-        inspector.setMaximumWidth(self._paint_inspector_expanded_width)
-        inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        inspector.setMinimumWidth(240)
+        inspector.setMaximumWidth(420)
+        inspector.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
         self._paint_inspector_frame = inspector
         from app.painter_ui_inspector_dock import (
             PainterUIInspectorResizeHandle,
@@ -9765,6 +9787,7 @@ class PaintDialog(QDialog):
         self._paint_inspector_resize_handle = PainterUIInspectorResizeHandle(
             inspector
         )
+        self._paint_inspector_resize_handle.hide()
         self._paint_inspector_resize_handle.width_requested.connect(
             lambda width: self._set_painter_ui_inspector_width(
                 width,
@@ -10453,6 +10476,9 @@ class PaintDialog(QDialog):
                 ),
             )
         )
+        self._painter_ui_navigator.collapsed_changed.connect(
+            self._on_painter_ui_navigator_collapsed
+        )
         self._paint_ui_inspector.set_auto_hide(
             bool(
                 self._painter_ui_panel_state.get(
@@ -10463,6 +10489,11 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_navigator.hide()
         workspace.insertWidget(1, self._painter_ui_navigator)
+        self._painter_ui_navigator.set_splitter_managed(True)
+        workspace.setStretchFactor(
+            workspace.indexOf(self._painter_ui_navigator),
+            0,
+        )
         inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
         self._paint_ui_inspector.hide()
 
@@ -10739,6 +10770,11 @@ class PaintDialog(QDialog):
         inspector_layout.addWidget(inspector_controls_scroll, stretch=1)
         inspector_layout.addWidget(layer_dock_panel, stretch=2)
         workspace.addWidget(inspector)
+        workspace.setStretchFactor(workspace.indexOf(inspector), 0)
+        workspace.splitterMoved.connect(
+            self._on_painter_workspace_splitter_moved
+        )
+        QTimer.singleShot(0, self._restore_painter_workspace_splitter)
 
         status_bar = QFrame()
         status_bar.setObjectName("PaintStatusBar")
@@ -12843,6 +12879,7 @@ class PaintDialog(QDialog):
             )
             if ui_design:
                 breadcrumb.place()
+        QTimer.singleShot(0, self._restore_painter_workspace_splitter)
 
     def _sync_painter_menu_mode(self, workspace_mode: str) -> None:
         ui_design = str(workspace_mode or "") == "ui_design"
@@ -22872,15 +22909,177 @@ class PaintDialog(QDialog):
                     268 if self._standalone else 280,
                 )
             )
-            frame.setMinimumWidth(width)
-            frame.setMaximumWidth(width)
+            frame.setMinimumWidth(240)
+            frame.setMaximumWidth(420)
+            self._resize_painter_workspace_panel(frame, width)
             if handle is not None:
-                handle.show()
+                handle.hide()
         self._save_painter_ui_panel_presentation(
             inspector_collapsed=bool(collapsed),
             inspector_auto_hide=bool(collapsed),
         )
         self._update_canvas_geometry()
+
+    def _on_painter_ui_navigator_collapsed(self, collapsed: bool) -> None:
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        target = (
+            34
+            if bool(collapsed)
+            else int(navigator.expanded_width())
+        )
+        self._resize_painter_workspace_panel(navigator, target)
+        self._update_canvas_geometry()
+
+    def _resize_painter_workspace_panel(
+        self,
+        panel: QWidget,
+        width: int,
+    ) -> None:
+        splitter = getattr(self, "_paint_workspace_layout", None)
+        if not isinstance(splitter, QSplitter):
+            panel.resize(int(width), panel.height())
+            return
+        index = splitter.indexOf(panel)
+        if index < 0:
+            return
+        sizes = splitter.sizes()
+        if not sizes or index >= len(sizes):
+            return
+        requested = max(0, int(width))
+        delta = requested - int(sizes[index])
+        sizes[index] = requested
+        canvas = getattr(self, "_canvas_frame", None)
+        canvas_index = splitter.indexOf(canvas) if canvas is not None else -1
+        if canvas_index >= 0 and canvas_index != index:
+            sizes[canvas_index] = max(
+                280,
+                int(sizes[canvas_index]) - delta,
+            )
+        splitter.setSizes(sizes)
+
+    def _restore_painter_workspace_splitter(self) -> None:
+        splitter = getattr(self, "_paint_workspace_layout", None)
+        if not isinstance(splitter, QSplitter):
+            return
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        inspector = getattr(self, "_paint_inspector_frame", None)
+        canvas = getattr(self, "_canvas_frame", None)
+        tool_rail = getattr(self, "_tool_rail", None)
+        if any(
+            widget is None
+            for widget in (navigator, inspector, canvas, tool_rail)
+        ):
+            return
+        navigator_width = (
+            34
+            if navigator.is_collapsed()
+            else int(navigator.expanded_width())
+        )
+        ui_inspector = getattr(self, "_paint_ui_inspector", None)
+        inspector_width = (
+            36
+            if (
+                ui_inspector is not None
+                and ui_inspector.is_collapsed()
+            )
+            else int(
+                getattr(
+                    self,
+                    "_paint_inspector_expanded_width",
+                    268 if self._standalone else 280,
+                )
+            )
+        )
+        available = max(
+            280,
+            int(splitter.width())
+            - int(tool_rail.width())
+            - navigator_width
+            - inspector_width
+            - splitter.handleWidth() * 3,
+        )
+        splitter.setSizes(
+            [
+                int(tool_rail.width()),
+                navigator_width,
+                available,
+                inspector_width,
+            ]
+        )
+
+    def _on_painter_workspace_splitter_moved(
+        self,
+        _position: int,
+        _index: int,
+    ) -> None:
+        splitter = getattr(self, "_paint_workspace_layout", None)
+        if not isinstance(splitter, QSplitter):
+            return
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        inspector_frame = getattr(self, "_paint_inspector_frame", None)
+        changes: dict[str, int] = {}
+        if navigator is not None and not navigator.is_collapsed():
+            navigator_width = navigator.adopt_expanded_width(
+                navigator.width(),
+                emit_signal=False,
+            )
+            changes["navigator_width"] = navigator_width
+        ui_inspector = getattr(self, "_paint_ui_inspector", None)
+        if (
+            inspector_frame is not None
+            and inspector_frame.isVisible()
+            and ui_inspector is not None
+            and not ui_inspector.is_collapsed()
+            and not bool(
+                getattr(self, "_painter_ui_inspector_detached", False)
+            )
+        ):
+            inspector_width = max(
+                240,
+                min(420, int(inspector_frame.width())),
+            )
+            self._paint_inspector_expanded_width = inspector_width
+            changes["inspector_width"] = inspector_width
+        if changes:
+            self._queue_painter_ui_panel_presentation(**changes)
+        self._update_canvas_geometry()
+
+    def _queue_painter_ui_panel_presentation(
+        self,
+        **changes: int | bool,
+    ) -> None:
+        state = dict(
+            getattr(self, "_painter_ui_panel_state", {}) or {}
+        )
+        state.update(changes)
+        self._painter_ui_panel_state = state
+        if not bool(
+            getattr(self, "_persist_painter_ui_panel_state", False)
+        ):
+            return
+        timer = getattr(self, "_painter_ui_panel_save_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(180)
+            timer.timeout.connect(
+                self._flush_painter_ui_panel_presentation
+            )
+            self._painter_ui_panel_save_timer = timer
+        timer.start()
+
+    def _flush_painter_ui_panel_presentation(self) -> None:
+        if not bool(
+            getattr(self, "_persist_painter_ui_panel_state", False)
+        ):
+            return
+        from app.painter_ui_panel_state import save_painter_ui_panel_state
+
+        self._painter_ui_panel_state = save_painter_ui_panel_state(
+            dict(getattr(self, "_painter_ui_panel_state", {}) or {})
+        )
 
     def _set_painter_ui_inspector_width(
         self,
@@ -22904,8 +23103,9 @@ class PaintDialog(QDialog):
         ):
             frame = getattr(self, "_paint_inspector_frame", None)
             if frame is not None:
-                frame.setMinimumWidth(value)
-                frame.setMaximumWidth(value)
+                frame.setMinimumWidth(240)
+                frame.setMaximumWidth(420)
+                self._resize_painter_workspace_panel(frame, value)
                 frame.updateGeometry()
         if user_initiated:
             self._save_painter_ui_panel_presentation(

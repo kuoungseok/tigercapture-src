@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -80,8 +81,13 @@ class PainterUINavigatorPanel(QFrame):
         super().__init__(parent)
         self.setObjectName("PainterUINavigator")
         self._expanded_width = self.DEFAULT_EXPANDED_WIDTH
+        self._splitter_managed = False
         self.setMinimumWidth(self._expanded_width)
         self.setMaximumWidth(self._expanded_width)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
         self._syncing = False
         self._collapsed = False
         self._collapse_user_override = False
@@ -223,9 +229,15 @@ class PainterUINavigatorPanel(QFrame):
             self.setMaximumWidth(34)
             self.resize_handle.hide()
         else:
-            self.setMinimumWidth(self._expanded_width)
-            self.setMaximumWidth(self._expanded_width)
-            self.resize_handle.show()
+            if self._splitter_managed:
+                self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
+                self.setMaximumWidth(self.MAX_EXPANDED_WIDTH)
+            else:
+                self.setMinimumWidth(self._expanded_width)
+                self.setMaximumWidth(self._expanded_width)
+            self.resize_handle.setVisible(
+                not self._splitter_managed
+            )
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
 
@@ -245,11 +257,45 @@ class PainterUINavigatorPanel(QFrame):
             return value
         self._expanded_width = value
         if not self._collapsed:
-            self.setMinimumWidth(value)
-            self.setMaximumWidth(value)
+            if not self._splitter_managed:
+                self.setMinimumWidth(value)
+                self.setMaximumWidth(value)
             self.updateGeometry()
         self.width_changed.emit(value)
         return value
+
+    def adopt_expanded_width(
+        self,
+        width: int,
+        *,
+        emit_signal: bool = True,
+    ) -> int:
+        """Record a width chosen by the containing workspace splitter."""
+        value = max(
+            self.MIN_EXPANDED_WIDTH,
+            min(self.MAX_EXPANDED_WIDTH, int(width)),
+        )
+        if value == self._expanded_width:
+            return value
+        self._expanded_width = value
+        if emit_signal:
+            self.width_changed.emit(value)
+        return value
+
+    def set_splitter_managed(self, managed: bool) -> None:
+        self._splitter_managed = bool(managed)
+        if self._collapsed:
+            self.setMinimumWidth(34)
+            self.setMaximumWidth(34)
+        elif self._splitter_managed:
+            self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
+            self.setMaximumWidth(self.MAX_EXPANDED_WIDTH)
+        else:
+            self.setMinimumWidth(self._expanded_width)
+            self.setMaximumWidth(self._expanded_width)
+        self.resize_handle.setVisible(
+            not self._collapsed and not self._splitter_managed
+        )
 
     def expanded_width(self) -> int:
         return self._expanded_width

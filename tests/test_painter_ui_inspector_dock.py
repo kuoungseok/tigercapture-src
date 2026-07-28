@@ -68,14 +68,17 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
         )
         == 340
     )
-    assert dialog._paint_inspector_frame.minimumWidth() == 340
-    assert dialog._paint_inspector_frame.maximumWidth() == 340
+    assert dialog._paint_inspector_frame.minimumWidth() == 240
+    assert dialog._paint_inspector_frame.maximumWidth() == 420
+    assert abs(dialog._paint_inspector_frame.width() - 340) <= 2
 
     dialog._paint_ui_inspector.set_auto_hide(True)
     assert dialog._paint_inspector_frame.maximumWidth() == 36
     assert not dialog._paint_ui_inspector.dock_button.isVisible()
     dialog._paint_ui_inspector.set_auto_hide(False)
-    assert dialog._paint_inspector_frame.minimumWidth() == 340
+    assert dialog._paint_inspector_frame.minimumWidth() == 240
+    assert dialog._paint_inspector_frame.maximumWidth() == 420
+    assert abs(dialog._paint_inspector_frame.width() - 340) <= 2
 
     dialog._detach_painter_ui_inspector()
     app.processEvents()
@@ -100,7 +103,9 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
     assert dialog._painter_ui_inspector_detached is False
     assert dialog._paint_ui_inspector.parent() is dialog._paint_inspector_controls
     assert dialog._paint_inspector_frame.isVisible()
-    assert dialog._paint_inspector_frame.minimumWidth() == 340
+    assert dialog._paint_inspector_frame.minimumWidth() == 240
+    assert dialog._paint_inspector_frame.maximumWidth() == 420
+    assert abs(dialog._paint_inspector_frame.width() - 340) <= 2
 
     dialog._detach_painter_ui_inspector()
     dialog._set_canvas_workspace_mode("paint")
@@ -162,6 +167,63 @@ def test_ui_inspector_presentation_action_switches_all_three_modes() -> None:
     assert dialog._painter_ui_inspector_dock_window.isVisible()
 
     dialog._dock_painter_ui_inspector()
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_ui_workspace_splitter_freely_resizes_both_side_panels() -> None:
+    app = _app()
+    from PySide6.QtWidgets import QSplitter
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#F5F7FA"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1500, 900)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._paint_ui_inspector.set_auto_hide(False)
+    dialog.show()
+    app.processEvents()
+    dialog._painter_ui_navigator.set_collapsed(False)
+    app.processEvents()
+
+    splitter = dialog._paint_workspace_layout
+    assert isinstance(splitter, QSplitter)
+    assert splitter.count() == 4
+    assert dialog._painter_ui_navigator.minimumWidth() == 136
+    assert dialog._painter_ui_navigator.maximumWidth() == 320
+    assert dialog._paint_inspector_frame.minimumWidth() == 240
+    assert dialog._paint_inspector_frame.maximumWidth() == 420
+
+    navigator_before = dialog._painter_ui_navigator.width()
+    inspector_before = dialog._paint_inspector_frame.width()
+    splitter.moveSplitter(splitter.handle(2).x() + 88, 2)
+    splitter.moveSplitter(splitter.handle(3).x() - 64, 3)
+    app.processEvents()
+
+    assert (
+        abs(dialog._painter_ui_navigator.width() - navigator_before)
+        >= 8
+    )
+    assert (
+        abs(dialog._paint_inspector_frame.width() - inspector_before)
+        >= 8
+    )
+    assert (
+        dialog._painter_ui_panel_state["navigator_width"]
+        == dialog._painter_ui_navigator.width()
+    )
+    assert (
+        dialog._painter_ui_panel_state["inspector_width"]
+        == dialog._paint_inspector_frame.width()
+    )
+    assert dialog._canvas_frame.width() >= 280
+
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

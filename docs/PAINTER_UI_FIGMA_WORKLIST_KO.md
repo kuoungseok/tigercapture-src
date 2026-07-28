@@ -55,6 +55,10 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - The right Inspector defaults to Auto-hide and reuses one canonical widget for
   selection overlay, pinned, and floating presentations. UI and automation
   share `paint.ui.inspector.presentation`.
+- Navigator, canvas, and pinned Inspector now use a native horizontal splitter
+  instead of equal min/max width locks. Both side widths remain bounded,
+  divider movement is persisted with a debounce, and the canvas takes all
+  remaining space across resize and workspace-mode changes.
 - Inspector content is adaptive rather than fixed: no selection owns artboard
   controls, single selection exposes object Design/Prototype/Inspect, and
   multiple selection removes the irrelevant Prototype surface without

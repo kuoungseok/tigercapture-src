@@ -18,6 +18,11 @@ Completed in the first shell slice:
   persistent thin vertical scrollbar
 - resizable 240-420 px right inspector with detachable floating-window and
   automatic re-dock when leaving UI Design
+- native horizontal workspace splitter for navigator/canvas/inspector; side
+  panels are bounded but not fixed-width, both dividers are directly draggable,
+  and the center canvas owns the remaining space
+- debounced persistence of splitter-selected navigator/inspector widths with
+  correct restoration after collapse, Auto-hide, floating, and mode changes
 - restart-safe persistence for user-adjusted navigator/inspector width and
   presentation; the right inspector now defaults to Auto-hide instead of
   permanently taxing canvas width
@@ -713,6 +718,10 @@ workflow is production-ready.
   keeps Pages/Layers/Assets reachable through a thin vertical scrollbar.
 - The right inspector can be resized from 240-420 px or detached into a
   floating window; leaving UI Design re-docks the canonical inspector widget.
+- These are flexible splitter ranges, not fixed slots. The left navigator,
+  canvas, and pinned Inspector share one horizontal splitter; dragging either
+  boundary reallocates canvas space immediately and saves the resulting width
+  after the interaction settles.
 - Design contents are not a fixed property dump. Artboard settings appear only
   without object selection; text, image, frame/group/button, component, and
   multiple-selection contexts expose only relevant rows.
