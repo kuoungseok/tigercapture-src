@@ -6776,6 +6776,11 @@ AI Script Edit MVP integration:
   working surface and restores the original alpha and output dimensions. The
   current 960x540 warm Painted diagnostic is about 28.1 ms/frame; this is a CPU
   diagnostic and not a claim that the effect has a dedicated GPU backend.
+  The Painterly Inspector exposes editable line/paper color swatches and
+  projected-texture blend/opacity controls. Preview and export share the same
+  deterministic effect path and are covered by pixel-identical parity tests;
+  `tools/qa_motion_painterly_ui.py` captures the real Qt workspace with those
+  controls visible.
 - M28 Trend Template and Product QA is complete v1. The built-in gallery now
   contains eight editable 2026 product templates under
   `tigerstudio.motion.trend_template.v1`: Luxury Craft Product Reveal,

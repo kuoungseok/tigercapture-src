@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, Qt
+from PySide6.QtGui import QColor, QImage
 import pytest
 
 from app.motion_designer.schema import (
@@ -291,6 +292,48 @@ def test_motion_effect_library_exposes_light_noise_and_stylize_controls() -> Non
     assert window.effects.parameter_control(effect.id, "amount") is not None
     assert window.effects.parameter_control(effect.id, "evolution") is not None
 
+    window.close()
+    app.processEvents()
+
+
+def test_painterly_inspector_edits_colors_and_texture_blend(tmp_path) -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=1000,
+    ))
+    window._add_layer("shape")
+    layer = window.controller.composition.layers[0]
+    window._select_layer(layer.id)
+    window.lookdev.preset.setCurrentIndex(
+        window.lookdev.preset.findData("ink"),
+    )
+    window.lookdev._line_color = "#4a2018"
+    window.lookdev._paper_color = "#e6d4b8"
+    window.lookdev._emit_apply()
+    app.processEvents()
+    effect = window.controller.composition.layers[0].effects[0]
+    assert effect.kind == "painterly_look"
+    assert effect.metadata["line_color"] == "#4a2018"
+    assert effect.metadata["paper_color"] == "#e6d4b8"
+
+    texture_path = tmp_path / "paper.png"
+    texture = QImage(8, 8, QImage.Format_RGBA8888)
+    texture.fill(QColor("#a98d72"))
+    assert texture.save(str(texture_path))
+    window.lookdev.texture_requested.emit(
+        str(texture_path),
+        "overlay",
+        0.45,
+    )
+    app.processEvents()
+    effect = window.controller.composition.layers[0].effects[0]
+    assert effect.metadata["projected_texture"]["blend_mode"] == "overlay"
+    assert effect.metadata["projected_texture"]["opacity"] == 0.45
     window.close()
     app.processEvents()
 

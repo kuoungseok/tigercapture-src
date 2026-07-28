@@ -2893,7 +2893,12 @@ class MotionDesignerWindow(QMainWindow):
             ],
         })
 
-    def _attach_painterly_texture(self, uri: str) -> None:
+    def _attach_painterly_texture(
+        self,
+        uri: str,
+        blend_mode: str,
+        opacity: float,
+    ) -> None:
         if not self._selected_layer_id:
             return
         from pathlib import Path
@@ -2925,8 +2930,12 @@ class MotionDesignerWindow(QMainWindow):
             effect_index = layer.effects.index(effect)
         effect.metadata["projected_texture"] = {
             "uri": str(path),
-            "blend_mode": "multiply",
-            "opacity": 0.25,
+            "blend_mode": (
+                blend_mode
+                if blend_mode in {"multiply", "screen", "overlay"}
+                else "multiply"
+            ),
+            "opacity": max(0.0, min(1.0, float(opacity))),
             "projection": "screen",
             "revision": str(path.stat().st_mtime_ns),
         }
