@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -89,6 +90,11 @@ class PainterUIMotionBindingPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("painterMotionBindingPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
         self._report: dict[str, Any] = {}
         self._object_id = ""
 
@@ -187,7 +193,6 @@ class PainterUIMotionBindingPanel(QWidget):
         )
         repair_layout.addWidget(self.detach_button)
         root.addWidget(repair_frame)
-        root.addStretch(1)
 
         self.composition_id_edit.textChanged.connect(self._update_relink_enabled)
         self.binding_id_edit.textChanged.connect(self._update_relink_enabled)
@@ -195,13 +200,18 @@ class PainterUIMotionBindingPanel(QWidget):
         self.setStyleSheet(
             """
             QWidget#painterMotionBindingPanel {
-                background: #11161E;
-                color: #E8EDF3;
+                background-color: #15191F;
+                color: #DCE5F0;
+            }
+            QLabel#painterPanelSectionTitle {
+                color: #EEF3F9;
+                font-size: 12px;
+                font-weight: 600;
             }
             QFrame#painterMotionLinkSummary, QFrame#painterMotionLinkRepair {
-                background: #171E28;
-                border: 1px solid #2A3442;
-                border-radius: 5px;
+                background-color: #1A2028;
+                border: 1px solid #2B3541;
+                border-radius: 4px;
             }
             QLabel#painterMotionLinkObject,
             QLabel#painterMotionLinkSubheading {
@@ -209,7 +219,7 @@ class PainterUIMotionBindingPanel(QWidget):
                 font-weight: 600;
             }
             QLabel#painterMutedLabel, QLabel#painterMotionLinkIdentifiers {
-                color: #9BA8B7;
+                color: #98A5B4;
             }
             QLabel#painterMotionLinkStatus {
                 color: #9EC5FF;
@@ -233,36 +243,39 @@ class PainterUIMotionBindingPanel(QWidget):
             }
             QLineEdit {
                 min-height: 24px;
-                color: #E8EDF3;
-                background: #10151D;
-                border: 1px solid #354357;
+                color: #E6EDF5;
+                background-color: #10141A;
+                border: 1px solid #343F4D;
                 border-radius: 4px;
                 padding: 2px 6px;
             }
+            QLineEdit:focus {
+                border-color: #6F8EAF;
+            }
             QPushButton {
                 min-height: 24px;
-                color: #E8EDF3;
-                background: #202A38;
-                border: 1px solid #354357;
+                color: #DCE5F0;
+                background-color: #222A34;
+                border: 1px solid #35414F;
                 border-radius: 4px;
                 padding: 2px 9px;
             }
             QPushButton:hover {
-                background: #29374A;
-                border-color: #55749A;
+                background-color: #2A3542;
+                border-color: #607C9C;
             }
             QPushButton:disabled {
-                color: #66717F;
-                background: #171C24;
-                border-color: #252D38;
+                color: #66717D;
+                background-color: #191E25;
+                border-color: #272F39;
             }
             QPushButton#painterMotionDangerButton {
                 color: #F0C0B9;
-                background: #34201F;
-                border-color: #74423D;
+                background-color: #30201F;
+                border-color: #68413D;
             }
             QPushButton#painterMotionDangerButton:hover {
-                background: #462725;
+                background-color: #462725;
                 border-color: #A45A52;
             }
             """

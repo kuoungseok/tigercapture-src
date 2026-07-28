@@ -586,6 +586,14 @@ QWidget#PainterUIInspector QScrollArea {
     outline: none;
 }
 
+QScrollArea#PainterUIMotionScroll,
+QWidget#PainterUIMotionViewport,
+QWidget#PainterUIMotionPage {
+    background-color: #15191f;
+    color: #dce5f0;
+    border: none;
+}
+
 QWidget#PainterUIInspector QListWidget::item,
 QWidget#PainterUIInspector QTreeWidget::item {
     color: #dce5f0;

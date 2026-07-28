@@ -4,13 +4,14 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Mapping
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -223,6 +224,11 @@ class PainterUIMotionDeliveryPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("painterMotionDeliveryPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
         self._report: dict[str, Any] = {}
         self._binding_id = ""
 
@@ -299,13 +305,18 @@ class PainterUIMotionDeliveryPanel(QWidget):
         self.setStyleSheet(
             """
             QWidget#painterMotionDeliveryPanel {
-                background: #11161E;
-                color: #E8EDF3;
+                background-color: #15191F;
+                color: #DCE5F0;
+            }
+            QLabel#painterPanelSectionTitle {
+                color: #EEF3F9;
+                font-size: 12px;
+                font-weight: 600;
             }
             QFrame#painterMotionSummary, QFrame#painterMotionTarget {
-                background: #171E28;
-                border: 1px solid #2A3442;
-                border-radius: 5px;
+                background-color: #1A2028;
+                border: 1px solid #2B3541;
+                border-radius: 4px;
             }
             QLabel#painterMotionObject, QLabel#painterMotionTargetTitle,
             QLabel#painterMotionSubheading {
@@ -313,7 +324,7 @@ class PainterUIMotionDeliveryPanel(QWidget):
                 font-weight: 600;
             }
             QLabel#painterMutedLabel, QLabel#painterMotionCount {
-                color: #9BA8B7;
+                color: #98A5B4;
             }
             QLabel#painterMotionBlockedCount {
                 color: #D9948A;
@@ -327,20 +338,20 @@ class PainterUIMotionDeliveryPanel(QWidget):
             }
             QPushButton {
                 min-height: 24px;
-                color: #E8EDF3;
-                background: #202A38;
-                border: 1px solid #354357;
+                color: #DCE5F0;
+                background-color: #222A34;
+                border: 1px solid #35414F;
                 border-radius: 4px;
                 padding: 2px 9px;
             }
             QPushButton:hover {
-                background: #29374A;
-                border-color: #55749A;
+                background-color: #2A3542;
+                border-color: #607C9C;
             }
             QPushButton:disabled {
-                color: #66717F;
-                background: #171C24;
-                border-color: #252D38;
+                color: #66717D;
+                background-color: #191E25;
+                border-color: #272F39;
             }
             """
         )

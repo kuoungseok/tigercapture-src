@@ -68,9 +68,15 @@ def _report() -> dict:
 
 def test_motion_delivery_panel_has_friendly_empty_states() -> None:
     _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSizePolicy
+
     from app.painter_ui_motion_delivery_panel import PainterUIMotionDeliveryPanel
 
     panel = PainterUIMotionDeliveryPanel()
+    assert panel.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+    assert panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
+    assert "#15191F" in panel.styleSheet()
     assert panel.empty_label.isVisible() is False  # Hidden parent widgets are not visible.
     assert "No Motion delivery report" in panel.empty_label.text()
     assert not panel.open_motion_button.isEnabled()

@@ -47,9 +47,15 @@ def _report(status: str = "ok") -> dict:
 
 def test_motion_binding_panel_has_friendly_empty_states() -> None:
     _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSizePolicy
+
     from app.painter_ui_motion_binding_panel import PainterUIMotionBindingPanel
 
     panel = PainterUIMotionBindingPanel()
+    assert panel.testAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+    assert panel.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
+    assert "#15191F" in panel.styleSheet()
     assert "No Motion link report" in panel.empty_label.text()
     assert not panel.migrate_button.isEnabled()
     assert not panel.relink_button.isEnabled()

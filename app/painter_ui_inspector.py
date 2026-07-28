@@ -547,6 +547,8 @@ class PainterUIInspector(QWidget):
         )
 
         motion_page = QWidget()
+        motion_page.setObjectName("PainterUIMotionPage")
+        motion_page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         motion_layout = QVBoxLayout(motion_page)
         motion_layout.setContentsMargins(0, 0, 0, 0)
         motion_layout.setSpacing(4)
@@ -571,8 +573,14 @@ class PainterUIInspector(QWidget):
         motion_layout.addWidget(self.motion_delivery_panel)
         motion_layout.addStretch(1)
         motion_scroll = QScrollArea()
+        motion_scroll.setObjectName("PainterUIMotionScroll")
         motion_scroll.setWidgetResizable(True)
         motion_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        motion_scroll.viewport().setObjectName("PainterUIMotionViewport")
+        motion_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
         motion_scroll.setWidget(motion_page)
         add_inspector_tab(motion_scroll, "Motion", "motion")
 
