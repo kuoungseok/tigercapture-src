@@ -66,6 +66,9 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - Double-click/Escape and `paint.ui.selection.scope.inspect/enter/exit` share a
   nested frame/group edit scope; outside objects are dimmed and excluded from
   hit testing.
+- Text objects support direct double-click editing over their resolved canvas
+  bounds. Escape cancels, focus-out or Ctrl/Cmd+Enter commits one Undo step,
+  and `paint.ui.text.content.set` provides Action parity.
 - Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
   toggles intersecting objects on the active artboard.
 - Corner resize supports Shift aspect lock and Alt center-based scaling.

@@ -399,6 +399,27 @@ def main() -> int:
         output_dir / "painter_ui_designer_m1_text_inspector.png"
     )
     dialog.grab().save(str(text_inspector_screenshot_path), "PNG")
+    dialog._painter_ui_overlay.fit_object(phone_object_ids["text"])
+    app.processEvents()
+    inline_text_ok = dialog._painter_ui_overlay.begin_text_edit(
+        phone_object_ids["text"]
+    )
+    app.processEvents()
+    inline_text_editor = dialog._painter_ui_overlay._text_editor
+    inline_text_ok = bool(
+        inline_text_ok
+        and inline_text_editor is not None
+        and inline_text_editor.isVisible()
+        and inline_text_editor.geometry().width() >= 80
+        and inline_text_editor.geometry().height() >= 32
+    )
+    inline_text_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_inline_text.png"
+    )
+    dialog.grab().save(str(inline_text_screenshot_path), "PNG")
+    dialog._painter_ui_overlay._finish_text_edit(commit=False)
+    dialog._painter_ui_overlay.fit_all()
+    app.processEvents()
     registry.execute(
         "paint.ui.selection.set",
         {
@@ -560,6 +581,7 @@ def main() -> int:
             and inspector_resized_screenshot_path.is_file()
             and inspector_detached_screenshot_path.is_file()
             and text_inspector_screenshot_path.is_file()
+            and inline_text_screenshot_path.is_file()
             and image_inspector_screenshot_path.is_file()
             and multi_inspector_screenshot_path.is_file()
             and quick_properties_screenshot_path.is_file()
@@ -567,6 +589,7 @@ def main() -> int:
             and compact_screenshot_path.is_file()
             and detached_round_trip
             and text_context_ok
+            and inline_text_ok
             and image_context_ok
             and multi_context_ok
             and adaptive_context_ok
@@ -593,6 +616,7 @@ def main() -> int:
             inspector_detached_screenshot_path
         ),
         "text_inspector_screenshot": str(text_inspector_screenshot_path),
+        "inline_text_screenshot": str(inline_text_screenshot_path),
         "image_inspector_screenshot": str(image_inspector_screenshot_path),
         "multi_inspector_screenshot": str(multi_inspector_screenshot_path),
         "quick_properties_screenshot": str(
@@ -615,6 +639,7 @@ def main() -> int:
             "multi": multi_context_ok,
             "adaptive": adaptive_context_ok,
         },
+        "inline_text_ok": inline_text_ok,
         "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],

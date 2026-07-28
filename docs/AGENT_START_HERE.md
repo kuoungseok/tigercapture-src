@@ -87,6 +87,9 @@ Focused entry points:
   Alt-click overlap cycling share `paint.ui.selection.parent/deep_select`.
   Double-click/Escape and `paint.ui.selection.scope.inspect/enter/exit` share
   the nested frame/group edit-scope stack without document mutation.
+  Double-clicking an unlocked UI text object opens the canvas inline editor;
+  `paint.ui.text.content.set` is its stable-ID Action equivalent and both paths
+  preserve one-step Undo semantics.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

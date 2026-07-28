@@ -9665,6 +9665,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.edit_scope_exit_requested.connect(
             self._exit_painter_ui_edit_scope
         )
+        self._painter_ui_overlay.text_change_requested.connect(
+            self._update_painter_ui_text_content
+        )
         self._painter_ui_overlay.hide()
         from app.painter_ui_selection_breadcrumb import (
             PainterUISelectionBreadcrumb,
@@ -13602,6 +13605,33 @@ class PaintDialog(QDialog):
                 "height": max(1.0, float(height)),
             },
             label="Transform UI object",
+        )
+
+    def _update_painter_ui_text_content(
+        self,
+        object_id: str,
+        text: str,
+    ) -> None:
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == str(object_id)
+            ),
+            None,
+        )
+        if row is None or row.get("kind") != "text":
+            return
+        self._update_painter_ui_object_changes(
+            str(object_id),
+            {
+                "content": {
+                    **dict(row.get("content") or {}),
+                    "text": str(text),
+                }
+            },
+            label="Edit UI text",
         )
 
     def _update_painter_ui_object_changes(

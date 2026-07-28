@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from PySide6.QtCore import QPointF, QRectF, Signal, Qt
 from PySide6.QtGui import (
     QColor,
+    QFont,
     QImage,
     QPainter,
     QPainterPath,
@@ -69,6 +70,9 @@ class PainterUIDesignOverlay(QWidget):
     view_changed = Signal(object)
     edit_scope_enter_requested = Signal(str)
     edit_scope_exit_requested = Signal()
+    text_change_requested = Signal(str, str)
+    text_edit_started = Signal(str)
+    text_edit_finished = Signal(str, bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -109,6 +113,8 @@ class PainterUIDesignOverlay(QWidget):
         self._ruler_origin_preview: QPointF | None = None
         self._active_guide_position = 0.0
         self._edit_scope_id = ""
+        self._text_editor = None
+        self._text_edit_object_id = ""
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -126,7 +132,164 @@ class PainterUIDesignOverlay(QWidget):
             row["id"] for row in self._document["objects"]
         }:
             self._edit_scope_id = ""
+        if self._text_edit_object_id and not any(
+            row["id"] == self._text_edit_object_id
+            and row["kind"] == "text"
+            for row in self._document["objects"]
+        ):
+            self._finish_text_edit(commit=False)
+        else:
+            self._position_text_editor()
         self.update()
+
+    def begin_text_edit(
+        self,
+        object_id: str,
+        *,
+        cursor_position: QPointF | None = None,
+    ) -> bool:
+        target = str(object_id or "")
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == target and item["kind"] == "text"
+            ),
+            None,
+        )
+        if row is None or bool(row.get("locked", False)):
+            return False
+        if self._text_edit_object_id and self._text_edit_object_id != target:
+            self._finish_text_edit(commit=True)
+        if self._text_editor is None:
+            from app.painter_ui_inline_text_editor import (
+                PainterUIInlineTextEditor,
+            )
+
+            editor = PainterUIInlineTextEditor(self)
+            editor.commit_requested.connect(
+                lambda text: self._finish_text_edit(
+                    commit=True,
+                    text=text,
+                )
+            )
+            editor.cancel_requested.connect(
+                lambda: self._finish_text_edit(commit=False)
+            )
+            self._text_editor = editor
+        editor = self._text_editor
+        self._text_edit_object_id = target
+        editor.reset_finish_state()
+        editor.setPlainText(str((row.get("content") or {}).get("text") or ""))
+        font = QFont(self.font())
+        _viewport, scale = self._artboard_viewport(
+            next(
+                artboard
+                for artboard in self._document["artboards"]
+                if artboard["id"] == row["artboard_id"]
+            )
+        )
+        font.setPixelSize(
+            max(
+                9,
+                min(
+                    144,
+                    round(float(row["style"].get("font_size") or 16.0) * scale),
+                ),
+            )
+        )
+        font.setWeight(
+            QFont.Weight(
+                max(
+                    int(QFont.Weight.Thin),
+                    min(
+                        int(QFont.Weight.Black),
+                        int(row["style"].get("font_weight") or 400),
+                    ),
+                )
+            )
+        )
+        editor.setFont(font)
+        color = ui_color(
+            row["style"].get("text_color")
+            or row["style"].get("fill"),
+            "#F2F5F9",
+        ).name()
+        editor.setStyleSheet(
+            "QPlainTextEdit#PainterUIInlineTextEditor {"
+            " background: rgba(12, 17, 24, 205);"
+            f" color: {color};"
+            " border: 1px solid #6FA0F5;"
+            " padding: 2px;"
+            " selection-background-color: #376DB8;"
+            "}"
+        )
+        self._position_text_editor()
+        editor.show()
+        editor.raise_()
+        editor.setFocus(Qt.FocusReason.MouseFocusReason)
+        if cursor_position is None:
+            editor.selectAll()
+        else:
+            local = editor.mapFrom(
+                self,
+                cursor_position.toPoint(),
+            )
+            editor.setTextCursor(editor.cursorForPosition(local))
+        self.text_edit_started.emit(target)
+        self.update()
+        return True
+
+    def _position_text_editor(self) -> None:
+        editor = self._text_editor
+        target = self._text_edit_object_id
+        if editor is None or not target:
+            return
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == target
+            ),
+            None,
+        )
+        if row is None:
+            return
+        rect = self._object_rect(row).adjusted(-2.0, -2.0, 2.0, 2.0)
+        rect.setWidth(max(80.0, rect.width()))
+        rect.setHeight(max(32.0, rect.height()))
+        editor.setGeometry(rect.toAlignedRect())
+
+    def _finish_text_edit(
+        self,
+        *,
+        commit: bool,
+        text: str | None = None,
+    ) -> None:
+        editor = self._text_editor
+        target = self._text_edit_object_id
+        if editor is None or not target:
+            return
+        value = editor.toPlainText() if text is None else str(text)
+        original = next(
+            (
+                str((row.get("content") or {}).get("text") or "")
+                for row in self._document["objects"]
+                if row["id"] == target
+            ),
+            "",
+        )
+        self._text_edit_object_id = ""
+        editor.hide()
+        editor.reset_finish_state()
+        if commit and value != original:
+            self.text_change_requested.emit(target, value)
+        self.text_edit_finished.emit(target, bool(commit))
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.update()
+
+    def is_text_editing(self) -> bool:
+        return bool(self._text_edit_object_id)
 
     def set_edit_scope(self, object_id: str = "") -> str:
         target = str(object_id or "")
@@ -644,6 +807,7 @@ class PainterUIDesignOverlay(QWidget):
         return self.view_state()
 
     def _emit_view_changed(self) -> None:
+        self._position_text_editor()
         self.view_changed.emit(self.view_state())
 
     def view_state(self) -> dict[str, Any]:
@@ -1316,7 +1480,11 @@ class PainterUIDesignOverlay(QWidget):
         label = str(row["content"].get("text") or "")
         if kind in {"text", "button"} and not label:
             label = str(row["name"])
-        if label and kind not in {"line", "image"}:
+        if (
+            label
+            and kind not in {"line", "image"}
+            and str(row["id"]) != self._text_edit_object_id
+        ):
             text_style = style
             if kind == "text" and "shadow" in style and "text_shadow" not in style:
                 text_style = {**style, "text_shadow": style["shadow"]}
@@ -1558,6 +1726,14 @@ class PainterUIDesignOverlay(QWidget):
         self.update()
 
     def mousePressEvent(self, event) -> None:
+        if (
+            self._text_edit_object_id
+            and self._text_editor is not None
+            and not self._text_editor.geometry().contains(
+                event.position().toPoint()
+            )
+        ):
+            self._finish_text_edit(commit=True)
         if event.button() == Qt.MouseButton.MiddleButton or (
             event.button() == Qt.MouseButton.LeftButton
             and self._space_pan_active
@@ -2156,6 +2332,29 @@ class PainterUIDesignOverlay(QWidget):
                 if selected in hit_ids
                 else []
             ) + [object_id for object_id in hit_ids if object_id != selected]
+            text_target = next(
+                (
+                    object_id
+                    for object_id in candidates
+                    if next(
+                        (
+                            row["kind"]
+                            for row in self._document["objects"]
+                            if row["id"] == object_id
+                        ),
+                        "",
+                    )
+                    == "text"
+                ),
+                "",
+            )
+            if text_target and self.begin_text_edit(
+                text_target,
+                cursor_position=QPointF(event.position()),
+            ):
+                self.object_selection_requested.emit(text_target, "replace")
+                event.accept()
+                return
             parent_ids = {
                 str(row.get("parent_id") or "")
                 for row in self._document["objects"]

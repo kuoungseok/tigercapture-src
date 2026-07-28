@@ -309,6 +309,18 @@ Implemented checkpoint (2026-07-29, adaptive Inspector slice):
   presentation and fall back to Design only when the active tab becomes
   unavailable.
 
+Implemented checkpoint (2026-07-29, inline text editing slice):
+
+- Double-clicking an unlocked text object opens a canvas-native plain-text
+  editor over the resolved object bounds instead of sending the user to the
+  Inspector.
+- `Ctrl/Cmd+Enter` or focus-out commits one `Edit UI text` undo step; Escape
+  cancels without document mutation.
+- The original rendered label is suppressed while editing, and the editor
+  follows pan/zoom and resolved responsive geometry.
+- `paint.ui.text.content.set` uses the same stable object/content contract for
+  automation and rejects non-text objects explicitly.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

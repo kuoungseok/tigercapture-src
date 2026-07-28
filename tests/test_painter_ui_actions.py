@@ -62,6 +62,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.ruler.origin.reset",
         "paint.ui.object.add",
         "paint.ui.object.update",
+        "paint.ui.text.content.set",
         "paint.ui.object.remove",
         "paint.ui.selection.set",
         "paint.ui.selection.parent",

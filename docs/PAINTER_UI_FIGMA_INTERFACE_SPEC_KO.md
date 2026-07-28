@@ -311,6 +311,15 @@ Canvas 직접 조작:
 - mixed range selection
 - overflow indicator
 
+Current contract:
+
+- Double-click on an unlocked text object starts the inline editor over the
+  resolved text bounds.
+- Escape cancels. `Ctrl/Cmd+Enter` and focus-out commit exactly one undoable
+  text-content mutation.
+- `paint.ui.text.content.set` is the automation equivalent and preserves the
+  rest of the object's content payload.
+
 ### 5.7 Image 선택
 
 표시:

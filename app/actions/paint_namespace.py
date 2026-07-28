@@ -701,6 +701,22 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.text.content.set",
+        "Set the editable plain-text content of one Painter UI text object.",
+        "paint",
+        "paint_ui_text_content_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "text": {"type": "string"},
+            },
+            required=("object_id", "text"),
+        ),
+        required=("object_id", "text"),
+        undo_label="Edit UI text",
+        dry_summary="a UI text object's content would be updated",
+    )
+    registry.register_adapter_action(
         "paint.ui.appearance.inspect",
         "Read the editable fill gradient and ordered effect stack for one UI object.",
         "paint",

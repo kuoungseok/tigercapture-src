@@ -1082,6 +1082,45 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Update UI object")
         return self._paint_ui_commit(dialog, "Update UI object", document)
 
+    def paint_ui_text_content_set(
+        self,
+        *,
+        object_id: str,
+        text: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_object
+
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"UI object not found: {object_id}")
+        if row["kind"] != "text":
+            raise ValueError("Inline text content requires a text object")
+        document, updated = update_ui_object(
+            dialog._painter_ui_document,
+            str(object_id),
+            {
+                "content": {
+                    **dict(row.get("content") or {}),
+                    "text": str(text),
+                }
+            },
+        )
+        dialog._push_undo_state("Edit UI text")
+        result = self._paint_ui_commit(dialog, "Edit UI text", document)
+        result["text_object"] = {
+            "object_id": str(updated["id"]),
+            "text": str(updated["content"].get("text") or ""),
+        }
+        return result
+
     def paint_ui_appearance_inspect(
         self,
         *,
