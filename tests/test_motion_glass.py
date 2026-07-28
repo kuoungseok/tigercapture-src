@@ -15,6 +15,10 @@ from app.motion_designer.glass_material import (
     glass_effect,
     make_glass_effect,
 )
+from app.motion_designer.glass_gpu_renderer import (
+    MAX_GLASS_PREVIEW_LONG_EDGE,
+    MotionGlassGpuRenderer,
+)
 from app.motion_designer.glass_runtime import resolve_glass_driver
 from app.motion_designer.render_graph import build_render_graph, render_graph_image
 from app.motion_designer.preview_renderer import MotionPreviewWidget
@@ -405,3 +409,55 @@ def test_tiled_glass_preflight_rejects_unbounded_full_frame_effects() -> None:
     report = tiled_render_preflight(build_render_graph(composition, 500))
     assert report["ok"] is False
     assert "effect_requires_full_frame:brightness_contrast" in report["issues"]
+
+
+def test_glass_gpu_eligibility_preserves_effect_semantics_across_layer_order() -> None:
+    composition = _composition()
+    graph = build_render_graph(
+        composition,
+        500,
+        render_quality="preview",
+    )
+    eligible, reason = MotionGlassGpuRenderer.can_draw(graph)
+    assert eligible is True
+    assert reason == ""
+
+    composition.layers.append(
+        MotionLayer(
+            id="title_above_glass",
+            name="Title",
+            layer_type="shape",
+            source=SourceRef(
+                kind="shape",
+                params={"width": 20, "height": 20, "fill": "#ffffff"},
+            ),
+        )
+    )
+    eligible, reason = MotionGlassGpuRenderer.can_draw(
+        build_render_graph(composition, 500, render_quality="preview")
+    )
+    assert eligible is True
+    assert reason == ""
+
+
+def test_glass_gpu_eligibility_rejects_additional_layer_effects() -> None:
+    composition = _composition()
+    composition.layers[-1].effects.append(
+        MotionEffectRef(kind="brightness_contrast")
+    )
+    eligible, reason = MotionGlassGpuRenderer.can_draw(
+        build_render_graph(composition, 500, render_quality="preview")
+    )
+    assert eligible is False
+    assert reason == "glass_layer_has_additional_effects"
+
+
+def test_glass_gpu_working_surface_is_bounded_and_preserves_aspect() -> None:
+    width, height = MotionGlassGpuRenderer._working_size(
+        QRectF(0.0, 0.0, 1920.0, 1080.0)
+    )
+    assert width == MAX_GLASS_PREVIEW_LONG_EDGE
+    assert height == 540
+    assert MotionGlassGpuRenderer._working_size(
+        QRectF(0.0, 0.0, 716.0, 403.0)
+    ) == (716, 403)

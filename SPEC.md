@@ -6594,11 +6594,12 @@ AI Script Edit MVP integration:
   backdrop blur, procedural refraction, tint/absorption, thickness,
   edge/specular response, dispersion, and glossy bloom. Clear, Frosted,
   Tinted, Glossy, and Liquid CTA presets are editable in `Look > Glass` and
-  through `motion.material.glass.*` actions. Glass vector nodes explicitly
-  report `backdrop_glass_requires_raster`; the shared raster result has
-  Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
-  candidate and reports `effect_requires_bake:tiger_glass`. The non-raster GPU
-  backdrop path remains M22 work. The v1 Unreal decision is explicit:
+  through `motion.material.glass.*` actions. Eligible preview graphs use the
+  real `motion_glass_gpu` OpenGL backdrop shader. Unsupported graphs explicitly
+  report reasons such as `backdrop_glass_requires_raster`; the shared raster
+  fallback retains Preview/Export pixel parity. Complex Glass remains a
+  deterministic UMG bake candidate and reports
+  `effect_requires_bake:tiger_glass`. The v1 Unreal decision is explicit:
   Tiger Glass is not mapped to a native UI Material because UMG cannot sample
   arbitrary sibling backdrop content with equivalent semantics. Direct Widget
   Blueprint generation is blocked with
@@ -6607,11 +6608,31 @@ AI Script Edit MVP integration:
   complete.
   Draft/Preview
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
-  QA tool records 138-172 ms/frame on the current shared CPU fallback after
-  ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
-  not a realtime-performance claim; M22 remains incomplete until the
-  non-raster GPU backdrop path and sustained interactive performance meet the
-  product target.
+  QA tool records 138-172 ms/frame on the shared CPU fallback after ROI
+  optimization, down from 278-374 ms/frame. This is the historical accuracy
+  baseline for unsupported graphs, not the current eligible-preview
+  performance path.
+  `MotionGlassGpuRenderer` applies blur, refraction, dispersion,
+  tint/absorption, edge/specular/bloom, and runtime drivers in a fragment
+  shader. Ordinary contiguous layer ranges are rendered as shared raster
+  segments, while Glass layers ping-pong two non-MSAA FBOs so each pass samples
+  the preceding framebuffer without flattening the Glass effect on CPU. The
+  FBO pair is reused per viewport size and the GPU working surface is bounded
+  to a 960-pixel long edge to avoid unnecessary high-DPI preview cost.
+  Eligibility rejects adjustment/precomp, mattes, card shadows, motion blur,
+  non-normal blends, effect groups, and additional effects on a Glass layer;
+  those graphs keep the accurate shared raster fallback with an explicit
+  reason. This is a Glass-effect GPU path, not a claim that the complete Motion
+  graph is GPU-native.
+  The formal 15.36-second product probe recorded 450 swaps at 29.29 fps,
+  one loop, `motion_glass_gpu`, and GL error 0. Its same-time CPU reference
+  measured mean RGB absolute error 4.51/255 and p95 8/255 against automatic
+  limits of 12 and 36. The final 60.36-second sustained probe recorded 1,601
+  swaps at 26.52 fps, four loops, and GL error 0; its same-time reference also
+  passed at mean 3.84/255 and p95 10/255. M22 Dynamic Glass v1 is therefore
+  complete. Deterministic Final Export continues to use the shared
+  full-frame/tiled renderer instead of treating the preview shader
+  approximation as pixel-identical export.
 - M23 Mixed Media Craft Workspace v1 is implemented around the provider-neutral
   `tigerstudio.motion.collage.v1` contract. A collage board binds existing
   Motion layers to stable item IDs, deterministic layout seed and z-order,
@@ -6774,20 +6795,21 @@ AI Script Edit MVP integration:
   workspace screenshot, and an exact OpenGL framebuffer capture. Probe
   execution validity is separate from the product realtime gate (`>=24 fps`
   and a non-raster-fallback backend).
-- A final visible PyInstaller build ran for 60.45 seconds, produced 230 frame
+- A previous visible PyInstaller build ran for 60.45 seconds, produced 230 frame
   swaps and four full timeline loops, and retained a valid OpenGL context.
   Process RSS decreased from 457.7 MB to 444.4 MB during the run. Both captures
   are non-empty and visually free of the diagonal tearing caused by the former
   whole-window Qt grab path. The measured rate is 3.81 fps and the mixed graph
-  reports `qt_painter_fallback`.
+  reports `qt_painter_fallback`. This is retained as historical frozen-build
+  evidence from before `motion_glass_gpu`, not the current source result.
 - `tools/qa_motion_2026_frozen_distribution.py` evaluates this evidence without
   conflating packaging with render performance. It verifies all three frozen
   launchers, the 60-second report, wall-clock duration, measurement validity,
   OpenGL context, non-zero memory samples, bounded RSS growth, workspace PNG,
   and framebuffer PNG. Current evidence returns `frozen_bundle_smoke_ok=true`
   but `product_realtime_ready=false`, with explicit `minimum_24_fps` and
-  `gpu_render_path` blockers. M28 therefore remains blocked by the known M22
-  mixed Glass/effect GPU path.
+  `gpu_render_path` blockers. M22 now passes those gates in the source build;
+  M28 still requires a newly frozen bundle and the same sustained validation.
 - Inno Setup 1.4.2 was rebuilt from the current 4.59 GiB frozen bundle. The
   2,108,818,576-byte installer has SHA-256
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`.
@@ -6811,7 +6833,8 @@ AI Script Edit MVP integration:
 - Current 1080p five-preset Preview evidence measures roughly 98-110 ms/frame.
   A real visible five-second Liquid Glass workspace probe reaches 7.16 fps,
   versus the earlier 3.63 fps source baseline. This is a material CPU fallback
-  improvement, not completion: the 24 fps and non-raster GPU gates still fail.
+  improvement from the historical CPU fallback baseline. The later
+  `motion_glass_gpu` gate supersedes this performance result.
 - Tiger Glass drivers now consume real Preview-only pointer, pointer-velocity,
   and wheel-scroll vectors. Pointer coordinates are normalized against the
   visible composition viewport; velocity and scroll decay without changing the
@@ -6832,8 +6855,9 @@ AI Script Edit MVP integration:
   speedup. A real 15.20-second visible workspace run at a 716x403 viewport
   completed one loop and 296 frame swaps (19.48 fps), with RSS decreasing by
   2.3 MB. A shorter five-second scene reached 28.82 fps. The variable
-  end-to-end rate is a substantial improvement over 7.16 fps, but the backend
-  remains `qt_painter_fallback`; the non-raster GPU product gate remains open.
+  end-to-end rate is a substantial improvement over 7.16 fps. This is retained
+  as the unsupported-graph CPU fallback baseline; eligible Glass graphs now
+  use the separately validated `motion_glass_gpu` path.
 - The integrated 60-second product gate now encodes its HDR artifact from a
   real Liquid Glass composition rather than a non-Glass placeholder. The
   artifact contains three `tiger_glass` effects, differs from a no-Glass

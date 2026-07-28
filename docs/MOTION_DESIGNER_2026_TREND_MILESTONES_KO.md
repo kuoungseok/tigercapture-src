@@ -1,7 +1,7 @@
 # Motion Designer 2026 Trend Gap and Implementation Milestones
 
 작성일: 2026-07-29  
-상태: M21, M23, M25-M27 Complete v1; M22, M28 진행 중; M24 계획
+상태: M21-M23, M25-M27 Complete v1; M28 진행 중; M24 계획
 대상: Tiger Studio Motion Designer
 
 ## 1. 목적
@@ -87,7 +87,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | 순서 | 마일스톤 | 목적 | 상태 |
 | --- | --- | --- | --- |
 | M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | Complete v1 |
-| M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | In progress: core backdrop |
+| M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | Complete v1 |
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Complete v1 |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Complete v1 |
@@ -184,16 +184,17 @@ Glass material을 구현한다.
 - `Look > Glass` Inspector와
   `motion.material.glass.create/get/set/remove`, preset list,
   driver bind, preflight Action/MCP를 제공한다.
-- Glass가 있는 vector node는 GPU에서 잘못 그리지 않고
-  `backdrop_glass_requires_raster` 진단과 shared backdrop raster로
-  fallback한다. Preview/Export 픽셀 parity가 자동 검증된다.
+- 지원 그래프는 `motion_glass_gpu` OpenGL backdrop shader로 렌더한다.
+  지원 범위를 벗어난 그래프는 `backdrop_glass_requires_raster` 등 정확한
+  진단과 shared backdrop raster로 fallback한다. Preview/Export 픽셀
+  parity가 자동 검증된다.
 - Draft/Preview blur는 multi-resolution pyramid를 사용하고 실제 glass
   mask bounds와 blur/refraction padding만 처리하는 ROI 경로를 사용한다.
 - `tools/qa_motion_glass.py`는 1920x1080에서 5개 프리셋을 3프레임씩
   실렌더하고 contact sheet와 timing JSON을 남긴다. 2026-07-29 CPU
   fallback 측정은 ROI 전 278-374ms/frame, ROI 후 138-172ms/frame이다.
-  정확도 기준선은 개선됐지만 30fps 목표에는 미달하므로 M22는 아직
-  완료 상태가 아니다.
+  이 값은 GPU 경로 도입 전 CPU 정확도 기준선이며 현재 실시간 제품
+  판정에는 사용하지 않는다.
 - Preview/Draft Glass는 이제 blur만 줄이는 대신 실제 Glass ROI의 backdrop,
   mask, refraction, dispersion, edge/specular 계산 전체를 각각 480/320px
   long-edge working surface에서 처리한 뒤 원본 alpha 경계로 복원한다.
@@ -201,12 +202,13 @@ Glass material을 구현한다.
   float32로 복사하던 경로도 ROI 확인 후 crop 변환으로 바꿨다.
 - 같은 1080p 5프리셋 QA의 현재 Preview 평균은 프리셋별 약
   98-110ms/frame이고, 실제 표시 Motion 창의 5초 Liquid Glass 프로브는
-  7.16fps다. 이전 소스 프로브 3.63fps보다 약 97% 개선됐지만 24fps 제품
-  기준과 non-raster GPU 기준에는 여전히 미달한다.
+  7.16fps였다. 이전 소스 프로브 3.63fps보다 약 97% 개선된 이 기록도
+  GPU 경로 도입 전 역사적 기준선이다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
-- 남은 M22 범위는 GPU backdrop shader, 장시간 24fps 기준,
-  UI Material native 후보 변환, 결정적 tiled export 증거다.
+- M22 v1은 GPU backdrop shader, 장시간 24fps 기준, 결정적 tiled export,
+  UMG disposition까지 완료했다. UMG는 의미가 다른 native 근사를 하지
+  않고 결정적 bake를 권고한다.
 
 렌더 구조:
 
@@ -256,8 +258,9 @@ UMG:
 - `tools/qa_motion_glass.py`는 `tiger_glass_pointer_driver.png`를 생성하고
   1920x1080에서 중앙과 우하단 포인터가 서로 다른 픽셀을 렌더링했는지
   보고한다.
-- 남은 M22 차단 항목은 non-raster GPU backdrop 경로와 안정적인 24fps
-  제품 기준이다. HDR 및 Glass-only tiled export 증거는 완료됐다.
+- non-raster GPU backdrop 경로와 안정적인 24fps 제품 기준은 아래
+  OpenGL 제품 게이트에서 완료됐다. HDR 및 Glass-only tiled export
+  증거도 완료됐다.
   UMG v1은 arbitrary sibling backdrop을 같은 의미로 샘플링할 수 없으므로
   native UI Material로 근사하지 않고 `effect_requires_bake:tiger_glass`
   차단과 결정적 image/video bake 권고로 확정했다.
@@ -275,8 +278,8 @@ UMG:
   차이는 RGB 0.25, alpha 0.18이고, 단일 프레임 측정은 약 2.4배 빨라졌다.
 - 실제 표시 창의 716x403 Preview를 15.20초 재생해 296 frame swap,
   1회 loop, 19.48fps를 기록했고 RSS는 약 2.3MB 감소했다. 짧은 5초
-  구간은 28.82fps였다. 이전 7.16fps보다 크게 개선됐지만 장시간
-  24fps와 non-raster GPU 기준은 아직 통과하지 못했다.
+  구간은 28.82fps였다. 이전 7.16fps보다 크게 개선됐지만 이 측정은
+  아래 OpenGL 경로 도입 전 CPU viewport 기준선이다.
 
 ### 2026-07-29 HDR Glass 제품 증거 갱신
 
@@ -326,6 +329,33 @@ UMG:
   `glass:effect_requires_bake:tiger_glass`로 차단했다. 따라서 M22 v1은
   Glass를 UI Material로 불완전하게 근사하지 않고 결정적 bake 경로를
   권장한다.
+
+### 2026-07-29 OpenGL Glass 제품 기준 완료
+
+- `MotionGlassGpuRenderer`는 실제 OpenGL fragment shader에서 backdrop
+  blur, procedural refraction, chromatic dispersion, tint/absorption,
+  edge/specular/bloom과 runtime driver를 처리한다. Glass 효과를 CPU
+  raster 결과로 미리 굽지 않는다.
+- 레이어 순서를 보존하기 위해 일반 레이어 구간은 shared raster segment,
+  Glass 레이어는 shader pass로 나눈 뒤 두 개의 non-MSAA FBO를
+  ping-pong한다. 각 Glass pass는 직전 framebuffer를 backdrop으로
+  샘플링하므로 중첩과 임의 순서가 유지된다. FBO는 viewport 크기별로
+  재사용하며 GPU working surface의 긴 변을 960px로 제한해 고DPI 화면의
+  불필요한 preview 비용을 막는다.
+- v1 GPU 범위는 normal blend, matte 없음, card shadow 없음, motion blur
+  없음, adjustment/precomp 없음, Glass 레이어에 추가 effect 없음이다.
+  범위를 벗어나면 조용히 생략하지 않고 기존 정확한 shared raster
+  경로와 구체적인 reason으로 fallback한다. 전체 Motion graph가
+  GPU-native라는 주장은 하지 않는다.
+- 실제 15.36초 제품 프로브는 450 frame swap, 29.29fps, 1회 loop,
+  `motion_glass_gpu`, GL error 0을 기록했다. 같은 시점 CPU 기준과의
+  시각 parity는 평균 RGB 절대 차이 4.51/255, p95 8/255이며 자동 제품
+  한계 12/36을 통과했다.
+- 최종 60.36초 지속 프로브는 1,601 frame swap, 26.52fps, 4회 loop,
+  GL error 0을 기록했다. 같은 시점 parity도 평균 3.84/255, p95 10/255로
+  통과했다. 따라서 M22 Dynamic Glass v1은 완료다. 결정적 Final Export는
+  GPU preview 근사가 아니라 기존 shared full/tiled renderer를 계속
+  사용한다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 
@@ -671,8 +701,9 @@ QA:
   런타임 보고서, 최소 실행 시간, 측정 유효성, OpenGL, 메모리 샘플과 증가
   한도, 두 캡처를 검사하고 `frozen_bundle_smoke_ok=true`를 반환한다.
 - 같은 배포 QA는 `product_realtime_ready=false`를 별도로 유지한다.
-  현재 renderer가 `qt_painter_fallback`이며 24fps에 미달하므로 M22의
-  혼합 Glass/effect GPU 경로가 M28 실시간 게이트를 계속 막는다.
+  이 결과는 새 `motion_glass_gpu` 소스를 포함하지 않은 이전 PyInstaller
+  배포본의 역사적 기준선이다. 소스 제품 게이트에서 M22는 통과했지만
+  M28은 새 frozen bundle로 동일한 60초 게이트를 다시 통과해야 한다.
 - 현재 PyInstaller 번들로 Inno Setup 1.4.2 설치본을 다시 생성했다.
   설치본은 2,108,818,576바이트이고 SHA-256은
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`다.
@@ -689,7 +720,8 @@ QA:
 M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
 대체안을 반환한다. 배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는
-통과했지만, 24fps GPU 실시간 기준은 후속 M22/M28 작업으로 남는다.
+통과했으며 소스의 24fps GPU 실시간 기준도 M22에서 통과했다. 남은 제품
+게이트는 새 GPU 소스를 포함한 frozen 재빌드·60초 재검증과 M24 의존성이다.
 4.59GB 번들과 2.11GB 설치본의 PyTorch/CUDA 중복 런타임 축소도 공개
 배포 전 패키징 최적화 항목이다.
 

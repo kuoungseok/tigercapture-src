@@ -9,11 +9,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
 
 RUNTIME_PROBE_SCHEMA = "tigerstudio.motion.trend_runtime_probe.v1"
+GLASS_VISUAL_MEAN_ABS_LIMIT = 12.0
+GLASS_VISUAL_P95_ABS_LIMIT = 36.0
 
 
 def _memory_bytes() -> int:
@@ -75,6 +79,8 @@ def evaluate_runtime_probe(
     diagnostics: dict[str, Any],
     screenshot_path: Path,
     preview_framebuffer_path: Path | None = None,
+    expected_backend: str | None = None,
+    visual_parity: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     backend = str(diagnostics.get("backend") or "")
     context_valid = bool(diagnostics.get("context_valid"))
@@ -104,6 +110,15 @@ def evaluate_runtime_probe(
         "minimum_24_fps": frame_rate >= 24.0,
         "gpu_render_path": not raster_fallback,
     }
+    if expected_backend:
+        realtime_checks["expected_backend"] = backend == expected_backend
+    if visual_parity is not None:
+        realtime_checks["glass_visual_parity"] = bool(
+            float(visual_parity.get("mean_abs_rgb", float("inf")))
+            <= GLASS_VISUAL_MEAN_ABS_LIMIT
+            and float(visual_parity.get("p95_abs_rgb", float("inf")))
+            <= GLASS_VISUAL_P95_ABS_LIMIT
+        )
     return {
         "ok": measurement_ok and all(realtime_checks.values()),
         "measurement_ok": measurement_ok,
@@ -116,6 +131,44 @@ def evaluate_runtime_probe(
     }
 
 
+def _qimage_rgb(image: QImage) -> np.ndarray:
+    converted = image.convertToFormat(QImage.Format_RGBA8888)
+    rows = np.frombuffer(converted.bits(), dtype=np.uint8).reshape(
+        converted.height(),
+        converted.bytesPerLine(),
+    )
+    return rows[:, : converted.width() * 4].reshape(
+        converted.height(),
+        converted.width(),
+        4,
+    )[..., :3].copy()
+
+
+def evaluate_visual_parity(
+    gpu_image: QImage,
+    cpu_image: QImage,
+) -> dict[str, float]:
+    if (
+        gpu_image.size() != cpu_image.size()
+        or gpu_image.isNull()
+        or cpu_image.isNull()
+    ):
+        return {
+            "mean_abs_rgb": float("inf"),
+            "p95_abs_rgb": float("inf"),
+            "maximum_abs_rgb": float("inf"),
+        }
+    difference = np.abs(
+        _qimage_rgb(gpu_image).astype(np.int16)
+        - _qimage_rgb(cpu_image).astype(np.int16)
+    )
+    return {
+        "mean_abs_rgb": float(difference.mean()),
+        "p95_abs_rgb": float(np.percentile(difference, 95)),
+        "maximum_abs_rgb": float(difference.max(initial=0)),
+    }
+
+
 def run_trend_runtime_probe(
     output_path: str | Path,
     *,
@@ -125,6 +178,7 @@ def run_trend_runtime_probe(
     report_path = Path(output_path).expanduser().resolve(strict=False)
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
+    from app.motion_designer.render_graph import build_render_graph, render_graph_image
     from app.motion_designer.templates import instantiate_template
     from app.motion_designer.ui.window import MotionDesignerWindow
 
@@ -139,6 +193,12 @@ def run_trend_runtime_probe(
     screenshot_path = report_path.with_name("trend_runtime_workspace.png")
     preview_framebuffer_path = report_path.with_name(
         "trend_runtime_preview_framebuffer.png"
+    )
+    preview_crop_path = report_path.with_name(
+        "trend_runtime_preview_composition.png"
+    )
+    cpu_reference_path = report_path.with_name(
+        "trend_runtime_cpu_reference.png"
     )
     frame_swaps = 0
     loop_count = 0
@@ -161,10 +221,44 @@ def run_trend_runtime_probe(
             return
         window._set_playback_direction(0)
         app.processEvents()
-        window.preview.grabFramebuffer().save(
+        framebuffer = window.preview.grabFramebuffer()
+        framebuffer.save(
             str(preview_framebuffer_path),
             "PNG",
         )
+        target_rect = window.preview._composition_target()
+        ratio = float(window.preview.devicePixelRatioF())
+        crop_x = max(0, int(round(target_rect.x() * ratio)))
+        crop_y = max(0, int(round(target_rect.y() * ratio)))
+        crop_width = min(
+            framebuffer.width() - crop_x,
+            max(1, int(round(target_rect.width() * ratio))),
+        )
+        crop_height = min(
+            framebuffer.height() - crop_y,
+            max(1, int(round(target_rect.height() * ratio))),
+        )
+        gpu_crop = framebuffer.copy(
+            crop_x,
+            crop_y,
+            max(1, crop_width),
+            max(1, crop_height),
+        )
+        gpu_crop.save(str(preview_crop_path), "PNG")
+        cpu_graph = build_render_graph(
+            composition,
+            window._time_ms,
+            include_vector_gpu=False,
+            render_quality="preview",
+            output_size=(composition.width, composition.height),
+            runtime_inputs=window.preview.runtime_glass_inputs(),
+        )
+        cpu_reference = render_graph_image(
+            cpu_graph,
+            output_size=(gpu_crop.width(), gpu_crop.height()),
+        )
+        cpu_reference.save(str(cpu_reference_path), "PNG")
+        visual_parity = evaluate_visual_parity(gpu_crop, cpu_reference)
         screen = window.screen()
         if screen is not None:
             screen.grabWindow(int(window.winId())).save(
@@ -181,6 +275,8 @@ def run_trend_runtime_probe(
             diagnostics=diagnostics,
             screenshot_path=screenshot_path,
             preview_framebuffer_path=preview_framebuffer_path,
+            expected_backend="motion_glass_gpu",
+            visual_parity=visual_parity,
         )
         state.update({
             "schema": RUNTIME_PROBE_SCHEMA,
@@ -201,6 +297,9 @@ def run_trend_runtime_probe(
             "backend": diagnostics,
             "screenshot_path": str(screenshot_path),
             "preview_framebuffer_path": str(preview_framebuffer_path),
+            "preview_crop_path": str(preview_crop_path),
+            "cpu_reference_path": str(cpu_reference_path),
+            "glass_gpu_visual_parity": visual_parity,
             **evaluation,
         })
         report_path.write_text(
@@ -236,6 +335,7 @@ def run_trend_runtime_probe(
 
 __all__ = [
     "RUNTIME_PROBE_SCHEMA",
+    "evaluate_visual_parity",
     "evaluate_runtime_probe",
     "run_trend_runtime_probe",
 ]

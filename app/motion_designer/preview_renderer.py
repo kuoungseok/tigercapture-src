@@ -20,6 +20,7 @@ from .color_runtime import (
     apply_motion_color_pipeline_premultiplied_rgba,
     motion_color_transform_required,
 )
+from .glass_gpu_renderer import MotionGlassGpuRenderer
 from .render_graph import build_render_graph, paint_render_graph, render_graph_image
 from .schema import MotionComposition
 from .puppet_gpu_renderer import MotionPuppetGpuRenderer
@@ -35,6 +36,7 @@ class MotionPreviewWidget(QOpenGLWidget):
         self._vector_gpu = MotionVectorGpuRenderer(self)
         self._typography_gpu = MotionTypographyGpuRenderer(self)
         self._puppet_gpu = MotionPuppetGpuRenderer(self)
+        self._glass_gpu = MotionGlassGpuRenderer(self)
         self._last_gpu_backend = "vector"
         self._last_raster_size: tuple[int, int] | None = None
         self._cleanup_connected = False
@@ -75,6 +77,7 @@ class MotionPreviewWidget(QOpenGLWidget):
         self._vector_gpu.clear()
         self._typography_gpu.clear()
         self._puppet_gpu.clear()
+        self._glass_gpu.clear()
         self.doneCurrent()
         self._cleanup_connected = False
 
@@ -114,6 +117,14 @@ class MotionPreviewWidget(QOpenGLWidget):
                     target.width() * ratio, target.height() * ratio,
                 )
                 try:
+                    if self._glass_gpu.draw(
+                        context.functions(), graph,
+                        widget_width=max(1, int(round(self.width() * ratio))),
+                        widget_height=max(1, int(round(self.height() * ratio))),
+                        target=physical_target,
+                    ):
+                        self._last_gpu_backend = "glass"
+                        return
                     if self._vector_gpu.draw(
                         context.functions(), graph,
                         widget_width=max(1, int(round(self.width() * ratio))),
@@ -139,7 +150,7 @@ class MotionPreviewWidget(QOpenGLWidget):
                         self._last_gpu_backend = "puppet"
                         return
                 except Exception as exc:
-                    self._typography_gpu.last_diagnostics = {
+                    self._glass_gpu.last_diagnostics = {
                         "backend": "qt_painter_fallback",
                         "reason": f"preview_gpu_exception:{type(exc).__name__}:{exc}",
                     }
@@ -280,6 +291,8 @@ class MotionPreviewWidget(QOpenGLWidget):
         context = self.context()
         if self._last_gpu_backend == "typography":
             backend_diagnostics = self._typography_gpu.last_diagnostics
+        elif self._last_gpu_backend == "glass":
+            backend_diagnostics = self._glass_gpu.last_diagnostics
         elif self._last_gpu_backend == "puppet":
             backend_diagnostics = self._puppet_gpu.last_diagnostics
         elif self._last_gpu_backend == "vector":
@@ -288,9 +301,17 @@ class MotionPreviewWidget(QOpenGLWidget):
             typography_reason = self._typography_gpu.last_diagnostics.get("reason", "")
             vector_reason = self._vector_gpu.last_diagnostics.get("reason", "")
             puppet_reason = self._puppet_gpu.last_diagnostics.get("reason", "")
+            glass_reason = self._glass_gpu.last_diagnostics.get("reason", "")
             backend_diagnostics = {
                 "backend": "qt_painter_fallback",
-                "reason": puppet_reason or typography_reason or vector_reason or "unsupported_graph",
+                "reason": (
+                    glass_reason
+                    or puppet_reason
+                    or typography_reason
+                    or vector_reason
+                    or "unsupported_graph"
+                ),
+                "glass_gpu_reason": glass_reason,
                 "vector_gpu_reason": vector_reason,
                 "typography_gpu_reason": typography_reason,
                 "puppet_gpu_reason": puppet_reason,
