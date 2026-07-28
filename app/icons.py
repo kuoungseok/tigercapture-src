@@ -607,6 +607,32 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawEllipse(QPointF(s * .18, s * .76), s * .045, s * .045)
         painter.drawEllipse(QPointF(s * .82, s * .24), s * .045, s * .045)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+    elif n in {"polygon", "polygon-tool", "polygon_tool"}:
+        painter.drawPolygon(
+            QPolygonF(
+                [
+                    QPointF(s * .50, s * .16),
+                    QPointF(s * .82, s * .35),
+                    QPointF(s * .72, s * .76),
+                    QPointF(s * .28, s * .76),
+                    QPointF(s * .18, s * .35),
+                ]
+            )
+        )
+    elif n in {"arc", "arc-tool", "arc_tool"}:
+        painter.drawArc(
+            QRectF(s * .18, s * .18, s * .64, s * .64),
+            25 * 16,
+            280 * 16,
+        )
+        painter.drawLine(
+            QPointF(s * .50, s * .50),
+            QPointF(s * .79, s * .38),
+        )
+        painter.drawLine(
+            QPointF(s * .50, s * .50),
+            QPointF(s * .32, s * .75),
+        )
     elif n in {"button", "ui-button", "ui_button"}:
         painter.drawRoundedRect(QRectF(s * .14, s * .28, s * .72, s * .44), s * .09, s * .09)
         painter.drawLine(QPointF(s * .34, s * .50), QPointF(s * .66, s * .50))

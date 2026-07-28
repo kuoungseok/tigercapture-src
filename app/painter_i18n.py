@@ -505,6 +505,14 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Component", "컴포넌트", "コンポーネント", "组件", "Composant", "Komponente"),
     ("Variable", "변수", "変数", "变量", "Variable", "Variable"),
     ("Insert instance", "인스턴스 삽입", "インスタンスを挿入", "插入实例", "Insérer une instance", "Instanz einfügen"),
+    ("Polygon", "다각형", "多角形", "多边形", "Polygone", "Polygon"),
+    ("Star", "별", "星形", "星形", "Etoile", "Stern"),
+    ("Arc", "호", "円弧", "圆弧", "Arc", "Bogen"),
+    ("Points", "꼭짓점", "頂点", "顶点", "Points", "Punkte"),
+    ("Inner", "내부 반경", "内側半径", "内半径", "Rayon interieur", "Innenradius"),
+    ("Rotation", "회전", "回転", "旋转", "Rotation", "Drehung"),
+    ("Shape", "도형", "シェイプ", "形状", "Forme", "Form"),
+    ("Sweep", "호 길이", "円弧角", "弧角", "Balayage", "Bogenwinkel"),
 )
 
 _TABLE = {

@@ -158,6 +158,10 @@ Focused entry points:
   applies axes in Qt canvas/export paths, preserves them in Figma shared plugin
   metadata, and explicitly blocks Unreal UMG output until a real deterministic
   text-bake path exists.
+  Schema 16 adds persistent Polygon/Star/Arc parameters through the shared
+  `app/painter_ui_parametric_shapes.py` geometry contract. The grouped Shape
+  flyout, contextual Inspector, `paint.ui.object.add/update`, canvas hit
+  testing, PNG, and SVG must remain behaviorally aligned.
   Schema 15 adds ordered artboard `layout_grids[]`, simultaneous
   Uniform/Columns/Rows canvas rendering, Stretch/Center alignment, and Action
   parity through `paint.ui.artboard.layout.set`. Reusable named grid styles

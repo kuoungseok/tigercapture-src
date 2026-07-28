@@ -35,10 +35,18 @@ Implemented:
   Actions, and `paint.ui.image.*`
 - image fit/fill/stretch/tile, focal point, replace, and original-size restore
 - durable `.tspaint` embedding of UI image sources
+- Polygon, Star, and Arc creation from the grouped Shape flyout
+- contextual Polygon/Star point count, Star/Arc inner radius, Polygon/Star
+  rotation offset, and Arc start/sweep controls
+- one shared parametric-shape geometry contract for canvas, hit testing,
+  raster export, and SVG export
+- UI/Action parity through `paint.ui.object.add/update`, with persistent
+  `content` parameters and the existing Undo/Redo mutation path
+- Painter UI document schema version 16 for typed parametric shape content
 
 Still required by this contract:
 
-- the complete Polygon/Star/Arc creation set and vector-network editing
+- vector-network node and segment editing beyond the parametric shape set
 - full M1+ interaction and delivery work tracked by the milestone document
 
 The left navigator and right Inspector are not permanently fixed sidebars.

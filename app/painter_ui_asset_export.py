@@ -17,7 +17,17 @@ from app.painter_ui_image_renderer import draw_ui_image
 
 
 ASSET_EXPORT_SCHEMA = "tigerstudio.painter.ui.asset_export.v1"
-_VECTOR_KINDS = {"frame", "group", "rectangle", "ellipse", "line", "text"}
+_VECTOR_KINDS = {
+    "frame",
+    "group",
+    "rectangle",
+    "ellipse",
+    "line",
+    "polygon",
+    "star",
+    "arc",
+    "text",
+}
 
 
 def _slug(value: str) -> str:
@@ -141,6 +151,14 @@ def render_ui_artboard(
             )
         elif kind == "line":
             painter.drawLine(rect.topLeft(), rect.bottomRight())
+        elif kind in {"polygon", "star", "arc"}:
+            from app.painter_ui_parametric_shapes import (
+                parametric_shape_path,
+            )
+
+            painter.drawPath(
+                parametric_shape_path(rect, kind, content)
+            )
         elif kind == "image":
             if not _draw_image_fill(
                 painter,
@@ -300,6 +318,27 @@ def _svg_for_artboard(
                     row["y"],
                     row["x"] + row["width"],
                     row["y"] + row["height"],
+                    common,
+                )
+            )
+        elif row["kind"] in {"polygon", "star", "arc"}:
+            from app.painter_ui_parametric_shapes import (
+                parametric_shape_svg_path,
+            )
+
+            rows.append(
+                '<path d="%s" fill-rule="evenodd" %s/>'
+                % (
+                    parametric_shape_svg_path(
+                        QRectF(
+                            float(row["x"]),
+                            float(row["y"]),
+                            float(row["width"]),
+                            float(row["height"]),
+                        ),
+                        str(row["kind"]),
+                        content,
+                    ),
                     common,
                 )
             )

@@ -892,6 +892,24 @@ workflow is production-ready.
 - Compactness is covered by widget geometry tests and real offscreen screenshot
   QA; controls may not overlap or silently disappear at the compact width.
 
+## 4.2 2026-07-29 M1 Parametric Shape Checkpoint
+
+- The grouped Shape flyout now creates Rectangle, Ellipse, Line, Polygon,
+  Star, and Arc objects without adding permanent toolbar chrome.
+- Polygon and Star expose point count; Star and Arc expose inner radius;
+  Polygon/Star expose rotation offset; Arc exposes start and sweep angles.
+- Shape controls are contextual Inspector rows and disappear for unrelated
+  selections.
+- `app/painter_ui_parametric_shapes.py` is the shared geometry owner for
+  canvas drawing, shape-aware hit testing/masks, PNG rendering, and SVG paths.
+- Painter UI document schema version 16 normalizes and round-trips the
+  parametric shape content while preserving stable IDs.
+- Manual UI edits and AI automation use the same `paint.ui.object.add/update`
+  mutations and existing Undo/Redo path. No parallel canvas-only shape state
+  is allowed.
+- Focused geometry/Inspector/export tests, the full Painter UI suite, the
+  architecture guard, and real desktop/compact screenshot QA cover this slice.
+
 ## 5. Main Risks
 
 - Feature breadth can hide weak day-to-day UX. Measure task completion, not

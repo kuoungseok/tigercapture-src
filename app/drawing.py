@@ -13836,6 +13836,38 @@ class PaintDialog(QDialog):
                 "height": 24.0,
                 "style": {"fill": "#8FA7C5", "stroke_width": 2},
             },
+            "polygon": {
+                "name": "Polygon",
+                "width": 180.0,
+                "height": 180.0,
+                "style": {"fill": "#40516A", "stroke": "#71839B"},
+                "content": {
+                    "point_count": 6,
+                    "rotation_offset": -90.0,
+                },
+            },
+            "star": {
+                "name": "Star",
+                "width": 180.0,
+                "height": 180.0,
+                "style": {"fill": "#40516A", "stroke": "#71839B"},
+                "content": {
+                    "point_count": 5,
+                    "inner_radius": 0.45,
+                    "rotation_offset": -90.0,
+                },
+            },
+            "arc": {
+                "name": "Arc",
+                "width": 180.0,
+                "height": 180.0,
+                "style": {"fill": "#40516A", "stroke": "#71839B"},
+                "content": {
+                    "start_angle": -90.0,
+                    "sweep_angle": 270.0,
+                    "inner_radius": 0.55,
+                },
+            },
             "text": {
                 "name": "Heading",
                 "width": 360.0,

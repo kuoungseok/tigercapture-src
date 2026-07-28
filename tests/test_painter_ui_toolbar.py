@@ -112,11 +112,17 @@ def test_floating_toolbar_group_flyouts_switch_tools() -> None:
     emitted: list[str] = []
     toolbar.tool_requested.connect(emitted.append)
     toolbar._tool_actions["ellipse"].trigger()
+    toolbar._tool_actions["polygon"].trigger()
+    toolbar._tool_actions["star"].trigger()
+    toolbar._tool_actions["arc"].trigger()
     toolbar._tool_actions["image"].trigger()
 
-    assert emitted == ["ellipse", "image"]
+    assert emitted == ["ellipse", "polygon", "star", "arc", "image"]
     assert toolbar.tool_buttons["image"].isChecked()
     assert toolbar.tool_buttons["ellipse"] is toolbar.tool_buttons["rectangle"]
+    assert toolbar.tool_buttons["polygon"] is toolbar.tool_buttons["rectangle"]
+    assert toolbar.tool_buttons["star"] is toolbar.tool_buttons["rectangle"]
+    assert toolbar.tool_buttons["arc"] is toolbar.tool_buttons["rectangle"]
     assert toolbar.tool_buttons["image"] is toolbar.tool_buttons["text"]
     toolbar.deleteLater()
 

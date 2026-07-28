@@ -82,10 +82,20 @@ class PainterUIFloatingToolbar(QFrame):
                 ("Rectangle", "rectangle", "rectangle"),
                 ("Ellipse", "ellipse", "ellipse"),
                 ("Line", "line", "line"),
+                ("Polygon", "polygon", "polygon"),
+                ("Star", "star", "star"),
+                ("Arc", "arc", "arc"),
             )
         )
         layout.addWidget(shape_button)
-        for kind in ("rectangle", "ellipse", "line"):
+        for kind in (
+            "rectangle",
+            "ellipse",
+            "line",
+            "polygon",
+            "star",
+            "arc",
+        ):
             self.tool_buttons[kind] = shape_button
             self._tool_group_for_kind[kind] = shape_button
 
@@ -379,7 +389,7 @@ class PainterUIFloatingToolbar(QFrame):
         for label, kind, icon_name in rows:
             action = QAction(
                 app_icon(icon_name, size=15, color="#E4E8EE"),
-                label,
+                painter_text(label),
                 menu,
             )
             action.setData(kind)

@@ -45,6 +45,9 @@ _CREATE_TOOLS = {
     "rectangle",
     "ellipse",
     "line",
+    "polygon",
+    "star",
+    "arc",
     "text",
     "image",
     "button",
@@ -1318,6 +1321,17 @@ class PainterUIDesignOverlay(QWidget):
         if row["kind"] == "ellipse":
             path.addEllipse(rect)
             return path
+        from app.painter_ui_parametric_shapes import (
+            PARAMETRIC_SHAPE_KINDS,
+            parametric_shape_path,
+        )
+
+        if row["kind"] in PARAMETRIC_SHAPE_KINDS:
+            return parametric_shape_path(
+                rect,
+                str(row["kind"]),
+                row.get("content"),
+            )
         style = row.get("style") or {}
         artboard = next(
             item
@@ -1574,6 +1588,10 @@ class PainterUIDesignOverlay(QWidget):
                 )
             )
             painter.drawLine(rect.topLeft(), rect.bottomRight())
+        elif kind in {"polygon", "star", "arc"}:
+            painter.drawPath(
+                self._object_shape_path(row)
+            )
         elif kind == "progress":
             painter.drawRoundedRect(rect, 3.0 * scale, 3.0 * scale)
             amount = max(0.0, min(1.0, float(row["content"].get("value", 0.64))))

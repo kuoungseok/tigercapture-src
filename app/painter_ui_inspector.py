@@ -1326,6 +1326,90 @@ class PainterUIInspector(QWidget):
         )
         self.appearance_button.clicked.connect(self._edit_appearance)
         form.addRow("Appearance", self.appearance_button)
+        shape_controls = QFrame()
+        shape_controls.setObjectName("PainterUIParametricShapeControls")
+        self.shape_controls = shape_controls
+        shape_layout = QVBoxLayout(shape_controls)
+        shape_layout.setContentsMargins(0, 0, 0, 0)
+        shape_layout.setSpacing(3)
+        self.shape_parameter_rows: dict[str, QFrame] = {}
+
+        def add_shape_parameter_row(
+            key: str,
+            label: str,
+            controls: tuple[QWidget, ...],
+        ) -> None:
+            row = QFrame()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            row_layout.addWidget(QLabel(painter_text(label)))
+            row_layout.addStretch(1)
+            for control in controls:
+                row_layout.addWidget(control)
+            shape_layout.addWidget(row)
+            self.shape_parameter_rows[key] = row
+
+        self.shape_point_count_spin = PainterUIDragSpinBox()
+        self.shape_point_count_spin.setRange(3, 64)
+        self.shape_point_count_spin.setResetValue(5)
+        self.shape_point_count_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        add_shape_parameter_row(
+            "points",
+            "Points",
+            (self.shape_point_count_spin,),
+        )
+        self.shape_inner_radius_spin = PainterUIDragSpinBox()
+        self.shape_inner_radius_spin.setRange(0, 95)
+        self.shape_inner_radius_spin.setSuffix("%")
+        self.shape_inner_radius_spin.setResetValue(45)
+        self.shape_inner_radius_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        add_shape_parameter_row(
+            "inner_radius",
+            "Inner",
+            (self.shape_inner_radius_spin,),
+        )
+        self.shape_rotation_spin = PainterUIDragDoubleSpinBox()
+        self.shape_rotation_spin.setRange(-360.0, 360.0)
+        self.shape_rotation_spin.setDecimals(1)
+        self.shape_rotation_spin.setSuffix(" deg")
+        self.shape_rotation_spin.setResetValue(-90.0)
+        self.shape_rotation_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        add_shape_parameter_row(
+            "rotation",
+            "Rotation",
+            (self.shape_rotation_spin,),
+        )
+        self.shape_start_angle_spin = PainterUIDragDoubleSpinBox()
+        self.shape_start_angle_spin.setRange(-360.0, 360.0)
+        self.shape_start_angle_spin.setDecimals(1)
+        self.shape_start_angle_spin.setPrefix("Start ")
+        self.shape_start_angle_spin.setSuffix(" deg")
+        self.shape_start_angle_spin.setResetValue(-90.0)
+        self.shape_start_angle_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        self.shape_sweep_angle_spin = PainterUIDragDoubleSpinBox()
+        self.shape_sweep_angle_spin.setRange(1.0, 360.0)
+        self.shape_sweep_angle_spin.setDecimals(1)
+        self.shape_sweep_angle_spin.setPrefix("Sweep ")
+        self.shape_sweep_angle_spin.setSuffix(" deg")
+        self.shape_sweep_angle_spin.setResetValue(270.0)
+        self.shape_sweep_angle_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        add_shape_parameter_row(
+            "angles",
+            "Arc",
+            (self.shape_start_angle_spin, self.shape_sweep_angle_spin),
+        )
+        form.insertRow(7, painter_text("Shape"), shape_controls)
         multi_properties = QFrame()
         multi_properties.setObjectName("PainterUIMultiProperties")
         multi_layout = QGridLayout(multi_properties)
@@ -1806,6 +1890,7 @@ class PainterUIInspector(QWidget):
                 self.radius_spin,
                 self.appearance_button,
             ),
+            "shape": (shape_controls,),
             "multi_properties": (multi_properties,),
             "frame": (self.clip_content_check,),
             "text": (
@@ -2255,6 +2340,11 @@ class PainterUIInspector(QWidget):
             self.stroke_width_spin,
             self.radius_spin,
             self.appearance_button,
+            self.shape_point_count_spin,
+            self.shape_inner_radius_spin,
+            self.shape_rotation_spin,
+            self.shape_start_angle_spin,
+            self.shape_sweep_angle_spin,
             self.clip_content_check,
             self.use_as_mask_check,
             self.mask_invert_check,
@@ -2425,6 +2515,29 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_appearance_editor import appearance_summary
 
         self.appearance_button.setText(appearance_summary(style))
+        from app.painter_ui_parametric_shapes import (
+            normalize_parametric_shape_content,
+        )
+
+        shape_content = normalize_parametric_shape_content(
+            str(row["kind"]),
+            row.get("content"),
+        )
+        self.shape_point_count_spin.setValue(
+            int(shape_content.get("point_count", 5))
+        )
+        self.shape_inner_radius_spin.setValue(
+            int(round(float(shape_content.get("inner_radius", 0.45)) * 100.0))
+        )
+        self.shape_rotation_spin.setValue(
+            float(shape_content.get("rotation_offset", -90.0))
+        )
+        self.shape_start_angle_spin.setValue(
+            float(shape_content.get("start_angle", -90.0))
+        )
+        self.shape_sweep_angle_spin.setValue(
+            float(shape_content.get("sweep_angle", 270.0))
+        )
         is_frame = row["kind"] == "frame"
         self.clip_content_check.setEnabled(is_frame)
         self.clip_content_check.setChecked(
@@ -2651,6 +2764,9 @@ class PainterUIInspector(QWidget):
                 "image": "Image",
                 "ellipse": "Ellipse",
                 "line": "Line",
+                "polygon": "Polygon",
+                "star": "Star",
+                "arc": "Arc",
                 "progress": "Progress",
             }.get(kind, kind.replace("_", " ").title() or "Object")
             hint = {
@@ -2680,6 +2796,8 @@ class PainterUIInspector(QWidget):
                 visible_groups.add("token_suggestions")
             if kind in {"frame", "group", "button"}:
                 visible_groups.add("auto_layout")
+            if kind in {"polygon", "star", "arc"}:
+                visible_groups.add("shape")
             visible_groups.add("content_stress")
             if kind == "frame":
                 visible_groups.add("frame")
@@ -2755,6 +2873,18 @@ class PainterUIInspector(QWidget):
                 if label is not None:
                     label.setVisible(visible)
                 widget.setVisible(visible)
+        self._sync_parametric_shape_controls(
+            str(row.get("kind") or "") if row is not None and count == 1 else ""
+        )
+
+    def _sync_parametric_shape_controls(self, kind: str) -> None:
+        visible_by_kind = {
+            "polygon": {"points", "rotation"},
+            "star": {"points", "inner_radius", "rotation"},
+            "arc": {"inner_radius", "angles"},
+        }.get(str(kind).casefold(), set())
+        for key, row in self.shape_parameter_rows.items():
+            row.setVisible(key in visible_by_kind)
 
     def design_context(self) -> str:
         return str(getattr(self, "_design_context", "artboard"))
@@ -3546,6 +3676,27 @@ class PainterUIInspector(QWidget):
             else:
                 style.pop(key, None)
         content = dict(row.get("content") or {})
+        shape_kind = str(row.get("kind") or "").casefold()
+        if shape_kind in {"polygon", "star", "arc"}:
+            from app.painter_ui_parametric_shapes import (
+                normalize_parametric_shape_content,
+            )
+
+            content.update(
+                normalize_parametric_shape_content(
+                    shape_kind,
+                    {
+                        **content,
+                        "point_count": self.shape_point_count_spin.value(),
+                        "inner_radius": (
+                            self.shape_inner_radius_spin.value() / 100.0
+                        ),
+                        "rotation_offset": self.shape_rotation_spin.value(),
+                        "start_angle": self.shape_start_angle_spin.value(),
+                        "sweep_angle": self.shape_sweep_angle_spin.value(),
+                    },
+                )
+            )
         if row.get("kind") in {"text", "button"}:
             content["text"] = self.text_edit.text()
             style["font_size"] = float(self.font_size_spin.value())

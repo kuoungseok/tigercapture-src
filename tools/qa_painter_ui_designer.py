@@ -149,34 +149,41 @@ def main() -> int:
             "style": {"fill": "#202B38", "stroke": "#53657C"},
         },
         {
-            "kind": "rectangle",
-            "name": "Metric A",
+            "kind": "polygon",
+            "name": "Metric Polygon",
             "artboard_id": desktop_id,
             "x": 190,
             "y": 230,
             "width": 260,
             "height": 150,
             "style": {"fill": "#304458", "stroke": "#65809A"},
+            "content": {"point_count": 6, "rotation_offset": -90},
         },
         {
-            "kind": "rectangle",
-            "name": "Metric B",
+            "kind": "star",
+            "name": "Metric Star",
             "artboard_id": desktop_id,
             "x": 590,
             "y": 280,
             "width": 260,
             "height": 150,
             "style": {"fill": "#385568", "stroke": "#6D91A7"},
+            "content": {"point_count": 7, "inner_radius": 0.42},
         },
         {
-            "kind": "rectangle",
-            "name": "Metric C",
+            "kind": "arc",
+            "name": "Metric Arc",
             "artboard_id": desktop_id,
             "x": 990,
             "y": 330,
             "width": 260,
             "height": 150,
             "style": {"fill": "#455A70", "stroke": "#7B8FA8"},
+            "content": {
+                "start_angle": -70,
+                "sweep_angle": 285,
+                "inner_radius": 0.58,
+            },
         },
     ):
         added = registry.execute("paint.ui.object.add", payload).to_dict()
@@ -286,6 +293,31 @@ def main() -> int:
     app.processEvents()
     desktop_screenshot_path = output_dir / "painter_ui_designer_m1_desktop.png"
     dialog.grab().save(str(desktop_screenshot_path), "PNG")
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [desktop_object_ids[1]],
+            "primary_object_id": desktop_object_ids[1],
+        },
+    )
+    app.processEvents()
+    inspector_scrollbar = (
+        dialog._paint_inspector_controls_scroll.verticalScrollBar()
+    )
+    inspector_scrollbar.setValue(min(inspector_scrollbar.maximum(), 360))
+    app.processEvents()
+    shape_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_parametric_shapes.png"
+    )
+    dialog.grab().save(str(shape_screenshot_path), "PNG")
+    dialog.resize(760, 700)
+    app.processEvents()
+    compact_shape_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_parametric_shapes_compact.png"
+    )
+    dialog.grab().save(str(compact_shape_screenshot_path), "PNG")
+    dialog.resize(1360, 900)
+    app.processEvents()
     grouped = registry.execute(
         "paint.ui.object.group",
         {
@@ -1222,6 +1254,8 @@ def main() -> int:
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
+            and shape_screenshot_path.is_file()
+            and compact_shape_screenshot_path.is_file()
             and auto_layout_screenshot_path.is_file()
             and sizing_screenshot_path.is_file()
             and stress_preview_screenshot_path.is_file()
@@ -1286,6 +1320,10 @@ def main() -> int:
         "screenshot": str(screenshot_path),
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
+        "parametric_shapes_screenshot": str(shape_screenshot_path),
+        "parametric_shapes_compact_screenshot": str(
+            compact_shape_screenshot_path
+        ),
         "auto_layout_screenshot": str(auto_layout_screenshot_path),
         "sizing_diagnostics_screenshot": str(sizing_screenshot_path),
         "content_stress_screenshot": str(

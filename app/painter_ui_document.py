@@ -8,13 +8,16 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 15
+UI_DOCUMENT_VERSION = 16
 UI_OBJECT_KINDS = {
     "frame",
     "group",
     "rectangle",
     "ellipse",
     "line",
+    "polygon",
+    "star",
+    "arc",
     "path",
     "text",
     "image",
@@ -251,6 +254,14 @@ def _normalize_object(
     normalized_style = normalize_ui_advanced_style(style)
     normalized_content = (
         copy.deepcopy(dict(content)) if isinstance(content, Mapping) else {}
+    )
+    from app.painter_ui_parametric_shapes import (
+        normalize_parametric_shape_content,
+    )
+
+    normalized_content = normalize_parametric_shape_content(
+        kind,
+        normalized_content,
     )
     normalized_content["text_ranges"] = normalize_ui_text_ranges(
         normalized_content.get("text_ranges"),
