@@ -453,17 +453,23 @@ def main() -> int:
     app.processEvents()
     splitter = dialog._paint_workspace_layout
     navigator_before = navigator.width()
-    inspector_before = dialog._paint_inspector_frame.width()
     splitter.moveSplitter(splitter.handle(2).x() + 28, 2)
+    app.processEvents()
+    inspector_after_navigator = dialog._paint_inspector_frame.width()
     splitter.moveSplitter(splitter.handle(3).x() - 24, 3)
     app.processEvents()
     flexible_workspace_ok = (
         abs(navigator.width() - navigator_before) >= 4
-        and abs(dialog._paint_inspector_frame.width() - inspector_before) >= 4
+        and abs(
+            dialog._paint_inspector_frame.width()
+            - inspector_after_navigator
+        )
+        >= 4
         and navigator.minimumWidth() == navigator.MIN_EXPANDED_WIDTH
-        and navigator.maximumWidth() == navigator.MAX_EXPANDED_WIDTH
-        and dialog._paint_inspector_frame.minimumWidth() == 240
-        and dialog._paint_inspector_frame.maximumWidth() == 420
+        and navigator.maximumWidth() > 320
+        and dialog._paint_inspector_frame.minimumWidth() == 180
+        and dialog._paint_inspector_frame.maximumWidth() > 420
+        and dialog._canvas_frame.width() >= 280
     )
     navigator.set_expanded_width(
         navigator.DEFAULT_EXPANDED_WIDTH,

@@ -9752,6 +9752,8 @@ class PaintDialog(QDialog):
         inspector.setObjectName("PaintInspector")
         from app.painter_ui_panel_state import (
             DEFAULT_PANEL_STATE,
+            INSPECTOR_MIN_WIDTH,
+            PERSISTED_PANEL_MAX_WIDTH,
             load_painter_ui_panel_state,
         )
 
@@ -9773,8 +9775,8 @@ class PaintDialog(QDialog):
         )
         if not self._standalone and not self._persist_painter_ui_panel_state:
             self._paint_inspector_expanded_width = 280
-        inspector.setMinimumWidth(240)
-        inspector.setMaximumWidth(420)
+        inspector.setMinimumWidth(INSPECTOR_MIN_WIDTH)
+        inspector.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
         inspector.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Expanding,
@@ -22879,6 +22881,11 @@ class PaintDialog(QDialog):
             navigator.set_collapsed(True)
 
     def _set_painter_ui_inspector_collapsed(self, collapsed: bool) -> None:
+        from app.painter_ui_panel_state import (
+            INSPECTOR_MIN_WIDTH,
+            PERSISTED_PANEL_MAX_WIDTH,
+        )
+
         frame = getattr(self, "_paint_inspector_frame", None)
         if frame is None:
             return
@@ -22909,8 +22916,8 @@ class PaintDialog(QDialog):
                     268 if self._standalone else 280,
                 )
             )
-            frame.setMinimumWidth(240)
-            frame.setMaximumWidth(420)
+            frame.setMinimumWidth(INSPECTOR_MIN_WIDTH)
+            frame.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
             self._resize_painter_workspace_panel(frame, width)
             if handle is not None:
                 handle.hide()
@@ -23037,8 +23044,8 @@ class PaintDialog(QDialog):
             )
         ):
             inspector_width = max(
-                240,
-                min(420, int(inspector_frame.width())),
+                inspector_frame.minimumWidth(),
+                int(inspector_frame.width()),
             )
             self._paint_inspector_expanded_width = inspector_width
             changes["inspector_width"] = inspector_width
@@ -23087,7 +23094,12 @@ class PaintDialog(QDialog):
         *,
         user_initiated: bool = False,
     ) -> int:
-        value = max(240, min(420, int(width)))
+        from app.painter_ui_panel_state import (
+            INSPECTOR_MIN_WIDTH,
+            PERSISTED_PANEL_MAX_WIDTH,
+        )
+
+        value = max(INSPECTOR_MIN_WIDTH, int(width))
         self._paint_inspector_expanded_width = value
         inspector = getattr(self, "_paint_ui_inspector", None)
         collapsed = bool(
@@ -23103,8 +23115,8 @@ class PaintDialog(QDialog):
         ):
             frame = getattr(self, "_paint_inspector_frame", None)
             if frame is not None:
-                frame.setMinimumWidth(240)
-                frame.setMaximumWidth(420)
+                frame.setMinimumWidth(INSPECTOR_MIN_WIDTH)
+                frame.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
                 self._resize_painter_workspace_panel(frame, value)
                 frame.updateGeometry()
         if user_initiated:

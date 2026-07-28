@@ -14,13 +14,14 @@ Completed in the first shell slice:
 - Sections, Components, and Tokens moved into Assets
 - right `Design / Prototype / Inspect` modes
 - manual side-panel collapse and automatic narrow-canvas navigator collapse
-- resizable 136-320 px left navigator with a compact 168 px default and a
-  persistent thin vertical scrollbar
-- resizable 240-420 px right inspector with detachable floating-window and
-  automatic re-dock when leaving UI Design
-- native horizontal workspace splitter for navigator/canvas/inspector; side
-  panels are bounded but not fixed-width, both dividers are directly draggable,
-  and the center canvas owns the remaining space
+- fluid left navigator with a compact 168 px default, a usable 112 px minimum,
+  no fixed expanded-width ceiling, and a persistent thin vertical scrollbar
+- fluid right inspector with a compact 268 px default, a usable 180 px minimum,
+  no fixed expanded-width ceiling, detachable floating-window, and automatic
+  re-dock when leaving UI Design
+- native horizontal workspace splitter for navigator/canvas/inspector; expanded
+  side panels have no arbitrary maximum width, both dividers are directly
+  draggable, and the center canvas owns the remaining space
 - debounced persistence of splitter-selected navigator/inspector widths with
   correct restoration after collapse, Auto-hide, floating, and mode changes
 - restart-safe persistence for user-adjusted navigator/inspector width and

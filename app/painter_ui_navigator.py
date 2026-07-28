@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.icons import app_icon, icon_size
+from app.painter_ui_panel_state import PERSISTED_PANEL_MAX_WIDTH
 
 
 class _NavigatorResizeHandle(QFrame):
@@ -67,8 +68,7 @@ class PainterUINavigatorPanel(QFrame):
     collapsed_changed = Signal(bool)
     width_changed = Signal(int)
 
-    MIN_EXPANDED_WIDTH = 136
-    MAX_EXPANDED_WIDTH = 320
+    MIN_EXPANDED_WIDTH = 112
     DEFAULT_EXPANDED_WIDTH = 168
 
     def __init__(
@@ -231,7 +231,7 @@ class PainterUINavigatorPanel(QFrame):
         else:
             if self._splitter_managed:
                 self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
-                self.setMaximumWidth(self.MAX_EXPANDED_WIDTH)
+                self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
             else:
                 self.setMinimumWidth(self._expanded_width)
                 self.setMaximumWidth(self._expanded_width)
@@ -249,7 +249,7 @@ class PainterUINavigatorPanel(QFrame):
     ) -> int:
         value = max(
             self.MIN_EXPANDED_WIDTH,
-            min(self.MAX_EXPANDED_WIDTH, int(width)),
+            int(width),
         )
         if user_initiated:
             self._collapse_user_override = True
@@ -273,7 +273,7 @@ class PainterUINavigatorPanel(QFrame):
         """Record a width chosen by the containing workspace splitter."""
         value = max(
             self.MIN_EXPANDED_WIDTH,
-            min(self.MAX_EXPANDED_WIDTH, int(width)),
+            int(width),
         )
         if value == self._expanded_width:
             return value
@@ -289,7 +289,7 @@ class PainterUINavigatorPanel(QFrame):
             self.setMaximumWidth(34)
         elif self._splitter_managed:
             self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
-            self.setMaximumWidth(self.MAX_EXPANDED_WIDTH)
+            self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
         else:
             self.setMinimumWidth(self._expanded_width)
             self.setMaximumWidth(self._expanded_width)

@@ -35,10 +35,10 @@ def test_panel_state_round_trips_and_clamps(tmp_path) -> None:
         settings,
     )
     assert saved == {
-        "navigator_width": 320,
+        "navigator_width": 999,
         "navigator_collapsed": True,
         "navigator_user_override": True,
-        "inspector_width": 240,
+        "inspector_width": 180,
         "inspector_collapsed": True,
         "inspector_auto_hide": False,
     }

@@ -32,6 +32,11 @@ Still required by this contract:
 - persisted panel widths and minimized state
 - full M1+ interaction and delivery work tracked by the milestone document
 
+The left navigator and right Inspector use preferred defaults rather than fixed
+expanded widths. Their splitter positions are user-controlled and persisted;
+only the compact collapsed rails have fixed widths. The center canvas keeps its
+minimum usable width and receives all remaining workspace space.
+
 Related roadmap:
 
 - `docs/PAINTER_UI_FIGMA_UX_MILESTONES_2026_KO.md`

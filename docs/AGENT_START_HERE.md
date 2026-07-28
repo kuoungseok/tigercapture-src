@@ -76,9 +76,10 @@ Focused entry points:
 - Painter UI Design now has a compact resizable left navigator and a right
   inspector that defaults to Auto-hide and can be pinned, resized, or detached.
   Navigator/canvas/Inspector are hosted by one horizontal splitter; do not
-  reintroduce equal minimum/maximum width locks for expanded panels. Splitter
-  movement is the canonical UI width mutation and persisted panel state is its
-  presentation-only counterpart.
+  reintroduce equal minimum/maximum width locks for expanded panels. Expanded
+  panels have usable minimums but no arbitrary maximum; only their collapsed
+  rails use fixed widths. Splitter movement is the canonical UI width mutation
+  and persisted panel state is its presentation-only counterpart.
   `paint.ui.inspector.presentation` owns the same three presentation states for
   automation. The Design tab progressively discloses
   rows for artboard, text, image, frame/group/button, component, and multiple

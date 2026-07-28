@@ -19,6 +19,10 @@ DEFAULT_PANEL_STATE = {
     "inspector_auto_hide": True,
 }
 
+NAVIGATOR_MIN_WIDTH = 112
+INSPECTOR_MIN_WIDTH = 180
+PERSISTED_PANEL_MAX_WIDTH = 16777215
+
 
 def _bool_value(value: Any, fallback: bool) -> bool:
     if value is None:
@@ -35,9 +39,9 @@ def load_painter_ui_panel_state(
     store.beginGroup(SETTINGS_GROUP)
     try:
         navigator_width = max(
-            136,
+            NAVIGATOR_MIN_WIDTH,
             min(
-                320,
+                PERSISTED_PANEL_MAX_WIDTH,
                 int(
                     store.value(
                         "navigator_width",
@@ -47,9 +51,9 @@ def load_painter_ui_panel_state(
             ),
         )
         inspector_width = max(
-            240,
+            INSPECTOR_MIN_WIDTH,
             min(
-                420,
+                PERSISTED_PANEL_MAX_WIDTH,
                 int(
                     store.value(
                         "inspector_width",
@@ -92,12 +96,12 @@ def save_painter_ui_panel_state(
         if key in current:
             current[key] = value
     current["navigator_width"] = max(
-        136,
-        min(320, int(current["navigator_width"])),
+        NAVIGATOR_MIN_WIDTH,
+        min(PERSISTED_PANEL_MAX_WIDTH, int(current["navigator_width"])),
     )
     current["inspector_width"] = max(
-        240,
-        min(420, int(current["inspector_width"])),
+        INSPECTOR_MIN_WIDTH,
+        min(PERSISTED_PANEL_MAX_WIDTH, int(current["inspector_width"])),
     )
     current["navigator_collapsed"] = bool(
         current["navigator_collapsed"]
@@ -123,6 +127,9 @@ def save_painter_ui_panel_state(
 
 __all__ = [
     "DEFAULT_PANEL_STATE",
+    "INSPECTOR_MIN_WIDTH",
+    "NAVIGATOR_MIN_WIDTH",
+    "PERSISTED_PANEL_MAX_WIDTH",
     "SETTINGS_APP",
     "SETTINGS_GROUP",
     "SETTINGS_ORG",
