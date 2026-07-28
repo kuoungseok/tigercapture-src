@@ -2829,3 +2829,104 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    style_plan_fields = {
+        **cid,
+        "prompt": {"type": "string"},
+        "references": {"type": "array", "items": {"type": "object"}},
+        "layer_ids": {"type": "array", "items": {"type": "string"}},
+        "seed": {"type": "integer", "minimum": 0},
+    }
+    registry.register_adapter_action(
+        "motion.ai.style.plan",
+        "Create a reviewable five-candidate style plan with backend and cost disclosure.",
+        "motion",
+        "motion_ai_style_plan",
+        params_schema=schema_object(
+            style_plan_fields,
+            required=("composition_id", "prompt"),
+        ),
+        required=("composition_id", "prompt"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.style.candidates.generate",
+        "Generate Clean, Craft, Collage, Glass, and Stop Motion editable candidates.",
+        "motion",
+        "motion_ai_style_candidates_generate",
+        params_schema=schema_object(
+            style_plan_fields,
+            required=("composition_id", "prompt"),
+        ),
+        required=("composition_id", "prompt"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.style.apply",
+        "Apply one reviewed style candidate while preserving source transforms and keyframes.",
+        "motion",
+        "motion_ai_style_apply",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+            "candidate_id": {"type": "string"},
+            "approved": {"type": "boolean"},
+        }, required=("composition_id", "plan", "candidate_id", "approved")),
+        required=("composition_id", "plan", "candidate_id", "approved"),
+        undo_label="Apply AI Style Direction",
+        dry_summary="The approved editable style candidate would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.ai.style.lock.set",
+        "Lock brand font, texture, seed, mascot, and protected layers.",
+        "motion",
+        "motion_ai_style_lock_set",
+        params_schema=schema_object({
+            **cid,
+            "changes": {"type": "object"},
+        }, required=("composition_id", "changes")),
+        required=("composition_id", "changes"),
+        undo_label="Update AI Style Lock",
+        dry_summary="Brand and protected-layer locks would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.ai.story.plan",
+        "Create a reviewable Hook-to-CTA story plan separate from visual style.",
+        "motion",
+        "motion_ai_story_plan",
+        params_schema=schema_object({
+            **cid,
+            "prompt": {"type": "string"},
+        }, required=("composition_id", "prompt")),
+        required=("composition_id", "prompt"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.story.apply",
+        "Apply an explicitly approved AI story plan as editable story beats.",
+        "motion",
+        "motion_ai_story_apply",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+            "approved": {"type": "boolean"},
+        }, required=("composition_id", "plan", "approved")),
+        required=("composition_id", "plan", "approved"),
+        undo_label="Apply AI Story Direction",
+        dry_summary="The approved Hook-to-CTA story plan would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.ai.trend.preflight",
+        "Inspect style locks, backend fallbacks, cost, and trend-candidate completeness.",
+        "motion",
+        "motion_ai_trend_preflight",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+        }, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )

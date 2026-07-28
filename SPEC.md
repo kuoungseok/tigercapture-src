@@ -6691,6 +6691,42 @@ AI Script Edit MVP integration:
   M26 v1 is a deterministic role/priority constraint reflow, not a claim of
   semantic generative art direction or automatic platform copy rewriting;
   those remain M27 work.
+- M27 AI Style Director v1 is implemented through the reviewable
+  `tigerstudio.motion.ai_style_plan.v1` contract. It separates style intent
+  from story intent, records reference provenance, backend availability,
+  estimated cost, explicit fallbacks, and five editable candidates: Clean,
+  Craft, Collage, Glass, and Stop Motion. The shared Claude provider context
+  may inform planning when available, while the v1 style compiler remains a
+  deterministic local path that can run without AI.
+- The Motion AI workspace applies every candidate to a cloned composition and
+  renders a real 384x216 preview through `MotionExportRenderer`. It displays
+  operations, preserved data, backend, cost, and warnings before the user can
+  approve a candidate. Apply rejects stale revisions and requires explicit
+  approval.
+- Candidate application preserves source references, transform properties,
+  pivots, keyframes, and manual effects. Brand font, texture, seed, mascot, and
+  protected-layer locks persist in
+  `tigerstudio.motion.ai_style_lock.v1`; only Style Director-owned effects,
+  collage metadata, or stop-motion metadata are replaced on a later style
+  pass. Reports distinguish all eligible layers from layers that received a
+  visual style change.
+- `tigerstudio.motion.ai_story_plan.v1` plans eight stable-ID beats from Hook
+  through CTA and applies them to the ordinary story-direction document only
+  after approval. Automation exposes `motion.ai.style.plan`,
+  `motion.ai.style.candidates.generate`, `motion.ai.style.apply`,
+  `motion.ai.style.lock.set`, `motion.ai.story.plan/apply`, and
+  `motion.ai.trend.preflight`.
+- Glass candidates disclose the current shared-raster CPU fallback. Painterly
+  3D reports unavailable until M24 and offers editable 2D Craft as a fallback.
+  Existing Craft, Collage, Glass, and Stop Motion UMG native/bake/blocked
+  classifications remain authoritative; AI provenance metadata is authoring
+  data and does not create a second Unreal rendering path.
+- `tools/qa_motion_style_director.py` renders all five candidates through the
+  shared renderer. Current evidence records five distinct candidates, zero
+  source mutation, zero transform/keyframe loss, and an eight-beat story plan.
+  M27 v1 is a reviewable editable style compiler, not a claim that a
+  generative model autonomously produces finished art direction or replaces
+  the underlying Motion tools.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

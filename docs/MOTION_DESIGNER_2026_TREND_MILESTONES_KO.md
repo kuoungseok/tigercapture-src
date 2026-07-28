@@ -1,7 +1,7 @@
 # Motion Designer 2026 Trend Gap and Implementation Milestones
 
 작성일: 2026-07-29  
-상태: 기능 대조 완료, M21-M28 계획  
+상태: M21, M23, M25-M27 Complete v1; M22 진행 중; M24, M28 계획
 대상: Tiger Studio Motion Designer
 
 ## 1. 목적
@@ -92,7 +92,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Complete v1 |
 | M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Complete v1 |
-| M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Planned |
+| M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Complete v1 |
 | M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | Planned |
 
 의존 관계:
@@ -483,6 +483,32 @@ Action/MCP:
 - 적용 후 모든 결과가 일반 layer/effect/material/story 데이터로 편집 가능
 - 사용자 수정 보존 회귀
 - AI 없이도 같은 Action을 수동 실행 가능
+
+구현 상태:
+
+- `tigerstudio.motion.ai_style_plan.v1`은 style intent와 story intent,
+  reference provenance, backend availability, 예상 비용, fallback을 계획 시점에
+  고정한다. Claude 공유 provider를 사용할 수 있지만, v1의 5개 스타일
+  컴파일은 오프라인에서도 동일하게 실행되는 결정적 로컬 경로다.
+- AI 작업공간은 Clean, Craft, Collage, Glass, Stop Motion 후보를 복제된
+  컴포지션에 적용하고 `MotionExportRenderer`로 실제 384x216 프레임을
+  렌더한다. 사용자는 이 프레임과 operation, 보존 범위, backend, 비용,
+  warning을 검토한 뒤 명시적으로 승인한다.
+- 적용은 source, transform, pivot, keyframe, 수동 effect를 변경하지 않는다.
+  brand font/texture/seed/mascot와 protected layer lock을 유지하며,
+  Style Director가 생성한 데이터만 다음 후보에서 정리한다.
+- `tigerstudio.motion.ai_story_plan.v1`은 Hook부터 CTA까지 8개 beat의 안정 ID를
+  계획하고 승인 후 기존 story 데이터 계약으로 적용한다.
+- Glass 후보는 현재 shared raster CPU fallback을 명시하며, Painterly 3D는
+  M24가 완료되지 않아 편집 가능한 2D Craft 대체안을 반환한다. 기능을
+  조용히 생략하거나 GPU/3D 지원을 주장하지 않는다.
+- `tools/qa_motion_style_director.py`는 동일 입력의 5개 후보를 실제 renderer로
+  렌더한다. 현재 QA는 원본 source mutation 0, transform/keyframe loss 0,
+  story beat 8개를 기록한다.
+
+M27 v1은 편집 가능한 deterministic style compiler와 review workflow다.
+생성형 모델이 완성된 art direction을 스스로 설계하거나 이미지 내용을 새로
+그리는 기능이라고 주장하지 않는다.
 
 ## 12. M28 - Trend Template and Product QA
 

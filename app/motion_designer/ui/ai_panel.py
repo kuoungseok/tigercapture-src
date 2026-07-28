@@ -89,6 +89,8 @@ class MotionAIReferenceList(QListWidget):
 
 class MotionAIPanel(QWidget):
     plan_requested = Signal(object)
+    style_requested = Signal(object)
+    style_apply_requested = Signal(object)
     apply_requested = Signal(object)
     patch_requested = Signal(object)
     patch_apply_requested = Signal(object)
@@ -103,6 +105,7 @@ class MotionAIPanel(QWidget):
         self._references: list[MotionAIReference] = []
         self._proposal: dict | None = None
         self._candidates: list[dict] = []
+        self._style_plan: dict | None = None
         self._patch: dict | None = None
         self._applied_layer_ids: list[str] = []
         self._provider_status = self._read_provider_status()
@@ -178,6 +181,12 @@ class MotionAIPanel(QWidget):
         self.plan_button = QPushButton("Plan", self)
         self.plan_button.clicked.connect(self.request_plan)
         tools.addWidget(self.plan_button)
+        self.style_button = QPushButton("5 Styles", self)
+        self.style_button.setToolTip(
+            "Render Clean, Craft, Collage, Glass, and Stop Motion candidates",
+        )
+        self.style_button.clicked.connect(self.request_style_plan)
+        tools.addWidget(self.style_button)
         self.revise_button = QPushButton("Revise", self)
         self.revise_button.setEnabled(False)
         self.revise_button.setToolTip(
@@ -329,6 +338,13 @@ class MotionAIPanel(QWidget):
             **self.extraction.options(),
         })
 
+    def request_style_plan(self) -> None:
+        self.style_requested.emit({
+            "prompt": self.prompt.toPlainText().strip(),
+            "references": self.reference_dicts(),
+            "seed": 20260729,
+        })
+
     def request_patch(self) -> None:
         prompt = self.prompt.toPlainText().strip()
         if not prompt or not self._applied_layer_ids:
@@ -369,6 +385,7 @@ class MotionAIPanel(QWidget):
 
     def set_generating(self, active: bool) -> None:
         self.plan_button.setEnabled(not active)
+        self.style_button.setEnabled(not active)
         self.attach_button.setEnabled(not active)
         self.clear_button.setEnabled(not active)
         self.decompose_images.setEnabled(not active)
@@ -388,11 +405,13 @@ class MotionAIPanel(QWidget):
 
     def set_error(self, message: str) -> None:
         self._proposal = None
+        self._style_plan = None
         self.set_generating(False)
         self.status.setText("Plan failed")
         self.result.setPlainText(str(message or "Motion AI generation failed."))
 
     def set_proposal(self, proposal: dict) -> None:
+        self._style_plan = None
         self._candidates = [dict(proposal)]
         self.candidate_selector.setVisible(False)
         self.candidate_strip.clear()
@@ -400,6 +419,7 @@ class MotionAIPanel(QWidget):
         self._display_proposal(dict(proposal))
 
     def set_candidate_set(self, payload: dict) -> None:
+        self._style_plan = None
         candidates = [
             dict(item)
             for item in payload.get("candidates", [])
@@ -437,6 +457,85 @@ class MotionAIPanel(QWidget):
         self.candidate_strip.setVisible(len(candidates) > 1)
         self._display_proposal(candidates[selected])
 
+    def set_style_plan(self, payload: dict) -> None:
+        plan = payload.get("plan")
+        if not isinstance(plan, dict):
+            self.set_error("Style Director returned an invalid plan.")
+            return
+        candidates = [
+            dict(item)
+            for item in plan.get("candidates", [])
+            if isinstance(item, dict)
+        ]
+        if len(candidates) != 5:
+            self.set_error("Style Director requires five review candidates.")
+            return
+        previews = {
+            str(row.get("candidate_id") or ""): dict(row)
+            for row in payload.get("previews", [])
+            if isinstance(row, dict)
+        }
+        self._style_plan = dict(plan)
+        self._proposal = None
+        self._candidates = candidates
+        self.candidate_strip.blockSignals(True)
+        self.candidate_strip.clear()
+        self.candidate_selector.clear()
+        for index, candidate in enumerate(candidates):
+            title = str(candidate.get("title") or f"Style {index + 1}")
+            self.candidate_selector.addItem(title, index)
+            item = QListWidgetItem(title)
+            item.setTextAlignment(Qt.AlignHCenter)
+            item.setData(Qt.UserRole, index)
+            preview = previews.get(str(candidate.get("id") or ""), {})
+            pixmap = QPixmap(str(preview.get("thumbnail_path") or ""))
+            if not pixmap.isNull():
+                item.setIcon(QIcon(pixmap))
+            else:
+                item.setIcon(
+                    self.style().standardIcon(QStyle.SP_FileDialogContentsView),
+                )
+            item.setToolTip(
+                f"{title} / actual Motion renderer preview / editable result",
+            )
+            self.candidate_strip.addItem(item)
+        self.candidate_strip.setCurrentRow(0)
+        self.candidate_strip.blockSignals(False)
+        self.candidate_strip.setVisible(True)
+        self.candidate_selector.setVisible(False)
+        self._display_style_candidate(candidates[0])
+
+    def _display_style_candidate(self, candidate: dict) -> None:
+        plan = self._style_plan or {}
+        backend = dict(plan.get("backend") or {})
+        cost = dict(backend.get("estimated_cost") or {})
+        lines = [
+            str(candidate.get("title") or "Style Candidate"),
+            "",
+            "Editable operations:",
+            *[
+                f"+ {str(operation.get('type') or '').replace('_', ' ')}"
+                for operation in candidate.get("operations", [])
+                if isinstance(operation, dict)
+            ],
+            "",
+            "Preserves:",
+            *[f"- {item}" for item in candidate.get("preserves", [])],
+            "",
+            f"Provider: {backend.get('effective_provider', 'rule_based')}",
+            f"Estimated cost: {float(cost.get('amount', 0.0)):.2f} {cost.get('currency', 'USD')}",
+        ]
+        warnings = [str(item) for item in candidate.get("warnings", [])]
+        if backend.get("fallback_used"):
+            warnings.insert(0, str(backend.get("fallback_reason") or "Provider fallback"))
+        if warnings:
+            lines.extend(["", "Review:", *[f"- {item}" for item in warnings]])
+        self.result.setPlainText("\n".join(lines))
+        self.apply_button.setEnabled(True)
+        self.status.setText(
+            f"Style Director / {candidate.get('title', 'Candidate')}",
+        )
+
     def _select_candidate(self, index: int) -> None:
         if 0 <= int(index) < len(self._candidates):
             self.candidate_selector.blockSignals(True)
@@ -446,7 +545,10 @@ class MotionAIPanel(QWidget):
                 self.candidate_strip.blockSignals(True)
                 self.candidate_strip.setCurrentRow(int(index))
                 self.candidate_strip.blockSignals(False)
-            self._display_proposal(self._candidates[int(index)])
+            if self._style_plan is not None:
+                self._display_style_candidate(self._candidates[int(index)])
+            else:
+                self._display_proposal(self._candidates[int(index)])
 
     def set_candidate_previews(self, payload: dict) -> None:
         for row in payload.get("previews", []):
@@ -532,6 +634,15 @@ class MotionAIPanel(QWidget):
         self.status.setText(f"{provider} / {len(layers)} layers")
 
     def apply_proposal(self) -> None:
+        if self._style_plan is not None:
+            index = self.candidate_strip.currentRow()
+            if 0 <= index < len(self._candidates):
+                self.style_apply_requested.emit({
+                    "plan": dict(self._style_plan),
+                    "candidate_id": str(self._candidates[index].get("id") or ""),
+                    "approved": True,
+                })
+            return
         if self._proposal:
             self.apply_requested.emit(dict(self._proposal))
 
@@ -597,6 +708,7 @@ class MotionAIPanel(QWidget):
 
     def _invalidate_proposal(self) -> None:
         self._proposal = None
+        self._style_plan = None
         self._patch = None
         self._candidates.clear()
         self.candidate_selector.clear()

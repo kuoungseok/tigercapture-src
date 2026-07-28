@@ -126,6 +126,83 @@ class MotionAICandidatePreviewWorker(QObject):
             self.completed.emit(result)
 
 
+class MotionAIStylePreviewWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        composition: MotionComposition,
+        request: dict,
+        cache_root: str | Path,
+    ) -> None:
+        super().__init__()
+        self._composition = MotionComposition.from_dict(composition.to_dict())
+        self._request = dict(request)
+        self._cache_root = Path(cache_root)
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from app.motion_designer.export_renderer import MotionExportRenderer
+            from app.motion_designer.style_director import (
+                apply_style_candidate,
+                plan_style_direction,
+                trend_preflight,
+            )
+
+            plan = plan_style_direction(
+                self._composition,
+                str(self._request.get("prompt") or ""),
+                self._request.get("references") or (),
+                layer_ids=self._request.get("layer_ids") or (),
+                seed=int(self._request.get("seed", 20260729)),
+            )
+            directory = self._cache_root / str(plan["id"])
+            directory.mkdir(parents=True, exist_ok=True)
+            renderer = MotionExportRenderer(cache_capacity=2)
+            time_ms = min(
+                max(0.0, self._composition.duration_ms * 0.35),
+                max(0.0, self._composition.duration_ms - 1),
+            )
+            previews = []
+            for index, candidate in enumerate(plan["candidates"]):
+                styled, report = apply_style_candidate(
+                    self._composition,
+                    plan,
+                    str(candidate["id"]),
+                    approved=True,
+                )
+                image = renderer.render_frame(
+                    styled,
+                    time_ms,
+                    width=384,
+                    height=216,
+                    use_cache=False,
+                )
+                path = directory / f"{index:02d}_{candidate['style_id']}.png"
+                if not image.save(str(path), "PNG"):
+                    raise RuntimeError(f"Failed to save style preview: {path}")
+                previews.append({
+                    "index": index,
+                    "candidate_id": str(candidate["id"]),
+                    "style_id": str(candidate["style_id"]),
+                    "thumbnail_path": str(path),
+                    "time_ms": time_ms,
+                    "apply_report": report,
+                    "render_source": "MotionExportRenderer",
+                })
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.completed.emit({
+                "schema": "tigerstudio.motion.ai_style_preview_set.v1",
+                "plan": plan,
+                "previews": previews,
+                "preflight": trend_preflight(self._composition, plan),
+            })
+
+
 class MotionAIPatchWorker(QObject):
     completed = Signal(object)
     failed = Signal(str)
@@ -166,4 +243,5 @@ __all__ = [
     "MotionAICandidatePreviewWorker",
     "MotionAIGenerationWorker",
     "MotionAIPatchWorker",
+    "MotionAIStylePreviewWorker",
 ]

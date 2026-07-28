@@ -790,6 +790,59 @@ def test_motion_ai_panel_builds_reviewable_multimodal_draft_and_undoes(tmp_path)
     app.processEvents()
 
 
+def test_motion_ai_workspace_reviews_and_applies_five_style_candidates() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    from app.motion_designer.style_director import plan_style_direction
+
+    app = QApplication.instance() or QApplication([])
+    layer = MotionLayer(
+        id="style_hero",
+        name="Style Hero",
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 180,
+            "height": 220,
+            "fill": "#d66d52",
+        }),
+        out_ms=3000,
+    )
+    layer.transform.position.default = [320, 180]
+    composition = MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=3000,
+        layers=[layer],
+    )
+    window = MotionDesignerWindow(composition)
+    plan = plan_style_direction(
+        window.controller.composition,
+        "Premium handmade launch",
+        backend_snapshot={
+            "selected_provider": "rule_based",
+            "effective_generation_provider": "rule_based",
+            "providers": {"rule_based": {"available": True}},
+        },
+    )
+
+    window.ai.set_style_plan({"plan": plan, "previews": []})
+    assert window.ai.style_button.text() == "5 Styles"
+    assert window.ai.candidate_strip.count() == 5
+    assert window.ai._style_plan["id"] == plan["id"]
+    window.ai.candidate_strip.setCurrentRow(1)
+    assert "Craft" in window.ai.result.toPlainText()
+    window.ai.apply_proposal()
+    changed = window.controller.composition.layers[0]
+    assert any(
+        effect.metadata.get("style_director")
+        for effect in changed.effects
+    )
+    assert window.ai.status.text() == "Applied 1"
+    window.close()
+    app.processEvents()
+
+
 def test_motion_mask_refine_canvas_adds_and_removes_brush_strokes() -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):

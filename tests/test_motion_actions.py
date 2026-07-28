@@ -608,6 +608,81 @@ def test_motion_ai_plan_and_apply_actions_share_the_reviewed_proposal_contract()
     assert {"motion.ai.plan", "motion.ai.apply"} <= specs
 
 
+def test_motion_ai_style_director_actions_plan_review_apply_and_preflight() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {
+        "name": "Style Director",
+        "width": 640,
+        "height": 360,
+        "duration_ms": 3000,
+    })
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {
+            "id": "hero",
+            "name": "Hero",
+            "layer_type": "shape",
+            "out_ms": 3000,
+            "source": {
+                "kind": "shape",
+                "params": {"width": 180, "height": 220, "fill": "#d96d52"},
+            },
+        },
+    })
+    assert added.ok
+    planned = registry.execute("motion.ai.style.candidates.generate", {
+        "composition_id": composition_id,
+        "prompt": "Premium handmade launch with a story hook.",
+        "seed": 29,
+    })
+    assert planned.ok
+    plan = planned.result["plan"]
+    assert {row["style_id"] for row in planned.result["candidates"]} == {
+        "clean", "craft", "collage", "glass", "stop_motion",
+    }
+    assert owner._motion_compositions[composition_id].layers[0].effects == []
+
+    craft = next(row for row in plan["candidates"] if row["style_id"] == "craft")
+    applied = registry.execute("motion.ai.style.apply", {
+        "composition_id": composition_id,
+        "plan": plan,
+        "candidate_id": craft["id"],
+        "approved": True,
+    })
+    assert applied.ok
+    assert applied.result["report"]["transform_keyframes_preserved"] is True
+    assert any(
+        effect.metadata.get("style_director")
+        for effect in owner._motion_compositions[composition_id].layers[0].effects
+    )
+
+    current = owner._motion_compositions[composition_id]
+    next_plan = registry.execute("motion.ai.style.plan", {
+        "composition_id": composition_id,
+        "prompt": "Clean product style.",
+    }).result
+    preflight = registry.execute("motion.ai.trend.preflight", {
+        "composition_id": composition_id,
+        "plan": next_plan,
+    })
+    assert preflight.ok
+    assert preflight.result["summary"]["candidate_count"] == 5
+    assert current.revision == owner._motion_compositions[composition_id].revision
+
+    specs = {row["id"] for row in registry.list_actions()}
+    assert {
+        "motion.ai.style.plan",
+        "motion.ai.style.candidates.generate",
+        "motion.ai.style.apply",
+        "motion.ai.style.lock.set",
+        "motion.ai.story.plan",
+        "motion.ai.story.apply",
+        "motion.ai.trend.preflight",
+    } <= specs
+
+
 def test_motion_audio_reactive_actions_share_analysis_preview_and_bake(tmp_path) -> None:
     rate = 16000
     t = np.arange(rate, dtype=np.float32) / rate

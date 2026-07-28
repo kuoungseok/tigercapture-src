@@ -96,6 +96,7 @@ _KO = {
     "AI WORKSPACE": "AI 작업공간",
     "Advanced": "고급",
     "Plan": "계획",
+    "5 Styles": "5개 스타일",
     "Revise": "수정",
     "Apply": "적용",
     "PROPOSAL": "제안",

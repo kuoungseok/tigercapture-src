@@ -31,6 +31,7 @@ from .ai_worker import (
     MotionAICandidatePreviewWorker,
     MotionAIGenerationWorker,
     MotionAIPatchWorker,
+    MotionAIStylePreviewWorker,
 )
 from .ar_pbr_panel import ArPbrPanel
 from .actor_panel import ActorPanel
@@ -839,6 +840,7 @@ class MotionDesignerWindow(QMainWindow):
         self._motion_export_job: tuple[QThread, MotionExportWorker] | None = None
         self._umg_generation_job: tuple[QThread, MotionUMGGenerationWorker] | None = None
         self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
+        self._ai_style_job: tuple[QThread, MotionAIStylePreviewWorker] | None = None
         self._ai_preview_job: tuple[QThread, MotionAICandidatePreviewWorker] | None = None
         self._ai_preview_pending: dict | None = None
         self._ai_patch_job: tuple[QThread, MotionAIPatchWorker] | None = None
@@ -1120,6 +1122,8 @@ class MotionDesignerWindow(QMainWindow):
         self.viewer_header.grid_changed.connect(self.canvas.set_grid_visible)
         self.viewer_header.safe_changed.connect(self.canvas.set_safe_guides_visible)
         self.ai.plan_requested.connect(self._plan_ai_request)
+        self.ai.style_requested.connect(self._plan_ai_style)
+        self.ai.style_apply_requested.connect(self._apply_ai_style)
         self.ai.apply_requested.connect(self._apply_ai_proposal)
         self.ai.patch_requested.connect(self._plan_ai_patch)
         self.ai.patch_apply_requested.connect(self._apply_ai_patch)
@@ -2296,6 +2300,68 @@ class MotionDesignerWindow(QMainWindow):
         self._ai_generation_job = (thread, worker)
         self.ai.set_generating(True)
         thread.start()
+
+    def _plan_ai_style(self, payload: object) -> None:
+        if self._ai_style_job is not None or not isinstance(payload, dict):
+            return
+        from PySide6.QtCore import QStandardPaths
+
+        cache_base = QStandardPaths.writableLocation(QStandardPaths.CacheLocation)
+        cache_root = (
+            Path(cache_base or Path.home() / ".tigercapture")
+            / "motion_ai"
+            / "style_previews"
+        )
+        thread = QThread(self)
+        worker = MotionAIStylePreviewWorker(
+            self.controller.composition,
+            dict(payload),
+            cache_root,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._finish_ai_style)
+        worker.failed.connect(self._fail_ai_style)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._clear_ai_style_job(thread))
+        self._ai_style_job = (thread, worker)
+        self.ai.set_generating(True)
+        self.ai.status.setText("Rendering five editable styles...")
+        thread.start()
+
+    def _finish_ai_style(self, payload: object) -> None:
+        self.ai.set_generating(False)
+        if isinstance(payload, dict):
+            self.ai.set_style_plan(payload)
+        else:
+            self.ai.set_error("Style Director returned an invalid result.")
+
+    def _fail_ai_style(self, message: str) -> None:
+        self.ai.set_error(message)
+
+    def _clear_ai_style_job(self, thread: QThread) -> None:
+        if self._ai_style_job is not None and self._ai_style_job[0] is thread:
+            self._ai_style_job = None
+
+    def _apply_ai_style(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        from app.motion_designer.style_director import apply_style_candidate
+
+        try:
+            candidate, report = apply_style_candidate(
+                self.controller.composition,
+                payload.get("plan") or {},
+                str(payload.get("candidate_id") or ""),
+                approved=bool(payload.get("approved", False)),
+            )
+        except Exception as exc:
+            self.ai.set_error(str(exc))
+            return
+        self.controller.replace(candidate)
+        self.ai.set_applied(len(report.get("applied_layer_ids") or []))
 
     def _finish_ai_generation(self, proposal: object) -> None:
         self.ai.set_generating(False)
@@ -3757,6 +3823,10 @@ class MotionDesignerWindow(QMainWindow):
             thread.wait(10000)
         if self._ai_generation_job is not None:
             thread, _worker = self._ai_generation_job
+            thread.quit()
+            thread.wait(35000)
+        if self._ai_style_job is not None:
+            thread, _worker = self._ai_style_job
             thread.quit()
             thread.wait(35000)
         if self._ai_preview_job is not None:
