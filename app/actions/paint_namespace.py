@@ -212,6 +212,25 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the visible Painter canvas workspace would change",
     )
     registry.register_adapter_action(
+        "paint.ui.inspector.presentation",
+        "Show the Painter UI inspector as an auto-hidden overlay, pinned panel, or floating window.",
+        "paint",
+        "paint_ui_inspector_presentation",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto_hide", "pinned", "floating"],
+                }
+            },
+            required=("mode",),
+        ),
+        required=("mode",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI inspector presentation would change",
+    )
+    registry.register_adapter_action(
         "paint.ui.view.fit",
         "Fit all UI artboards, the active artboard, or the current selection in the Painter canvas.",
         "paint",

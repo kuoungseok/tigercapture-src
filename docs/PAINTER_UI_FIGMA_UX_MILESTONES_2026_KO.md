@@ -19,11 +19,13 @@ Completed in the first shell slice:
 - resizable 240-420 px right inspector with detachable floating-window and
   automatic re-dock when leaving UI Design
 - restart-safe persistence for user-adjusted navigator/inspector width and
-  collapsed state; automatic compact-mode collapse is not persisted as a user
-  preference
+  presentation; the right inspector now defaults to Auto-hide instead of
+  permanently taxing canvas width
 - selection-triggered temporary Properties overlay when the right inspector is
   collapsed; it reuses the canonical inspector widget and returns it to the
   dock on close, expand, detach, or workspace change
+- shared `paint.ui.inspector.presentation` Action selects `auto_hide`,
+  `pinned`, or `floating` using the same canonical inspector widget
 - transient Zoom popover replaces three permanently visible Fit buttons and
   provides percentage input, Fit All, Fit Artboard, and Fit Selection
 - canvas-first navigation: Space/left-drag or middle-drag pan, wheel vertical
@@ -610,8 +612,9 @@ workflow is production-ready.
   grouped Shape and Content flyouts.
 - The template strip is fixed to a compact 34 px band with smaller preview
   targets; the full gallery remains available from the leading grid button.
-- The right inspector is constrained to 252-268 px in the standalone Painter
-  window and uses compact labels, tabs, fields, buttons, and list rows.
+- The right inspector defaults to a 36 px Auto-hide rail in the standalone
+  Painter window, so the canvas receives the width until properties are needed.
+  Its temporary overlay uses compact labels, tabs, fields, buttons, and rows.
 - The left navigator defaults to 168 px, can be resized from 136-320 px, and
   keeps Pages/Layers/Assets reachable through a thin vertical scrollbar.
 - The right inspector can be resized from 240-420 px or detached into a
@@ -626,6 +629,9 @@ workflow is production-ready.
   object opens the same canonical Design inspector as a temporary canvas
   overlay; closing it suppresses repeat opening for that selection and a new
   selection may open it again.
+- Pinning restores the remembered 240-420 px resizable panel; Floating moves
+  the same widget to its detachable window. `paint.ui.inspector.presentation`
+  exposes all three states without creating parallel property editors.
 - Rulers and persistent artboard guides remain visible without consuming
   inspector space.
 - Zoom controls are temporary rather than fixed chrome. A single toolbar icon

@@ -492,6 +492,40 @@ class PaintAdapterMixin(
         state["workspace"]["mode"] = selected
         return state
 
+    def paint_ui_inspector_presentation(
+        self,
+        *,
+        mode: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        value = str(mode or "").strip().casefold()
+        if value not in {"auto_hide", "pinned", "floating"}:
+            raise ValueError(
+                "paint.ui.inspector.presentation mode must be "
+                "auto_hide, pinned, or floating"
+            )
+        dialog._set_canvas_workspace_mode("ui_design")
+        if value == "floating":
+            dialog._paint_ui_inspector.set_auto_hide(False)
+            dialog._detach_painter_ui_inspector()
+        else:
+            if bool(
+                getattr(dialog, "_painter_ui_inspector_detached", False)
+            ):
+                dialog._dock_painter_ui_inspector()
+            dialog._paint_ui_inspector.set_auto_hide(
+                value == "auto_hide"
+            )
+        state = dialog.painter_action_state()
+        state["inspector_presentation"] = {
+            "mode": value,
+            "auto_hide": dialog._paint_ui_inspector.is_auto_hide(),
+            "detached": bool(
+                getattr(dialog, "_painter_ui_inspector_detached", False)
+            ),
+        }
+        return state
+
     def paint_ui_view_fit(self, *, mode: str = "all") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         view = dialog._fit_painter_ui_view(str(mode or "all"))

@@ -10196,6 +10196,11 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.collapsed_changed.connect(
             self._set_painter_ui_inspector_collapsed
         )
+        self._paint_ui_inspector.auto_hide_changed.connect(
+            lambda auto_hide: self._save_painter_ui_panel_presentation(
+                inspector_auto_hide=bool(auto_hide)
+            )
+        )
         self._paint_ui_inspector.dock_toggle_requested.connect(
             self._toggle_painter_ui_inspector_dock
         )
@@ -10395,8 +10400,13 @@ class PaintDialog(QDialog):
                 ),
             )
         )
-        self._paint_ui_inspector.set_collapsed(
-            bool(self._painter_ui_panel_state["inspector_collapsed"])
+        self._paint_ui_inspector.set_auto_hide(
+            bool(
+                self._painter_ui_panel_state.get(
+                    "inspector_auto_hide",
+                    self._painter_ui_panel_state["inspector_collapsed"],
+                )
+            )
         )
         self._painter_ui_navigator.hide()
         workspace.insertWidget(1, self._painter_ui_navigator)
@@ -22514,7 +22524,8 @@ class PaintDialog(QDialog):
             if handle is not None:
                 handle.show()
         self._save_painter_ui_panel_presentation(
-            inspector_collapsed=bool(collapsed)
+            inspector_collapsed=bool(collapsed),
+            inspector_auto_hide=bool(collapsed),
         )
         self._update_canvas_geometry()
 

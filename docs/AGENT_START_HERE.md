@@ -73,8 +73,10 @@ Focused entry points:
   canonical in `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`. Start with its P0
   binding-contract consolidation, then complete the `Normal -> Hover`
   component-state vertical slice before broader Motion Actor polish.
-- Painter UI Design now has a compact resizable left navigator and a
-  resizable/detachable right inspector. The Design tab progressively discloses
+- Painter UI Design now has a compact resizable left navigator and a right
+  inspector that defaults to Auto-hide and can be pinned, resized, or detached.
+  `paint.ui.inspector.presentation` owns the same three presentation states for
+  automation. The Design tab progressively discloses
   rows for artboard, text, image, frame/group/button, component, and multiple
   selection; advanced rows stay behind the shared Advanced properties toggle.
   User-adjusted side-panel widths and collapsed states persist independently

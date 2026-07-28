@@ -30,6 +30,7 @@ def test_panel_state_round_trips_and_clamps(tmp_path) -> None:
             "navigator_user_override": True,
             "inspector_width": 120,
             "inspector_collapsed": True,
+            "inspector_auto_hide": False,
         },
         settings,
     )
@@ -39,6 +40,7 @@ def test_panel_state_round_trips_and_clamps(tmp_path) -> None:
         "navigator_user_override": True,
         "inspector_width": 240,
         "inspector_collapsed": True,
+        "inspector_auto_hide": False,
     }
     assert load_painter_ui_panel_state(settings) == saved
 

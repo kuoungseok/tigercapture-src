@@ -52,6 +52,9 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - A transient Zoom popover and `paint.ui.view.focus/pan/zoom/fit` provide
   percentage zoom and all-artboards, active-artboard, selection, or object
   framing without permanent Fit buttons.
+- The right Inspector defaults to Auto-hide and reuses one canonical widget for
+  selection overlay, pinned, and floating presentations. UI and automation
+  share `paint.ui.inspector.presentation`.
 - Clicking another artboard or one of its objects activates that artboard.
 - Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
   toggles intersecting objects on the active artboard.

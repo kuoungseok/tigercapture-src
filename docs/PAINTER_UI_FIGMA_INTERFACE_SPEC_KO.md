@@ -754,10 +754,13 @@ overlay mode로 전환한다.
 - Advanced disclosure owns constraints and responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-component controls. It is
   collapsed by default and does not create a parallel mutation path.
-- The Inspector is not a permanently fixed canvas tax. It may be resized,
-  detached, or collapsed to a 36 px rail. With the rail collapsed, selecting a
+- The Inspector is not a permanently fixed canvas tax. Auto-hide is the
+  default presentation, leaving a 36 px rail; it may be pinned at a remembered
+  240-420 px width or detached into a floating window. With the rail collapsed, selecting a
   new object temporarily reparents the canonical Inspector into a compact
   canvas overlay; no duplicate property editor or mutation service is created.
+- UI and automation share `paint.ui.inspector.presentation` with
+  `auto_hide`, `pinned`, and `floating` modes.
 - Zoom is not a permanent three-button group. One toolbar icon opens a
   temporary percentage/Fit All/Fit Artboard/Fit Selection popover, and a
   short-lived percentage chip appears during navigation.

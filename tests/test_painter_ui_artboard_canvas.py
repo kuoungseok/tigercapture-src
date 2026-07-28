@@ -79,7 +79,7 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
     app.processEvents()
 
 
-def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
+def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
     app = _app()
     from PySide6.QtWidgets import QAbstractSpinBox, QFrame
 
@@ -117,7 +117,10 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
     inspector_width = dialog._paint_inspector_controls_scroll.parentWidget().width()
-    assert 252 <= inspector_width <= 268
+    assert inspector_width == 36
+    assert dialog._paint_ui_inspector.is_auto_hide()
+    assert dialog._paint_ui_inspector.is_collapsed()
+    assert not dialog._paint_ui_inspector.dock_button.isVisible()
     assert dialog._painter_ui_template_strip.height() <= 35
     assert dialog._painter_file_menu.menuAction().isVisible()
     assert dialog._painter_ui_menu.menuAction().isVisible()

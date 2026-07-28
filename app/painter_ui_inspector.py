@@ -194,6 +194,7 @@ class PainterUIInspector(QWidget):
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
     temporary_close_requested = Signal()
+    auto_hide_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -202,6 +203,7 @@ class PainterUIInspector(QWidget):
         self._appearance_style: dict[str, Any] = {}
         self._collapsed = False
         self._temporary_expanded = False
+        self._auto_hide = False
         self.setObjectName("PainterUIInspector")
 
         root = QVBoxLayout(self)
@@ -445,6 +447,7 @@ class PainterUIInspector(QWidget):
         tabs.setObjectName("PainterUIInspectorTabs")
         tabs.setDocumentMode(True)
         tabs.setIconSize(QSize(15, 15))
+        tabs.tabBar().setAutoHide(True)
         tabs.tabBar().setExpanding(True)
         tabs.tabBar().setUsesScrollButtons(False)
         self._tabs = tabs
@@ -1461,8 +1464,22 @@ class PainterUIInspector(QWidget):
             else:
                 widget.setVisible(not value)
         self.title_label.setVisible(not value)
+        self.dock_button.setVisible(not value)
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
+
+    def set_auto_hide(self, auto_hide: bool) -> None:
+        value = bool(auto_hide)
+        changed = self._auto_hide != value
+        if not changed and self._collapsed == value:
+            return
+        self._auto_hide = value
+        self.set_collapsed(value)
+        if changed:
+            self.auto_hide_changed.emit(value)
+
+    def is_auto_hide(self) -> bool:
+        return bool(self._auto_hide)
 
     def set_temporary_expanded(self, expanded: bool) -> None:
         value = bool(expanded)
@@ -1489,7 +1506,7 @@ class PainterUIInspector(QWidget):
         if self._temporary_expanded:
             self.temporary_close_requested.emit()
             return
-        self.set_collapsed(not self._collapsed)
+        self.set_auto_hide(not self._collapsed)
 
     def set_detached(self, detached: bool) -> None:
         value = bool(detached)
@@ -1526,9 +1543,9 @@ class PainterUIInspector(QWidget):
         tooltip = painter_text(
             "Close temporary properties"
             if self._temporary_expanded
-            else "Expand properties"
+            else "Pin properties"
             if self._collapsed
-            else "Collapse properties"
+            else "Auto-hide properties"
         )
         self.collapse_button.setToolTip(tooltip)
         self.collapse_button.setAccessibleName(tooltip)

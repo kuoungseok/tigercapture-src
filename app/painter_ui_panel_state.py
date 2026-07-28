@@ -15,7 +15,8 @@ DEFAULT_PANEL_STATE = {
     "navigator_collapsed": False,
     "navigator_user_override": False,
     "inspector_width": 268,
-    "inspector_collapsed": False,
+    "inspector_collapsed": True,
+    "inspector_auto_hide": True,
 }
 
 
@@ -72,6 +73,10 @@ def load_painter_ui_panel_state(
                 store.value("inspector_collapsed", None),
                 bool(DEFAULT_PANEL_STATE["inspector_collapsed"]),
             ),
+            "inspector_auto_hide": _bool_value(
+                store.value("inspector_auto_hide", None),
+                bool(DEFAULT_PANEL_STATE["inspector_auto_hide"]),
+            ),
         }
     finally:
         store.endGroup()
@@ -102,6 +107,9 @@ def save_painter_ui_panel_state(
     )
     current["inspector_collapsed"] = bool(
         current["inspector_collapsed"]
+    )
+    current["inspector_auto_hide"] = bool(
+        current["inspector_auto_hide"]
     )
     store.beginGroup(SETTINGS_GROUP)
     try:
