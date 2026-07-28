@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from .craft_style import make_craft_style_effect
 from .glass_material import make_glass_effect
+from .painterly_look import make_painterly_look_effect
 from .schema import (
     AnimatedProperty,
     Keyframe,
@@ -156,6 +157,37 @@ TREND_TEMPLATE_SPECS: tuple[dict[str, Any], ...] = (
             ("STOP", "WORDS CAN HIT", "One phrase owns the first beat."),
             ("BUILD", "RHYTHM / SCALE / SPACE", "Stack words without losing mobile readability."),
             ("LAND", "MAKE IT MOVE", "Resolve on one branded action."),
+        ),
+    },
+    {
+        "id": "painterly_3d_character_spot",
+        "name": "Painterly Character Spot",
+        "category": "2026 Trends",
+        "variants": ("16:9", "9:16"),
+        "duration_ms": 12000,
+        "cta": "MEET THE CHARACTER",
+        "description": (
+            "A stable painted character treatment for images, video, and "
+            "existing AR/PBR render layers without requiring a new 3D engine."
+        ),
+        "features": (
+            "Painterly Look", "Toon bands", "Stable ink lines",
+            "Brush and paper texture", "Character media slots",
+        ),
+        "workflow": (
+            "Character campaign, game promo, and stylized AR/PBR render spot"
+        ),
+        "replace_items": (
+            "Character image/video/render", "Detail crop", "Headline", "CTA",
+        ),
+        "tags": (
+            "painterly", "toon", "ink", "character", "ar pbr", "2026",
+        ),
+        "style": "painterly",
+        "scenes": (
+            ("SILHOUETTE", "A character with presence", "Start on a bold readable pose."),
+            ("PAINT / INK", "Every line has intent", "Reveal texture without line popping."),
+            ("IN MOTION", "Built for every frame", "Resolve on the character and invitation."),
         ),
     },
 )
@@ -350,6 +382,12 @@ def build_trend_template_layers(
                 "stop_motion": "handmade",
             }[str(spec["style"])]
             media.effects.append(make_craft_style_effect({"seed": 20260729 + index}, preset=preset))
+        elif spec["style"] == "painterly":
+            preset = ("painted", "ink", "toon")[index % 3]
+            media.effects.append(make_painterly_look_effect(
+                {"seed": 20260729 + index},
+                preset=preset,
+            ))
         layers.append(media)
         if spec["style"] == "glass":
             for row_index in range(3):
@@ -431,6 +469,53 @@ def build_trend_template_layers(
                 bar.parent_id = group.id
                 bar.behaviors.append(_behavior("slide", end - start, direction="in", distance=[0, 60], hold_after=True))
                 layers.append(bar)
+        elif spec["style"] == "painterly":
+            portrait_size = min(media_w, media_h)
+            body = _shape(
+                f"Scene {index + 1} Character Body",
+                width=portrait_size * 0.48,
+                height=portrait_size * 0.58,
+                x=media_x,
+                y=media_y + portrait_size * 0.20,
+                color=("#b75345", "#3d6879", "#7a557d")[index % 3],
+                start_ms=start,
+                end_ms=end,
+                role="character_preview",
+                radius=portrait_size * 0.11,
+            )
+            head = _shape(
+                f"Scene {index + 1} Character Head",
+                width=portrait_size * 0.36,
+                height=portrait_size * 0.40,
+                x=media_x,
+                y=media_y - portrait_size * 0.16,
+                color="#e9c6a2",
+                start_ms=start,
+                end_ms=end,
+                role="character_preview",
+                radius=portrait_size * 0.18,
+            )
+            head.source.params["shape"] = "ellipse"
+            hair = _shape(
+                f"Scene {index + 1} Character Hair",
+                width=portrait_size * 0.43,
+                height=portrait_size * 0.29,
+                x=media_x,
+                y=media_y - portrait_size * 0.26,
+                color=("#273c57", "#3a2d3f", "#173d42")[index % 3],
+                start_ms=start,
+                end_ms=end,
+                role="character_preview",
+                radius=portrait_size * 0.14,
+            )
+            hair.source.params["shape"] = "ellipse"
+            for preview_index, preview in enumerate((body, head, hair)):
+                preview.parent_id = group.id
+                preview.effects.append(make_painterly_look_effect(
+                    {"seed": 20260820 + index * 5 + preview_index},
+                    preset=("painted", "ink", "toon")[index % 3],
+                ))
+                layers.append(preview)
         kicker_layer = _text(
             f"Scene {index + 1} Kicker",
             str(kicker),
@@ -504,6 +589,17 @@ def build_trend_template_layers(
                 preset="luxury_paper" if spec["style"] == "craft" else "vhs_tape",
             )
         )
+    if str(spec["style"]) == "painterly":
+        layers[0].effects.append(make_painterly_look_effect(
+            {
+                "amount": 0.24,
+                "brush_amount": 0.16,
+                "paper_amount": 0.18,
+                "edge_strength": 0.0,
+                "seed": 20260729,
+            },
+            preset="paper",
+        ))
     return layers
 
 
@@ -602,13 +698,13 @@ def trend_template_capabilities() -> dict[str, Any]:
     return {
         "schema": "tigerstudio.motion.trend_template_capabilities.v1",
         "available_template_ids": [str(item["id"]) for item in TREND_TEMPLATE_SPECS],
-        "blocked": [
-            {
-                "id": "painterly_3d_character_spot",
-                "reason": "M24 painterly 2D/3D material pipeline is not implemented",
-                "fallback": "Use a 2D character layer with Luxury Craft or Editorial Collage",
-            }
-        ],
+        "blocked": [],
+        "notes": [{
+            "id": "painterly_3d_character_spot",
+            "scope": "provider_neutral_post_render",
+            "input": "image, video, or existing AR/PBR render layer",
+            "material_id_overrides": "requires an upstream material-ID pass",
+        }],
     }
 
 

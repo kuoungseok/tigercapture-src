@@ -264,6 +264,11 @@ class ActionRegistry:
         )
 
         register_motion_tracking_actions(self)
+        from app.actions.motion_lookdev_namespace import (
+            register_motion_lookdev_actions,
+        )
+
+        register_motion_lookdev_actions(self)
         from app.actions.motion_plugin_namespace import register_motion_plugin_actions
 
         register_motion_plugin_actions(self)

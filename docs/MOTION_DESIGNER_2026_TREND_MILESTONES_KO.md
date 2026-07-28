@@ -1,7 +1,7 @@
 # Motion Designer 2026 Trend Gap and Implementation Milestones
 
 작성일: 2026-07-29  
-상태: M21-M23, M25-M27 Complete v1; M28 진행 중; M24 계획
+상태: M21-M28 Complete v1; M24 재질-ID 세분화는 후속 범위
 대상: Tiger Studio Motion Designer
 
 ## 1. 목적
@@ -89,11 +89,11 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | Complete v1 |
 | M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | Complete v1 |
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Complete v1 |
-| M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
+| M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Complete v1 |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Complete v1 |
 | M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Complete v1 |
 | M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Complete v1 |
-| M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | In progress: 7-template pack |
+| M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | Complete v1: 8-template pack |
 
 의존 관계:
 
@@ -451,6 +451,38 @@ Action/MCP:
 - 카메라 회전 중 line popping 기준
 - video + 3D + 2D type 한 장면의 Preview/Export parity
 
+### 8.1 구현 상태 - Complete v1
+
+- `tigerstudio.motion.painterly_look.v1`과 `painterly_look` 효과를 추가했다.
+  이 효과는 새 3D 렌더러가 아니라 이미지, 비디오 프레임, 기존 AR/PBR
+  렌더 결과에 동일하게 적용되는 provider-neutral 후처리 계층이다.
+- Realistic, Toon, Painted, Ink, Paper 5개 preset은 bilateral paint
+  smoothing, 명도/색상 band, 안정적인 Sobel 계열 line, brush stroke,
+  granulation, paper tint, cross-hatching을 편집 가능한 값으로 제공한다.
+- procedural 질감과 line은 문서 seed와 screen 좌표에 고정되어 같은
+  입력 프레임에서 시간만 달라져도 line popping이 생기지 않는다. 원본
+  alpha는 보존된다.
+- `Look > Painterly` Inspector와 일반 Effects 목록이 같은 효과 계약을
+  편집한다. durable texture를 Multiply, Screen, Overlay 방식으로
+  screen projection할 수 있다.
+- Action/MCP는 `motion.lookdev.get/set/clear`,
+  `motion.lookdev.preset.list`, `motion.lookdev.line.set`,
+  `motion.lookdev.material.override`, `motion.lookdev.texture.project`,
+  `motion.lookdev.preflight`를 제공한다.
+- 현재 post-render 경로에는 material-ID pass가 없으므로 재질별 override를
+  저장할 수는 있지만 적용 가능하다고 거짓 주장하지 않는다. override가
+  있으면 preflight가 `material_id_pass_unavailable`을 명시적으로 반환한다.
+- Unreal UMG 변환은 `effect_requires_bake:painterly_look`을 기록해 효과를
+  조용히 생략하지 않는다.
+- `tools/qa_motion_painterly_look.py`는 5개 preset의 실제 contact sheet,
+  시간 안정성, alpha 보존, 픽셀 차이를 검증한다. 현재 모든 preset이
+  통과했다. 960x540 warm Painted 진단은 480px bounded working surface에서
+  약 28.1ms/frame을 기록했다. 이 수치는 CPU 진단이며 GPU 실시간 주장으로
+  사용하지 않는다.
+- M28의 `Painterly Character Spot`은 이미지, 비디오, 기존 AR/PBR 렌더
+  레이어를 교체 슬롯으로 받는 실제 3장면 템플릿으로 전환됐다. 새로운
+  3D 엔진을 추가한 것은 아니다.
+
 ## 9. M25 - Stop-motion Timing and CGI
 
 목표: 단순 저프레임 영상이 아니라 촉각적인 stop-motion 움직임을 설계한다.
@@ -618,8 +650,8 @@ Action/MCP:
   Style Director가 생성한 데이터만 다음 후보에서 정리한다.
 - `tigerstudio.motion.ai_story_plan.v1`은 Hook부터 CTA까지 8개 beat의 안정 ID를
   계획하고 승인 후 기존 story 데이터 계약으로 적용한다.
-- Glass 후보는 현재 shared raster CPU fallback을 명시하며, Painterly 3D는
-  M24가 완료되지 않아 편집 가능한 2D Craft 대체안을 반환한다. 기능을
+- Glass 후보는 현재 shared raster CPU fallback을 명시한다. Painterly는
+  M24의 provider-neutral post-render 효과와 5개 preset을 사용한다. 기능을
   조용히 생략하거나 GPU/3D 지원을 주장하지 않는다.
 - `tools/qa_motion_style_director.py`는 동일 입력의 5개 후보를 실제 renderer로
   렌더한다. 현재 QA는 원본 source mutation 0, transform/keyframe loss 0,
@@ -659,12 +691,12 @@ QA:
 
 현재 구현:
 
-- `tigerstudio.motion.trend_template.v1` 기반으로 다음 7개 제품 템플릿을
+- `tigerstudio.motion.trend_template.v1` 기반으로 다음 8개 제품 템플릿을
   템플릿 갤러리에 추가했다.
   Luxury Craft Product Reveal, Editorial Mixed Media Collage,
   Liquid Glass App Promo, Clay Stop-motion Mascot,
   Emotional Brand Story, VHS Nostalgia Music Promo,
-  Kinetic Type Vertical Short.
+  Kinetic Type Vertical Short, Painterly Character Spot.
 - 각 템플릿은 10~15초, 3~5개 scene, 실제 교체 media slot, 4단계 tutorial,
   16:9/9:16/1:1 중 해당 제품 variant, 일반 layer/effect/story/stop-motion
   데이터로 구성된다. 템플릿 전환은 이전 템플릿이 소유한 composition
@@ -672,9 +704,9 @@ QA:
 - `motion.template.trend.capabilities`와
   `motion.template.trend.preflight`는 지원 템플릿, 모든 variant validation,
   UMG native/bake/blocked 사유를 반환한다.
-- `tools/qa_motion_2026_trend_matrix.py`는 7개 템플릿의 모든 장면을
+- `tools/qa_motion_2026_trend_matrix.py`는 8개 템플릿의 모든 장면을
   `MotionExportRenderer`로 렌더하고 contact sheet, 장면 차이, 문서 validation,
-  UMG 누락 여부를 기록한다. 현재 7개 템플릿과 17개 variant가 유효하며
+  UMG 누락 여부를 기록한다. 현재 8개 템플릿과 19개 variant가 유효하며
   QA contact sheet는 비어 있지 않고 장면별 픽셀 차이가 있다.
 - `tools/qa_motion_2026_product_gate.py`는 실제 60초 템플릿을 2fps PNG
   120프레임으로 렌더한다. 8프레임에서 취소한 뒤 손상 프레임 하나를
@@ -684,7 +716,7 @@ QA:
   실제 H.264 MP4 생성을 함께 검증한다. 실제 HDR H.265 파일도 생성하고
   스트림을 다시 읽어 Rec.2020 primaries와 SMPTE ST 2084 transfer를 확인한다.
 - `tools/qa_motion_2026_trend_ui.py`는 실제 Qt Motion Designer 작업창과
-  `2026 Trends` 템플릿 갤러리를 캡처하고 7개 템플릿 노출을 검사한다.
+  `2026 Trends` 템플릿 갤러리를 캡처하고 8개 템플릿 노출을 검사한다.
   긴 Library 설명이 패널 최소 폭을 밀어내지 않도록 말줄임 처리했으며,
   Library/Project 패널 폭을 제한해 Canvas가 주 작업 영역을 유지한다.
 - `TigerStudio.exe --motion-runtime-probe <report.json>
@@ -751,12 +783,14 @@ QA:
   최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
   슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
 
-M28은 아직 완료가 아니다. 소스와 frozen runtime의 backend, 시각 parity,
-provenance 계약은 완료됐다. `Painterly 3D Character Spot`은 M24가 없으므로
-갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
-대체안을 반환한다. 배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는
-통과했으며 소스의 24fps GPU 실시간 기준도 M22에서 통과했다. 남은 제품
-게이트는 M24 의존성뿐이다.
+M28 Complete v1. 소스와 frozen runtime의 backend, 시각 parity,
+provenance 계약이 완료됐다. `Painterly Character Spot`은 M24의
+provider-neutral post-render 효과를 사용하는 실제 편집 가능 템플릿이다.
+갤러리는 8개 템플릿과 19개 variant를 검증하며 blocked capability는 없다.
+배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는 통과했고 소스의
+24fps GPU 실시간 기준도 M22에서 통과했다. 새 M24 소스를 포함한 설치본
+재생성은 다음 공개 배포 시 수행할 packaging 작업이며 기존 M28 frozen
+증거의 실행 파일 provenance를 소급해 바꾸지 않는다.
 4.59GB 번들과 2.11GB 설치본의 PyTorch/CUDA 중복 런타임 축소도 공개
 배포 전 패키징 최적화 항목이다.
 

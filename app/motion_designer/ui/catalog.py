@@ -46,6 +46,7 @@ FILTER_ITEMS = (
     ("Paper Fold", "paper_fold"),
     ("Scan Cleanup", "scan_cleanup"),
     ("Craft / Imperfection", "craft_style"),
+    ("Painterly / Toon / Ink", "painterly_look"),
 )
 
 CATALOG = {
@@ -170,4 +171,5 @@ ITEM_DESCRIPTIONS = {
     "paper_fold": "Simulate a folding paper surface",
     "scan_cleanup": "Balance scanned paper, preserve ink, and remove paper",
     "craft_style": "Deterministic film grain, gate weave, and light flicker",
+    "painterly_look": "Stable toon bands, ink lines, brush texture, and paper",
 }

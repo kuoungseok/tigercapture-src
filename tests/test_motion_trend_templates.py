@@ -39,9 +39,9 @@ def _rgba(image: QImage) -> np.ndarray:
     ).copy()
 
 
-def test_trend_catalog_has_seven_supported_products_and_explicit_3d_block():
-    assert len(TREND_IDS) == 7
-    assert len(set(TREND_IDS)) == 7
+def test_trend_catalog_has_eight_supported_products():
+    assert len(TREND_IDS) == 8
+    assert len(set(TREND_IDS)) == 8
     for template_id in TREND_IDS:
         template = get_template(template_id)
         assert template.category == "2026 Trends"
@@ -51,15 +51,12 @@ def test_trend_catalog_has_seven_supported_products_and_explicit_3d_block():
         assert template.features
     capabilities = trend_template_capabilities()
     assert capabilities["available_template_ids"] == list(TREND_IDS)
-    assert capabilities["blocked"] == [{
-        "id": "painterly_3d_character_spot",
-        "reason": "M24 painterly 2D/3D material pipeline is not implemented",
-        "fallback": "Use a 2D character layer with Luxury Craft or Editorial Collage",
-    }]
+    assert capabilities["blocked"] == []
+    assert capabilities["notes"][0]["scope"] == "provider_neutral_post_render"
     preflight = preflight_trend_templates()
     assert preflight["ok"] is True
-    assert preflight["summary"]["template_count"] == 7
-    assert preflight["summary"]["variant_count"] == 17
+    assert preflight["summary"]["template_count"] == 8
+    assert preflight["summary"]["variant_count"] == 19
 
 
 def test_trend_templates_are_valid_editable_and_have_complete_scene_ranges():
@@ -116,8 +113,14 @@ def test_trend_styles_use_real_feature_contracts_and_umg_never_silently_omits():
         for layer in kinetic.layers
         if layer.metadata.get("template_role") == "headline"
     )
+    painterly = instantiate_template("painterly_3d_character_spot")
+    assert sum(
+        effect.kind == "painterly_look"
+        for layer in painterly.layers
+        for effect in layer.effects
+    ) >= 4
 
-    for composition in (craft, glass, stop):
+    for composition in (craft, glass, stop, painterly):
         document = motion_composition_to_umg_document(composition)
         visual_layers = [
             row for row in document["Layers"]

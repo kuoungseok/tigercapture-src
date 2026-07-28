@@ -46,6 +46,7 @@ from .generator_panel import GeneratorPanel
 from .inspector import InspectorPanel
 from .craft_panel import CraftStylePanel
 from .glass_panel import GlassMaterialPanel
+from .lookdev_panel import PainterlyLookPanel
 from .collage_panel import CollagePanel
 from .story_panel import StoryDirectionPanel
 from .stop_motion_panel import StopMotionPanel
@@ -870,12 +871,14 @@ class MotionDesignerWindow(QMainWindow):
         self.button = ButtonComponentPanel(self)
         self.effects = EffectMaskPanel("effect", self)
         self.craft = CraftStylePanel(self)
+        self.lookdev = PainterlyLookPanel(self)
         self.glass = GlassMaterialPanel(self)
         self.collage = CollagePanel(self)
         self.stop_motion = StopMotionPanel(self)
         self.story = StoryDirectionPanel(self)
         self.looks = QTabWidget(self)
         self.looks.addTab(self.craft, "Craft")
+        self.looks.addTab(self.lookdev, "Painterly")
         self.looks.addTab(self.glass, "Glass")
         self.looks.addTab(self.collage, "Collage")
         self.looks.addTab(self.stop_motion, "Stop Motion")
@@ -1061,6 +1064,9 @@ class MotionDesignerWindow(QMainWindow):
         self.craft.apply_requested.connect(self._apply_craft_style)
         self.craft.clear_requested.connect(self._clear_craft_style)
         self.craft.texture_requested.connect(self._attach_craft_texture)
+        self.lookdev.apply_requested.connect(self._apply_painterly_look)
+        self.lookdev.clear_requested.connect(self._clear_painterly_look)
+        self.lookdev.texture_requested.connect(self._attach_painterly_texture)
         self.glass.apply_requested.connect(self._apply_glass_material)
         self.glass.remove_requested.connect(self._remove_glass_material)
         self.collage.create_requested.connect(self._create_collage_board)
@@ -1762,6 +1768,7 @@ class MotionDesignerWindow(QMainWindow):
         self.behaviors.set_layer(layer)
         self.effects.set_context(layer, self.controller.composition)
         self.craft.set_layer(layer)
+        self.lookdev.set_layer(layer)
         self.glass.set_layer(layer)
         self.collage.set_context(self.controller.composition, layer)
         self.stop_motion.set_context(self.controller.composition, layer)
@@ -2719,6 +2726,19 @@ class MotionDesignerWindow(QMainWindow):
                 "effects": [*[item.to_dict() for item in layer.effects], effect.to_dict()]
             })
             return
+        if kind == "painterly_look":
+            from app.motion_designer.painterly_look import (
+                make_painterly_look_effect,
+            )
+
+            effect = make_painterly_look_effect()
+            self.controller.update_layer(layer.id, {
+                "effects": [
+                    *[item.to_dict() for item in layer.effects],
+                    effect.to_dict(),
+                ],
+            })
+            return
         defaults = {
             "brightness_contrast": {"brightness": 0.0, "contrast": 1.0},
             "saturation": {"amount": 1.0}, "gaussian_blur": {"radius": 4.0},
@@ -2818,6 +2838,96 @@ class MotionDesignerWindow(QMainWindow):
             "uri": str(path),
             "blend_mode": "multiply",
             "opacity": 0.25,
+            "revision": str(path.stat().st_mtime_ns),
+        }
+        rows[effect_index] = effect.to_dict()
+        self.controller.update_layer(layer.id, {"effects": rows})
+
+    def _apply_painterly_look(self, preset: str, settings: object) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.painterly_look import (
+            is_painterly_look_effect,
+            make_painterly_look_effect,
+        )
+
+        layer = find_layer(
+            self.controller.composition,
+            self._selected_layer_id,
+        )
+        previous = next(
+            (item for item in layer.effects if is_painterly_look_effect(item)),
+            None,
+        )
+        effect = make_painterly_look_effect(
+            settings if isinstance(settings, dict) else {},
+            preset=preset,
+        )
+        rows = [item.to_dict() for item in layer.effects]
+        if previous is None:
+            rows.append(effect.to_dict())
+        else:
+            effect.id = previous.id
+            for key in ("projected_texture", "material_overrides"):
+                if key in previous.metadata:
+                    effect.metadata[key] = previous.metadata[key]
+            rows[layer.effects.index(previous)] = effect.to_dict()
+        self.controller.update_layer(layer.id, {"effects": rows})
+
+    def _clear_painterly_look(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.painterly_look import (
+            is_painterly_look_effect,
+        )
+
+        layer = find_layer(
+            self.controller.composition,
+            self._selected_layer_id,
+        )
+        self.controller.update_layer(layer.id, {
+            "effects": [
+                item.to_dict()
+                for item in layer.effects
+                if not is_painterly_look_effect(item)
+            ],
+        })
+
+    def _attach_painterly_texture(self, uri: str) -> None:
+        if not self._selected_layer_id:
+            return
+        from pathlib import Path
+        from app.motion_designer.painterly_look import (
+            is_painterly_look_effect,
+            make_painterly_look_effect,
+        )
+
+        path = Path(uri).resolve()
+        if (
+            "debugcapture" in {part.lower() for part in path.parts}
+            or not path.is_file()
+        ):
+            return
+        layer = find_layer(
+            self.controller.composition,
+            self._selected_layer_id,
+        )
+        effect = next(
+            (item for item in layer.effects if is_painterly_look_effect(item)),
+            None,
+        )
+        rows = [item.to_dict() for item in layer.effects]
+        if effect is None:
+            effect = make_painterly_look_effect(preset="painted")
+            rows.append(effect.to_dict())
+            effect_index = len(rows) - 1
+        else:
+            effect_index = layer.effects.index(effect)
+        effect.metadata["projected_texture"] = {
+            "uri": str(path),
+            "blend_mode": "multiply",
+            "opacity": 0.25,
+            "projection": "screen",
             "revision": str(path.stat().st_mtime_ns),
         }
         rows[effect_index] = effect.to_dict()

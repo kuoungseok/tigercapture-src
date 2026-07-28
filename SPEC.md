@@ -6745,7 +6745,8 @@ AI Script Edit MVP integration:
   `motion.ai.style.lock.set`, `motion.ai.story.plan/apply`, and
   `motion.ai.trend.preflight`.
 - Glass candidates disclose the current shared-raster CPU fallback. Painterly
-  3D reports unavailable until M24 and offers editable 2D Craft as a fallback.
+  candidates use the M24 provider-neutral post-render effect and its editable
+  Realistic, Toon, Painted, Ink, and Paper presets.
   Existing Craft, Collage, Glass, and Stop Motion UMG native/bake/blocked
   classifications remain authoritative; AI provenance metadata is authoring
   data and does not create a second Unreal rendering path.
@@ -6755,12 +6756,33 @@ AI Script Edit MVP integration:
   M27 v1 is a reviewable editable style compiler, not a claim that a
   generative model autonomously produces finished art direction or replaces
   the underlying Motion tools.
-- M28 Trend Template and Product QA is in progress. The built-in gallery now
-  contains seven editable 2026 product templates under
+- M24 Painterly 2D/3D Look Development is complete v1 through the
+  `tigerstudio.motion.painterly_look.v1` contract. `painterly_look` is a
+  provider-neutral post-render effect for image, video, and existing AR/PBR
+  result layers; it does not add or replace a 3D renderer. It provides
+  bilateral paint smoothing, editable color bands, temporally locked ink
+  lines, brush texture, granulation, paper tint, hatching, durable projected
+  textures, five presets, a focused `Look > Painterly` Inspector, and
+  `motion.lookdev.*` Action/MCP controls.
+- Painterly output preserves source alpha and uses a stable document seed and
+  image-space coordinates, so repeated source frames do not develop random
+  line popping. UMG conversion explicitly reports
+  `effect_requires_bake:painterly_look`. Per-material overrides are serialized,
+  but preflight reports `material_id_pass_unavailable` until an upstream
+  renderer provides a real material-ID pass; they are never silently omitted.
+  `tools/qa_motion_painterly_look.py` generates five real preset frames and a
+  contact sheet and verifies temporal stability, alpha preservation, and
+  nontrivial pixel differences. Painterly processing uses a 480 px bounded
+  working surface and restores the original alpha and output dimensions. The
+  current 960x540 warm Painted diagnostic is about 28.1 ms/frame; this is a CPU
+  diagnostic and not a claim that the effect has a dedicated GPU backend.
+- M28 Trend Template and Product QA is complete v1. The built-in gallery now
+  contains eight editable 2026 product templates under
   `tigerstudio.motion.trend_template.v1`: Luxury Craft Product Reveal,
   Editorial Mixed Media Collage, Liquid Glass App Promo, Clay Stop-motion
-  Mascot, Emotional Brand Story, VHS Nostalgia Music Promo, and Kinetic Type
-  Vertical Short. Each is a 10-15 second, three-to-five-scene composition with
+  Mascot, Emotional Brand Story, VHS Nostalgia Music Promo, Kinetic Type
+  Vertical Short, and Painterly Character Spot. Each is a 10-15 second,
+  three-to-five-scene composition with
   real replacement media slots, four tutorial steps, relevant 16:9/9:16/1:1
   variants, and ordinary Motion layer/effect/story/stop-motion data.
 - Replacing a managed trend template clears only composition-level state owned
@@ -6771,9 +6793,11 @@ AI Script Edit MVP integration:
 - `tools/qa_motion_2026_trend_matrix.py` renders every scene through
   `MotionExportRenderer` and writes a real contact sheet plus validation,
   scene-difference, editability, and UMG omission evidence. Current evidence
-  covers seven templates and 17 variants. M28 is not complete:
-  Painterly 3D Character Spot remains explicitly blocked until M24 and offers
-  a 2D Craft/Collage fallback.
+  covers eight templates and 19 variants. Painterly Character Spot accepts
+  image, video, or an existing AR/PBR render layer and uses the M24 post-render
+  contract; it does not claim a second 3D engine. The trend capability report
+  has no blocked product templates and explicitly notes that material-ID
+  overrides require an upstream ID pass.
 - `tools/qa_motion_2026_product_gate.py` renders a real 60-second trend
   composition to a 120-frame PNG sequence at 2 fps, cancels after eight
   frames, corrupts one partial frame, then resumes by reusing seven valid
@@ -6783,7 +6807,7 @@ AI Script Edit MVP integration:
   actual H.264 MP4 artifact, and an actual HDR H.265 artifact whose stream
   reports Rec.2020 primaries and SMPTE ST 2084 transfer.
 - `tools/qa_motion_2026_trend_ui.py` captures the real Qt Motion Designer
-  workspace and the 2026 Trends gallery, verifies that all seven templates are
+  workspace and the 2026 Trends gallery, verifies that all eight templates are
   present, and records the active UI language and template control label.
   Motion workspace side panels now have bounded working widths and long
   Library descriptions elide instead of forcing the Canvas into a narrow
@@ -6841,8 +6865,10 @@ AI Script Edit MVP integration:
   because Painter changed afterward, while
   `installer_current_for_frozen_report=true`,
   `frozen_provenance_matches=true`, and `installer_freshness_ok=true`.
-  M28 now remains open only for its intentionally blocked M24-dependent
-  template.
+  M28's previously blocked M24-dependent template is now implemented and its
+  source product gate is complete. The frozen binary evidence remains bound to
+  its recorded revision and SHA-256; a future public installer must be rebuilt
+  to include subsequent M24 source changes rather than relabeling old evidence.
 - Inno Setup 1.4.2 was rebuilt from the current 4.59 GiB frozen bundle. The
   2,108,818,576-byte installer has SHA-256
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`.

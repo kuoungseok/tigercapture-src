@@ -50,11 +50,12 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.toolbar.templates_button.text() == "Templates"
     assert window.project_tabs.count() == 3
     assert window.inspector_tabs.count() == 20
-    assert window.looks.count() == 4
-    assert window.looks.tabText(2) == "Collage"
-    assert window.looks.tabText(3) == "Stop Motion"
+    assert window.looks.count() == 5
+    assert window.looks.tabText(3) == "Collage"
+    assert window.looks.tabText(4) == "Stop Motion"
     assert window.looks.tabText(0) == "Craft"
-    assert window.looks.tabText(1) == "Glass"
+    assert window.looks.tabText(1) == "Painterly"
+    assert window.looks.tabText(2) == "Glass"
     assert window.inspector_tabs.indexOf(window.tracking) >= 0
     assert window.inspector_tabs.indexOf(window.puppet) >= 0
     assert window.inspector_tabs.indexOf(window.rig) >= 0
@@ -277,7 +278,10 @@ def test_motion_effect_library_exposes_light_noise_and_stylize_controls() -> Non
         window.effects.kind.itemText(index)
         for index in range(window.effects.kind.count())
     }
-    assert {"drop_shadow", "light_sweep", "fractal_noise", "posterize", "craft_style"} <= kinds
+    assert {
+        "drop_shadow", "light_sweep", "fractal_noise", "posterize",
+        "craft_style", "painterly_look",
+    } <= kinds
 
     window._add_effect("fractal_noise")
     app.processEvents()

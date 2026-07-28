@@ -60,7 +60,7 @@ def main() -> int:
             and workspace_path.stat().st_size > 0
             and gallery_path.is_file()
             and gallery_path.stat().st_size > 0
-            and trend_count == 7
+            and trend_count == 8
         ),
         "workspace": str(workspace_path),
         "gallery": str(gallery_path),

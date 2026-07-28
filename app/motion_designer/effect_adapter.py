@@ -317,6 +317,193 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
     return rgba
 
 
+def _apply_painterly_look(rgba, effect: MotionEffectRef, time_ms: float):
+    """Apply a temporally stable post-render painterly treatment."""
+    import cv2
+    import numpy as np
+
+    amount = max(0.0, min(1.0, float(
+        _value(effect, "amount", time_ms, 1.0)
+    )))
+    if amount <= 1e-6:
+        return rgba
+    full_source = rgba.copy()
+    full_height, full_width = rgba.shape[:2]
+    working_limit = max(320, int(round(float(
+        _value(effect, "working_limit", time_ms, 480.0)
+    ))))
+    working_scale = min(
+        1.0,
+        working_limit / max(1, full_width, full_height),
+    )
+    if working_scale < 0.999:
+        rgba = cv2.resize(
+            rgba,
+            (
+                max(1, int(round(full_width * working_scale))),
+                max(1, int(round(full_height * working_scale))),
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+    source = rgba.copy()
+    alpha = source[..., 3:4].copy()
+    rgb = source[..., :3].copy()
+    height, width = rgb.shape[:2]
+
+    smoothing = max(0.0, min(1.0, float(
+        _value(effect, "smoothing", time_ms, 0.15)
+    )))
+    if smoothing > 1e-6:
+        diameter = 3 + int(round(smoothing * 8.0)) * 2
+        smooth = cv2.bilateralFilter(
+            rgb.astype(np.uint8),
+            diameter,
+            12.0 + smoothing * 72.0,
+            8.0 + smoothing * 52.0,
+        ).astype(np.float32)
+        rgb = rgb * (1.0 - smoothing) + smooth * smoothing
+
+    toon_amount = max(0.0, min(1.0, float(
+        _value(effect, "toon_amount", time_ms, 0.0)
+    )))
+    if toon_amount > 1e-6:
+        levels = max(2, int(round(float(
+            _value(effect, "color_levels", time_ms, 8.0)
+        ))))
+        step = 255.0 / max(1, levels - 1)
+        quantized = np.round(rgb / step) * step
+        rgb = rgb * (1.0 - toon_amount) + quantized * toon_amount
+
+    seed = max(0, int(_value(effect, "seed", time_ms, 20260729)))
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    brush_amount = max(0.0, min(1.0, float(
+        _value(effect, "brush_amount", time_ms, 0.0)
+    )))
+    granulation = max(0.0, min(1.0, float(
+        _value(effect, "granulation", time_ms, 0.0)
+    )))
+    paper_amount = max(0.0, min(1.0, float(
+        _value(effect, "paper_amount", time_ms, 0.0)
+    )))
+    if brush_amount > 1e-6 or granulation > 1e-6 or paper_amount > 1e-6:
+        brush_scale = max(2.0, float(
+            _value(effect, "brush_scale", time_ms, 18.0)
+        ))
+        phase = (seed % 997) / 997.0 * math.tau
+        strokes = (
+            np.sin((xx * 0.83 + yy * 0.37) / brush_scale * math.tau + phase)
+            + np.sin((xx * -0.21 + yy * 0.94) / (brush_scale * 1.73) * math.tau - phase)
+        ) * 0.25
+        noise = _fractal_noise(
+            height,
+            width,
+            scale=max(3.0, brush_scale * 0.72),
+            octaves=4,
+            seed=seed + 401,
+            phase=0.0,
+        ) - 0.5
+        texture = strokes * brush_amount + noise * (
+            granulation * 1.3 + paper_amount * 0.7
+        )
+        rgb *= np.clip(1.0 + texture[..., None] * 0.25, 0.72, 1.24)
+        if paper_amount > 1e-6:
+            paper_color = _color(
+                effect.metadata.get("paper_color"),
+                "#f1ead9",
+            )
+            paper_mix = np.clip(
+                (noise + 0.5)[..., None] * paper_amount * 0.18,
+                0.0,
+                0.22,
+            )
+            rgb = rgb * (1.0 - paper_mix) + paper_color * paper_mix
+
+    luminance = (
+        rgb[..., 0] * 0.2126
+        + rgb[..., 1] * 0.7152
+        + rgb[..., 2] * 0.0722
+    )
+    hatch_amount = max(0.0, min(1.0, float(
+        _value(effect, "hatch_amount", time_ms, 0.0)
+    )))
+    if hatch_amount > 1e-6:
+        spacing = max(2.0, float(
+            _value(effect, "hatch_spacing", time_ms, 9.0)
+        ))
+        hatch_a = ((xx + yy * 0.62 + seed % 19) % spacing) < 1.2
+        hatch_b = ((xx - yy * 0.62 + seed % 23) % (spacing * 1.17)) < 1.0
+        shadow = np.clip((138.0 - luminance) / 138.0, 0.0, 1.0)
+        hatch = (
+            hatch_a.astype(np.float32)
+            + hatch_b.astype(np.float32) * (shadow > 0.55)
+        ) * shadow * hatch_amount
+        line_color = _color(effect.metadata.get("line_color"), "#17202a")
+        rgb = rgb * (1.0 - hatch[..., None] * 0.46) + (
+            line_color * hatch[..., None] * 0.46
+        )
+
+    edge_strength = max(0.0, min(2.0, float(
+        _value(effect, "edge_strength", time_ms, 0.0)
+    )))
+    if edge_strength > 1e-6:
+        gray = luminance.astype(np.float32) / 255.0
+        gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+        gradient = np.sqrt(gx * gx + gy * gy)
+        threshold = max(0.0, min(1.0, float(
+            _value(effect, "edge_threshold", time_ms, 0.18)
+        )))
+        softness = max(0.001, min(1.0, float(
+            _value(effect, "edge_softness", time_ms, 0.08)
+        )))
+        edge = np.clip((gradient - threshold) / softness, 0.0, 1.0)
+        edge *= edge_strength * (alpha[..., 0] / 255.0)
+        line_color = _color(effect.metadata.get("line_color"), "#17202a")
+        rgb = rgb * (1.0 - edge[..., None]) + line_color * edge[..., None]
+
+    projection = effect.metadata.get("projected_texture")
+    if isinstance(projection, dict):
+        uri = str(projection.get("uri") or "")
+        if uri:
+            try:
+                revision = str(Path(uri).stat().st_mtime_ns)
+            except OSError:
+                revision = str(projection.get("revision") or "")
+            texture = _craft_texture(uri, width, height, revision)
+            if texture is not None:
+                opacity = max(0.0, min(1.0, float(
+                    projection.get("opacity", 0.25)
+                )))
+                texture_alpha = texture[..., 3:4] / 255.0 * opacity
+                texture_rgb = texture[..., :3]
+                mode = str(projection.get("blend_mode") or "multiply").lower()
+                if mode == "screen":
+                    blended = 255.0 - (255.0 - rgb) * (255.0 - texture_rgb) / 255.0
+                elif mode == "overlay":
+                    blended = np.where(
+                        rgb <= 127.5,
+                        2.0 * rgb * texture_rgb / 255.0,
+                        255.0 - 2.0 * (255.0 - rgb) * (255.0 - texture_rgb) / 255.0,
+                    )
+                else:
+                    blended = rgb * texture_rgb / 255.0
+                rgb = rgb * (1.0 - texture_alpha) + blended * texture_alpha
+
+    result_rgb = source[..., :3] * (1.0 - amount) + rgb * amount
+    if working_scale < 0.999:
+        result = full_source
+        result[..., :3] = cv2.resize(
+            result_rgb,
+            (full_width, full_height),
+            interpolation=cv2.INTER_LINEAR,
+        )
+        result[..., 3:4] = full_source[..., 3:4]
+        return result
+    rgba[..., :3] = result_rgb
+    rgba[..., 3:4] = alpha
+    return rgba
+
+
 def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float) -> QImage:
     if not effects:
         return image
@@ -451,6 +638,8 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             rgba[..., :3] = rgb * (1.0 - amount) + noise[..., None] * amount
         elif kind == "craft_style":
             rgba = _apply_craft_style(rgba, effect, time_ms)
+        elif kind == "painterly_look":
+            rgba = _apply_painterly_look(rgba, effect, time_ms)
         elif kind == "posterize":
             levels = max(2, min(64, int(round(float(_value(effect, "levels", time_ms, 8))))))
             amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))

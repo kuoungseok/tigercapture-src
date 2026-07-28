@@ -138,7 +138,7 @@ def main() -> int:
     capabilities = trend_template_capabilities()
     report = {
         "ok": (
-            len(rows) == 7
+            len(rows) == 8
             and all(
                 row["valid"]
                 and row["nonblank"]
@@ -147,7 +147,7 @@ def main() -> int:
                 and all(value > 0 for value in row["scene_differences"])
                 for row in rows
             )
-            and len(capabilities["blocked"]) == 1
+            and not capabilities["blocked"]
         ),
         "schema": "tigerstudio.motion.2026_trend_qa.v1",
         "supported_template_count": len(rows),

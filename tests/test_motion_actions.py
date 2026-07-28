@@ -234,6 +234,89 @@ def test_motion_glass_actions_create_bind_preflight_and_remove() -> None:
     assert removed.ok and removed.result["changed"]
 
 
+def test_motion_lookdev_actions_apply_texture_preflight_and_clear(tmp_path) -> None:
+    from PySide6.QtGui import QColor, QImage
+
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute(
+        "motion.composition.create",
+        {"name": "Painterly"},
+    )
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "Media", "layer_type": "shape"},
+    })
+    layer_id = added.result["payload"]["composition"]["layers"][0]["id"]
+    presets = registry.execute("motion.lookdev.preset.list", {})
+    assert presets.ok
+    assert {row["id"] for row in presets.result["presets"]} == {
+        "realistic", "toon", "painted", "ink", "paper",
+    }
+    applied = registry.execute("motion.lookdev.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "ink",
+        "settings": {"edge_strength": 1.2},
+    })
+    assert applied.ok
+    effect_id = applied.result["effect"]["id"]
+    updated = registry.execute("motion.lookdev.line.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "color": "#302018",
+        "strength": 0.7,
+    })
+    assert updated.ok
+    texture_path = tmp_path / "fiber.png"
+    texture = QImage(8, 8, QImage.Format_RGBA8888)
+    texture.fill(QColor("#bcae98"))
+    assert texture.save(str(texture_path))
+    projected = registry.execute("motion.lookdev.texture.project", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "uri": str(texture_path),
+        "blend_mode": "overlay",
+        "opacity": 0.3,
+    })
+    assert projected.ok
+    inspected = registry.execute("motion.lookdev.get", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert inspected.ok
+    assert inspected.result["effect"]["id"] == effect_id
+    preflight = registry.execute("motion.lookdev.preflight", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert preflight.ok
+    assert preflight.result["ok"] is True
+    assert preflight.result["umg_reason"] == (
+        "effect_requires_bake:painterly_look"
+    )
+    override = registry.execute("motion.lookdev.material.override", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "material_id": "skin",
+        "settings": {"edge_strength": 0.0},
+    })
+    assert override.ok
+    blocked = registry.execute("motion.lookdev.preflight", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert blocked.ok
+    assert blocked.result["ok"] is False
+    assert blocked.result["issues"] == ["material_id_pass_unavailable"]
+    cleared = registry.execute("motion.lookdev.clear", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert cleared.ok and cleared.result["changed"]
+
+
 def test_motion_glass_tiled_export_actions_set_and_preflight() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)
@@ -919,8 +1002,11 @@ def test_motion_2026_trend_template_actions_disclose_supported_and_blocked_paths
 
     capabilities = registry.execute("motion.template.trend.capabilities", {})
     assert capabilities.ok
-    assert len(capabilities.result["available_template_ids"]) == 7
-    assert capabilities.result["blocked"][0]["id"] == "painterly_3d_character_spot"
+    assert len(capabilities.result["available_template_ids"]) == 8
+    assert capabilities.result["blocked"] == []
+    assert capabilities.result["notes"][0]["id"] == (
+        "painterly_3d_character_spot"
+    )
 
     preflight = registry.execute(
         "motion.template.trend.preflight",
@@ -931,7 +1017,7 @@ def test_motion_2026_trend_template_actions_disclose_supported_and_blocked_paths
     assert preflight.result["summary"] == {
         "template_count": 1,
         "variant_count": 2,
-        "blocked_capability_count": 1,
+        "blocked_capability_count": 0,
     }
     specs = {row["id"] for row in registry.list_actions()}
     assert {
