@@ -29,6 +29,21 @@ class PainterUIVectorContextBar(QFrame):
         self.curve_button = self._button("Bezier", "curve", "motion")
         self.split_button = self._button("Split", "split", "scissors")
         self.close_button = self._button("Close", "toggle_closed", "link")
+        self.reverse_button = self._button(
+            "Reverse path",
+            "reverse",
+            "repeat",
+        )
+        self.simplify_button = self._button(
+            "Simplify path",
+            "simplify",
+            "filter",
+        )
+        self.outline_button = self._button(
+            "Outline stroke",
+            "outline",
+            "pen",
+        )
         self.delete_button = self._button(
             "Delete node",
             "delete_node",
@@ -38,6 +53,9 @@ class PainterUIVectorContextBar(QFrame):
         layout.addWidget(self.curve_button)
         layout.addWidget(self.split_button)
         layout.addWidget(self.close_button)
+        layout.addWidget(self.reverse_button)
+        layout.addWidget(self.simplify_button)
+        layout.addWidget(self.outline_button)
         layout.addWidget(self.delete_button)
         layout.addWidget(self._separator())
         self.exit_button = self._button("Exit vector edit", "exit", "x")
@@ -83,6 +101,9 @@ class PainterUIVectorContextBar(QFrame):
         for button in (self.line_button, self.curve_button, self.split_button):
             button.setEnabled(bool(segment_id))
         self.delete_button.setEnabled(bool(node_id))
+        self.outline_button.setEnabled(
+            float(self._state.get("stroke_width") or 0.0) > 0.0
+        )
         closed = bool(self._state.get("closed", False))
         self.close_button.setIcon(
             app_icon(

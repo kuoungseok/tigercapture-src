@@ -14278,15 +14278,19 @@ class PaintDialog(QDialog):
             return
         from app.painter_ui_vector_network import (
             normalize_vector_content,
+            outline_vector_path,
             remove_vector_node,
+            reverse_vector_path,
             set_vector_path_closed,
             set_vector_segment_kind,
+            simplify_vector_path,
             split_vector_segment,
         )
 
         content = copy.deepcopy(dict(row.get("content") or {}))
         network = content.get("vector_network")
         label = "Edit UI vector"
+        object_changes: dict[str, object] | None = None
         if value in {"line", "curve"}:
             segment_id = str(state.get("segment_id") or "")
             if not segment_id:
@@ -14320,12 +14324,56 @@ class PaintDialog(QDialog):
             network = remove_vector_node(network, node_id)
             overlay._vector_active_node_id = ""
             label = "Delete UI vector node"
+        elif value == "reverse":
+            network = reverse_vector_path(network)
+            label = "Reverse UI vector path"
+        elif value == "simplify":
+            network, _report = simplify_vector_path(network)
+            overlay._vector_active_node_id = ""
+            overlay._vector_active_segment_id = ""
+            label = "Simplify UI vector path"
+        elif value == "outline":
+            style = copy.deepcopy(dict(row.get("style") or {}))
+            stroke_width = float(style.get("stroke_width") or 0.0)
+            if stroke_width <= 0.0:
+                return
+            network, report = outline_vector_path(
+                network,
+                width=float(row["width"]),
+                height=float(row["height"]),
+                stroke_width=stroke_width,
+                cap=str(style.get("stroke_cap") or "round"),
+                join=str(style.get("stroke_join") or "round"),
+            )
+            style.update(
+                {
+                    "fill": str(style.get("stroke") or "#000000"),
+                    "stroke": "#00000000",
+                    "stroke_width": 0.0,
+                }
+            )
+            content["vector_network"] = network
+            object_changes = {
+                "x": float(row["x"]) + float(report["x"]),
+                "y": float(row["y"]) + float(report["y"]),
+                "width": float(report["width"]),
+                "height": float(report["height"]),
+                "style": style,
+                "content": normalize_vector_content(content),
+            }
+            overlay._vector_active_node_id = ""
+            overlay._vector_active_segment_id = ""
+            label = "Outline UI vector stroke"
         else:
             return
-        content["vector_network"] = network
+        if object_changes is None:
+            content["vector_network"] = network
+            object_changes = {
+                "content": normalize_vector_content(content),
+            }
         self._update_painter_ui_object_changes(
             object_id,
-            {"content": normalize_vector_content(content)},
+            object_changes,
             label=label,
         )
         self._sync_painter_ui_vector_context(overlay._vector_edit_state())

@@ -162,7 +162,11 @@ Focused entry points:
   `app/painter_ui_vector_network.py`. The Pen/Vector tool, double-click Vector
   Edit, canvas node/segment/Bezier-handle editing, contextual command bar,
   Canvas/PNG/SVG paths, and `paint.ui.vector.*` Actions must share that
-  contract. Reverse Path, Outline Stroke, and Simplify remain follow-up work.
+  contract. Reverse Path preserves stable IDs and handle direction; Simplify
+  removes only redundant straight anchors; Outline Stroke creates editable
+  closed fill geometry and rebases object bounds. Their transient context-bar
+  commands and `paint.ui.vector.path.reverse/simplify/outline` Actions share
+  one-step Undo and the same document mutation services.
   Schema 16 added persistent Polygon/Star/Arc parameters through the shared
   `app/painter_ui_parametric_shapes.py` geometry contract. The grouped Shape
   flyout, contextual Inspector, `paint.ui.object.add/update`, canvas hit

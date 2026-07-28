@@ -1522,6 +1522,119 @@ class PaintAdapterMixin(
             },
         )
 
+    def paint_ui_vector_path_reverse(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import reverse_vector_path
+
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=reverse_vector_path(network),
+            label="Reverse UI vector path",
+        )
+
+    def paint_ui_vector_path_simplify(
+        self,
+        *,
+        tolerance: float = 0.0025,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        from app.painter_ui_vector_network import simplify_vector_path
+
+        network, report = simplify_vector_path(
+            network,
+            tolerance=tolerance,
+        )
+        return self._paint_ui_vector_commit(
+            dialog,
+            object_id=target,
+            content=content,
+            network=network,
+            label="Simplify UI vector path",
+            result={"simplify": report},
+        )
+
+    def paint_ui_vector_path_outline(
+        self,
+        *,
+        stroke_width: float = 0.0,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target, content, network = self._paint_ui_vector_target(
+            dialog, object_id
+        )
+        row = next(
+            item
+            for item in dialog._painter_ui_document["objects"]
+            if item["id"] == target
+        )
+        style = copy.deepcopy(dict(row.get("style") or {}))
+        effective_width = float(
+            stroke_width or style.get("stroke_width") or 0.0
+        )
+        if effective_width <= 0.0:
+            raise ValueError("Outline stroke requires a visible stroke width")
+        from app.painter_ui_document import update_ui_object
+        from app.painter_ui_vector_network import (
+            normalize_vector_content,
+            outline_vector_path,
+        )
+
+        network, report = outline_vector_path(
+            network,
+            width=float(row["width"]),
+            height=float(row["height"]),
+            stroke_width=effective_width,
+            cap=str(style.get("stroke_cap") or "round"),
+            join=str(style.get("stroke_join") or "round"),
+        )
+        content["vector_network"] = network
+        stroke_color = str(style.get("stroke") or "#000000")
+        style.update(
+            {
+                "fill": stroke_color,
+                "stroke": "#00000000",
+                "stroke_width": 0.0,
+            }
+        )
+        changes = {
+            "x": float(row["x"]) + float(report["x"]),
+            "y": float(row["y"]) + float(report["y"]),
+            "width": float(report["width"]),
+            "height": float(report["height"]),
+            "style": style,
+            "content": normalize_vector_content(content),
+        }
+        document, _updated = update_ui_object(
+            dialog._painter_ui_document,
+            target,
+            changes,
+        )
+        label = "Outline UI vector stroke"
+        dialog._push_undo_state(label)
+        state = self._paint_ui_commit(dialog, label, document)
+        return {
+            **state,
+            "vector_edit": {
+                "object_id": target,
+                "network": copy.deepcopy(network),
+                "outline": report,
+            },
+        }
+
     def paint_ui_object_properties_copy(
         self,
         *,

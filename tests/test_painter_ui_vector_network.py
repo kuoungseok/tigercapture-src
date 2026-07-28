@@ -8,9 +8,12 @@ from app.painter_ui_vector_network import (
     create_vector_network,
     join_vector_nodes,
     normalize_vector_network,
+    outline_vector_path,
     remove_vector_node,
+    reverse_vector_path,
     set_vector_path_closed,
     set_vector_segment_kind,
+    simplify_vector_path,
     split_vector_segment,
     update_vector_node,
     vector_network_to_svg_path,
@@ -91,6 +94,77 @@ def test_open_path_can_add_join_close_and_remove_nodes() -> None:
     assert network["closed"] is False
 
 
+def test_reverse_path_preserves_ids_and_swaps_bezier_handles() -> None:
+    network = set_vector_segment_kind(
+        create_vector_network(),
+        "segment-1",
+        "cubic",
+    )
+    original = normalize_vector_network(network)
+    reversed_path = reverse_vector_path(original)
+
+    assert {row["id"] for row in reversed_path["nodes"]} == {
+        row["id"] for row in original["nodes"]
+    }
+    assert {row["id"] for row in reversed_path["segments"]} == {
+        row["id"] for row in original["segments"]
+    }
+    original_segment = original["segments"][0]
+    reversed_segment = reversed_path["segments"][0]
+    assert reversed_segment["start_node_id"] == original_segment["end_node_id"]
+    assert reversed_segment["end_node_id"] == original_segment["start_node_id"]
+    original_start = next(
+        row for row in original["nodes"] if row["id"] == "node-1"
+    )
+    reversed_start = next(
+        row for row in reversed_path["nodes"] if row["id"] == "node-1"
+    )
+    assert reversed_start["in_handle"] == original_start["out_handle"]
+    assert reverse_vector_path(reversed_path) == original
+
+
+def test_simplify_removes_only_redundant_straight_nodes() -> None:
+    network, node_id = split_vector_segment(
+        create_vector_network(),
+        "segment-1",
+    )
+    simplified, report = simplify_vector_path(network, tolerance=0.001)
+
+    assert report["removed_node_ids"] == [node_id]
+    assert len(simplified["nodes"]) == 2
+
+    curved = set_vector_segment_kind(
+        create_vector_network(),
+        "segment-1",
+        "cubic",
+    )
+    curved, _curved_node_id = split_vector_segment(curved, "segment-1")
+    preserved, report = simplify_vector_path(curved, tolerance=0.25)
+    assert report["removed_count"] == 0
+    assert len(preserved["nodes"]) == 3
+
+
+def test_outline_stroke_returns_editable_closed_geometry() -> None:
+    network = set_vector_segment_kind(
+        create_vector_network(),
+        "segment-1",
+        "cubic",
+    )
+    outlined, report = outline_vector_path(
+        network,
+        width=240,
+        height=120,
+        stroke_width=12,
+    )
+
+    assert outlined["closed"] is True
+    assert len(outlined["nodes"]) >= 4
+    assert report["width"] > 240
+    assert report["height"] > 0
+    assert report["node_count"] == len(outlined["nodes"])
+    assert vector_network_to_svg_path(outlined).endswith(" Z")
+
+
 def test_ui_document_round_trips_vector_network_and_derived_svg() -> None:
     document, row = add_ui_object(
         normalize_ui_document(None),
@@ -165,6 +239,65 @@ def test_vector_actions_share_document_mutation_and_one_step_undo() -> None:
     ]
     assert len(restored["nodes"]) == 2
     assert restored["segments"][0]["kind"] == "cubic"
+    dialog.close()
+    app.processEvents()
+
+
+def test_outline_action_rebases_object_and_remains_undoable() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(480, 320, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
+    added = registry.execute(
+        "paint.ui.object.add",
+        {
+            "kind": "path",
+            "x": 80,
+            "y": 60,
+            "width": 240,
+            "height": 120,
+            "style": {
+                "fill": "#00000000",
+                "stroke": "#72A7FF",
+                "stroke_width": 12,
+            },
+            "content": {"vector_network": create_vector_network()},
+        },
+    ).to_dict()
+    object_id = added["result"]["ui_design"]["document"]["selection"][
+        "object_id"
+    ]
+    outlined = registry.execute(
+        "paint.ui.vector.path.outline",
+        {"object_id": object_id},
+    ).to_dict()
+
+    row = outlined["result"]["ui_design"]["document"]["objects"][0]
+    assert row["style"]["fill"] == "#72A7FF"
+    assert row["style"]["stroke_width"] == 0.0
+    assert row["content"]["vector_network"]["closed"] is True
+    assert row["x"] < 80
+    assert row["y"] > 60
+    assert row["width"] > 240
+    assert 11.0 <= row["height"] <= 13.0
+    assert outlined["result"]["vector_edit"]["outline"]["node_count"] >= 4
+
+    dialog._undo()
+    restored = dialog._painter_ui_document["objects"][0]
+    assert restored["x"] == 80.0
+    assert restored["y"] == 60.0
+    assert restored["style"]["stroke_width"] == 12
     dialog.close()
     app.processEvents()
 
@@ -263,6 +396,7 @@ def test_vector_context_bar_emits_commands_and_updates_enablement() -> None:
             "segment_id": "segment-1",
             "node_count": 3,
             "closed": False,
+            "stroke_width": 2.0,
         }
     )
     parent.show()
@@ -274,7 +408,17 @@ def test_vector_context_bar_emits_commands_and_updates_enablement() -> None:
     bar.curve_button.click()
     bar.split_button.click()
     bar.close_button.click()
-    assert commands == ["curve", "split", "toggle_closed"]
+    bar.reverse_button.click()
+    bar.simplify_button.click()
+    bar.outline_button.click()
+    assert commands == [
+        "curve",
+        "split",
+        "toggle_closed",
+        "reverse",
+        "simplify",
+        "outline",
+    ]
 
     bar.set_state({})
     assert bar.isHidden()

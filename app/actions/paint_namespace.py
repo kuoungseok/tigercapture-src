@@ -1021,6 +1021,53 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="two vector nodes would be joined",
     )
     registry.register_adapter_action(
+        "paint.ui.vector.path.reverse",
+        "Reverse vector path traversal while preserving stable node and segment IDs.",
+        "paint",
+        "paint_ui_vector_path_reverse",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+        ),
+        undo_label="Reverse UI vector path",
+        dry_summary="the vector path direction would be reversed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.simplify",
+        "Remove redundant straight anchors without flattening Bezier geometry.",
+        "paint",
+        "paint_ui_vector_path_simplify",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "tolerance": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 0.25,
+                },
+            }
+        ),
+        undo_label="Simplify UI vector path",
+        dry_summary="redundant straight vector nodes would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.outline",
+        "Convert a visible vector stroke into editable closed fill geometry.",
+        "paint",
+        "paint_ui_vector_path_outline",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "stroke_width": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 256.0,
+                },
+            }
+        ),
+        undo_label="Outline UI vector stroke",
+        dry_summary="the vector stroke would become editable fill geometry",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.properties.copy",
         "Copy stable-ID-safe appearance and layout properties from one UI object.",
         "paint",

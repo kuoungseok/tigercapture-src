@@ -189,6 +189,7 @@ def main() -> int:
         and desktop_state.get("node_id") == "node-2"
         and dialog._painter_ui_vector_context_bar.isVisible()
         and dialog._paint_inspector_frame.width() <= 40
+        and dialog._painter_ui_navigator.width() <= 40
     )
 
     dialog.resize(900, 650)
@@ -212,18 +213,51 @@ def main() -> int:
         and bar.geometry().right() <= host.width()
         and bar.geometry().bottom() <= host.height()
         and dialog._paint_inspector_frame.width() <= 40
+        and dialog._painter_ui_navigator.width() <= 40
+    )
+
+    outlined = registry.execute(
+        "paint.ui.vector.path.outline",
+        {"object_id": object_id},
+    ).to_dict()
+    app.processEvents()
+    outline_row = next(
+        item
+        for item in dialog._painter_ui_document["objects"]
+        if item["id"] == object_id
+    )
+    outline_path = (
+        output_dir
+        / "painter_ui_designer_m1_vector_outline_editable.png"
+    )
+    outline_saved = dialog.grab().save(str(outline_path), "PNG")
+    outline_network = outline_row["content"]["vector_network"]
+    outline_ok = bool(
+        outlined["ok"]
+        and outline_saved
+        and outline_path.is_file()
+        and outline_path.stat().st_size > 0
+        and outline_network["closed"]
+        and len(outline_network["nodes"]) >= 4
+        and float(outline_row["style"]["stroke_width"]) == 0.0
+        and str(outline_row["style"]["fill"]) == "#7FB4FF"
+        and dialog._paint_inspector_frame.width() <= 40
+        and dialog._painter_ui_navigator.width() <= 40
     )
 
     report = {
         "schema": "tigerstudio.painter.ui.vector.qa.v1",
-        "ok": desktop_ok and compact_ok,
+        "ok": desktop_ok and compact_ok and outline_ok,
         "object_id": object_id,
         "desktop_ok": desktop_ok,
         "compact_ok": compact_ok,
+        "outline_ok": outline_ok,
         "desktop_screenshot": str(desktop_path),
         "compact_screenshot": str(compact_path),
+        "outline_screenshot": str(outline_path),
         "vector_state": desktop_state,
         "inspector_presentation": "auto_hide",
+        "navigator_presentation": "auto_hide",
     }
     report_path = output_dir / "vector_network_report.json"
     report_path.write_text(

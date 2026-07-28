@@ -7,6 +7,10 @@ P0-P2 completion checkpoint (2026-07-28):
 - Painter UI document schema is version 17.
 - Schema 17 adds typed stable-ID Vector Networks shared by canvas, vector
   editing, Action, PNG, and editable SVG output.
+- Vector Edit includes transient Reverse, conservative Simplify, and editable
+  Outline Stroke commands with matching
+  `paint.ui.vector.path.reverse/simplify/outline` Actions. These commands do
+  not create permanent side-panel chrome.
 - Schema 16 added normalized Polygon/Star/Arc parameters shared by canvas,
   Inspector, Action, PNG, and SVG paths.
 - Schema 15 introduced ordered per-artboard `layout_grids[]` with legacy

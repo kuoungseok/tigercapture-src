@@ -1235,6 +1235,9 @@ class PainterUIDesignOverlay(QWidget):
             "node_count": len(network["nodes"]),
             "segment_count": len(network["segments"]),
             "closed": bool(network["closed"]),
+            "stroke_width": float(
+                (target.get("style") or {}).get("stroke_width") or 0.0
+            ),
         }
 
     def exit_vector_edit(self) -> None:

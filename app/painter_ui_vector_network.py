@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from math import hypot
 from typing import Any, Mapping
 
 
@@ -541,6 +542,230 @@ def join_vector_nodes(
     )
 
 
+def reverse_vector_path(value: Any) -> dict[str, Any]:
+    """Reverse traversal while preserving every stable node/segment ID."""
+    network = _network_copy(value)
+    network["nodes"].reverse()
+    for node in network["nodes"]:
+        node["in_handle"], node["out_handle"] = (
+            node["out_handle"],
+            node["in_handle"],
+        )
+    network["segments"] = [
+        {
+            **segment,
+            "start_node_id": segment["end_node_id"],
+            "end_node_id": segment["start_node_id"],
+        }
+        for segment in reversed(network["segments"])
+    ]
+    return normalize_vector_network(network)
+
+
+def _distance_to_line(
+    point: Mapping[str, float],
+    start: Mapping[str, float],
+    end: Mapping[str, float],
+) -> float:
+    dx = float(end["x"]) - float(start["x"])
+    dy = float(end["y"]) - float(start["y"])
+    length = hypot(dx, dy)
+    if length <= 1e-12:
+        return hypot(
+            float(point["x"]) - float(start["x"]),
+            float(point["y"]) - float(start["y"]),
+        )
+    return abs(
+        dy * float(point["x"])
+        - dx * float(point["y"])
+        + float(end["x"]) * float(start["y"])
+        - float(end["y"]) * float(start["x"])
+    ) / length
+
+
+def simplify_vector_path(
+    value: Any,
+    *,
+    tolerance: float = 0.0025,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Remove redundant straight anchors without flattening Bezier geometry."""
+    network = _network_copy(value)
+    threshold = max(0.0, min(0.25, float(tolerance)))
+    removed: list[str] = []
+    changed = True
+    while changed:
+        changed = False
+        nodes = {item["id"]: item for item in network["nodes"]}
+        minimum = 3 if network["closed"] else 2
+        if len(nodes) <= minimum:
+            break
+        for node_id, node in list(nodes.items()):
+            incoming = [
+                item
+                for item in network["segments"]
+                if item["end_node_id"] == node_id
+            ]
+            outgoing = [
+                item
+                for item in network["segments"]
+                if item["start_node_id"] == node_id
+            ]
+            if (
+                len(incoming) != 1
+                or len(outgoing) != 1
+                or incoming[0]["kind"] != "line"
+                or outgoing[0]["kind"] != "line"
+            ):
+                continue
+            previous = nodes.get(incoming[0]["start_node_id"])
+            following = nodes.get(outgoing[0]["end_node_id"])
+            if previous is None or following is None or previous is following:
+                continue
+            if _distance_to_line(node, previous, following) > threshold:
+                continue
+            incoming[0]["end_node_id"] = following["id"]
+            outgoing_id = outgoing[0]["id"]
+            network["segments"] = [
+                item
+                for item in network["segments"]
+                if item["id"] != outgoing_id
+            ]
+            network["nodes"] = [
+                item for item in network["nodes"] if item["id"] != node_id
+            ]
+            removed.append(node_id)
+            changed = True
+            break
+    return normalize_vector_network(network), {
+        "tolerance": threshold,
+        "removed_node_ids": removed,
+        "removed_count": len(removed),
+    }
+
+
+def _simplify_closed_points(
+    points: list[dict[str, float]],
+    tolerance: float,
+) -> list[dict[str, float]]:
+    result = [
+        {"x": float(point["x"]), "y": float(point["y"])}
+        for point in points
+    ]
+    changed = True
+    while changed and len(result) > 3:
+        changed = False
+        for index, point in enumerate(result):
+            previous = result[index - 1]
+            following = result[(index + 1) % len(result)]
+            if _distance_to_line(point, previous, following) <= tolerance:
+                result.pop(index)
+                changed = True
+                break
+    return result
+
+
+def outline_vector_path(
+    value: Any,
+    *,
+    width: float,
+    height: float,
+    stroke_width: float,
+    cap: str = "round",
+    join: str = "round",
+    simplify_tolerance: float = 0.35,
+) -> tuple[dict[str, Any], dict[str, float | int]]:
+    """Convert a center stroke to an editable closed polygon network."""
+    from PySide6.QtCore import QRectF, Qt
+    from PySide6.QtGui import QPainterPathStroker
+
+    object_width = max(0.001, float(width))
+    object_height = max(0.001, float(height))
+    line_width = max(0.01, float(stroke_width))
+    source = vector_network_to_qpath(
+        value,
+        QRectF(0.0, 0.0, object_width, object_height),
+    )
+    if source.isEmpty():
+        raise ValueError("Cannot outline an empty vector path")
+    stroker = QPainterPathStroker()
+    stroker.setWidth(line_width)
+    stroker.setCapStyle(
+        {
+            "butt": Qt.PenCapStyle.FlatCap,
+            "flat": Qt.PenCapStyle.FlatCap,
+            "square": Qt.PenCapStyle.SquareCap,
+        }.get(str(cap or "").casefold(), Qt.PenCapStyle.RoundCap)
+    )
+    stroker.setJoinStyle(
+        {
+            "miter": Qt.PenJoinStyle.MiterJoin,
+            "bevel": Qt.PenJoinStyle.BevelJoin,
+        }.get(str(join or "").casefold(), Qt.PenJoinStyle.RoundJoin)
+    )
+    outline = stroker.createStroke(source)
+    bounds = outline.boundingRect()
+    if bounds.isEmpty():
+        raise ValueError("Vector stroke produced no outline geometry")
+    tolerance = max(0.05, float(simplify_tolerance))
+    polygons: list[list[dict[str, float]]] = []
+    for polygon in outline.toFillPolygons():
+        points = [
+            {"x": float(point.x()), "y": float(point.y())}
+            for point in polygon
+        ]
+        if len(points) > 1 and hypot(
+            points[-1]["x"] - points[0]["x"],
+            points[-1]["y"] - points[0]["y"],
+        ) <= 1e-6:
+            points.pop()
+        points = _simplify_closed_points(points, tolerance)
+        if len(points) >= 3:
+            polygons.append(points)
+    if not polygons:
+        raise ValueError("Vector stroke outline could not be polygonized")
+
+    nodes: list[dict[str, Any]] = []
+    segments: list[dict[str, str]] = []
+    for polygon in polygons:
+        polygon_ids: list[str] = []
+        for point in polygon:
+            node_id = f"node-{len(nodes) + 1}"
+            polygon_ids.append(node_id)
+            nodes.append(
+                {
+                    "id": node_id,
+                    "x": (point["x"] - bounds.left()) / bounds.width(),
+                    "y": (point["y"] - bounds.top()) / bounds.height(),
+                    "in_handle": None,
+                    "out_handle": None,
+                    "kind": "corner",
+                }
+            )
+        for index, start_id in enumerate(polygon_ids):
+            segments.append(
+                {
+                    "id": f"segment-{len(segments) + 1}",
+                    "start_node_id": start_id,
+                    "end_node_id": polygon_ids[
+                        (index + 1) % len(polygon_ids)
+                    ],
+                    "kind": "line",
+                }
+            )
+    network = normalize_vector_network(
+        {"nodes": nodes, "segments": segments, "closed": True}
+    )
+    return network, {
+        "x": float(bounds.left()),
+        "y": float(bounds.top()),
+        "width": float(bounds.width()),
+        "height": float(bounds.height()),
+        "source_stroke_width": line_width,
+        "polygon_count": len(polygons),
+        "node_count": len(nodes),
+    }
+
+
 __all__ = [
     "VECTOR_NODE_KINDS",
     "VECTOR_SEGMENT_KINDS",
@@ -549,9 +774,12 @@ __all__ = [
     "join_vector_nodes",
     "normalize_vector_content",
     "normalize_vector_network",
+    "outline_vector_path",
     "remove_vector_node",
+    "reverse_vector_path",
     "set_vector_path_closed",
     "set_vector_segment_kind",
+    "simplify_vector_path",
     "split_vector_segment",
     "update_vector_node",
     "vector_network_to_svg_path",

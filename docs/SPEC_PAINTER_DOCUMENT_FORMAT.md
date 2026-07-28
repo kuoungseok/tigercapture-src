@@ -200,7 +200,7 @@ Actions:
 - `paint.ui.object.add/update/remove`
 - `paint.ui.vector.node.add/update/remove`
 - `paint.ui.vector.segment.set/split`
-- `paint.ui.vector.path.closed.set/join`
+- `paint.ui.vector.path.closed.set/join/reverse/simplify/outline`
 - `paint.ui.selection.set`
 - `paint.ui.object.arrange`
 - `paint.ui.object.group/ungroup/reorder`
