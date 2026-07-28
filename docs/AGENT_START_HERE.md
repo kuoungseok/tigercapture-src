@@ -147,6 +147,10 @@ Focused entry points:
   `paint.ui.property.inspect/reset`. Layout warnings are selection-local and
   include recovery guidance; do not replace them with a second validation
   model or a canvas-only reset path.
+  M2 Content Test is implemented in `app/painter_ui_stress_preview.py`.
+  `paint.ui.layout.stress_preview` and the Inspector share one presentation
+  entry point; only the canvas Overlay receives the ephemeral preview document.
+  Canonical revision, persistence, and Undo must remain unchanged.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

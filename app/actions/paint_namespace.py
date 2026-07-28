@@ -316,6 +316,33 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter UI layout diagnostics would be returned",
     )
     registry.register_adapter_action(
+        "paint.ui.layout.stress_preview",
+        "Preview content stress on one UI object without changing the document or Undo history.",
+        "paint",
+        "paint_ui_layout_stress_preview",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "preset": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "long_ko",
+                        "long_en",
+                        "large_type",
+                        "missing_image",
+                        "empty_list",
+                    ],
+                },
+            },
+            required=("preset",),
+        ),
+        required=("preset",),
+        mutating=False,
+        changed=False,
+        dry_summary="a non-destructive Painter UI content stress preview would be shown",
+    )
+    registry.register_adapter_action(
         "paint.ui.responsive.override.set",
         "Set an object override for a breakpoint and orientation context.",
         "paint",

@@ -40,6 +40,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.view.zoom",
         "paint.ui.view.pan",
         "paint.ui.layout.diagnostics",
+        "paint.ui.layout.stress_preview",
         "paint.ui.responsive.override.set",
         "paint.ui.responsive.override.remove",
         "paint.ui.theme.set",

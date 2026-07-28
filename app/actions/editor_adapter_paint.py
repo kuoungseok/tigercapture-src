@@ -592,6 +592,26 @@ class PaintAdapterMixin(
 
         return diagnose_ui_layout(dialog._painter_ui_document)
 
+    def paint_ui_layout_stress_preview(
+        self,
+        *,
+        preset: str,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        report = dialog._set_painter_ui_stress_preview(
+            str(object_id or ""),
+            str(preset or "none"),
+        )
+        return {
+            "schema": "tigerstudio.painter.ui.stress_preview.action.v1",
+            "stress_preview": report,
+            "document_revision": int(
+                dialog._painter_ui_document["revision"]
+            ),
+            "undo_depth": len(dialog._undo_stack),
+        }
+
     def paint_ui_responsive_override_set(
         self,
         *,

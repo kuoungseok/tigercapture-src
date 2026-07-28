@@ -271,6 +271,7 @@ class PainterUIInspector(QWidget):
     motion_binding_migrate_requested = Signal(str)
     motion_binding_relink_requested = Signal(str, str, str)
     motion_binding_detach_requested = Signal(str)
+    stress_preview_requested = Signal(str, str)
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
     temporary_close_requested = Signal()
@@ -1090,6 +1091,55 @@ class PainterUIInspector(QWidget):
         self.auto_layout_status_label.setObjectName("PaintMuted")
         self.auto_layout_status_label.setWordWrap(True)
         form.addRow("", self.auto_layout_status_label)
+        self._stress_preview_report: dict[str, Any] = {}
+        stress_preview = QFrame()
+        stress_preview.setObjectName("PainterUIStressPreview")
+        stress_layout = QVBoxLayout(stress_preview)
+        stress_layout.setContentsMargins(0, 0, 0, 0)
+        stress_layout.setSpacing(3)
+        stress_controls = QHBoxLayout()
+        stress_controls.setContentsMargins(0, 0, 0, 0)
+        stress_controls.setSpacing(3)
+        self.stress_preview_combo = QComboBox()
+        for label, preset in (
+            ("Off", "none"),
+            ("Long Korean", "long_ko"),
+            ("Long English", "long_en"),
+            ("Large Type", "large_type"),
+            ("Missing Image", "missing_image"),
+            ("Empty List", "empty_list"),
+        ):
+            self.stress_preview_combo.addItem(
+                painter_text(label),
+                preset,
+            )
+        self.stress_preview_combo.currentIndexChanged.connect(
+            self._emit_stress_preview
+        )
+        self.stress_preview_clear_button = QPushButton()
+        self.stress_preview_clear_button.setObjectName(
+            "PainterUIIconButton"
+        )
+        self.stress_preview_clear_button.setFixedSize(24, 24)
+        self.stress_preview_clear_button.setIcon(
+            app_icon("x", size=11, color="#AEBACA")
+        )
+        self.stress_preview_clear_button.setToolTip(
+            painter_text("Clear content preview")
+        )
+        self.stress_preview_clear_button.clicked.connect(
+            self._clear_stress_preview
+        )
+        stress_controls.addWidget(self.stress_preview_combo, 1)
+        stress_controls.addWidget(self.stress_preview_clear_button)
+        stress_layout.addLayout(stress_controls)
+        self.stress_preview_status_label = QLabel(
+            painter_text("Preview only - document is unchanged")
+        )
+        self.stress_preview_status_label.setObjectName("PaintMuted")
+        self.stress_preview_status_label.setWordWrap(True)
+        stress_layout.addWidget(self.stress_preview_status_label)
+        form.addRow(painter_text("Content Test"), stress_preview)
         auto_padding = QFrame()
         auto_padding_layout = QHBoxLayout(auto_padding)
         auto_padding_layout.setContentsMargins(0, 0, 0, 0)
@@ -1616,6 +1666,7 @@ class PainterUIInspector(QWidget):
                 auto_flow,
                 auto_cross,
             ),
+            "content_stress": (stress_preview,),
             "appearance": (
                 self.opacity_spin,
                 self.fill_edit,
@@ -1969,6 +2020,13 @@ class PainterUIInspector(QWidget):
     ) -> None:
         self.motion_binding_panel.set_report(value)
 
+    def set_stress_preview_report(
+        self,
+        value: Mapping[str, Any] | None,
+    ) -> None:
+        self._stress_preview_report = dict(value or {})
+        self._sync_stress_preview_controls()
+
     def _selected_id(self) -> str:
         return str(self._document["selection"]["object_id"] or "")
 
@@ -2092,6 +2150,8 @@ class PainterUIInspector(QWidget):
             self.auto_layout_width_sizing_combo,
             self.auto_layout_height_sizing_combo,
             self.auto_layout_wrap_check,
+            self.stress_preview_combo,
+            self.stress_preview_clear_button,
             *self.auto_layout_padding_controls.values(),
             self.pivot_x_spin,
             self.pivot_y_spin,
@@ -2439,6 +2499,7 @@ class PainterUIInspector(QWidget):
             }
             if kind in {"frame", "group", "button"}:
                 visible_groups.add("auto_layout")
+            visible_groups.add("content_stress")
             if kind == "frame":
                 visible_groups.add("frame")
             if kind in {"text", "button"}:
@@ -3515,6 +3576,52 @@ class PainterUIInspector(QWidget):
         self.auto_layout_status_label.setText(text)
         self.auto_layout_status_label.setToolTip("\n".join(tooltip_rows))
         self.auto_layout_status_label.setStyleSheet(f"color: {color};")
+
+    def _sync_stress_preview_controls(self) -> None:
+        report = dict(getattr(self, "_stress_preview_report", {}) or {})
+        active = bool(report.get("active", False))
+        preset = str(report.get("preset") or "none")
+        was_syncing = bool(self._syncing)
+        self._syncing = True
+        try:
+            index = self.stress_preview_combo.findData(
+                preset if active else "none"
+            )
+            self.stress_preview_combo.setCurrentIndex(max(0, index))
+        finally:
+            self._syncing = was_syncing
+        self.stress_preview_clear_button.setEnabled(active)
+        if active:
+            target = str(report.get("target_name") or "Selection")
+            count = int(report.get("affected_count") or 0)
+            self.stress_preview_status_label.setText(
+                painter_text(
+                    "Preview only - document is unchanged"
+                )
+                + f" · {target} · {count}"
+            )
+            self.stress_preview_status_label.setToolTip(
+                str(report.get("message") or "")
+            )
+        else:
+            self.stress_preview_status_label.setText(
+                painter_text("Preview only - document is unchanged")
+            )
+            self.stress_preview_status_label.setToolTip("")
+
+    def _emit_stress_preview(self, _index: int = -1) -> None:
+        if self._syncing:
+            return
+        object_id = self._selected_id()
+        if not object_id:
+            return
+        preset = str(self.stress_preview_combo.currentData() or "none")
+        self.stress_preview_requested.emit(object_id, preset)
+
+    def _clear_stress_preview(self) -> None:
+        index = self.stress_preview_combo.findData("none")
+        if index >= 0:
+            self.stress_preview_combo.setCurrentIndex(index)
 
     def _emit_duplicate(self) -> None:
         if self._selected_id():

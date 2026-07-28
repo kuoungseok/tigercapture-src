@@ -401,6 +401,15 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Enter group", "그룹 편집 시작", "グループ編集を開始", "进入组编辑", "Entrer dans le groupe", "Gruppe bearbeiten"),
     ("Exit group", "그룹 편집 종료", "グループ編集を終了", "退出组编辑", "Quitter le groupe", "Gruppenbearbeitung beenden"),
     ("Advanced properties", "고급 속성", "詳細プロパティ", "高级属性", "Propriétés avancées", "Erweiterte Eigenschaften"),
+    ("Content Test", "콘텐츠 테스트", "コンテンツテスト", "内容测试", "Test de contenu", "Inhaltstest"),
+    ("Off", "꺼짐", "オフ", "关闭", "Désactivé", "Aus"),
+    ("Long Korean", "긴 한국어", "長い韓国語", "长韩文", "Coréen long", "Langes Koreanisch"),
+    ("Long English", "긴 영문", "長い英語", "长英文", "Anglais long", "Langes Englisch"),
+    ("Large Type", "큰 글자", "大きな文字", "大字号", "Grand texte", "Große Schrift"),
+    ("Missing Image", "누락 이미지", "画像なし", "缺失图像", "Image manquante", "Fehlendes Bild"),
+    ("Empty List", "빈 목록", "空のリスト", "空列表", "Liste vide", "Leere Liste"),
+    ("Clear content preview", "콘텐츠 프리뷰 지우기", "コンテンツプレビューを消去", "清除内容预览", "Effacer l'aperçu du contenu", "Inhaltsvorschau löschen"),
+    ("Preview only - document is unchanged", "프리뷰 전용 · 문서는 변경되지 않음", "プレビューのみ・文書は変更されません", "仅预览，文档不会更改", "Aperçu uniquement · document inchangé", "Nur Vorschau · Dokument bleibt unverändert"),
 )
 
 _TABLE = {

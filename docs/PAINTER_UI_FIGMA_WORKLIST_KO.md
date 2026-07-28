@@ -87,6 +87,10 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
   selection-local layout diagnostics with recovery guidance. Automation reads
   and resets the same normalized property through
   `paint.ui.property.inspect/reset`.
+- A selection-local Content Test control and
+  `paint.ui.layout.stress_preview` now share non-destructive long Korean,
+  long English, large-type, missing-image, and empty-list previews. The
+  canonical document, revision, persistence, and Undo stack are invariant.
 - Artboard title dragging moves frames in document space and persists the new
   position through the same undoable artboard mutation service.
 - Inspector presets add iPhone, Android, desktop, console, and broadcast

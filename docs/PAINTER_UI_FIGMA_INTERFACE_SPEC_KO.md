@@ -274,6 +274,11 @@ Canvas interaction checkpoint (2026-07-29):
 - `paint.ui.property.inspect/reset` exposes the same normalized value, default,
   token binding, diagnostics, object mutation, and one-step Undo contract to AI
   and automation.
+- The selection-local Content Test control previews long Korean, long English,
+  large type, missing image, or empty-list content without mutating the
+  canonical document. `paint.ui.layout.stress_preview` uses the same stable-ID
+  presentation path, and clearing the preview restores the canonical Overlay
+  immediately without creating Undo history.
 
 ### 5.4 Shape 선택
 

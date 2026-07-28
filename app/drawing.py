@@ -10297,6 +10297,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.motion_binding_detach_requested.connect(
             self._detach_painter_ui_motion_binding
         )
+        self._paint_ui_inspector.stress_preview_requested.connect(
+            self._set_painter_ui_stress_preview
+        )
         self._paint_ui_inspector.template_save_requested.connect(
             self._save_painter_ui_template
         )
@@ -14839,11 +14842,70 @@ class PaintDialog(QDialog):
             label="Nudge UI object",
         )
 
+    def _painter_ui_stress_preview_document(
+        self,
+    ) -> tuple[dict, dict]:
+        from app.painter_ui_stress_preview import build_ui_stress_preview
+
+        canonical = getattr(self, "_painter_ui_document", None)
+        preset = str(
+            getattr(self, "_painter_ui_stress_preview_preset", "none")
+            or "none"
+        )
+        object_id = str(
+            getattr(self, "_painter_ui_stress_preview_object_id", "")
+            or ""
+        )
+        try:
+            preview, report = build_ui_stress_preview(
+                canonical,
+                object_id,
+                preset,
+            )
+        except ValueError as exc:
+            self._painter_ui_stress_preview_preset = "none"
+            self._painter_ui_stress_preview_object_id = ""
+            preview, report = build_ui_stress_preview(
+                canonical,
+                "",
+                "none",
+            )
+            report["message"] = str(exc)
+        self._painter_ui_stress_preview_report = dict(report)
+        return preview, dict(report)
+
+    def _set_painter_ui_stress_preview(
+        self,
+        object_id: str = "",
+        preset: str = "none",
+    ) -> dict:
+        requested = str(preset or "none").strip().casefold()
+        target = str(
+            object_id
+            or (
+                (
+                    getattr(self, "_painter_ui_document", {}) or {}
+                ).get("selection")
+                or {}
+            ).get("object_id")
+            or ""
+        )
+        self._painter_ui_stress_preview_preset = requested
+        self._painter_ui_stress_preview_object_id = (
+            target if requested != "none" else ""
+        )
+        _preview, report = self._painter_ui_stress_preview_document()
+        self._refresh_painter_ui_overlay()
+        return dict(report)
+
     def _refresh_painter_ui_overlay(self) -> None:
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is None:
             return
-        overlay.set_document(getattr(self, "_painter_ui_document", None))
+        preview_document, stress_report = (
+            self._painter_ui_stress_preview_document()
+        )
+        overlay.set_document(preview_document)
         scope = self._painter_ui_edit_scope_state()
         overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
@@ -14858,6 +14920,7 @@ class PaintDialog(QDialog):
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is not None:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
+            inspector.set_stress_preview_report(stress_report)
         navigator = getattr(self, "_painter_ui_navigator", None)
         if navigator is not None:
             navigator.set_document(

@@ -438,6 +438,16 @@ Implementation checkpoint (2026-07-29):
   update, persistence, and one-step Undo.
 - QA proves a permitted Fixed-overflow warning without bypassing the validator
   in `painter_ui_designer_m2_sizing_diagnostics.png`.
+- Content Test now offers long Korean, long English, large type, missing image,
+  and empty-list presets for the selected stable object subtree. Only the
+  canvas Overlay receives the generated preview document; Inspector, Layers,
+  save data, canonical revision, and Undo history remain unchanged.
+- The Inspector and `paint.ui.layout.stress_preview` call the same presentation
+  entry point. The pure planner lives in
+  `app/painter_ui_stress_preview.py`, and `preset: none` clears the preview.
+- Desktop and compact proof are generated as
+  `painter_ui_designer_m2_content_stress.png` and
+  `painter_ui_designer_m2_content_stress_compact.png`.
 
 Required Actions:
 

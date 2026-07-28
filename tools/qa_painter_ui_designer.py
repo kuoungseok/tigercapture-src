@@ -526,6 +526,53 @@ def main() -> int:
         output_dir / "painter_ui_designer_m1_text_inspector.png"
     )
     dialog.grab().save(str(text_inspector_screenshot_path), "PNG")
+    stress_canonical_before = json.dumps(
+        dialog._painter_ui_document,
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    stress_undo_before = len(dialog._undo_stack)
+    stress_result = registry.execute(
+        "paint.ui.layout.stress_preview",
+        {
+            "object_id": phone_object_ids["text"],
+            "preset": "long_ko",
+        },
+    ).to_dict()
+    dialog._painter_ui_overlay.fit_object(phone_object_ids["text"])
+    app.processEvents()
+    stress_preview_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_content_stress.png"
+    )
+    dialog.grab().save(str(stress_preview_screenshot_path), "PNG")
+    stress_preview_row = next(
+        (
+            row
+            for row in dialog._painter_ui_overlay._document["objects"]
+            if row["id"] == phone_object_ids["text"]
+        ),
+        {},
+    )
+    stress_preview_ok = bool(
+        stress_result.get("ok") is True
+        and stress_result["result"]["stress_preview"]["active"] is True
+        and len(
+            str((stress_preview_row.get("content") or {}).get("text") or "")
+        )
+        > 60
+        and json.dumps(
+            dialog._painter_ui_document,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        == stress_canonical_before
+        and len(dialog._undo_stack) == stress_undo_before
+    )
+    registry.execute(
+        "paint.ui.layout.stress_preview",
+        {"preset": "none"},
+    )
+    app.processEvents()
     dialog._painter_ui_overlay.fit_object(phone_object_ids["text"])
     app.processEvents()
     inline_text_ok = dialog._painter_ui_overlay.begin_text_edit(
@@ -554,6 +601,7 @@ def main() -> int:
             "primary_object_id": phone_object_ids["image"],
         },
     )
+    dialog._painter_ui_overlay.fit_object(phone_object_ids["text"])
     app.processEvents()
     image_context_ok = (
         dialog._paint_ui_inspector.design_context() == "image"
@@ -694,6 +742,43 @@ def main() -> int:
     )
     dialog.grab().save(str(compact_screenshot_path), "PNG")
     toolbar.zoom_popover.hide()
+    compact_stress_canonical_before = json.dumps(
+        dialog._painter_ui_document,
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    compact_stress_undo_before = len(dialog._undo_stack)
+    registry.execute(
+        "paint.ui.layout.stress_preview",
+        {
+            "object_id": phone_object_ids["text"],
+            "preset": "long_en",
+        },
+    )
+    app.processEvents()
+    compact_stress_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_content_stress_compact.png"
+    )
+    dialog.grab().save(str(compact_stress_screenshot_path), "PNG")
+    compact_stress_ok = bool(
+        compact_stress_screenshot_path.is_file()
+        and (
+            getattr(dialog, "_painter_ui_stress_preview_report", {}) or {}
+        ).get("preset")
+        == "long_en"
+        and json.dumps(
+            dialog._painter_ui_document,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        == compact_stress_canonical_before
+        and len(dialog._undo_stack) == compact_stress_undo_before
+    )
+    registry.execute(
+        "paint.ui.layout.stress_preview",
+        {"preset": "none"},
+    )
+    app.processEvents()
     dialog.resize(1360, 900)
     app.processEvents()
     state = dialog.painter_action_state()
@@ -740,6 +825,8 @@ def main() -> int:
             and desktop_screenshot_path.is_file()
             and auto_layout_screenshot_path.is_file()
             and sizing_screenshot_path.is_file()
+            and stress_preview_screenshot_path.is_file()
+            and compact_stress_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -757,6 +844,8 @@ def main() -> int:
             and flexible_workspace_ok
             and auto_layout_ok
             and property_contract_ok
+            and stress_preview_ok
+            and compact_stress_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -780,6 +869,12 @@ def main() -> int:
         "desktop_screenshot": str(desktop_screenshot_path),
         "auto_layout_screenshot": str(auto_layout_screenshot_path),
         "sizing_diagnostics_screenshot": str(sizing_screenshot_path),
+        "content_stress_screenshot": str(
+            stress_preview_screenshot_path
+        ),
+        "content_stress_compact_screenshot": str(
+            compact_stress_screenshot_path
+        ),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -805,6 +900,8 @@ def main() -> int:
         "flexible_workspace_ok": flexible_workspace_ok,
         "auto_layout_canvas_ok": auto_layout_ok,
         "property_contract_ok": property_contract_ok,
+        "content_stress_ok": stress_preview_ok,
+        "content_stress_compact_ok": compact_stress_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,
