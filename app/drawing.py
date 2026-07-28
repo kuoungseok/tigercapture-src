@@ -22959,6 +22959,7 @@ class PaintDialog(QDialog):
             paste_replace_action = menu.addAction(
                 painter_text("Paste to replace")
             )
+            scale_action = menu.addAction(painter_text("Scale selection..."))
             copy_action.setEnabled(bool(selected))
             copy_properties_action.setEnabled(bool(selected))
             paste_properties_action.setEnabled(
@@ -22967,6 +22968,7 @@ class PaintDialog(QDialog):
             paste_replace_action.setEnabled(
                 bool(selected_ids and has_clipboard)
             )
+            scale_action.setEnabled(bool(selected_ids))
             copy_action.triggered.connect(
                 lambda _checked=False: self._copy_painter_ui_object_payload()
             )
@@ -22978,6 +22980,9 @@ class PaintDialog(QDialog):
             )
             paste_replace_action.triggered.connect(
                 lambda _checked=False: self._paste_replace_painter_ui_objects()
+            )
+            scale_action.triggered.connect(
+                lambda _checked=False: self._scale_painter_ui_selection()
             )
             menu.addSeparator()
             parent_action = menu.addAction(painter_text("Select parent"))
@@ -23090,6 +23095,41 @@ class PaintDialog(QDialog):
         if not report["target_object_ids"]:
             return
         self._push_undo_state("Paste replace UI objects")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _scale_painter_ui_selection(self) -> None:
+        from app.painter_i18n import painter_text
+        from app.painter_ui_object_scale import scale_ui_objects
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        target_ids = list(
+            (current.get("selection") or {}).get("object_ids") or []
+        )
+        if not target_ids:
+            return
+        percent, accepted = QInputDialog.getDouble(
+            self,
+            painter_text("Scale selection"),
+            painter_text("Scale percentage"),
+            100.0,
+            1.0,
+            10000.0,
+            2,
+        )
+        if not accepted:
+            return
+        document, report = scale_ui_objects(
+            current,
+            target_ids,
+            scale_x=float(percent) / 100.0,
+            origin="center",
+            scale_visuals=True,
+        )
+        if not report["object_ids"]:
+            return
+        self._push_undo_state("Scale UI objects")
         self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

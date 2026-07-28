@@ -1043,6 +1043,36 @@ def main() -> int:
         )
         == property_style_before
     )
+    scale_target_before = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    scale_width_before = float(scale_target_before["width"])
+    scale_result = registry.execute(
+        "paint.ui.object.scale",
+        {
+            "object_ids": [property_target_id],
+            "scale_x": 1.125,
+            "origin": "top_left",
+        },
+    ).to_dict()
+    scale_target_after = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    dialog._undo()
+    scale_target_undone = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    object_scale_ok = bool(
+        scale_result.get("ok") is True
+        and float(scale_target_after["width"]) > scale_width_before
+        and float(scale_target_undone["width"]) == scale_width_before
+    )
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -1120,6 +1150,7 @@ def main() -> int:
             and multi_grid_ok
             and grid_style_ok
             and property_clipboard_ok
+            and object_scale_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -1194,6 +1225,7 @@ def main() -> int:
         "multiple_layout_grids_ok": multi_grid_ok,
         "layout_grid_style_ok": grid_style_ok,
         "property_clipboard_ok": property_clipboard_ok,
+        "object_scale_ok": object_scale_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

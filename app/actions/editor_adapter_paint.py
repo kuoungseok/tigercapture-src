@@ -1307,6 +1307,41 @@ class PaintAdapterMixin(
         result["clipboard_result"] = report
         return result
 
+    def paint_ui_object_scale(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        scale_x: float = 1.0,
+        scale_y: float | None = None,
+        origin: str = "center",
+        scale_visuals: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_object_scale import scale_ui_objects
+
+        targets = list(
+            object_ids
+            or dialog._painter_ui_document["selection"]["object_ids"]
+        )
+        document, report = scale_ui_objects(
+            dialog._painter_ui_document,
+            targets,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            origin=origin,
+            scale_visuals=scale_visuals,
+        )
+        if not report["object_ids"]:
+            return {
+                "changed": False,
+                "scale_result": report,
+                "ui_design": dialog.painter_action_state()["ui_design"],
+            }
+        dialog._push_undo_state("Scale UI objects")
+        result = self._paint_ui_commit(dialog, "Scale UI objects", document)
+        result["scale_result"] = report
+        return result
+
     def paint_ui_text_content_set(
         self,
         *,

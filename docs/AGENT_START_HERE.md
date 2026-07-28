@@ -170,6 +170,9 @@ Focused entry points:
   `app/painter_ui_property_clipboard.py` owns UI-object Copy/Paste Properties
   and Paste to Replace. It preserves target stable IDs, hierarchy, position,
   and z-order; UI and `paint.ui.object.properties.*` Actions must share it.
+  `app/painter_ui_object_scale.py` owns Figma-style selection scaling. Keep its
+  UI contextual rather than adding a fixed panel, scale visual metrics with
+  bounds, and reject selections spanning different parent coordinate spaces.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

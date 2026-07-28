@@ -440,6 +440,9 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Copy properties", "속성 복사", "プロパティをコピー", "复制属性", "Copier les propriétés", "Eigenschaften kopieren"),
     ("Paste properties", "속성 붙여넣기", "プロパティを貼り付け", "粘贴属性", "Coller les propriétés", "Eigenschaften einfügen"),
     ("Paste to replace", "대체하여 붙여넣기", "置き換えて貼り付け", "粘贴并替换", "Coller pour remplacer", "Zum Ersetzen einfügen"),
+    ("Scale selection...", "선택 영역 크기 조절...", "選択範囲を拡大・縮小...", "缩放所选内容...", "Mettre la sélection à l’échelle...", "Auswahl skalieren..."),
+    ("Scale selection", "선택 영역 크기 조절", "選択範囲を拡大・縮小", "缩放所选内容", "Mettre la sélection à l’échelle", "Auswahl skalieren"),
+    ("Scale percentage", "크기 비율 (%)", "拡大率 (%)", "缩放百分比 (%)", "Échelle (%)", "Skalierung (%)"),
 )
 
 _TABLE = {

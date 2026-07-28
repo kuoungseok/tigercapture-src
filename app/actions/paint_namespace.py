@@ -12,6 +12,7 @@ from app.painter_ui_document import (
     UI_OBJECT_KINDS,
     UI_TOKEN_KINDS,
 )
+from app.painter_ui_object_scale import UI_SCALE_ORIGINS
 
 
 PAINT_ACTION_BRUSH_STYLES = tuple(
@@ -837,6 +838,38 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=property_paste_schema,
         undo_label="Paste replace UI objects",
         dry_summary="selected UI objects would be replaced without breaking references",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.scale",
+        "Scale selected Painter UI objects and their visual geometry around one shared pivot.",
+        "paint",
+        "paint_ui_object_scale",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                },
+                "scale_x": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "scale_y": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "origin": {
+                    "type": "string",
+                    "enum": sorted(UI_SCALE_ORIGINS),
+                },
+                "scale_visuals": {"type": "boolean"},
+            },
+            required=("scale_x",),
+        ),
+        required=("scale_x",),
+        undo_label="Scale UI objects",
+        dry_summary="selected UI objects and visual geometry would be scaled",
     )
     registry.register_adapter_action(
         "paint.ui.text.content.set",

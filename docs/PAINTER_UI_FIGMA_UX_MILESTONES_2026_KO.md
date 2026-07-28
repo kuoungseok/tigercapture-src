@@ -396,6 +396,20 @@ Implemented checkpoint (2026-07-29, object property clipboard slice):
   `paint.ui.object.paste_replace` use `app/painter_ui_property_clipboard.py`,
   one-step Undo, and the same normalized batch mutation service.
 
+Implemented checkpoint (2026-07-29, Figma-style Scale slice):
+
+- Scale is selection-local and appears in the canvas context menu only when an
+  object selection exists; it does not add another fixed Inspector section.
+- One percentage input scales a selection around its common center. Automation
+  may additionally choose separate X/Y factors and a center or corner pivot.
+- Geometry, typography, corner radii, stroke width, shadow/blur geometry, and
+  9-slice margins scale together instead of changing only outer bounds.
+- Objects from different parent coordinate spaces are explicitly blocked
+  rather than moved with ambiguous local coordinates.
+- UI and `paint.ui.object.scale` share
+  `app/painter_ui_object_scale.py`, constraint-aware batch mutation, and one
+  `Scale UI objects` Undo step.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

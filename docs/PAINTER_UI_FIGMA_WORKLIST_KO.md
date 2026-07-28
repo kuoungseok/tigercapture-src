@@ -250,6 +250,9 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   IDs, hierarchy, position, and z-order and share
   `paint.ui.object.properties.copy/paste` /
   `paint.ui.object.paste_replace` mutation contracts.
+- Selection-local Scale uses a transient percentage prompt rather than a fixed
+  panel. `paint.ui.object.scale` scales geometry and visual metrics through one
+  shared service and blocks mixed parent coordinate spaces.
 
 ## P2. 인스펙터 확장
 
