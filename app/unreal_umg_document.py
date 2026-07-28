@@ -157,6 +157,12 @@ def _umg_block_reasons(layer: MotionLayer) -> list[str]:
         value = layer.metadata.get(metadata_key)
         if value not in (None, {}, [], False):
             reasons.append(f"motion_feature_requires_bake:{metadata_key}")
+    stop_motion = layer.metadata.get("stop_motion")
+    if (
+        isinstance(stop_motion, Mapping)
+        and bool(stop_motion.get("enabled", False))
+    ):
+        reasons.append("motion_feature_requires_bake:stop_motion")
     frame_blending = layer.metadata.get("frame_blending")
     if (
         isinstance(frame_blending, Mapping)
@@ -201,6 +207,14 @@ def motion_composition_to_umg_document(
         or motion_color.project.ocio_config_path
         else []
     )
+    stop_motion = composition.metadata.get("stop_motion")
+    if (
+        isinstance(stop_motion, Mapping)
+        and bool(stop_motion.get("enabled", False))
+    ):
+        document_block_reasons.append(
+            "motion_feature_requires_bake:stop_motion",
+        )
 
     def register_resource(uri: str, kind: str) -> str:
         if not uri:

@@ -75,11 +75,20 @@ def evaluate_composition(
     *,
     interaction_states: Mapping[str, str | Mapping[str, Any]] | None = None,
 ) -> list[EvaluatedLayer]:
+    from .stop_motion import (
+        apply_stop_motion_transform,
+        stop_motion_sample_time,
+    )
+
     solo_ids = {layer.id for layer in composition.layers if layer.solo}
     values_by_id: dict[str, dict[str, Any]] = {}
     layers_by_id = {layer.id: layer for layer in composition.layers}
+    sample_times = {
+        layer.id: stop_motion_sample_time(composition, layer, time_ms)
+        for layer in composition.layers
+    }
     for layer in composition.layers:
-        values = evaluate_layer_transform(layer, time_ms)
+        values = evaluate_layer_transform(layer, sample_times[layer.id])
         values_by_id[layer.id] = apply_button_state(
             layer,
             values,
@@ -87,7 +96,16 @@ def evaluate_composition(
         )
     from .expressions import apply_composition_expressions
 
-    apply_composition_expressions(composition, time_ms, values_by_id)
+    composition_sample_time = stop_motion_sample_time(
+        composition,
+        None,
+        time_ms,
+    )
+    apply_composition_expressions(
+        composition,
+        composition_sample_time,
+        values_by_id,
+    )
     for layer in composition.layers:
         constraint = layer.metadata.get("constraint")
         if isinstance(constraint, dict):
@@ -98,7 +116,14 @@ def evaluate_composition(
                 values_by_id[layer.id]["position"] = point_on_path(list(constraint.get("points") or []), float(constraint.get("progress", 0.0)))
     from .rigging import evaluate_rig_layer_deltas
 
-    rig_deltas = evaluate_rig_layer_deltas(composition, time_ms)
+    rig_deltas = evaluate_rig_layer_deltas(composition, composition_sample_time)
+    for layer in composition.layers:
+        apply_stop_motion_transform(
+            composition,
+            layer,
+            values_by_id[layer.id],
+            time_ms,
+        )
 
     matrix_cache: dict[str, tuple[float, float, float, float, float, float]] = {}
     def world_matrix(layer: MotionLayer, stack: set[str] | None = None):
@@ -118,7 +143,8 @@ def evaluate_composition(
         values = values_by_id[layer.id]
         active = layer.visible and layer.in_ms <= time_ms < layer.out_ms and (not solo_ids or layer.id in solo_ids)
         evaluated.append(EvaluatedLayer(
-            id=layer.id, name=layer.name, active=active, local_time_ms=remap_layer_time(layer, time_ms),
+            id=layer.id, name=layer.name, active=active,
+            local_time_ms=remap_layer_time(layer, sample_times[layer.id]),
             position=list(values["position"]), scale=list(values["scale"]), rotation=float(values["rotation"]),
             opacity=max(0.0, min(1.0, float(values["opacity"]))), anchor=list(values["anchor"]),
             matrix=project_layer_matrix(
@@ -128,7 +154,7 @@ def evaluate_composition(
                 ),
                 composition=composition,
                 layer=layer,
-                time_ms=time_ms,
+                time_ms=sample_times[layer.id],
             ),
             source=layer.source.to_dict(), blend_mode=layer.blend_mode,
         ))

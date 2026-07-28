@@ -50,8 +50,9 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.toolbar.templates_button.text() == "Templates"
     assert window.project_tabs.count() == 3
     assert window.inspector_tabs.count() == 20
-    assert window.looks.count() == 3
+    assert window.looks.count() == 4
     assert window.looks.tabText(2) == "Collage"
+    assert window.looks.tabText(3) == "Stop Motion"
     assert window.looks.tabText(0) == "Craft"
     assert window.looks.tabText(1) == "Glass"
     assert window.inspector_tabs.indexOf(window.tracking) >= 0
@@ -107,6 +108,45 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     window.controller.undo()
     assert window.controller.composition.layers == []
     window.close()
+
+
+def test_stop_motion_panel_updates_timing_material_pose_and_onion_status() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    composition = MotionComposition(width=640, height=360, duration_ms=3000)
+    window = MotionDesignerWindow(composition)
+    window._add_layer("shape")
+    layer_id = window.controller.composition.layers[0].id
+    window._select_layer(layer_id)
+
+    window.stop_motion.enabled.setChecked(True)
+    window.stop_motion.exposure.setCurrentIndex(
+        window.stop_motion.exposure.findData(3),
+    )
+    window.stop_motion.jitter.setValue(2.5)
+    window.stop_motion._emit_timing()
+    settings = window.controller.composition.layers[0].metadata["stop_motion"]
+    assert settings["enabled"] is True
+    assert settings["exposure_frames"] == 3
+    assert settings["pose_jitter_px"] == 2.5
+
+    window.stop_motion.material_requested.emit("felt", 41)
+    changed = window.controller.composition.layers[0]
+    assert changed.metadata["stop_motion_material"]["preset"] == "felt"
+    assert {effect.kind for effect in changed.effects} >= {
+        "craft_style",
+        "drop_shadow",
+    }
+
+    window._time_ms = 500
+    window.stop_motion.pose_capture_requested.emit("Contact")
+    assert window.controller.composition.metadata["stop_motion_poses"][0]["name"] == "Contact"
+    window.stop_motion.onion_requested.emit()
+    assert "Onion poses:" in window.stop_motion.status.text()
+    window.close()
+    app.processEvents()
 
 
 def test_motion_designer_language_switch_retranslates_open_window() -> None:

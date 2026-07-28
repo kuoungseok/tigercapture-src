@@ -2710,3 +2710,122 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    stop_scope = {
+        **cid,
+        "layer_ids": {"type": "array", "items": {"type": "string"}},
+    }
+    registry.register_adapter_action(
+        "motion.stop_motion.get",
+        "Get composition and effective layer stop-motion timing settings.",
+        "motion",
+        "motion_stop_motion_get",
+        params_schema=schema_object(stop_scope, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.set",
+        "Set ones, twos, or threes exposure timing and tactile motion controls.",
+        "motion",
+        "motion_stop_motion_set",
+        params_schema=schema_object({
+            **stop_scope,
+            "settings": {"type": "object"},
+        }, required=("composition_id", "settings")),
+        required=("composition_id", "settings"),
+        undo_label="Set Stop Motion Timing",
+        dry_summary="Stop-motion exposure and tactile timing would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.pose.capture",
+        "Capture selected layer transforms as a reusable stop-motion pose.",
+        "motion",
+        "motion_stop_motion_pose_capture",
+        params_schema=schema_object({
+            **stop_scope,
+            "name": {"type": "string"},
+            "time_ms": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "name", "time_ms")),
+        required=("composition_id", "name", "time_ms"),
+        undo_label="Capture Stop Motion Pose",
+        dry_summary="A reusable stop-motion pose would be captured",
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.pose.apply",
+        "Apply a captured pose with stable hold-key identifiers.",
+        "motion",
+        "motion_stop_motion_pose_apply",
+        params_schema=schema_object({
+            **stop_scope,
+            "pose_id": {"type": "string"},
+            "time_ms": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "pose_id")),
+        required=("composition_id", "pose_id"),
+        undo_label="Apply Stop Motion Pose",
+        dry_summary="A captured stop-motion pose would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.material.set",
+        "Apply a clay, felt, cardboard, or painted-wood material treatment.",
+        "motion",
+        "motion_stop_motion_material_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+            "preset": {
+                "type": "string",
+                "enum": ["clay", "felt", "cardboard", "painted_wood"],
+            },
+            "seed": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "layer_ids", "preset")),
+        required=("composition_id", "layer_ids", "preset"),
+        undo_label="Set Stop Motion Material",
+        dry_summary="A tactile stop-motion material would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.audio.snap",
+        "Snap nearby pose keys to audio transients on the exposure grid.",
+        "motion",
+        "motion_stop_motion_audio_snap",
+        params_schema=schema_object({
+            **stop_scope,
+            "transient_times_ms": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+            },
+            "threshold_ms": {"type": "integer", "minimum": 0, "maximum": 2000},
+        }, required=("composition_id", "transient_times_ms")),
+        required=("composition_id", "transient_times_ms"),
+        undo_label="Snap Stop Motion To Audio",
+        dry_summary="Nearby pose keys would snap to audio transients",
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.onion.inspect",
+        "Inspect previous, current, and next held stop-motion poses.",
+        "motion",
+        "motion_stop_motion_onion_inspect",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "time_ms": {"type": "number", "minimum": 0},
+            "frames": {"type": "integer", "minimum": 0, "maximum": 4},
+        }, required=("composition_id", "layer_id", "time_ms")),
+        required=("composition_id", "layer_id", "time_ms"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.stop_motion.preflight",
+        "Check exposure cadence, hold interpolation, poses, and material setup.",
+        "motion",
+        "motion_stop_motion_preflight",
+        params_schema=schema_object(stop_scope, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )

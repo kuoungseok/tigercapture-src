@@ -197,6 +197,7 @@ class MotionCanvas(QGraphicsView):
                 interaction_states=self._button_preview_states,
             )
         }
+        from app.motion_designer.stop_motion import stop_motion_sample_time
         from app.motion_designer.boolean_layers import consumed_boolean_operand_ids, resolve_boolean_layer
         consumed_operand_ids = consumed_boolean_operand_ids(composition, states)
         for z_index, layer in enumerate(composition.layers):
@@ -204,15 +205,29 @@ class MotionCanvas(QGraphicsView):
             if not state.active or layer.layer_type in {"group", "adjustment"} or layer.id in consumed_operand_ids:
                 continue
             render_layer = resolve_boolean_layer(composition, layer, states)
+            composition_time_ms = stop_motion_sample_time(
+                composition,
+                render_layer,
+                self._time_ms,
+            )
             from app.motion_designer.advanced_motion import evaluate_replicator
 
             instances = evaluate_replicator(
                 layer.metadata.get("replicator"), state.local_time_ms,
             )
             item = (
-                self._make_replicated_item(render_layer, state.local_time_ms, instances)
+                self._make_replicated_item(
+                    render_layer,
+                    state.local_time_ms,
+                    composition_time_ms,
+                    instances,
+                )
                 if len(instances) > 1
-                else self._make_item(render_layer)
+                else self._make_item(
+                    render_layer,
+                    state.local_time_ms,
+                    composition_time_ms,
+                )
             )
             item.setData(0, layer.id)
             item.setFlag(QGraphicsItem.ItemIsSelectable, not layer.locked)
@@ -313,12 +328,17 @@ class MotionCanvas(QGraphicsView):
             elif pin.kind == "starch":
                 handle.setBrush(QBrush(QColor("#69a7e8")))
 
-    def _make_item(self, layer: MotionLayer) -> QGraphicsItem:
+    def _make_item(
+        self,
+        layer: MotionLayer,
+        local_time_ms: float,
+        composition_time_ms: float,
+    ) -> QGraphicsItem:
         params = layer.source.params
-        width = float(evaluate_source_param(params, "width", self._time_ms, 400.0))
-        height = float(evaluate_source_param(params, "height", self._time_ms, 220.0))
+        width = float(evaluate_source_param(params, "width", local_time_ms, 400.0))
+        height = float(evaluate_source_param(params, "height", local_time_ms, 220.0))
         rect = QRectF(-width * .5, -height * .5, width, height)
-        fill = QColor(str(evaluate_source_param(params, "fill", self._time_ms, "#3f8fba")))
+        fill = QColor(str(evaluate_source_param(params, "fill", local_time_ms, "#3f8fba")))
         if layer.layer_type in {"generator", "live2d_actor", "spine_actor"}:
             from app.motion_designer.adapters import render_source
 
@@ -328,9 +348,9 @@ class MotionCanvas(QGraphicsView):
             )
             image = render_source(
                 layer,
-                self._time_ms,
+                local_time_ms,
                 composition=composition,
-                composition_time_ms=self._time_ms,
+                composition_time_ms=composition_time_ms,
                 quality="preview",
                 viewport_size=viewport,
             )
@@ -343,7 +363,7 @@ class MotionCanvas(QGraphicsView):
             container = QGraphicsRectItem(rect)
             container.setPen(QPen(Qt.NoPen))
             container.setBrush(QBrush(Qt.NoBrush))
-            image = render_typography(layer, self._time_ms)
+            image = render_typography(layer, local_time_ms)
             if not image.isNull():
                 pixmap = QGraphicsPixmapItem(QPixmap.fromImage(image), container)
                 pixmap.setOffset(-image.width() * .5, -image.height() * .5)
@@ -352,7 +372,13 @@ class MotionCanvas(QGraphicsView):
         if layer.layer_type == "image" and layer.source.uri and Path(layer.source.uri).is_file():
             from app.motion_designer.adapters import render_source
 
-            image = render_source(layer, self._time_ms)
+            image = render_source(
+                layer,
+                local_time_ms,
+                composition=self._composition,
+                composition_time_ms=composition_time_ms,
+                quality="preview",
+            )
             if not image.isNull():
                 pixmap = QPixmap.fromImage(image)
                 item = QGraphicsPixmapItem(pixmap)
@@ -368,12 +394,12 @@ class MotionCanvas(QGraphicsView):
             or isinstance(params.get("path"), dict)
             or isinstance(params.get("boolean"), dict)
         ):
-            path = build_vector_painter_path(params, self._time_ms)
+            path = build_vector_painter_path(params, local_time_ms)
             path = QTransform.fromTranslate(-width * .5, -height * .5).map(path)
             item = QGraphicsPathItem(path)
             item.setPen(QPen(
-                QColor(str(evaluate_source_param(params, "stroke", self._time_ms, "#20242b"))),
-                float(evaluate_source_param(params, "stroke_width", self._time_ms, 2.0)),
+                QColor(str(evaluate_source_param(params, "stroke", local_time_ms, "#20242b"))),
+                float(evaluate_source_param(params, "stroke_width", local_time_ms, 2.0)),
             ))
             item.setBrush(QBrush(fill))
             return item
@@ -390,6 +416,7 @@ class MotionCanvas(QGraphicsView):
         self,
         layer: MotionLayer,
         local_time_ms: float,
+        composition_time_ms: float,
         instances: list[dict[str, float]],
     ) -> QGraphicsItemGroup:
         from app.motion_designer.adapters import render_source
@@ -404,7 +431,7 @@ class MotionCanvas(QGraphicsView):
             layer,
             local_time_ms,
             composition=composition,
-            composition_time_ms=self._time_ms,
+            composition_time_ms=composition_time_ms,
             quality="preview",
             viewport_size=viewport,
         )

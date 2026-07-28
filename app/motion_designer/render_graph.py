@@ -171,6 +171,13 @@ def build_render_graph(
         if not state.active or layer.layer_type in {"group", "null", "camera", "light"} or layer.id in consumed_operand_ids:
             continue
         render_layer = resolve_boolean_layer(composition, layer, states)
+        from .stop_motion import stop_motion_sample_time
+
+        source_composition_time = stop_motion_sample_time(
+            composition,
+            render_layer,
+            time_ms,
+        )
         from .frame_blending import (
             frame_blending_preflight,
             frame_mix_samples,
@@ -223,7 +230,7 @@ def build_render_graph(
                     render_layer,
                     state.local_time_ms,
                     composition=composition,
-                    composition_time_ms=float(time_ms),
+                    composition_time_ms=source_composition_time,
                     quality=render_quality,
                     viewport_size=output_size or (composition.width, composition.height),
                 )
@@ -254,7 +261,7 @@ def build_render_graph(
                     render_layer,
                     left_time,
                     composition=composition,
-                    composition_time_ms=float(time_ms),
+                    composition_time_ms=source_composition_time,
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
@@ -264,7 +271,7 @@ def build_render_graph(
                     render_layer,
                     right_time,
                     composition=composition,
-                    composition_time_ms=float(time_ms),
+                    composition_time_ms=source_composition_time,
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
@@ -282,7 +289,7 @@ def build_render_graph(
                     render_layer,
                     state.local_time_ms,
                     composition=composition,
-                    composition_time_ms=float(time_ms),
+                    composition_time_ms=source_composition_time,
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
@@ -360,7 +367,7 @@ def build_render_graph(
             puppet_gpu_reason=puppet_gpu_reason,
             source_layer=render_layer,
             source_composition=composition,
-            composition_time_ms=float(time_ms),
+            composition_time_ms=source_composition_time,
             render_quality=str(render_quality),
             source_viewport_size=output_size or (composition.width, composition.height),
             replicator_instances=replicator,

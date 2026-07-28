@@ -6634,6 +6634,29 @@ AI Script Edit MVP integration:
   stable-ID loss across source replacement and Painter linking. A curated
   distributable paper/tape/ink asset pack and frame-drawing exposure/onion-skin
   UI remain post-v1 extensions.
+- M25 Stop-motion Timing and CGI v1 is implemented through
+  `tigerstudio.motion.stop_motion.v1`. Composition and layer overrides support
+  ones, twos, and threes exposure, locked deterministic pose jitter,
+  contact-settle/overshoot/replacement-pop timing, reusable stable-ID poses,
+  onion-pose inspection, and audio-transient snapping to the exposure grid.
+  The evaluator, Canvas source rendering, Preview, and Export consume the same
+  quantized local and composition time instead of applying a cosmetic
+  posterize effect after animation.
+- Clay, felt, cardboard, and painted-wood treatments remain editable ordinary
+  `craft_style` and `drop_shadow` effects with a locked material seed and
+  explicit material metadata. They are available under `Look > Stop Motion`
+  and through `motion.stop_motion.get/set`, pose capture/apply, material set,
+  audio snap, onion inspect, and preflight actions.
+- Unreal conversion reports
+  `motion_feature_requires_bake:stop_motion` whenever active stepped timing
+  cannot be represented natively; it never silently emits continuously
+  interpolated UMG animation. `tools/qa_motion_stop_motion.py` renders 6-second
+  clay mascot, 10-second miniature product, and 8-second paper replacement
+  scenes through the shared exporter. Current evidence records zero cadence
+  violations and zero pixel interpolation inside held exposures, while the
+  following exposure changes. Physically simulated clay deformation,
+  volumetric miniature lighting, and automatic frame sculpting are not M25 v1
+  claims.
 - M26 Story and Platform Direction v1 is implemented through
   `tigerstudio.motion.story_direction.v1`. A composition can persist ordered
   Hook, Setup, Desire, Conflict, Reveal, Proof, Payoff, and CTA beats with

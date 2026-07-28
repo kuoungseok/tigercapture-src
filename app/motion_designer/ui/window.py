@@ -47,6 +47,7 @@ from .craft_panel import CraftStylePanel
 from .glass_panel import GlassMaterialPanel
 from .collage_panel import CollagePanel
 from .story_panel import StoryDirectionPanel
+from .stop_motion_panel import StopMotionPanel
 from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
@@ -869,11 +870,13 @@ class MotionDesignerWindow(QMainWindow):
         self.craft = CraftStylePanel(self)
         self.glass = GlassMaterialPanel(self)
         self.collage = CollagePanel(self)
+        self.stop_motion = StopMotionPanel(self)
         self.story = StoryDirectionPanel(self)
         self.looks = QTabWidget(self)
         self.looks.addTab(self.craft, "Craft")
         self.looks.addTab(self.glass, "Glass")
         self.looks.addTab(self.collage, "Collage")
+        self.looks.addTab(self.stop_motion, "Stop Motion")
         self.masks = EffectMaskPanel("mask", self)
         self.tracking = TrackingPanel(self)
         self.inspector_tabs = QTabWidget(self)
@@ -1060,6 +1063,11 @@ class MotionDesignerWindow(QMainWindow):
             self._set_collage_attachment,
         )
         self.collage.scan_requested.connect(self._set_collage_scan_cleanup)
+        self.stop_motion.timing_requested.connect(self._set_stop_motion_timing)
+        self.stop_motion.material_requested.connect(self._set_stop_motion_material)
+        self.stop_motion.pose_capture_requested.connect(self._capture_stop_motion_pose)
+        self.stop_motion.pose_apply_requested.connect(self._apply_stop_motion_pose)
+        self.stop_motion.onion_requested.connect(self._inspect_stop_motion_onion)
         self.story.story_update_requested.connect(self._update_story_direction)
         self.story.beat_add_requested.connect(self._add_story_beat)
         self.story.platform_preview_requested.connect(self._preview_platform_variant)
@@ -1166,6 +1174,7 @@ class MotionDesignerWindow(QMainWindow):
             (layer for layer in composition.layers if layer.id == self._selected_layer_id),
             None,
         )
+        self.stop_motion.set_context(composition, selected)
         self.rig.set_layer(selected, composition)
         self.tracking.set_context(composition, selected)
         self.composition_changed.emit(composition)
@@ -1747,6 +1756,7 @@ class MotionDesignerWindow(QMainWindow):
         self.craft.set_layer(layer)
         self.glass.set_layer(layer)
         self.collage.set_context(self.controller.composition, layer)
+        self.stop_motion.set_context(self.controller.composition, layer)
         self.masks.set_layer(layer)
         local_time = self._layer_local_time(layer)
         self.effects.set_time(local_time)
@@ -2783,6 +2793,80 @@ class MotionDesignerWindow(QMainWindow):
                 if item.id != previous.id
             ],
         })
+
+    def _set_stop_motion_timing(self, settings: object) -> None:
+        if not isinstance(settings, dict):
+            return
+        from app.motion_designer.stop_motion import set_stop_motion
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer_ids = [self._selected_layer_id] if self._selected_layer_id else []
+        set_stop_motion(candidate, settings, layer_ids=layer_ids)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_stop_motion_material(self, preset: str, seed: int) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.stop_motion import set_stop_motion_material
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        set_stop_motion_material(
+            candidate,
+            [self._selected_layer_id],
+            preset=str(preset),
+            seed=int(seed),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _capture_stop_motion_pose(self, name: str) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.stop_motion import capture_stop_motion_pose
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        capture_stop_motion_pose(
+            candidate,
+            name=str(name),
+            time_ms=self._time_ms,
+            layer_ids=[self._selected_layer_id],
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+        self.stop_motion.set_status(f"Captured {name} at {self._time_ms} ms")
+
+    def _apply_stop_motion_pose(self, pose_id: str) -> None:
+        if not pose_id:
+            return
+        from app.motion_designer.stop_motion import apply_stop_motion_pose
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        apply_stop_motion_pose(
+            candidate,
+            str(pose_id),
+            time_ms=self._time_ms,
+            layer_ids=[self._selected_layer_id] if self._selected_layer_id else (),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+        self.stop_motion.set_status(f"Applied pose at {self._time_ms} ms")
+
+    def _inspect_stop_motion_onion(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.stop_motion import stop_motion_onion_samples
+
+        report = stop_motion_onion_samples(
+            self.controller.composition,
+            layer_id=self._selected_layer_id,
+            time_ms=self._time_ms,
+        )
+        times = ", ".join(
+            f"{int(sample['time_ms'])} ms"
+            for sample in report["samples"]
+        )
+        self.stop_motion.set_status(f"Onion poses: {times}")
 
     def _create_collage_board(self, layout: str, seed: int) -> None:
         if not self._selected_layer_id:

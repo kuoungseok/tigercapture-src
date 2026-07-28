@@ -90,7 +90,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | In progress: core backdrop |
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Complete v1 |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
-| M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Planned |
+| M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Complete v1 |
 | M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Complete v1 |
 | M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Planned |
 | M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | Planned |
@@ -360,6 +360,32 @@ Action/MCP:
 - 6초 clay mascot, 10초 miniature product, 8초 paper replacement animation
 - frame cadence 위반 0
 - 정지 노출 구간의 의도하지 않은 interpolation 0
+
+### 9.1 Implementation Status - Complete v1
+
+- `tigerstudio.motion.stop_motion.v1` stores composition or layer-level ones,
+  twos, and threes exposure. The evaluator, Canvas source renderer, Preview,
+  and Export use the same quantized time.
+- Position, rotation, and scale jitter remain deterministic inside each held
+  exposure. Contact settle, overshoot, and replacement pop provide tactile
+  timing styles without flattening the source animation.
+- Clay, felt, cardboard, and painted-wood presets use editable `craft_style`
+  and `drop_shadow` effects with a locked seed and material metadata.
+- Pose capture/apply keeps stable pose and keyframe IDs and writes hold
+  interpolation. Onion inspection and audio-transient snapping use the same
+  exposure grid.
+- `Look > Stop Motion` and `motion.stop_motion.*` Action/MCP commands edit the
+  same contract.
+- Unreal conversion returns
+  `motion_feature_requires_bake:stop_motion` instead of silently dropping
+  stepped timing.
+- `tools/qa_motion_stop_motion.py` renders the required 6-second clay mascot,
+  10-second miniature product, and 8-second paper replacement scenarios.
+  Current evidence has zero cadence violations and zero unintended pixel
+  interpolation inside holds; the next exposure changes.
+- v1 is a deterministic stepped-motion authoring tool. Physically simulated
+  clay deformation, volumetric miniature lighting, and automatic frame
+  sculpting remain later work and are not current claims.
 
 ## 10. M26 - Story and Platform Direction
 
