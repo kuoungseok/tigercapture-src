@@ -6745,9 +6745,16 @@ AI Script Edit MVP integration:
   scene-difference, editability, and UMG omission evidence. Current evidence
   covers seven templates and 17 variants. M28 is not complete:
   Painterly 3D Character Spot remains explicitly blocked until M24 and offers
-  a 2D Craft/Collage fallback; 60-second loop, cancel/resume/recovery,
-  HDR/SDR, alpha/nested-composition, packaged-build MP4/PNG sequence, and
-  real-window capture gates remain outstanding.
+  a 2D Craft/Collage fallback.
+- `tools/qa_motion_2026_product_gate.py` renders a real 60-second trend
+  composition to a 120-frame PNG sequence at 2 fps, cancels after eight
+  frames, corrupts one partial frame, then resumes by reusing seven valid
+  frames and rendering the remaining 113. The same gate verifies atomic
+  recovery checksum roundtrip, straight-storage/premultiplied-composite alpha,
+  nested-composition Preview/Export pixel parity, HDR PQ H.265 preflight, and
+  an actual H.264 MP4 artifact. M28 still requires a packaged-build 60-second
+  realtime playback run, an actual HDR H.265 artifact inspection, real Motion
+  Designer window captures, and distribution regression evidence.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation
