@@ -6795,6 +6795,16 @@ AI Script Edit MVP integration:
   frame instead of discarding all elapsed time above 100 ms. This keeps the
   playhead near wall-clock time while the performance gate still reports
   dropped-frame quality honestly.
+- M22 Glass preview now processes the complete backdrop, mask, refraction,
+  dispersion, and edge/specular pipeline on a bounded ROI working surface
+  (480 px Preview, 320 px Draft), then restores the original-resolution alpha
+  boundary. Final quality retains full-resolution processing. The renderer also
+  determines the mask ROI before converting backdrop pixels to float32,
+  avoiding two full-frame float copies per Glass layer.
+- Current 1080p five-preset Preview evidence measures roughly 98-110 ms/frame.
+  A real visible five-second Liquid Glass workspace probe reaches 7.16 fps,
+  versus the earlier 3.63 fps source baseline. This is a material CPU fallback
+  improvement, not completion: the 24 fps and non-raster GPU gates still fail.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

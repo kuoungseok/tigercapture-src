@@ -124,6 +124,31 @@ def test_glass_quality_selects_deterministic_blur_pyramid() -> None:
     assert draft_a != final
 
 
+def test_glass_preview_scaling_preserves_original_alpha_bounds() -> None:
+    from app.motion_designer.glass_renderer import render_glass_surface
+
+    _app()
+    backdrop = QImage(1280, 720, QImage.Format_RGBA8888_Premultiplied)
+    backdrop.fill(QColor("#24677f"))
+    mask = QImage(1280, 720, QImage.Format_RGBA8888_Premultiplied)
+    mask.fill(0)
+    painter = QPainter(mask)
+    painter.fillRect(270, 160, 740, 390, QColor("#ffffff"))
+    painter.end()
+    effect = make_glass_effect(
+        {"blur_radius": 18.0, "refraction": 10.0},
+        preset="liquid_cta",
+    )
+    effect.metadata["quality"] = "preview"
+
+    rendered = render_glass_surface(backdrop, mask, effect, 750)
+
+    assert rendered.pixelColor(269, 300).alpha() == 0
+    assert rendered.pixelColor(270, 300).alpha() > 0
+    assert rendered.pixelColor(1009, 300).alpha() > 0
+    assert rendered.pixelColor(1010, 300).alpha() == 0
+
+
 def test_overlapping_glass_layers_composite_in_order() -> None:
     _app()
     composition = _composition()

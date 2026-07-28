@@ -194,6 +194,15 @@ Glass material을 구현한다.
   fallback 측정은 ROI 전 278-374ms/frame, ROI 후 138-172ms/frame이다.
   정확도 기준선은 개선됐지만 30fps 목표에는 미달하므로 M22는 아직
   완료 상태가 아니다.
+- Preview/Draft Glass는 이제 blur만 줄이는 대신 실제 Glass ROI의 backdrop,
+  mask, refraction, dispersion, edge/specular 계산 전체를 각각 480/320px
+  long-edge working surface에서 처리한 뒤 원본 alpha 경계로 복원한다.
+  Final은 전해상도 계산을 유지한다. full-frame backdrop/mask를 먼저
+  float32로 복사하던 경로도 ROI 확인 후 crop 변환으로 바꿨다.
+- 같은 1080p 5프리셋 QA의 현재 Preview 평균은 프리셋별 약
+  98-110ms/frame이고, 실제 표시 Motion 창의 5초 Liquid Glass 프로브는
+  7.16fps다. 이전 소스 프로브 3.63fps보다 약 97% 개선됐지만 24fps 제품
+  기준과 non-raster GPU 기준에는 여전히 미달한다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
 - 남은 M22 범위는 GPU backdrop shader 또는 viewport-resolution preview,
@@ -589,7 +598,10 @@ QA:
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`다.
   임시 사용자 경로에 무인 설치한 뒤 2,968개 파일, `TigerCapture.exe`,
   `TigerStudio.exe`, 실제 `Tiger Studio` 창을 확인하고 정상 제거했다.
-  설치본은 현재 소스보다 새 버전이며 임시 설치 경로도 제거됐다.
+  측정 시점에는 설치본이 모든 packaging input보다 새 버전이었고 임시
+  설치 경로도 제거됐다.
+  이 증거 이후 M22 Glass ROI 최적화가 추가됐으므로 다음 공개 설치본은
+  최적화 소스를 포함해 다시 생성해야 한다.
 - 무거운 프레임에서 100ms를 초과한 경과 시간을 버리던 재생 시계를
   최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
   슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
