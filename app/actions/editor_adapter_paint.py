@@ -580,6 +580,83 @@ class PaintAdapterMixin(
             limit=limit,
         )
 
+    def paint_ui_image_place(
+        self,
+        *,
+        source_path: str,
+        artboard_id: str = "",
+        parent_id: str = "",
+        x: float | None = None,
+        y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
+        image_fit: str = "fit",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_image_assets import place_ui_image
+
+        document, _row, report = place_ui_image(
+            dialog._painter_ui_document,
+            source_path,
+            artboard_id=artboard_id,
+            parent_id=parent_id,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            image_fit=image_fit,
+        )
+        dialog._push_undo_state("Place UI image")
+        result = self._paint_ui_commit(
+            dialog,
+            "Place UI image",
+            document,
+        )
+        result["image_place"] = report
+        return result
+
+    def paint_ui_image_fill_set(
+        self,
+        *,
+        source_path: str,
+        object_id: str = "",
+        image_fit: str = "fill",
+        focal_x: float = 0.5,
+        focal_y: float = 0.5,
+        tile_scale: float = 1.0,
+        restore_original_size: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_image_assets import set_ui_image_fill
+
+        target_id = str(
+            object_id
+            or dialog._painter_ui_document["selection"]["object_id"]
+            or ""
+        )
+        if not target_id:
+            raise ValueError(
+                "paint.ui.image.fill.set requires object_id or a selection"
+            )
+        document, _row, report = set_ui_image_fill(
+            dialog._painter_ui_document,
+            target_id,
+            source_path,
+            image_fit=image_fit,
+            focal_x=focal_x,
+            focal_y=focal_y,
+            tile_scale=tile_scale,
+            restore_original_size=restore_original_size,
+        )
+        dialog._push_undo_state("Set UI image fill")
+        result = self._paint_ui_commit(
+            dialog,
+            "Set UI image fill",
+            document,
+        )
+        result["image_fill"] = report
+        return result
+
     def paint_ui_layout_diagnostics(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout

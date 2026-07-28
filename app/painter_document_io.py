@@ -72,6 +72,23 @@ def _embed_external_paths(document: dict[str, Any]) -> tuple[dict[str, bytes], l
     pbr = document.get("pbr")
     if isinstance(pbr, dict):
         embed(pbr, "source_path", "pbr", 0)
+    ui_document = document.get("ui_document")
+    if isinstance(ui_document, dict):
+        image_index = 0
+        for row in ui_document.get("objects") or []:
+            if not isinstance(row, dict):
+                continue
+            content = row.get("content")
+            if not isinstance(content, dict):
+                continue
+            if str(content.get("source_path") or "").strip():
+                embed(
+                    content,
+                    "source_path",
+                    "ui-images",
+                    image_index,
+                )
+                image_index += 1
     return assets, missing
 
 

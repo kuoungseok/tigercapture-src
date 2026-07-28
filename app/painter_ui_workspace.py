@@ -849,6 +849,27 @@ class PainterUIDesignOverlay(QWidget):
             "offset_y": offset.y(),
         }
 
+    def artboard_point_at(
+        self,
+        point: QPointF,
+    ) -> tuple[str, QPointF] | None:
+        """Map a viewport point to local coordinates on the top artboard."""
+        candidates: list[tuple[dict[str, Any], QRectF, float]] = []
+        for artboard in self._document["artboards"]:
+            viewport, scale = self._artboard_viewport(artboard)
+            if viewport.contains(point):
+                candidates.append((artboard, viewport, scale))
+        if not candidates:
+            return None
+        artboard, viewport, scale = candidates[-1]
+        return (
+            str(artboard["id"]),
+            QPointF(
+                (point.x() - viewport.x()) / max(0.0001, scale),
+                (point.y() - viewport.y()) / max(0.0001, scale),
+            ),
+        )
+
     def _scale(self) -> tuple[float, float]:
         _viewport, scale = self._artboard_viewport()
         return scale, scale
@@ -1582,6 +1603,30 @@ class PainterUIDesignOverlay(QWidget):
         else:
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
+
+        if kind != "image" and kind in {
+            "button",
+            "ellipse",
+            "frame",
+            "rectangle",
+        } and str(content.get("source_path") or "").strip():
+            painter.save()
+            painter.setClipPath(self._object_shape_path(row))
+            draw_ui_image(painter, rect, content)
+            painter.restore()
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(
+                QPen(
+                    stroke,
+                    max(
+                        1.0,
+                        float(style.get("stroke_width") or 1.0) * scale,
+                    ),
+                )
+            )
+            painter.drawPath(self._object_shape_path(row))
+            painter.restore()
 
         draw_ui_object_inner_shadows(
             painter,

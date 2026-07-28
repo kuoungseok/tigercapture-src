@@ -1551,6 +1551,36 @@ class PainterUIInspector(QWidget):
         image_layout.addWidget(self.image_fit_combo)
         image_layout.addWidget(self.image_tile_scale_spin)
         form.addRow("Image Fit", image_layout_row)
+        image_focal_row = QFrame()
+        image_focal_layout = QHBoxLayout(image_focal_row)
+        image_focal_layout.setContentsMargins(0, 0, 0, 0)
+        image_focal_layout.setSpacing(3)
+        self.image_focal_x_spin = PainterUIDragDoubleSpinBox()
+        self.image_focal_x_spin.setRange(0.0, 1.0)
+        self.image_focal_x_spin.setDecimals(2)
+        self.image_focal_x_spin.setSingleStep(0.05)
+        self.image_focal_x_spin.setPrefix("X ")
+        self.image_focal_x_spin.setResetValue(0.5)
+        self.image_focal_x_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        self.image_focal_y_spin = PainterUIDragDoubleSpinBox()
+        self.image_focal_y_spin.setRange(0.0, 1.0)
+        self.image_focal_y_spin.setDecimals(2)
+        self.image_focal_y_spin.setSingleStep(0.05)
+        self.image_focal_y_spin.setPrefix("Y ")
+        self.image_focal_y_spin.setResetValue(0.5)
+        self.image_focal_y_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        self.image_original_size_button = QPushButton("Original size")
+        self.image_original_size_button.clicked.connect(
+            self._restore_image_original_size
+        )
+        image_focal_layout.addWidget(self.image_focal_x_spin)
+        image_focal_layout.addWidget(self.image_focal_y_spin)
+        image_focal_layout.addWidget(self.image_original_size_button)
+        form.addRow("Focal Point", image_focal_row)
         self.nine_slice_check = QCheckBox("Enable 9-slice")
         self.nine_slice_check.toggled.connect(self._emit_properties)
         self.nine_slice_check.toggled.connect(
@@ -1793,6 +1823,7 @@ class PainterUIInspector(QWidget):
             "image": (
                 image_source_row,
                 image_layout_row,
+                image_focal_row,
             ),
             "image_advanced": (
                 self.nine_slice_check,
@@ -2470,12 +2501,17 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_image_renderer import normalize_ui_image_content
 
         image_content = normalize_ui_image_content(row.get("content"))
-        is_image = row["kind"] == "image"
+        from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+        is_image = row["kind"] in IMAGE_FILL_KINDS
         for widget in (
             self.image_source_edit,
             self.image_browse_button,
             self.image_fit_combo,
             self.image_tile_scale_spin,
+            self.image_focal_x_spin,
+            self.image_focal_y_spin,
+            self.image_original_size_button,
             self.nine_slice_check,
             *self.nine_slice_controls.values(),
         ):
@@ -2486,6 +2522,13 @@ class PainterUIInspector(QWidget):
         )
         self.image_fit_combo.setCurrentIndex(max(0, image_fit_index))
         self.image_tile_scale_spin.setValue(image_content["tile_scale"])
+        self.image_focal_x_spin.setValue(image_content["focal_x"])
+        self.image_focal_y_spin.setValue(image_content["focal_y"])
+        self.image_original_size_button.setEnabled(
+            is_image
+            and image_content["original_width"] > 0
+            and image_content["original_height"] > 0
+        )
         self.nine_slice_check.setChecked(
             image_content["nine_slice_enabled"]
         )
@@ -2642,7 +2685,15 @@ class PainterUIInspector(QWidget):
                 visible_groups.add("frame")
             if kind in {"text", "button"}:
                 visible_groups.add("text")
-            if kind == "image":
+            from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+            if (
+                kind in IMAGE_FILL_KINDS
+                and (
+                    kind == "image"
+                    or bool(content.get("source_path"))
+                )
+            ):
                 visible_groups.add("image")
             if (
                 self.advanced_properties_toggle.isChecked()
@@ -3518,7 +3569,9 @@ class PainterUIInspector(QWidget):
                 self.text_align_combo.currentData() or "left"
             )
             style["line_height"] = float(self.line_height_spin.value())
-        if row.get("kind") == "image":
+        from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+        if row.get("kind") in IMAGE_FILL_KINDS:
             content.update(
                 {
                     "source_path": self.image_source_edit.text().strip(),
@@ -3526,6 +3579,8 @@ class PainterUIInspector(QWidget):
                         self.image_fit_combo.currentData() or "fit"
                     ),
                     "tile_scale": float(self.image_tile_scale_spin.value()),
+                    "focal_x": float(self.image_focal_x_spin.value()),
+                    "focal_y": float(self.image_focal_y_spin.value()),
                     "nine_slice_enabled": (
                         self.nine_slice_check.isChecked()
                     ),
@@ -3693,13 +3748,42 @@ class PainterUIInspector(QWidget):
 
     def _sync_image_control_states(self) -> None:
         row = self._selected_row()
-        is_image = row is not None and row.get("kind") == "image"
+        from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+        is_image = (
+            row is not None and row.get("kind") in IMAGE_FILL_KINDS
+        )
         tiled = self.image_fit_combo.currentData() == "tile"
         sliced = self.nine_slice_check.isChecked()
         self.image_tile_scale_spin.setEnabled(is_image and tiled and not sliced)
         self.image_fit_combo.setEnabled(is_image and not sliced)
+        focal_enabled = (
+            is_image
+            and self.image_fit_combo.currentData() == "fill"
+            and not sliced
+        )
+        self.image_focal_x_spin.setEnabled(focal_enabled)
+        self.image_focal_y_spin.setEnabled(focal_enabled)
         for spin in self.nine_slice_controls.values():
             spin.setEnabled(is_image and sliced)
+
+    def _restore_image_original_size(self) -> None:
+        if self._syncing:
+            return
+        row = self._selected_row()
+        if row is None:
+            return
+        from app.painter_ui_image_renderer import normalize_ui_image_content
+
+        content = normalize_ui_image_content(row.get("content"))
+        width = int(content["original_width"])
+        height = int(content["original_height"])
+        if width <= 0 or height <= 0:
+            return
+        self.properties_changed.emit(
+            str(row["id"]),
+            {"width": float(width), "height": float(height)},
+        )
 
     def _sync_auto_layout_control_states(self) -> None:
         row = self._selected_row()

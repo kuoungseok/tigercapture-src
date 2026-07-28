@@ -9651,6 +9651,8 @@ class PaintDialog(QDialog):
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
+        self._painter_ui_overlay.setAcceptDrops(True)
+        self._painter_ui_overlay.installEventFilter(self)
         self._painter_ui_edit_scope_stack: list[str] = []
         self._painter_ui_overlay.view_changed.connect(
             self._on_painter_ui_view_changed
@@ -13709,6 +13711,10 @@ class PaintDialog(QDialog):
             self._add_default_painter_ui_object(
                 str(operation.get("kind") or "rectangle")
             )
+        elif operation_type == "place_image":
+            self._prompt_place_painter_ui_image()
+        elif operation_type == "set_image_fill":
+            self._prompt_set_painter_ui_image_fill()
         elif operation_type == "fit":
             self._fit_painter_ui_view(str(operation.get("mode") or "all"))
         elif operation_type == "scale_selection":
@@ -13860,6 +13866,120 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    @staticmethod
+    def _painter_ui_image_dialog_filter() -> str:
+        return (
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;"
+            "All files (*.*)"
+        )
+
+    @staticmethod
+    def _painter_ui_image_path_from_mime(mime) -> str:
+        from app.painter_ui_image_assets import SUPPORTED_UI_IMAGE_SUFFIXES
+
+        if mime is None or not mime.hasUrls():
+            return ""
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.suffix.casefold() in SUPPORTED_UI_IMAGE_SUFFIXES:
+                return str(path)
+        return ""
+
+    def _prompt_place_painter_ui_image(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            painter_text("Place UI Image"),
+            str(Path.home()),
+            self._painter_ui_image_dialog_filter(),
+        )
+        if not path:
+            return
+        try:
+            self._place_painter_ui_image_path(path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                painter_text("Place UI Image"),
+                f"{painter_text('Could not place image')}: {exc}",
+            )
+
+    def _place_painter_ui_image_path(
+        self,
+        source_path: str,
+        *,
+        artboard_id: str = "",
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict:
+        from app.painter_ui_image_assets import place_ui_image
+
+        document, _row, report = place_ui_image(
+            getattr(self, "_painter_ui_document", None) or {},
+            source_path,
+            artboard_id=artboard_id,
+            x=x,
+            y=y,
+        )
+        self._push_undo_state("Place UI image")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._set_painter_ui_tool("select")
+        return report
+
+    def _prompt_set_painter_ui_image_fill(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        current = getattr(self, "_painter_ui_document", {}) or {}
+        object_id = str(
+            (current.get("selection") or {}).get("object_id") or ""
+        )
+        if not object_id:
+            return
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            painter_text("Set UI Image Fill"),
+            str(Path.home()),
+            self._painter_ui_image_dialog_filter(),
+        )
+        if not path:
+            return
+        try:
+            self._set_painter_ui_image_fill_path(object_id, path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                painter_text("Set UI Image Fill"),
+                f"{painter_text('Could not set image fill')}: {exc}",
+            )
+
+    def _set_painter_ui_image_fill_path(
+        self,
+        object_id: str,
+        source_path: str,
+        *,
+        image_fit: str = "fill",
+        restore_original_size: bool = False,
+    ) -> dict:
+        from app.painter_ui_image_assets import set_ui_image_fill
+
+        document, _row, report = set_ui_image_fill(
+            getattr(self, "_painter_ui_document", None) or {},
+            object_id,
+            source_path,
+            image_fit=image_fit,
+            restore_original_size=restore_original_size,
+        )
+        self._push_undo_state("Set UI image fill")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        return report
 
     def _create_painter_ui_object_from_rect(
         self,
@@ -22654,6 +22774,7 @@ class PaintDialog(QDialog):
             getattr(self, "_canvas_host", None),
             getattr(self, "_bg_label", None),
             getattr(self, "canvas", None),
+            getattr(self, "_painter_ui_overlay", None),
         )
         if obj not in canvas_widgets:
             return super().eventFilter(obj, event)
@@ -22674,8 +22795,25 @@ class PaintDialog(QDialog):
             event.accept()
             return True
         placement_mode = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
+        ui_design_mode = (
+            str(getattr(self, "_canvas_workspace_mode", "paint"))
+            == "ui_design"
+        )
+        image_path = (
+            self._painter_ui_image_path_from_mime(event.mimeData())
+            if event_type
+            in {
+                QEvent.Type.DragEnter,
+                QEvent.Type.DragMove,
+                QEvent.Type.Drop,
+            }
+            else ""
+        )
         if event_type in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
             if event.mimeData().hasFormat(PAINT_BLOCKOUT_SHAPE_MIME):
+                event.acceptProposedAction()
+                return True
+            if ui_design_mode and image_path:
                 event.acceptProposedAction()
                 return True
         if event_type == QEvent.Type.Drop and event.mimeData().hasFormat(PAINT_BLOCKOUT_SHAPE_MIME):
@@ -22695,6 +22833,54 @@ class PaintDialog(QDialog):
                 self._add_3d_blockout_primitive(kind, world_position=world)
                 event.acceptProposedAction()
                 return True
+        if event_type == QEvent.Type.Drop and ui_design_mode and image_path:
+            overlay = getattr(self, "_painter_ui_overlay", None)
+            host = getattr(self, "_canvas_host", None)
+            if overlay is not None and host is not None:
+                host_point = self._point_in_canvas_host(
+                    obj,
+                    event.position().toPoint(),
+                )
+                overlay_point = overlay.mapFrom(host, host_point)
+                mapped = overlay.artboard_point_at(QPointF(overlay_point))
+                if mapped is not None:
+                    from app.painter_ui_image_assets import (
+                        default_ui_image_size,
+                    )
+
+                    artboard_id, point = mapped
+                    width, height = default_ui_image_size(
+                        self._painter_ui_document,
+                        image_path,
+                        artboard_id=artboard_id,
+                    )
+                    artboard = next(
+                        row
+                        for row in self._painter_ui_document["artboards"]
+                        if row["id"] == artboard_id
+                    )
+                    x = max(
+                        0.0,
+                        min(
+                            float(artboard["width"]) - width,
+                            point.x() - width * 0.5,
+                        ),
+                    )
+                    y = max(
+                        0.0,
+                        min(
+                            float(artboard["height"]) - height,
+                            point.y() - height * 0.5,
+                        ),
+                    )
+                    self._place_painter_ui_image_path(
+                        image_path,
+                        artboard_id=artboard_id,
+                        x=x,
+                        y=y,
+                    )
+                    event.acceptProposedAction()
+                    return True
         if placement_mode and event_type == QEvent.Type.Wheel:
             self._zoom_3d_blockout_camera(event.angleDelta().y())
             event.accept()
@@ -23097,6 +23283,35 @@ class PaintDialog(QDialog):
                 getattr(self, "_painter_ui_property_clipboard", None),
                 dict,
             )
+            place_image_action = menu.addAction(
+                painter_text("Place image...")
+            )
+            set_image_fill_action = menu.addAction(
+                painter_text("Set image fill...")
+            )
+            from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+            selected_row = next(
+                (
+                    row
+                    for row in current.get("objects", [])
+                    if row.get("id") == selected
+                ),
+                None,
+            )
+            set_image_fill_action.setEnabled(
+                bool(
+                    selected_row
+                    and selected_row.get("kind") in IMAGE_FILL_KINDS
+                )
+            )
+            place_image_action.triggered.connect(
+                self._prompt_place_painter_ui_image
+            )
+            set_image_fill_action.triggered.connect(
+                self._prompt_set_painter_ui_image_fill
+            )
+            menu.addSeparator()
             copy_action = menu.addAction(painter_text("Copy object"))
             copy_properties_action = menu.addAction(
                 painter_text("Copy properties")
@@ -23152,14 +23367,6 @@ class PaintDialog(QDialog):
             )
             exit_scope_action = menu.addAction(
                 painter_text("Exit group")
-            )
-            selected_row = next(
-                (
-                    row
-                    for row in current.get("objects", [])
-                    if row.get("id") == selected
-                ),
-                None,
             )
             enter_scope_action.setEnabled(
                 bool(
@@ -23361,8 +23568,8 @@ class PaintDialog(QDialog):
             if selected:
                 self._painter_ui_quick_properties_suppressed_id = selected
             self._hide_painter_ui_quick_properties()
-            frame.setMinimumWidth(36)
-            frame.setMaximumWidth(36)
+            frame.setMinimumWidth(0)
+            frame.setMaximumWidth(0)
             if handle is not None:
                 handle.hide()
         else:
@@ -23444,7 +23651,7 @@ class PaintDialog(QDialog):
         )
         ui_inspector = getattr(self, "_paint_ui_inspector", None)
         inspector_width = (
-            36
+            0
             if (
                 ui_inspector is not None
                 and ui_inspector.is_collapsed()

@@ -72,7 +72,7 @@ def test_collapsed_inspector_opens_contextual_properties_for_new_selection() -> 
 
     dialog._paint_ui_inspector.set_collapsed(True)
     assert dialog._paint_ui_inspector.is_collapsed()
-    assert dialog._paint_inspector_frame.maximumWidth() == 36
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
 
     document, row = add_ui_object(
         document,

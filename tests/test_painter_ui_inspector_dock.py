@@ -57,7 +57,7 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
 
     assert dialog._paint_ui_inspector.is_auto_hide()
     assert dialog._paint_ui_inspector.is_collapsed()
-    assert dialog._paint_inspector_frame.maximumWidth() == 36
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
     dialog._paint_ui_inspector.set_auto_hide(False)
     assert not dialog._paint_ui_inspector.is_collapsed()
     assert dialog._paint_ui_inspector.dock_button.isVisible()
@@ -73,7 +73,7 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
     assert abs(dialog._paint_inspector_frame.width() - 340) <= 2
 
     dialog._paint_ui_inspector.set_auto_hide(True)
-    assert dialog._paint_inspector_frame.maximumWidth() == 36
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
     assert not dialog._paint_ui_inspector.dock_button.isVisible()
     dialog._paint_ui_inspector.set_auto_hide(False)
     assert dialog._paint_inspector_frame.minimumWidth() == 180
@@ -143,7 +143,7 @@ def test_ui_inspector_presentation_action_switches_all_three_modes() -> None:
         "auto_hide": True,
         "detached": False,
     }
-    assert dialog._paint_inspector_frame.maximumWidth() == 36
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
 
     pinned = registry.execute(
         "paint.ui.inspector.presentation",

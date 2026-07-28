@@ -1,6 +1,6 @@
 # Painter UI Figma-Class Interface Specification
 
-Status: active UX contract; UI-P0 shell and M1 ruler-guide lifecycle implemented
+Status: active UX contract; UI-P0 shell and core M1 canvas workflows implemented
 
 Date: 2026-07-29
 
@@ -23,19 +23,26 @@ Implemented:
 - ruler-corner drag to set origin and double-click/menu reset
 - localized shell labels through the Painter i18n surface
 - focused UI tests and reproducible screenshot QA
+- right Inspector presentation modes: zero-width Auto-hide, explicit Pin, and
+  detachable Floating window
+- selection-triggered temporary Properties popover that reuses the canonical
+  Inspector without permanently shrinking the canvas
+- real image Place/Fill through file chooser, drag/drop, context menu, Quick
+  Actions, and `paint.ui.image.*`
+- image fit/fill/stretch/tile, focal point, replace, and original-size restore
+- durable `.tspaint` embedding of UI image sources
 
 Still required by this contract:
 
 - the complete Polygon/Star/Arc creation set and vector-network editing
-- selection-kind-specific Inspector sections
-- temporary compact properties popover when both panels are minimized
-- persisted panel widths and minimized state
 - full M1+ interaction and delivery work tracked by the milestone document
 
 The left navigator and right Inspector use preferred defaults rather than fixed
-expanded widths. Their splitter positions are user-controlled and persisted;
-only the compact collapsed rails have fixed widths. The center canvas keeps its
-minimum usable width and receives all remaining workspace space.
+expanded widths. Their splitter positions are user-controlled and persisted.
+The navigator may use a compact rail, but Inspector Auto-hide occupies zero
+canvas width and appears as a temporary contextual popover only when a
+selection needs properties. The center canvas keeps its minimum usable width
+and receives all remaining workspace space.
 
 Related roadmap:
 

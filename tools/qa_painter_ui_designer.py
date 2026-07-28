@@ -25,7 +25,8 @@ def main() -> int:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("TIGERSTUDIO_PAINTER_PANEL_SETTINGS", "0")
 
-    from PySide6.QtCore import QTimer
+    from PySide6.QtCore import QTimer, QRectF
+    from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
     from PySide6.QtWidgets import QApplication, QScrollArea
 
     from app.actions.registry import ActionRegistry
@@ -215,6 +216,38 @@ def main() -> int:
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    image_source_path = output_dir / "painter_ui_image_fill_source.png"
+    image_source = QImage(640, 360, QImage.Format.Format_ARGB32)
+    image_source.fill(QColor("#162230"))
+    image_painter = QPainter(image_source)
+    gradient = QLinearGradient(0, 0, 640, 360)
+    gradient.setColorAt(0.0, QColor("#2B6F91"))
+    gradient.setColorAt(0.52, QColor("#4A8090"))
+    gradient.setColorAt(1.0, QColor("#D18B56"))
+    image_painter.fillRect(QRectF(0, 0, 640, 360), gradient)
+    image_painter.setBrush(QColor("#E8D9B5"))
+    image_painter.setPen(QColor("#F5EAD3"))
+    image_painter.drawEllipse(QRectF(430, 46, 116, 116))
+    image_painter.setBrush(QColor("#1D3645"))
+    image_painter.setPen(QColor("#7FB0BE"))
+    image_painter.drawRoundedRect(QRectF(54, 94, 330, 196), 18, 18)
+    image_painter.end()
+    assert image_source.save(str(image_source_path), "PNG")
+    image_fill_result = registry.execute(
+        "paint.ui.image.fill.set",
+        {
+            "object_id": phone_object_ids["image"],
+            "source_path": str(image_source_path),
+            "image_fit": "fill",
+            "focal_x": 0.62,
+            "focal_y": 0.5,
+        },
+    ).to_dict()
+    real_image_fill_ok = bool(
+        image_fill_result.get("ok") is True
+        and image_fill_result["result"]["image_fill"]["object_id"]
+        == phone_object_ids["image"]
+    )
     screenshot_path = output_dir / "painter_ui_designer_m1.png"
     dialog.grab().save(str(screenshot_path), "PNG")
     select_inspector_tab("Design")
@@ -736,7 +769,7 @@ def main() -> int:
         quick_properties.isVisible()
         and quick_properties.contains(dialog._paint_ui_inspector)
         and dialog._paint_ui_inspector.is_temporary_expanded()
-        and dialog._paint_inspector_frame.maximumWidth() == 36
+        and dialog._paint_inspector_frame.maximumWidth() == 0
     )
     quick_properties_screenshot_path = (
         output_dir / "painter_ui_designer_m1_quick_properties.png"
@@ -1098,6 +1131,11 @@ def main() -> int:
         <= dialog._canvas_host.width()
     )
     quick_actions.hide()
+    registry.execute(
+        "paint.ui.inspector.presentation",
+        {"mode": "auto_hide"},
+    )
+    dialog._hide_painter_ui_quick_properties()
     dialog.resize(900, 650)
     app.processEvents()
     dialog._sync_ui_design_toolbar_density()
@@ -1115,8 +1153,14 @@ def main() -> int:
         and quick_actions.geometry().top() >= 0
         and quick_actions.geometry().bottom()
         <= dialog._canvas_host.height()
+        and dialog._paint_ui_inspector.is_auto_hide()
+        and dialog._paint_inspector_frame.width() <= 40
     )
     quick_actions.hide()
+    registry.execute(
+        "paint.ui.inspector.presentation",
+        {"mode": "pinned"},
+    )
     dialog.resize(1360, 900)
     app.processEvents()
     state = dialog.painter_action_state()
@@ -1204,6 +1248,7 @@ def main() -> int:
             and text_context_ok
             and inline_text_ok
             and image_context_ok
+            and real_image_fill_ok
             and multi_context_ok
             and multi_properties_ok
             and tidy_up_ok
@@ -1254,6 +1299,7 @@ def main() -> int:
         "text_inspector_screenshot": str(text_inspector_screenshot_path),
         "inline_text_screenshot": str(inline_text_screenshot_path),
         "image_inspector_screenshot": str(image_inspector_screenshot_path),
+        "image_fill_source": str(image_source_path),
         "multi_inspector_screenshot": str(multi_inspector_screenshot_path),
         "quick_properties_screenshot": str(
             quick_properties_screenshot_path
@@ -1282,6 +1328,7 @@ def main() -> int:
         "object_scale_ok": object_scale_ok,
         "quick_actions_ok": quick_action_desktop_ok,
         "quick_actions_compact_ok": quick_action_compact_ok,
+        "real_image_fill_ok": real_image_fill_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

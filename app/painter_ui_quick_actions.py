@@ -47,10 +47,18 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "create.image",
-        "label": "Add image",
-        "detail": "Create an image placeholder",
-        "keywords": "photo picture media",
-        "operation": {"type": "create", "kind": "image"},
+        "label": "Place image...",
+        "detail": "Choose an image for the active artboard",
+        "keywords": "add photo picture media import",
+        "operation": {"type": "place_image"},
+    },
+    {
+        "id": "selection.image_fill",
+        "label": "Set image fill...",
+        "detail": "Choose or replace the selected shape image",
+        "keywords": "photo picture media fill replace crop",
+        "operation": {"type": "set_image_fill"},
+        "requires": "image_fill_target",
     },
     {
         "id": "view.fit_all",
@@ -168,6 +176,13 @@ def _enabled(requirement: str, context: Mapping[str, Any]) -> bool:
         return count > 1
     if requirement == "group":
         return count == 1 and str(context.get("selected_kind") or "") == "group"
+    if requirement == "image_fill_target":
+        from app.painter_ui_image_assets import IMAGE_FILL_KINDS
+
+        return (
+            count == 1
+            and str(context.get("selected_kind") or "") in IMAGE_FILL_KINDS
+        )
     return True
 
 
@@ -178,7 +193,8 @@ def _score(query: str, row: Mapping[str, Any]) -> int:
     label = str(row.get("label") or "").casefold()
     detail = str(row.get("detail") or "").casefold()
     keywords = str(row.get("keywords") or "").casefold()
-    haystack = f"{label} {detail} {keywords}"
+    source_text = str(row.get("_search_source") or "").casefold()
+    haystack = f"{label} {detail} {source_text} {keywords}"
     words = needle.split()
     if not all(word in haystack for word in words):
         return 0
@@ -305,10 +321,13 @@ def search_painter_ui_quick_actions(
     from app.painter_i18n import painter_text
 
     for index, command in enumerate(_COMMANDS):
+        source_label = str(command["label"])
+        source_detail = str(command["detail"])
         row = {
             **command,
-            "label": painter_text(str(command["label"])),
-            "detail": painter_text(str(command["detail"])),
+            "label": painter_text(source_label),
+            "detail": painter_text(source_detail),
+            "_search_source": f"{source_label} {source_detail}",
             "kind": "command",
             "enabled": _enabled(str(command.get("requires") or ""), context),
             "_rank": index,

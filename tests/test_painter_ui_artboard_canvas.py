@@ -117,7 +117,7 @@ def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
     inspector_width = dialog._paint_inspector_controls_scroll.parentWidget().width()
-    assert inspector_width == 36
+    assert inspector_width == 0
     assert dialog._paint_ui_inspector.is_auto_hide()
     assert dialog._paint_ui_inspector.is_collapsed()
     assert not dialog._paint_ui_inspector.dock_button.isVisible()

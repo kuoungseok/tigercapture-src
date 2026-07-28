@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 
 from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_image_renderer import draw_ui_image
 
 
 ASSET_EXPORT_SCHEMA = "tigerstudio.painter.ui.asset_export.v1"
@@ -49,6 +50,35 @@ def _objects_for_artboard(
         ),
         key=lambda row: (int(row["z_index"]), row["id"]),
     )
+
+
+def _image_fill_clip_path(
+    rect: QRectF,
+    kind: str,
+    radius: float,
+) -> QPainterPath:
+    path = QPainterPath()
+    if kind == "ellipse":
+        path.addEllipse(rect)
+    else:
+        path.addRoundedRect(rect, radius, radius)
+    return path
+
+
+def _draw_image_fill(
+    painter: QPainter,
+    rect: QRectF,
+    kind: str,
+    radius: float,
+    content: Mapping[str, Any],
+) -> bool:
+    if not str(content.get("source_path") or "").strip():
+        return False
+    painter.save()
+    painter.setClipPath(_image_fill_clip_path(rect, kind, radius))
+    rendered = draw_ui_image(painter, rect, content)
+    painter.restore()
+    return rendered
 
 
 def render_ui_artboard(
@@ -102,16 +132,23 @@ def render_ui_artboard(
         kind = row["kind"]
         if kind == "ellipse":
             painter.drawEllipse(rect)
+            _draw_image_fill(
+                painter,
+                rect,
+                kind,
+                radius,
+                content,
+            )
         elif kind == "line":
             painter.drawLine(rect.topLeft(), rect.bottomRight())
         elif kind == "image":
-            source = Path(
-                str(content.get("source_path") or content.get("path") or "")
-            ).expanduser()
-            source_image = QImage(str(source)) if source.is_file() else QImage()
-            if not source_image.isNull():
-                painter.drawImage(rect, source_image)
-            else:
+            if not _draw_image_fill(
+                painter,
+                rect,
+                kind,
+                radius,
+                content,
+            ):
                 painter.fillRect(rect, QColor("#323842"))
                 painter.setPen(QPen(QColor("#9AA6B2"), 1.0))
                 painter.drawLine(rect.topLeft(), rect.bottomRight())
@@ -119,6 +156,13 @@ def render_ui_artboard(
         elif kind in {"text", "button"}:
             if kind == "button":
                 painter.drawRoundedRect(rect, radius, radius)
+                _draw_image_fill(
+                    painter,
+                    rect,
+                    kind,
+                    radius,
+                    content,
+                )
             font = QFont(str(style.get("font_family") or "Arial"))
             font.setPixelSize(max(1, int(float(style.get("font_size", 16.0)))))
             font.setWeight(
@@ -157,6 +201,14 @@ def render_ui_artboard(
             )
         else:
             painter.drawRoundedRect(rect, radius, radius)
+            if kind in {"frame", "rectangle"}:
+                _draw_image_fill(
+                    painter,
+                    rect,
+                    kind,
+                    radius,
+                    content,
+                )
         painter.restore()
     painter.end()
     return image

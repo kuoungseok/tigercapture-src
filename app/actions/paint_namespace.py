@@ -325,6 +325,65 @@ def register_paint_actions(registry: Any) -> None:
         changed=False,
         dry_summary="Painter UI Quick Actions would be searched",
     )
+    image_fit_schema = {
+        "type": "string",
+        "enum": ["fit", "fill", "stretch", "tile"],
+    }
+    registry.register_adapter_action(
+        "paint.ui.image.place",
+        "Place a decoded image on a Painter UI artboard at intrinsic or explicit dimensions.",
+        "paint",
+        "paint_ui_image_place",
+        params_schema=schema_object(
+            {
+                "source_path": {"type": "string", "minLength": 1},
+                "artboard_id": {"type": "string"},
+                "parent_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 1},
+                "height": {"type": "number", "minimum": 1},
+                "image_fit": image_fit_schema,
+            },
+            required=("source_path",),
+        ),
+        required=("source_path",),
+        undo_label="Place UI image",
+        dry_summary="an image would be placed on the active UI artboard",
+    )
+    registry.register_adapter_action(
+        "paint.ui.image.fill.set",
+        "Set or replace a selected UI shape image fill with fit, focal-point, tile, and original-size controls.",
+        "paint",
+        "paint_ui_image_fill_set",
+        params_schema=schema_object(
+            {
+                "source_path": {"type": "string", "minLength": 1},
+                "object_id": {"type": "string"},
+                "image_fit": image_fit_schema,
+                "focal_x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "focal_y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "tile_scale": {
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 16,
+                },
+                "restore_original_size": {"type": "boolean"},
+            },
+            required=("source_path",),
+        ),
+        required=("source_path",),
+        undo_label="Set UI image fill",
+        dry_summary="the selected UI object image fill would be replaced",
+    )
     registry.register_adapter_action(
         "paint.ui.layout.diagnostics",
         "Inspect deterministic Auto Layout, constraint, grid, and safe-area conflicts.",

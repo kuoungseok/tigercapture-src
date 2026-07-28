@@ -180,3 +180,56 @@ def test_painter_document_actions_save_and_open_native_format(tmp_path: Path) ->
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_native_document_embeds_painter_ui_image_sources(
+    tmp_path: Path,
+) -> None:
+    app = _app()
+    from PySide6.QtGui import QColor, QImage
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_image_assets import place_ui_image
+
+    image_path = tmp_path / "ui-card.png"
+    image = QImage(64, 40, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#E05A47"))
+    assert image.save(str(image_path), "PNG")
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    document, row, _report = place_ui_image(
+        dialog._painter_ui_document,
+        image_path,
+    )
+    dialog._painter_ui_document = document
+    output = tmp_path / "ui-image.tspaint"
+    saved = dialog.save_document_to_path(output)
+    assert saved["asset_count"] >= 2
+
+    restored = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(64, 64, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    restored.open_document_from_path(output)
+    restored_row = next(
+        item
+        for item in restored._painter_ui_document["objects"]
+        if item["id"] == row["id"]
+    )
+    restored_path = Path(restored_row["content"]["source_path"])
+    assert restored_path.is_file()
+    assert restored_path != image_path
+    assert QImage(str(restored_path)).size() == image.size()
+
+    dialog.close()
+    restored.close()
+    dialog.deleteLater()
+    restored.deleteLater()
+    app.processEvents()

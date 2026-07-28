@@ -27,6 +27,9 @@ Completed in the first shell slice:
 - restart-safe persistence for user-adjusted navigator/inspector width and
   presentation; the right inspector now defaults to Auto-hide instead of
   permanently taxing canvas width
+- Auto-hide now consumes zero fixed width; selecting an object opens the
+  canonical Inspector as a temporary canvas popover, while Pin and Floating
+  remain explicit user choices
 - selection-triggered temporary Properties overlay when the right inspector is
   collapsed; it reuses the canonical inspector widget and returns it to the
   dock on close, expand, detach, or workspace change
@@ -314,6 +317,30 @@ Implemented checkpoint (2026-07-29, adaptive Inspector slice):
 - Context changes preserve the user's pinned, Auto-hide, resized, or detached
   presentation and fall back to Design only when the active tab becomes
   unavailable.
+
+Implemented checkpoint (2026-07-29, real image Place/Fill slice):
+
+- `Place image...` is available from Quick Actions, the UI context menu, and
+  an OS file chooser; local image files can also be dropped directly on any
+  visible artboard at the mapped canvas position.
+- `Set image fill...` replaces the selected Image, Rectangle, Frame, Ellipse,
+  or Button image while preserving its stable object ID.
+- The contextual Image Inspector provides fit/fill/stretch/tile, tile scale,
+  normalized focal X/Y, replacement source, and original-dimension restore.
+- Canvas preview and PNG/SVG-bake asset delivery use the same image draw plan.
+  Shape fills preserve rounded/ellipse clipping instead of leaking through a
+  rectangular fallback.
+- `paint.ui.image.place` and `paint.ui.image.fill.set` use the same mutation
+  service as the UI and create one reversible Undo step.
+- `.tspaint` packages embed external UI image sources under `assets/ui-images`
+  and restore extracted paths during load, so the design does not depend on
+  the original import location.
+- Quick Actions retain English source terms in their search index while
+  displaying the active Painter language, including the new image and
+  Inspector presentation commands.
+- Automated desktop and 900x650 compact captures verify the real image fill,
+  translated command palette, zero-width Auto-hide, temporary Properties
+  popover, and resizable/detachable Inspector states.
 
 Implemented checkpoint (2026-07-29, inline text editing slice):
 

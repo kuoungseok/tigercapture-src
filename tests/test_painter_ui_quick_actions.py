@@ -125,6 +125,30 @@ def test_quick_actions_expose_all_fluid_inspector_presentations() -> None:
     }
 
 
+def test_quick_actions_use_real_image_place_and_contextual_fill() -> None:
+    from app.painter_ui_document import select_ui_objects
+    from app.painter_ui_quick_actions import search_painter_ui_quick_actions
+
+    document, hero, _component, _token, _mobile = _document()
+    place = _result(
+        search_painter_ui_quick_actions(document, "place image"),
+        "create.image",
+    )
+    assert place["operation"] == {"type": "place_image"}
+
+    document = select_ui_objects(
+        document,
+        [hero["id"]],
+        primary_object_id=hero["id"],
+    )
+    fill = _result(
+        search_painter_ui_quick_actions(document, "image fill"),
+        "selection.image_fill",
+    )
+    assert fill["enabled"] is True
+    assert fill["operation"] == {"type": "set_image_fill"}
+
+
 def test_quick_action_popover_is_transient_and_compact() -> None:
     app = _app()
     from PySide6.QtWidgets import QWidget
@@ -229,7 +253,7 @@ def test_quick_action_and_action_share_inspector_presentation_service() -> None:
         "detached": False,
     }
     assert dialog._paint_ui_inspector.is_collapsed()
-    assert dialog._paint_inspector_frame.maximumWidth() == 36
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
 
     dialog.close()
     dialog.deleteLater()

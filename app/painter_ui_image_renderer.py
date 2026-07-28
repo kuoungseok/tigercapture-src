@@ -35,6 +35,22 @@ def normalize_ui_image_content(
         0.05,
         min(16.0, _number(source.get("tile_scale"), 1.0)),
     )
+    source["focal_x"] = max(
+        0.0,
+        min(1.0, _number(source.get("focal_x"), 0.5)),
+    )
+    source["focal_y"] = max(
+        0.0,
+        min(1.0, _number(source.get("focal_y"), 0.5)),
+    )
+    source["original_width"] = max(
+        0,
+        int(_number(source.get("original_width"), 0)),
+    )
+    source["original_height"] = max(
+        0,
+        int(_number(source.get("original_height"), 0)),
+    )
     margins = source.get("nine_slice")
     margins = margins if isinstance(margins, Mapping) else {}
     source["nine_slice_enabled"] = bool(
@@ -180,7 +196,7 @@ def image_draw_plan(
         if source_aspect > target_aspect:
             crop_width = source_height * target_aspect
             source = QRectF(
-                (source_width - crop_width) * 0.5,
+                (source_width - crop_width) * settings["focal_x"],
                 0.0,
                 crop_width,
                 source_height,
@@ -189,7 +205,7 @@ def image_draw_plan(
             crop_height = source_width / target_aspect
             source = QRectF(
                 0.0,
-                (source_height - crop_height) * 0.5,
+                (source_height - crop_height) * settings["focal_y"],
                 source_width,
                 crop_height,
             )
@@ -247,7 +263,10 @@ def draw_ui_image(
     if not plan:
         return False
     painter.save()
-    painter.setClipRect(target)
+    painter.setClipRect(
+        target,
+        Qt.ClipOperation.IntersectClip,
+    )
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     for destination, source in plan:
         painter.drawImage(destination, image, source)
