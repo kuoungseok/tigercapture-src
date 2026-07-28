@@ -124,6 +124,8 @@ class PainterUIInspector(QWidget):
     remote_component_requested = Signal(str, str, object)
     boolean_requested = Signal(str, str, object)
     section_requested = Signal(str, str, object)
+    motion_open_requested = Signal(str)
+    motion_preview_hover_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -435,6 +437,19 @@ class PainterUIInspector(QWidget):
             self.token_export_requested
         )
         tabs.addTab(self.token_library, "Tokens")
+
+        from app.painter_ui_motion_delivery_panel import (
+            PainterUIMotionDeliveryPanel,
+        )
+
+        self.motion_delivery_panel = PainterUIMotionDeliveryPanel()
+        self.motion_delivery_panel.open_motion_requested.connect(
+            self.motion_open_requested
+        )
+        self.motion_delivery_panel.preview_hover_requested.connect(
+            self.motion_preview_hover_requested
+        )
+        tabs.addTab(self.motion_delivery_panel, "Motion")
 
         from app.painter_ui_production_panel import PainterUIProductionPanel
 
@@ -1169,6 +1184,12 @@ class PainterUIInspector(QWidget):
             self._sync_selected_fields()
         finally:
             self._syncing = False
+
+    def set_motion_delivery_report(
+        self,
+        value: Mapping[str, Any] | None,
+    ) -> None:
+        self.motion_delivery_panel.set_report(value)
 
     def _selected_id(self) -> str:
         return str(self._document["selection"]["object_id"] or "")

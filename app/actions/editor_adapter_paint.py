@@ -1808,6 +1808,30 @@ class PaintAdapterMixin(
             ),
         }
 
+    def paint_ui_motion_delivery_inspect(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_delivery import motion_delivery_report
+
+        document = dialog._painter_ui_document
+        selected = str(
+            object_id
+            or ((document.get("selection") or {}).get("object_id"))
+            or ""
+        )
+        if not selected:
+            raise ValueError(
+                "paint.ui.motion.delivery.inspect requires a UI object"
+            )
+        return motion_delivery_report(
+            document,
+            selected,
+            getattr(dialog, "_painter_ui_motion_compositions", {}),
+        )
+
     def paint_ui_motion_actor_import(
         self,
         *,

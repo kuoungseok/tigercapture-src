@@ -86,6 +86,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.motion.open",
         "paint.ui.motion.preview",
         "paint.ui.motion.inspect",
+        "paint.ui.motion.delivery.inspect",
         "paint.ui.motion_actor.import",
         "paint.ui.motion_actor.list",
         "paint.ui.delivery.profiles",
@@ -228,6 +229,15 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     ).to_dict()
     assert inspected_motion["ok"]
     assert inspected_motion["result"]["composition_id"] == composition_id
+    delivery = registry.execute(
+        "paint.ui.motion.delivery.inspect",
+        {"object_id": object_id},
+    ).to_dict()
+    assert delivery["ok"]
+    assert delivery["result"]["composition_id"] == composition_id
+    assert {
+        row["target"] for row in delivery["result"]["targets"]
+    } == {"web", "app", "umg"}
 
     handoff_dir = tmp_path / "handoff"
     handoff = registry.execute(

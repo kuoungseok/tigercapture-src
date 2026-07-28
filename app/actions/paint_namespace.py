@@ -1284,6 +1284,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI motion mapping would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.motion.delivery.inspect",
+        "Inspect property-level Web, app, and Unreal UMG delivery results for the selected Painter UI motion binding.",
+        "paint",
+        "paint_ui_motion_delivery_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI motion delivery would be inspected by target",
+    )
+    registry.register_adapter_action(
         "paint.ui.motion_actor.import",
         "Import a .tgmotion project as a selectable, transformable, playable Painter UI animation actor.",
         "paint",

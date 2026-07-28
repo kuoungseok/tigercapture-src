@@ -1,6 +1,15 @@
 # Motion Designer - Painter UI 연동 작업 목록
 
-상태: **양쪽 제작 세션 협의 완료, P0 계약 통합부터 진행**
+상태: **양쪽 제작 세션 협의 완료, P0 계약 통합 진행 중**
+
+2026-07-28 구현 체크포인트:
+
+- Painter Inspector에 Web/App/UMG Motion Delivery 패널을 추가했다.
+- 판정 단위는 clip 전체가 아니라 property/feature이며 `requested`,
+  `resolved`, `reasons`, `adapter_version`, `artifact_revision`을 보고한다.
+- 실제 adapter나 bake 산출물이 없으면 Native/Baked로 주장하지 않고
+  `Blocked`로 유지한다.
+- `paint.ui.motion.delivery.inspect` Action/MCP 경로가 같은 보고서를 사용한다.
 
 협의 기준:
 
@@ -367,7 +376,7 @@ composition을 하나의 객체로 배치한다는 의미다.
 - [ ] 삭제, 복제, Detach, Localize, Variant 변경 시 binding 정책
 - [ ] 양쪽 Undo 경계와 동시 수정 충돌 보고
 - [ ] Painter/Motion/Tiger UMG 공통 preflight
-- [ ] Web/App/UMG target별 delivery capability와 fallback 결과 분리
+- [x] Web/App/UMG target별 delivery capability와 fallback 결과 분리
 - [ ] Action/MCP inspect/migrate/relink/detach 제공
 
 완료 기준:
@@ -379,7 +388,7 @@ composition을 하나의 객체로 배치한다는 의미다.
 ## P1. 첫 제작 수직 기능
 
 - [ ] `Normal -> Hover` Component State Transition 생성
-- [ ] Painter `Animate`와 Motion Inspector 섹션
+- [x] Painter `Animate`와 Motion Inspector 섹션
 - [ ] Motion Clip Assets 목록과 객체 drag-and-drop
 - [ ] Fade/Slide/Scale/Pop/Pulse/Shimmer 프리셋
 - [ ] Painter transform/opacity 실시간 프리뷰

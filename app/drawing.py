@@ -9584,6 +9584,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.selection_changed.connect(
             self._set_painter_ui_selection
         )
+        self._paint_ui_inspector.motion_open_requested.connect(
+            lambda _binding_id: self._animate_selected_painter_ui_object()
+        )
+        self._paint_ui_inspector.motion_preview_hover_requested.connect(
+            lambda _binding_id: self._set_painter_ui_motion_preview(True)
+        )
         self._paint_ui_inspector.template_apply_requested.connect(
             self._apply_painter_ui_template
         )
@@ -13563,6 +13569,19 @@ class PaintDialog(QDialog):
             or ""
         )
         linked = self._painter_ui_linked_motion_id(selected) if selected else ""
+        if inspector is not None:
+            report = None
+            if selected:
+                from app.painter_ui_motion_delivery import (
+                    motion_delivery_report,
+                )
+
+                report = motion_delivery_report(
+                    getattr(self, "_painter_ui_document", {}),
+                    selected,
+                    getattr(self, "_painter_ui_motion_compositions", {}),
+                )
+            inspector.set_motion_delivery_report(report)
         from app.painter_ui_motion_actor import motion_actor_rows
 
         has_motion_actors = bool(
@@ -13794,6 +13813,7 @@ class PaintDialog(QDialog):
         self._painter_ui_motion_compositions[composition.id] = composition
         self._painter_ui_motion_active_id = composition.id
         self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
         if self._painter_ui_motion_preview_playing:
             self._render_painter_ui_motion_preview()
 
