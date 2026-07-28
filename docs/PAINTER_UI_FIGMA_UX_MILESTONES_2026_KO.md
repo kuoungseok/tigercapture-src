@@ -583,6 +583,19 @@ design-system and template release. M6-M7 form the production handoff release.
 M8 integrates existing Tiger Studio applications only after the core design
 workflow is production-ready.
 
+## 4.1 2026-07-28 UI-P0 Checkpoint
+
+- The UI Design shell now uses an icon-first floating creation toolbar with
+  grouped Shape and Content flyouts.
+- The template strip is fixed to a compact 34 px band with smaller preview
+  targets; the full gallery remains available from the leading grid button.
+- The right inspector is constrained to 252-268 px in the standalone Painter
+  window and uses compact labels, tabs, fields, buttons, and list rows.
+- Rulers and persistent artboard guides remain visible without consuming
+  inspector space.
+- Compactness is covered by widget geometry tests and real offscreen screenshot
+  QA; controls may not overlap or silently disappear at the compact width.
+
 ## 5. Main Risks
 
 - Feature breadth can hide weak day-to-day UX. Measure task completion, not

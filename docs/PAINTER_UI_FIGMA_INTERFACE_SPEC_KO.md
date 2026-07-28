@@ -723,3 +723,16 @@ overlay mode로 전환한다.
   https://help.figma.com/hc/en-us/articles/360039818734-Prototype-scroll-and-overflow-behavior
 - Figma Smart Animate:
   https://help.figma.com/hc/en-us/articles/360039818874-Smart-animate-layers-between-frames
+
+## 16. UI Design Compact Shell Contract
+
+- The always-visible template access band is 34 px high. Larger template
+  browsing belongs in the gallery, not in permanent canvas chrome.
+- The standalone right inspector uses a 252-268 px width envelope. Embedded
+  use may expand only to 280 px.
+- Inspector typography and controls use compact density while preserving
+  readable Korean and English labels, keyboard focus, and tooltips.
+- Shape and content creation commands are grouped under icon-first flyouts so
+  secondary tools do not permanently reduce canvas space.
+- Compact mode must preserve the same document mutations and Actions as the
+  expanded UI. Density changes are presentation-only.

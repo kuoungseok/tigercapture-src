@@ -242,7 +242,8 @@ QWidget#PaintUIDesignToolHost {
     border-radius: 7px;
 }
 
-QPushButton#PainterUIFloatingToolButton {
+QPushButton#PainterUIFloatingToolButton,
+QToolButton#PainterUIFloatingToolButton {
     background-color: transparent;
     color: #dce5f0;
     border: 1px solid transparent;
@@ -250,12 +251,14 @@ QPushButton#PainterUIFloatingToolButton {
     padding: 0;
 }
 
-QPushButton#PainterUIFloatingToolButton:hover {
+QPushButton#PainterUIFloatingToolButton:hover,
+QToolButton#PainterUIFloatingToolButton:hover {
     background-color: #29323e;
     border-color: #3f4c5d;
 }
 
-QPushButton#PainterUIFloatingToolButton:checked {
+QPushButton#PainterUIFloatingToolButton:checked,
+QToolButton#PainterUIFloatingToolButton:checked {
     background-color: #315f9b;
     border-color: #6b9ddd;
 }
@@ -404,8 +407,8 @@ QFrame#PainterUITemplateStrip {
     background-color: #171b22;
     border: none;
     border-bottom: 1px solid #2b323e;
-    min-height: 50px;
-    max-height: 50px;
+    min-height: 34px;
+    max-height: 34px;
 }
 
 QDialog[canvasWorkspaceMode="ui_design"] QMenuBar#PaintMenuBar {
@@ -481,18 +484,20 @@ QPushButton#PainterUITemplateQuick:pressed {
 QWidget#PainterUIInspector {
     background-color: #1e2228;
     color: #dfe6f0;
+    font-size: 10px;
 }
 
 QWidget#PainterUIInspector QLabel {
     background-color: transparent;
     color: #c7d0dd;
+    font-size: 9px;
 }
 
 QWidget#PainterUIInspector QLabel#PaintSectionTitle {
     color: #edf3fb;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 0;
-    padding: 5px 7px 2px 7px;
+    padding: 4px 6px 1px 6px;
 }
 
 QWidget#PainterUIInspector QLabel#PaintMuted {
@@ -543,8 +548,8 @@ QWidget#PainterUIInspector QDoubleSpinBox {
     color: #e4eaf2;
     border: 1px solid #303946;
     border-radius: 3px;
-    min-height: 22px;
-    padding: 0 6px;
+    min-height: 20px;
+    padding: 0 5px;
     selection-background-color: #4b6483;
 }
 
@@ -573,7 +578,7 @@ QWidget#PainterUIInspector QDoubleSpinBox:disabled {
 
 QWidget#PainterUIInspector QComboBox::drop-down {
     border: none;
-    width: 22px;
+    width: 18px;
 }
 
 QWidget#PainterUIInspector QComboBox QAbstractItemView {
@@ -586,12 +591,12 @@ QWidget#PainterUIInspector QComboBox QAbstractItemView {
 
 QWidget#PainterUIInspector QCheckBox {
     color: #c7d0dd;
-    spacing: 5px;
+    spacing: 4px;
 }
 
 QWidget#PainterUIInspector QCheckBox::indicator {
-    width: 13px;
-    height: 13px;
+    width: 12px;
+    height: 12px;
     background-color: #101419;
     border: 1px solid #455263;
     border-radius: 3px;
@@ -607,8 +612,8 @@ QWidget#PainterUIInspector QPushButton {
     color: #dce5f0;
     border: 1px solid #343e4b;
     border-radius: 3px;
-    min-height: 22px;
-    padding: 1px 7px;
+    min-height: 20px;
+    padding: 1px 5px;
 }
 
 QWidget#PainterUIInspector QPushButton:hover {
@@ -638,9 +643,9 @@ QTabWidget#PainterUIInspectorTabs QTabBar::tab {
     border: none;
     border-right: 1px solid #2b333f;
     border-bottom: 1px solid #29313c;
-    min-width: 74px;
-    min-height: 26px;
-    padding: 2px 8px;
+    min-width: 62px;
+    min-height: 23px;
+    padding: 1px 5px;
 }
 
 QTabWidget#PainterUIInspectorTabs QTabBar::tab:hover {
@@ -672,7 +677,7 @@ QWidget#PainterUIMotionPage {
 QWidget#PainterUIInspector QListWidget::item,
 QWidget#PainterUIInspector QTreeWidget::item {
     color: #dce5f0;
-    padding: 4px 5px;
+    padding: 3px 4px;
     border-radius: 3px;
 }
 
@@ -9527,8 +9532,8 @@ class PaintDialog(QDialog):
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
-        inspector.setMinimumWidth(320)
-        inspector.setMaximumWidth(336 if self._standalone else 348)
+        inspector.setMinimumWidth(252)
+        inspector.setMaximumWidth(268 if self._standalone else 280)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self._paint_inspector_frame = inspector
         inspector_layout = QVBoxLayout(inspector)
@@ -12718,10 +12723,9 @@ class PaintDialog(QDialog):
         if overlay is not None:
             overlay.set_tool(selected)
             overlay.setFocus(Qt.FocusReason.OtherFocusReason)
-        for key, button in getattr(self, "_ui_design_tool_buttons", {}).items():
-            button.blockSignals(True)
-            button.setChecked(key == selected)
-            button.blockSignals(False)
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None and hasattr(toolbar, "set_active_tool"):
+            toolbar.set_active_tool(selected)
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(f"UI Design: {selected.title()}")
         return selected
@@ -22016,8 +22020,8 @@ class PaintDialog(QDialog):
             frame.setMinimumWidth(36)
             frame.setMaximumWidth(36)
         else:
-            frame.setMinimumWidth(320)
-            frame.setMaximumWidth(336 if self._standalone else 348)
+            frame.setMinimumWidth(252)
+            frame.setMaximumWidth(268 if self._standalone else 280)
         self._update_canvas_geometry()
 
     def _restore_3d_workspace_after_resize(

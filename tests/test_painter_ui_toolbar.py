@@ -37,8 +37,8 @@ def test_floating_toolbar_emits_intents_and_reflows() -> None:
     ) <= 1
 
     toolbar.sync_density(400)
-    assert toolbar.tool_buttons["ellipse"].isHidden()
-    assert toolbar.tool_buttons["image"].isHidden()
+    assert not toolbar.tool_buttons["ellipse"].isHidden()
+    assert not toolbar.tool_buttons["image"].isHidden()
     assert toolbar.view_buttons["selection"].isHidden()
 
     toolbar.sync_density(900)
@@ -61,4 +61,21 @@ def test_floating_toolbar_tracks_active_tool_without_emitting() -> None:
     assert toolbar.tool_buttons["text"].isChecked()
     assert not toolbar.tool_buttons["select"].isChecked()
     assert emitted == []
+    toolbar.deleteLater()
+
+
+def test_floating_toolbar_group_flyouts_switch_tools() -> None:
+    _app()
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    toolbar = PainterUIFloatingToolbar()
+    emitted: list[str] = []
+    toolbar.tool_requested.connect(emitted.append)
+    toolbar._tool_actions["ellipse"].trigger()
+    toolbar._tool_actions["image"].trigger()
+
+    assert emitted == ["ellipse", "image"]
+    assert toolbar.tool_buttons["image"].isChecked()
+    assert toolbar.tool_buttons["ellipse"] is toolbar.tool_buttons["rectangle"]
+    assert toolbar.tool_buttons["image"] is toolbar.tool_buttons["text"]
     toolbar.deleteLater()

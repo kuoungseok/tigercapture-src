@@ -116,7 +116,9 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     )
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
-    assert dialog._paint_inspector_controls_scroll.parentWidget().width() >= 320
+    inspector_width = dialog._paint_inspector_controls_scroll.parentWidget().width()
+    assert 252 <= inspector_width <= 268
+    assert dialog._painter_ui_template_strip.height() <= 35
     assert dialog._painter_file_menu.menuAction().isVisible()
     assert dialog._painter_ui_menu.menuAction().isVisible()
     assert not dialog._painter_edit_menu.menuAction().isVisible()
@@ -132,7 +134,10 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert [
         tabs.tabText(index)
         for index in range(tabs.count())
-    ] == ["Design", "Prototype", "Inspect"]
+    ] == [
+        painter_text(label, current_language())
+        for label in ("Design", "Prototype", "Inspect")
+    ]
     assert dialog._painter_ui_navigator.isVisible()
     assert dialog._painter_ui_navigator.page_list.count() == 1
     assert (
@@ -147,7 +152,7 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     )
     dialog._canvas_host.resize(400, 500)
     dialog._sync_ui_design_toolbar_density()
-    assert dialog._ui_design_tool_buttons["ellipse"].isHidden()
+    assert not dialog._ui_design_tool_buttons["ellipse"].isHidden()
     assert dialog._ui_design_view_buttons["selection"].isHidden()
     dialog._canvas_host.resize(900, 500)
     dialog._sync_ui_design_toolbar_density()

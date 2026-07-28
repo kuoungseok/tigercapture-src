@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QMenu,
     QPushButton,
     QSizePolicy,
+    QToolButton,
 )
 
 from app.icons import app_icon, icon_size
@@ -40,31 +43,54 @@ class PainterUIFloatingToolbar(QFrame):
         layout.setContentsMargins(6, 5, 6, 5)
         layout.setSpacing(2)
 
-        self.tool_buttons: dict[str, QPushButton] = {}
-        for label, kind, icon_name in (
-            ("Select", "select", "cursor"),
-            ("Frame", "frame", "ui-frame"),
-            ("Rectangle", "rectangle", "rectangle"),
-            ("Ellipse", "ellipse", "ellipse"),
-            ("Line", "line", "line"),
-            ("Text", "text", "caption"),
-            ("Image", "image", "image"),
-            ("Button", "button", "button"),
-            ("Progress", "progress", "progress"),
-        ):
-            button = self._icon_button(
-                label,
-                icon_name,
-                checkable=True,
-                checked=kind == "select",
+        self.tool_buttons: dict[str, QPushButton | QToolButton] = {}
+        self._tool_actions: dict[str, QAction] = {}
+        self._tool_group_for_kind: dict[str, QPushButton | QToolButton] = {}
+
+        select_button = self._tool_button(
+            "Select",
+            "cursor",
+            checked=True,
+        )
+        select_button.clicked.connect(
+            lambda _checked=False: self.tool_requested.emit("select")
+        )
+        layout.addWidget(select_button)
+        self.tool_buttons["select"] = select_button
+        self._tool_group_for_kind["select"] = select_button
+
+        frame_button = self._tool_button("Frame", "ui-frame")
+        frame_button.clicked.connect(
+            lambda _checked=False: self.tool_requested.emit("frame")
+        )
+        layout.addWidget(frame_button)
+        self.tool_buttons["frame"] = frame_button
+        self._tool_group_for_kind["frame"] = frame_button
+
+        shape_button = self._tool_group_button(
+            (
+                ("Rectangle", "rectangle", "rectangle"),
+                ("Ellipse", "ellipse", "ellipse"),
+                ("Line", "line", "line"),
             )
-            button.clicked.connect(
-                lambda _checked=False, value=kind: self.tool_requested.emit(
-                    value
-                )
+        )
+        layout.addWidget(shape_button)
+        for kind in ("rectangle", "ellipse", "line"):
+            self.tool_buttons[kind] = shape_button
+            self._tool_group_for_kind[kind] = shape_button
+
+        content_button = self._tool_group_button(
+            (
+                ("Text", "text", "caption"),
+                ("Image", "image", "image"),
+                ("Button", "button", "button"),
+                ("Progress", "progress", "progress"),
             )
-            layout.addWidget(button)
-            self.tool_buttons[kind] = button
+        )
+        layout.addWidget(content_button)
+        for kind in ("text", "image", "button", "progress"):
+            self.tool_buttons[kind] = content_button
+            self._tool_group_for_kind[kind] = content_button
 
         layout.addWidget(self._separator())
         self.snap_button = self._icon_button(
@@ -126,18 +152,24 @@ class PainterUIFloatingToolbar(QFrame):
 
     def set_active_tool(self, tool: str) -> None:
         active = str(tool or "select")
-        for name, button in self.tool_buttons.items():
+        active_button = self._tool_group_for_kind.get(
+            active,
+            self.tool_buttons["select"],
+        )
+        for button in set(self._tool_group_for_kind.values()):
             button.blockSignals(True)
-            button.setChecked(name == active)
+            button.setChecked(button is active_button)
             button.blockSignals(False)
+        action = self._tool_actions.get(active)
+        if action is not None and isinstance(active_button, QToolButton):
+            active_button.setDefaultAction(action)
+            active_button.setCheckable(True)
+            active_button.setChecked(True)
+            active_button.setObjectName("PainterUIFloatingToolButton")
 
     def sync_density(self, available_width: int) -> None:
         width = max(0, int(available_width))
         compact = width < 620
-        very_compact = width < 430
-        for name in ("ellipse", "line", "button", "progress"):
-            self.tool_buttons[name].setVisible(not compact)
-        self.tool_buttons["image"].setVisible(not very_compact)
         for mode in ("artboard", "selection"):
             self.view_buttons[mode].setVisible(not compact)
         self.motion_actor_button.setVisible(not compact)
@@ -179,6 +211,56 @@ class PainterUIFloatingToolbar(QFrame):
         button.setIconSize(icon_size(15))
         button.setFixedSize(30, 30)
         return button
+
+    @staticmethod
+    def _tool_button(
+        label: str,
+        icon_name: str,
+        *,
+        checked: bool = False,
+    ) -> QPushButton:
+        return PainterUIFloatingToolbar._icon_button(
+            label,
+            icon_name,
+            checkable=True,
+            checked=checked,
+        )
+
+    def _tool_group_button(
+        self,
+        rows: tuple[tuple[str, str, str], ...],
+    ) -> QToolButton:
+        button = QToolButton()
+        button.setObjectName("PainterUIFloatingToolButton")
+        button.setCheckable(True)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        button.setFixedSize(38, 30)
+        button.setIconSize(icon_size(15))
+        menu = QMenu(button)
+        menu.setObjectName("PainterUIToolFlyout")
+        for label, kind, icon_name in rows:
+            action = QAction(
+                app_icon(icon_name, size=15, color="#E4E8EE"),
+                label,
+                menu,
+            )
+            action.setData(kind)
+            action.triggered.connect(
+                lambda _checked=False, value=kind: self._select_group_tool(
+                    value
+                )
+            )
+            menu.addAction(action)
+            self._tool_actions[kind] = action
+        button.setMenu(menu)
+        button.setDefaultAction(self._tool_actions[rows[0][1]])
+        button.setCheckable(True)
+        button.setObjectName("PainterUIFloatingToolButton")
+        return button
+
+    def _select_group_tool(self, kind: str) -> None:
+        self.set_active_tool(kind)
+        self.tool_requested.emit(str(kind))
 
 
 __all__ = ["PainterUIFloatingToolbar"]

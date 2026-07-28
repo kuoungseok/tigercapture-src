@@ -100,8 +100,10 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     assert len(strip.quick_buttons) == 5
     assert all(button.text() == "" for button in strip.quick_buttons)
     assert all(not button.icon().isNull() for button in strip.quick_buttons)
-    assert all(button.size().width() == 76 for button in strip.quick_buttons)
-    assert all(button.size().height() == 42 for button in strip.quick_buttons)
+    assert all(button.size().width() == 58 for button in strip.quick_buttons)
+    assert all(button.size().height() == 28 for button in strip.quick_buttons)
+    assert strip.browse_button.size().width() == 28
+    assert strip.browse_button.size().height() == 28
     assert not strip.browse_button.icon().isNull()
     strip.quick_buttons[0].click()
     assert len(strip_applied) == 1

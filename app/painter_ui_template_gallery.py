@@ -351,26 +351,27 @@ class PainterUITemplateStrip(QFrame):
     def __init__(self, parent=None, *, quick_count: int = 5) -> None:
         super().__init__(parent)
         self.setObjectName("PainterUITemplateStrip")
+        self.setFixedHeight(34)
         self._quick_count = max(1, int(quick_count))
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(7, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(6, 2, 7, 2)
+        layout.setSpacing(3)
 
         browse = QPushButton("")
         browse.setObjectName("PainterUITemplateBrowse")
         browse.setToolTip("Open UI template gallery")
         browse.setAccessibleName("UI template gallery")
-        browse.setIcon(app_icon("grid", size=15, color="#DCE6F7"))
-        browse.setIconSize(icon_size(15))
-        browse.setFixedSize(36, 42)
+        browse.setIcon(app_icon("grid", size=14, color="#DCE6F7"))
+        browse.setIconSize(icon_size(14))
+        browse.setFixedSize(28, 28)
         browse.clicked.connect(self._browse)
         self.browse_button = browse
         layout.addWidget(browse)
 
         divider = QFrame()
         divider.setObjectName("PainterUITemplateDivider")
-        divider.setFixedSize(1, 30)
+        divider.setFixedSize(1, 20)
         layout.addWidget(divider)
 
         self.quick_buttons: list[QPushButton] = []
@@ -381,8 +382,8 @@ class PainterUITemplateStrip(QFrame):
             button.setToolTip(f"{row['name']}\n{row['category']}")
             button.setAccessibleName(str(row["name"]))
             button.setIcon(QIcon(ui_template_thumbnail(template_id)))
-            button.setIconSize(QSize(66, 37))
-            button.setFixedSize(76, 42)
+            button.setIconSize(QSize(50, 26))
+            button.setFixedSize(58, 28)
             button.clicked.connect(
                 lambda _checked=False, value=template_id: (
                     self.template_apply_requested.emit(value)
