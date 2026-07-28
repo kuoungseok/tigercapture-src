@@ -187,6 +187,7 @@ class PainterCanvasStrokeAtlas:
         self,
         strokes: list[Any],
         *,
+        signature: str | None = None,
         width: int,
         height: int,
         time_ms: int,
@@ -194,15 +195,16 @@ class PainterCanvasStrokeAtlas:
         layer_opacity: dict[str, int] | None = None,
         layer_masks: dict[str, list[tuple[float, float]]] | None = None,
     ) -> tuple[QImage, dict[str, Any]]:
-        signature = canvas_stroke_gpu_signature(
-            list(strokes or []),
-            width=width,
-            height=height,
-            time_ms=time_ms,
-            layer_visibility=layer_visibility,
-            layer_opacity=layer_opacity,
-            layer_masks=layer_masks,
-        )
+        if signature is None:
+            signature = canvas_stroke_gpu_signature(
+                list(strokes or []),
+                width=width,
+                height=height,
+                time_ms=time_ms,
+                layer_visibility=layer_visibility,
+                layer_opacity=layer_opacity,
+                layer_masks=layer_masks,
+            )
         if signature and signature == self.failed_signature:
             raise PainterOpenGLUnavailable("Painter canvas atlas skipped a known failing stroke signature.")
         if (

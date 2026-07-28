@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import tempfile
+import time
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
     QTabletEvent,
+    QTransform,
     QKeySequence,
     QShortcut,
 )
@@ -1593,6 +1595,7 @@ class DrawingCanvas(QWidget):
     zoom_requested = Signal(str, float, float, float, float)
 
     ERASE_RADIUS_PX = 18
+    WET_CANVAS_PREVIEW_MAX_DIMENSION = 768
 
     def __init__(
         self,
@@ -1623,6 +1626,18 @@ class DrawingCanvas(QWidget):
         self._layer_wet_canvas_settings: dict[str, dict[str, object]] = {}
         self._wet_canvas_render_cache: dict[str, tuple[str, QImage]] = {}
         self._wet_canvas_reports: dict[str, dict[str, object]] = {}
+        self._wet_canvas_cached_stroke_count: dict[str, int] = {}
+        self._wet_canvas_executor = None
+        self._wet_canvas_future = None
+        self._wet_canvas_future_layer: str = ""
+        self._wet_canvas_future_signature: str = ""
+        self._wet_canvas_future_poll_scheduled: bool = False
+        self._stroke_revision: int = 0
+        self._layer_view_revision: int = 0
+        self._cpu_stroke_cache_key: tuple | None = None
+        self._cpu_stroke_cache_image: QImage | None = None
+        self._live_stroke_cache_image: QImage | None = None
+        self._live_stroke_cache_size: tuple[int, int] = (0, 0)
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._current_pressure: list[float] = []
         self._current_tilt: list[float] = []
@@ -1647,6 +1662,9 @@ class DrawingCanvas(QWidget):
         self._grid_size_px: int = 64
         self._document_size_px: tuple[int, int] = (1, 1)
         self._view_zoom_percent: int = 100
+        self._view_rotation_degrees: float = 0.0
+        self._view_content_size = QSize()
+        self._view_background_pixmap = QPixmap()
         self._pixel_grid_auto_enabled: bool = True
         self._selection_timer = QTimer(self)
         self._selection_timer.setInterval(90)
@@ -1682,6 +1700,7 @@ class DrawingCanvas(QWidget):
         self._painter_canvas_gpu_cache_key: str | None = None
         self._painter_canvas_gpu_cache_image: QImage | None = None
         self._painter_canvas_gpu_failure_key: str | None = None
+        self._painter_canvas_gpu_failure_state_key: tuple | None = None
         self._painter_canvas_stroke_atlas = None
         self._perspective_guides_enabled: bool = False
         self._perspective_horizon_norm: float = 0.5
@@ -1818,6 +1837,8 @@ class DrawingCanvas(QWidget):
             str(layer_id): normalize_wet_canvas_settings(settings)
             for layer_id, settings in dict(wet_canvas_settings or {}).items()
         }
+        self._layer_view_revision += 1
+        self._invalidate_stroke_raster_cache()
         self.update()
 
     def path_point_count(self) -> int:
@@ -1826,16 +1847,18 @@ class DrawingCanvas(QWidget):
     def path_snapshot(self) -> list[tuple[float, float]]:
         if not self._path_points:
             return []
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         return [
             (max(0.0, min(1.0, point.x() / w)), max(0.0, min(1.0, point.y() / h)))
             for point in self._path_points
         ]
 
     def set_path_snapshot(self, points: list[tuple[float, float]] | None) -> None:
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         self._path_points = [
             QPointF(
                 max(0.0, min(1.0, float(point[0]))) * w,
@@ -2015,10 +2038,63 @@ class DrawingCanvas(QWidget):
         self._view_zoom_percent = max(25, min(PAINT_MAX_ZOOM_PERCENT, int(percent or 100)))
         self.update()
 
+    def set_view_pose(
+        self,
+        *,
+        rotation_degrees: float,
+        content_size: QSize,
+        background_pixmap: QPixmap | None = None,
+    ) -> None:
+        self._view_rotation_degrees = float(rotation_degrees)
+        self._view_content_size = QSize(
+            max(1, int(content_size.width())),
+            max(1, int(content_size.height())),
+        )
+        self._view_background_pixmap = (
+            QPixmap(background_pixmap)
+            if background_pixmap is not None and not background_pixmap.isNull()
+            else QPixmap()
+        )
+        self.update()
+
+    def canvas_content_size(self) -> QSize:
+        size = getattr(self, "_view_content_size", QSize())
+        if size.isValid() and size.width() > 0 and size.height() > 0:
+            return QSize(size)
+        return QSize(max(1, self.width()), max(1, self.height()))
+
+    def _canvas_view_transform(self) -> QTransform:
+        content = self.canvas_content_size()
+        transform = QTransform()
+        transform.translate(self.width() * 0.5, self.height() * 0.5)
+        transform.rotate(float(self._view_rotation_degrees))
+        transform.translate(-content.width() * 0.5, -content.height() * 0.5)
+        return transform
+
+    def map_view_to_canvas(self, point: QPointF) -> QPointF:
+        inverse, invertible = self._canvas_view_transform().inverted()
+        return inverse.map(QPointF(point)) if invertible else QPointF(point)
+
+    def map_canvas_to_view(self, point: QPointF) -> QPointF:
+        return self._canvas_view_transform().map(QPointF(point))
+
+    def canvas_contains_view_point(self, point: QPointF) -> bool:
+        mapped = self.map_view_to_canvas(point)
+        size = self.canvas_content_size()
+        return QRectF(0, 0, size.width(), size.height()).contains(mapped)
+
+    def _clamp_canvas_point(self, point: QPointF) -> QPointF:
+        size = self.canvas_content_size()
+        return QPointF(
+            max(0.0, min(float(size.width()), float(point.x()))),
+            max(0.0, min(float(size.height()), float(point.y()))),
+        )
+
     def stable_render_size(self, width: int | None = None, height: int | None = None) -> QSize:
         """Return the unzoomed cache size used for retained stroke/material rendering."""
-        display_width = max(1, int(self.width() if width is None else width))
-        display_height = max(1, int(self.height() if height is None else height))
+        content = self.canvas_content_size()
+        display_width = max(1, int(content.width() if width is None else width))
+        display_height = max(1, int(content.height() if height is None else height))
         zoom = max(
             0.25,
             min(
@@ -2032,7 +2108,11 @@ class DrawingCanvas(QWidget):
         )
 
     def pixel_grid_state(self) -> dict[str, int | float | bool]:
-        metrics = self._pixel_grid_metrics(max(1, self.width()), max(1, self.height()))
+        size = self.canvas_content_size()
+        metrics = self._pixel_grid_metrics(
+            max(1, size.width()),
+            max(1, size.height()),
+        )
         return {
             "auto": bool(getattr(self, "_pixel_grid_auto_enabled", True)),
             "visible": bool(metrics.get("visible", False)),
@@ -2085,9 +2165,10 @@ class DrawingCanvas(QWidget):
         shape: str = "rect",
         aspect: str | None = None,
     ) -> None:
+        size = self.canvas_content_size()
         rect = self._normalized_drag_rect(
-            QPointF(float(x1) * max(1, self.width()), float(y1) * max(1, self.height())),
-            QPointF(float(x2) * max(1, self.width()), float(y2) * max(1, self.height())),
+            QPointF(float(x1) * max(1, size.width()), float(y1) * max(1, size.height())),
+            QPointF(float(x2) * max(1, size.width()), float(y2) * max(1, size.height())),
             aspect or self._selection_aspect_mode,
         )
         points = self._points_from_drag_rect(rect, shape=shape)
@@ -2194,42 +2275,335 @@ class DrawingCanvas(QWidget):
             return
         opacity_scale = self._layer_opacity.get(layer_id, 100) / 100.0
         settings = self._layer_wet_canvas_settings.get(layer_id, {})
+        preview_scale = min(
+            1.0,
+            float(self.WET_CANVAS_PREVIEW_MAX_DIMENSION)
+            / max(1.0, float(max(width, height))),
+        )
+        preview_w = max(1, int(round(width * preview_scale)))
+        preview_h = max(1, int(round(height * preview_scale)))
         signature = wet_canvas_signature(
             layer_strokes,
             settings,
-            width=width,
-            height=height,
+            width=preview_w,
+            height=preview_h,
             time_ms=time_ms,
             opacity_scale=opacity_scale,
+        )
+        signature = (
+            f"{signature}:preview={preview_scale:.6f}:{int(width)}x{int(height)}"
         )
         cached = self._wet_canvas_render_cache.get(layer_id)
         if cached is not None and cached[0] == signature:
             image = cached[1]
-        else:
-            image, report = render_wet_layer_qimage(
-                layer_strokes,
-                settings=settings,
-                width=width,
-                height=height,
-                time_ms=time_ms,
-                opacity_scale=opacity_scale,
-                render_stroke=lambda target, stroke, render_w, render_h, alpha: self._paint_stroke(
-                    target,
-                    stroke,
-                    render_w,
-                    render_h,
-                    opacity_scale=alpha,
-                ),
+            if preview_w == width and preview_h == height:
+                painter.drawImage(0, 0, image)
+            else:
+                painter.drawImage(QRectF(0, 0, width, height), image)
+            return
+
+        future = self._wet_canvas_future
+        if future is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            if self._wet_canvas_executor is None:
+                self._wet_canvas_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="painter-wet-preview",
+                )
+            # Committed Stroke instances are replaced, not mutated, by Painter
+            # history operations. A shallow snapshot keeps pen-up latency
+            # independent of the document's total point count.
+            job_strokes = list(layer_strokes)
+            job_settings = dict(settings)
+            future = self._wet_canvas_executor.submit(
+                self._render_wet_canvas_preview_job,
+                job_strokes,
+                job_settings,
+                preview_w,
+                preview_h,
+                time_ms,
+                opacity_scale,
+                preview_scale,
+                signature,
             )
+            self._wet_canvas_future = future
+            self._wet_canvas_future_layer = layer_id
+            self._wet_canvas_future_signature = signature
+            self._schedule_wet_canvas_future_poll()
+
+        if cached is not None:
+            image = cached[1]
+            painter.drawImage(QRectF(0, 0, width, height), image)
+            cached_count = self._wet_canvas_cached_stroke_count.get(layer_id, 0)
+            fallback_strokes = layer_strokes[cached_count:]
+        else:
+            fallback_strokes = layer_strokes
+        for stroke in fallback_strokes:
+            self._paint_stroke(
+                painter,
+                stroke,
+                width,
+                height,
+                opacity_scale=opacity_scale,
+            )
+
+    @staticmethod
+    def _render_wet_canvas_preview_job(
+        strokes: list[Stroke],
+        settings: dict,
+        width: int,
+        height: int,
+        time_ms: int,
+        opacity_scale: float,
+        preview_scale: float,
+        signature: str,
+    ) -> tuple[str, QImage, dict[str, object]]:
+        from app.painter_wet_canvas import render_wet_layer_qimage
+
+        image, report = render_wet_layer_qimage(
+            strokes,
+            settings=settings,
+            width=width,
+            height=height,
+            time_ms=time_ms,
+            opacity_scale=opacity_scale,
+            render_stroke=lambda target, stroke, render_w, render_h, alpha: DrawingCanvas._paint_stroke(
+                target,
+                (
+                    stroke
+                    if preview_scale >= 1.0
+                    else DrawingCanvas._scaled_preview_stroke(
+                        stroke,
+                        preview_scale,
+                    )
+                ),
+                render_w,
+                render_h,
+                opacity_scale=alpha,
+            ),
+        )
+        report["preview_scale"] = float(preview_scale)
+        report["preview_size"] = [int(width), int(height)]
+        return signature, image, dict(report)
+
+    def _schedule_wet_canvas_future_poll(self) -> None:
+        if self._wet_canvas_future_poll_scheduled:
+            return
+        self._wet_canvas_future_poll_scheduled = True
+        QTimer.singleShot(16, self._poll_wet_canvas_future)
+
+    def _poll_wet_canvas_future(self) -> None:
+        self._wet_canvas_future_poll_scheduled = False
+        future = self._wet_canvas_future
+        if future is None:
+            return
+        if not future.done():
+            self._schedule_wet_canvas_future_poll()
+            return
+        layer_id = self._wet_canvas_future_layer
+        try:
+            signature, image, report = future.result()
             self._wet_canvas_render_cache[layer_id] = (signature, image)
             self._wet_canvas_reports[layer_id] = dict(report)
+            self._wet_canvas_cached_stroke_count[layer_id] = int(
+                report.get("stroke_count", 0) or 0
+            )
+        except Exception as exc:
+            self._wet_canvas_reports[layer_id] = {
+                "enabled": True,
+                "async_preview": True,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+        finally:
+            self._wet_canvas_future = None
+            self._wet_canvas_future_layer = ""
+            self._wet_canvas_future_signature = ""
+        self._cpu_stroke_cache_key = None
+        self._cpu_stroke_cache_image = None
+        self.update()
+
+    @staticmethod
+    def _scaled_preview_stroke(stroke: Stroke, scale: float) -> Stroke:
+        scaled = copy.copy(stroke)
+        scaled.width_px = max(0.25, float(stroke.width_px) * float(scale))
+        return scaled
+
+    def _invalidate_stroke_raster_cache(self) -> None:
+        self._cpu_stroke_cache_key = None
+        self._cpu_stroke_cache_image = None
+        self._painter_canvas_gpu_failure_state_key = None
+
+    def _stroke_render_state_key(self, w: int, h: int, t_ms: int) -> tuple:
+        return (
+            int(self._stroke_revision),
+            int(self._layer_view_revision),
+            int(w),
+            int(h),
+            int(t_ms),
+        )
+
+    def _paint_committed_strokes_qpainter(
+        self,
+        painter: QPainter,
+        strokes: list[Stroke],
+        w: int,
+        h: int,
+        t_ms: int,
+    ) -> None:
+        painted_wet_layers: set[str] = set()
+        for stroke in strokes:
+            if not stroke.is_active(t_ms):
+                continue
+            layer_id = self._stroke_layer_id(stroke)
+            if not self._layer_visibility.get(layer_id, True):
+                continue
+            if self._wet_canvas_layer_enabled(layer_id):
+                if layer_id in painted_wet_layers:
+                    continue
+                mask = self._layer_masks.get(layer_id, [])
+                if len(mask) >= 3:
+                    painter.save()
+                    self._clip_to_layer_mask(painter, mask, w, h)
+                try:
+                    self._paint_wet_canvas_layer(
+                        painter,
+                        strokes,
+                        layer_id,
+                        w,
+                        h,
+                        t_ms,
+                    )
+                finally:
+                    if len(mask) >= 3:
+                        painter.restore()
+                painted_wet_layers.add(layer_id)
+                continue
+            mask = self._layer_masks.get(layer_id, [])
+            if len(mask) >= 3:
+                painter.save()
+                self._clip_to_layer_mask(painter, mask, w, h)
+            try:
+                self._paint_stroke(
+                    painter,
+                    stroke,
+                    w,
+                    h,
+                    opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+                )
+            finally:
+                if len(mask) >= 3:
+                    painter.restore()
+
+    def _paint_strokes_with_cpu_cache(
+        self,
+        painter: QPainter,
+        strokes: list[Stroke],
+        w: int,
+        h: int,
+        t_ms: int,
+    ) -> None:
+        if not hasattr(self, "_embedded_strokes"):
+            self._paint_committed_strokes_qpainter(painter, strokes, w, h, t_ms)
+            return
+        key = self._stroke_render_state_key(w, h, t_ms)
+        image = self._cpu_stroke_cache_image
+        if (
+            key != self._cpu_stroke_cache_key
+            or image is None
+            or image.isNull()
+        ):
+            image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(Qt.GlobalColor.transparent)
+            cache_painter = QPainter(image)
+            cache_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            try:
+                self._paint_committed_strokes_qpainter(
+                    cache_painter,
+                    strokes,
+                    w,
+                    h,
+                    t_ms,
+                )
+            finally:
+                cache_painter.end()
+            self._cpu_stroke_cache_key = key
+            self._cpu_stroke_cache_image = image
         painter.drawImage(0, 0, image)
+
+    def _append_stroke_to_cpu_cache(
+        self,
+        stroke: Stroke,
+        *,
+        previous_revision: int,
+    ) -> bool:
+        image = self._cpu_stroke_cache_image
+        key = self._cpu_stroke_cache_key
+        if image is None or image.isNull() or key is None:
+            return False
+        w = image.width()
+        h = image.height()
+        t_ms = int(self._get_time_ms())
+        if key != (
+            int(previous_revision),
+            int(self._layer_view_revision),
+            int(w),
+            int(h),
+            t_ms,
+        ):
+            return False
+        layer_id = self._stroke_layer_id(stroke)
+        if (
+            not stroke.is_active(t_ms)
+            or not self._layer_visibility.get(layer_id, True)
+            or self._wet_canvas_layer_enabled(layer_id)
+        ):
+            return False
+        if self._layer_order:
+            rank = {
+                candidate: index
+                for index, candidate in enumerate(self._layer_order)
+            }
+            new_rank = rank.get(layer_id, len(rank))
+            for existing in self._embedded_strokes[:-1]:
+                existing_layer = self._stroke_layer_id(existing)
+                if (
+                    existing.is_active(t_ms)
+                    and self._layer_visibility.get(existing_layer, True)
+                    and rank.get(existing_layer, len(rank)) > new_rank
+                ):
+                    return False
+        cache_painter = QPainter(image)
+        cache_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        mask = self._layer_masks.get(layer_id, [])
+        if len(mask) >= 3:
+            cache_painter.save()
+            self._clip_to_layer_mask(cache_painter, mask, w, h)
+        try:
+            self._paint_stroke(
+                cache_painter,
+                stroke,
+                w,
+                h,
+                opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+            )
+        finally:
+            if len(mask) >= 3:
+                cache_painter.restore()
+            cache_painter.end()
+        self._cpu_stroke_cache_key = self._stroke_render_state_key(w, h, t_ms)
+        return True
 
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        w = max(1, self.width())
-        h = max(1, self.height())
+        content_size = self.canvas_content_size()
+        w = max(1, content_size.width())
+        h = max(1, content_size.height())
+        painter.save()
+        painter.setTransform(self._canvas_view_transform(), True)
+        if not self._view_background_pixmap.isNull():
+            painter.drawPixmap(QRect(0, 0, w, h), self._view_background_pixmap)
 
         self._paint_grid(painter, w, h)
 
@@ -2252,86 +2626,23 @@ class DrawingCanvas(QWidget):
                 render_h,
                 t_ms,
             ):
-                painted_wet_layers: set[str] = set()
-                for stroke in strokes:
-                    if not stroke.is_active(t_ms):
-                        continue
-                    layer_id = self._stroke_layer_id(stroke)
-                    if not self._layer_visibility.get(layer_id, True):
-                        continue
-                    if self._wet_canvas_layer_enabled(layer_id):
-                        if layer_id in painted_wet_layers:
-                            continue
-                        mask = self._layer_masks.get(layer_id, [])
-                        if len(mask) >= 3:
-                            painter.save()
-                            self._clip_to_layer_mask(painter, mask, render_w, render_h)
-                        try:
-                            self._paint_wet_canvas_layer(
-                                painter,
-                                strokes,
-                                layer_id,
-                                render_w,
-                                render_h,
-                                t_ms,
-                            )
-                        finally:
-                            if len(mask) >= 3:
-                                painter.restore()
-                        painted_wet_layers.add(layer_id)
-                        continue
-                    mask = self._layer_masks.get(layer_id, [])
-                    if len(mask) >= 3:
-                        painter.save()
-                        self._clip_to_layer_mask(painter, mask, render_w, render_h)
-                    try:
-                        self._paint_stroke(
-                            painter,
-                            stroke,
-                            render_w,
-                            render_h,
-                            opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
-                        )
-                    finally:
-                        if len(mask) >= 3:
-                            painter.restore()
+                self._paint_strokes_with_cpu_cache(
+                    painter,
+                    strokes,
+                    render_w,
+                    render_h,
+                    t_ms,
+                )
         finally:
             painter.restore()
 
-        if self._current_points:
-            stroke = Stroke(
-                points=[(p.x() / w, p.y() / h) for p in self._current_points],
-                color=(
-                    self._pen_color.red(),
-                    self._pen_color.green(),
-                    self._pen_color.blue(),
-                ),
-                opacity=self._pen_opacity,
-                width_px=self._pen_width,
-                brush_style=self._pen_style,
-                **self._current_brush_detail_kwargs(),
-                layer_id=self._active_layer_id,
-                source_tool="pen",
-                point_pressure=list(self._current_pressure),
-                point_tilt=list(self._current_tilt),
-                point_tilt_x=list(self._current_tilt_x),
-                point_tilt_y=list(self._current_tilt_y),
-                point_rotation=list(self._current_rotation),
-                point_tangential_pressure=list(self._current_tangential_pressure),
-                point_load=list(self._current_load),
-            )
+        if self._current_points and self._live_stroke_cache_image is not None:
             mask = self._layer_masks.get(self._active_layer_id, [])
             if len(mask) >= 3:
                 painter.save()
                 self._clip_to_layer_mask(painter, mask, w, h)
             try:
-                self._paint_stroke(
-                    painter,
-                    stroke,
-                    w,
-                    h,
-                    opacity_scale=self._layer_opacity.get(self._active_layer_id, 100) / 100.0,
-                )
+                painter.drawImage(0, 0, self._live_stroke_cache_image)
             finally:
                 if len(mask) >= 3:
                     painter.restore()
@@ -2408,6 +2719,7 @@ class DrawingCanvas(QWidget):
                 self._extra_paint_hook(painter, w, h)
             except Exception:
                 pass
+        painter.restore()
 
     @staticmethod
     def _stroke_layer_id(stroke: Stroke) -> str:
@@ -3342,6 +3654,13 @@ class DrawingCanvas(QWidget):
         h: int,
         t_ms: int,
     ) -> bool:
+        failure_state_key = self._stroke_render_state_key(w, h, t_ms)
+        if (
+            hasattr(self, "_embedded_strokes")
+            and failure_state_key
+            == getattr(self, "_painter_canvas_gpu_failure_state_key", None)
+        ):
+            return False
         if any(
             self._wet_canvas_layer_enabled(layer_id)
             for layer_id in self._layer_wet_canvas_settings
@@ -3363,6 +3682,7 @@ class DrawingCanvas(QWidget):
             self._painter_canvas_gpu_cache_key = None
             self._painter_canvas_gpu_cache_image = None
             self._painter_canvas_gpu_failure_key = None
+            self._painter_canvas_gpu_failure_state_key = None
             self._painter_canvas_renderer_status = {
                 "renderer": "painter_canvas_none_v1",
                 "active": "none",
@@ -3372,6 +3692,7 @@ class DrawingCanvas(QWidget):
                 "size": [int(w), int(h)],
             }
             return True
+        signature: str | None = None
         try:
             from app.painter_opengl import (
                 PainterCanvasStrokeAtlas,
@@ -3395,6 +3716,7 @@ class DrawingCanvas(QWidget):
                 self._painter_canvas_stroke_atlas = atlas
             image, report = atlas.render(
                 strokes,
+                signature=signature,
                 width=w,
                 height=h,
                 time_ms=t_ms,
@@ -3407,6 +3729,7 @@ class DrawingCanvas(QWidget):
             self._painter_canvas_gpu_cache_key = signature
             self._painter_canvas_gpu_cache_image = image
             self._painter_canvas_gpu_failure_key = None
+            self._painter_canvas_gpu_failure_state_key = None
             self._painter_canvas_renderer_status = {
                 **dict(report or {}),
                 "remote_safe": True,
@@ -3432,18 +3755,9 @@ class DrawingCanvas(QWidget):
                 "remote_safe": True,
                 "size": [int(w), int(h)],
             }
-            try:
-                self._painter_canvas_gpu_failure_key = canvas_stroke_gpu_signature(
-                    strokes,
-                    width=w,
-                    height=h,
-                    time_ms=t_ms,
-                    layer_visibility=self._layer_visibility,
-                    layer_opacity=self._layer_opacity,
-                    layer_masks=self._layer_masks,
-                )
-            except Exception:
-                self._painter_canvas_gpu_failure_key = None
+            self._painter_canvas_gpu_failure_key = signature
+            if hasattr(self, "_embedded_strokes"):
+                self._painter_canvas_gpu_failure_state_key = failure_state_key
             return False
 
     def _paint_marching_ants(self, painter: QPainter, w: int, h: int) -> None:
@@ -3688,10 +4002,13 @@ class DrawingCanvas(QWidget):
         current: QPointF,
         aspect: str | None = None,
     ) -> QRectF:
-        x1 = max(0.0, min(float(self.width()), float(start.x())))
-        y1 = max(0.0, min(float(self.height()), float(start.y())))
-        x2 = max(0.0, min(float(self.width()), float(current.x())))
-        y2 = max(0.0, min(float(self.height()), float(current.y())))
+        size = self.canvas_content_size()
+        content_w = float(size.width())
+        content_h = float(size.height())
+        x1 = max(0.0, min(content_w, float(start.x())))
+        y1 = max(0.0, min(content_h, float(start.y())))
+        x2 = max(0.0, min(content_w, float(current.x())))
+        y2 = max(0.0, min(content_h, float(current.y())))
         dx = x2 - x1
         dy = y2 - y1
         mode = str(aspect or "free").strip().casefold()
@@ -3715,13 +4032,14 @@ class DrawingCanvas(QWidget):
             y2 = y1 + sy * ady
         left = max(0.0, min(x1, x2))
         top = max(0.0, min(y1, y2))
-        right = min(float(self.width()), max(x1, x2))
-        bottom = min(float(self.height()), max(y1, y2))
+        right = min(content_w, max(x1, x2))
+        bottom = min(content_h, max(y1, y2))
         return QRectF(left, top, max(0.0, right - left), max(0.0, bottom - top))
 
     def _points_from_drag_rect(self, rect: QRectF, *, shape: str = "rect") -> list[tuple[float, float]]:
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         left = max(0.0, min(1.0, rect.left() / w))
         top = max(0.0, min(1.0, rect.top() / h))
         right = max(0.0, min(1.0, rect.right() / w))
@@ -3754,9 +4072,10 @@ class DrawingCanvas(QWidget):
         step = max(4, min(512, int(getattr(self, "_grid_size_px", 64) or 64)))
         x = round(float(point.x()) / step) * step
         y = round(float(point.y()) / step) * step
+        size = self.canvas_content_size()
         return QPointF(
-            max(0.0, min(float(self.width()), float(x))),
-            max(0.0, min(float(self.height()), float(y))),
+            max(0.0, min(float(size.width()), float(x))),
+            max(0.0, min(float(size.height()), float(y))),
         )
 
     # ------------- mouse interaction -------------
@@ -3770,6 +4089,71 @@ class DrawingCanvas(QWidget):
         self._current_rotation = []
         self._current_tangential_pressure = []
         self._current_load = []
+        self._live_stroke_cache_image = None
+        self._live_stroke_cache_size = (0, 0)
+
+    def _paint_latest_live_stroke_segment(self) -> None:
+        if not self._current_points:
+            return
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
+        if (
+            self._live_stroke_cache_image is None
+            or self._live_stroke_cache_size != (w, h)
+        ):
+            self._live_stroke_cache_image = QImage(
+                w,
+                h,
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            self._live_stroke_cache_image.fill(Qt.GlobalColor.transparent)
+            self._live_stroke_cache_size = (w, h)
+            start = 0
+        else:
+            start = max(0, len(self._current_points) - 2)
+        segment = Stroke(
+            points=[
+                (point.x() / w, point.y() / h)
+                for point in self._current_points[start:]
+            ],
+            color=(
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            opacity=self._pen_opacity,
+            width_px=self._pen_width,
+            brush_style=self._pen_style,
+            **self._current_brush_detail_kwargs(),
+            layer_id=self._active_layer_id,
+            source_tool="pen",
+            point_pressure=list(self._current_pressure[start:]),
+            point_tilt=list(self._current_tilt[start:]),
+            point_tilt_x=list(self._current_tilt_x[start:]),
+            point_tilt_y=list(self._current_tilt_y[start:]),
+            point_rotation=list(self._current_rotation[start:]),
+            point_tangential_pressure=list(
+                self._current_tangential_pressure[start:]
+            ),
+            point_load=list(self._current_load[start:]),
+        )
+        live_painter = QPainter(self._live_stroke_cache_image)
+        live_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            self._paint_stroke(
+                live_painter,
+                segment,
+                w,
+                h,
+                opacity_scale=self._layer_opacity.get(
+                    self._active_layer_id,
+                    100,
+                )
+                / 100.0,
+            )
+        finally:
+            live_painter.end()
 
     def _append_current_stroke_sample(
         self,
@@ -3791,6 +4175,7 @@ class DrawingCanvas(QWidget):
         self._current_rotation.append(float(sample.rotation))
         self._current_tangential_pressure.append(float(sample.tangential_pressure))
         self._current_load.append(float(sample.load))
+        self._paint_latest_live_stroke_segment()
         self._update_current_stroke_dirty(point, previous)
         return True
 
@@ -3801,8 +4186,9 @@ class DrawingCanvas(QWidget):
     def _finish_current_stroke(self) -> None:
         if not self._current_points:
             return
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         stroke = Stroke(
             points=[(p.x() / w, p.y() / h) for p in self._current_points],
             color=(
@@ -3837,7 +4223,14 @@ class DrawingCanvas(QWidget):
         from app.painter_stylus import tablet_stylus_sample
 
         event_type = event.type()
-        point = QPointF(event.position())
+        view_point = QPointF(event.position())
+        if (
+            event_type == QEvent.Type.TabletPress
+            and not self.canvas_contains_view_point(view_point)
+        ):
+            event.ignore()
+            return
+        point = self._clamp_canvas_point(self.map_view_to_canvas(view_point))
         pointer_name = str(event.pointerType()).casefold()
         erasing = self._tool == "eraser" or "eraser" in pointer_name
         if event_type == QEvent.Type.TabletPress:
@@ -3870,19 +4263,23 @@ class DrawingCanvas(QWidget):
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        pos = event.position()
+        view_pos = QPointF(event.position())
+        if not self.canvas_contains_view_point(view_pos):
+            return
+        pos = self._clamp_canvas_point(self.map_view_to_canvas(view_pos))
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         if self._tool in {"zoom_in", "zoom_out"}:
             self.zoom_requested.emit(
                 self._tool,
-                max(0.0, min(1.0, pos.x() / max(1, self.width()))),
-                max(0.0, min(1.0, pos.y() / max(1, self.height()))),
+                max(0.0, min(1.0, pos.x() / w)),
+                max(0.0, min(1.0, pos.y() / h)),
                 0.0,
                 0.0,
             )
             return
         if self._tool == "magic_select":
-            w = max(1, self.width())
-            h = max(1, self.height())
             self.selection_probe_requested.emit("color", pos.x() / w, pos.y() / h)
             return
         # Stage 1 rotoscope — rectangle drag for GrabCut takes
@@ -3895,8 +4292,6 @@ class DrawingCanvas(QWidget):
         # Phase E — Power Window polygon editor takes precedence over
         # pen/eraser when the editor has installed a click hook.
         if self._click_hook is not None:
-            w = max(1, self.width())
-            h = max(1, self.height())
             try:
                 consumed = self._click_hook(pos.x() / w, pos.y() / h, "click")
             except Exception:
@@ -3905,8 +4300,6 @@ class DrawingCanvas(QWidget):
                 self.update()
                 return
         if self._interaction_hook is not None:
-            w = max(1, self.width())
-            h = max(1, self.height())
             try:
                 consumed = bool(self._interaction_hook("press", pos.x() / w, pos.y() / h, event))
             except Exception:
@@ -3948,9 +4341,10 @@ class DrawingCanvas(QWidget):
             return
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._interaction_hook is not None):
-            pos = event.position()
-            w = max(1, self.width())
-            h = max(1, self.height())
+            pos = self.map_view_to_canvas(event.position())
+            size = self.canvas_content_size()
+            w = max(1, size.width())
+            h = max(1, size.height())
             try:
                 consumed = bool(self._interaction_hook("double", pos.x() / w, pos.y() / h, event))
             except Exception:
@@ -3960,9 +4354,10 @@ class DrawingCanvas(QWidget):
                 return
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._click_hook is not None):
-            pos = event.position()
-            w = max(1, self.width())
-            h = max(1, self.height())
+            pos = self.map_view_to_canvas(event.position())
+            size = self.canvas_content_size()
+            w = max(1, size.width())
+            h = max(1, size.height())
             try:
                 self._click_hook(pos.x() / w, pos.y() / h, "double")
             except Exception:
@@ -4014,23 +4409,27 @@ class DrawingCanvas(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._tablet_stroke_active:
             return
+        pos = self._clamp_canvas_point(
+            self.map_view_to_canvas(event.position())
+        )
         if self._color_window_drag_handle is not None:
-            self._update_color_window_drag(event.position(), commit=False)
+            self._update_color_window_drag(pos, commit=False)
             return
         # Rectangle drag — keep updating the current corner while
         # the mouse is held.
         if self._rect_hook is not None and self._rect_drag_start is not None:
-            self._rect_drag_current = QPointF(event.position())
+            self._rect_drag_current = QPointF(pos)
             self.update()
             return
         if self._color_window_payload is not None:
-            self._set_color_window_cursor(self._color_window_hit_test(event.position()))
+            self._set_color_window_cursor(self._color_window_hit_test(pos))
             return
         if self._interaction_hook is not None:
-            w = max(1, self.width())
-            h = max(1, self.height())
+            size = self.canvas_content_size()
+            w = max(1, size.width())
+            h = max(1, size.height())
             try:
-                consumed = bool(self._interaction_hook("move", event.position().x() / w, event.position().y() / h, event))
+                consumed = bool(self._interaction_hook("move", pos.x() / w, pos.y() / h, event))
             except Exception:
                 consumed = False
             if consumed or self._interaction_active:
@@ -4042,12 +4441,11 @@ class DrawingCanvas(QWidget):
             "crop",
             "zoom_area",
         }:
-            self._selection_drag_current = self._snap_canvas_point(event.position())
+            self._selection_drag_current = self._snap_canvas_point(pos)
             self.update()
             return
         if self._tool != "pen" or not self._current_points:
             return
-        pos = event.position()
         from app.painter_stylus import mouse_stylus_sample
 
         self._append_current_stroke_sample(pos, mouse_stylus_sample())
@@ -4057,20 +4455,24 @@ class DrawingCanvas(QWidget):
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        pos = self._clamp_canvas_point(
+            self.map_view_to_canvas(event.position())
+        )
         if self._color_window_drag_handle is not None:
-            self._update_color_window_drag(event.position(), commit=True)
+            self._update_color_window_drag(pos, commit=True)
             self._color_window_drag_handle = None
             self._color_window_drag_start = None
             self._color_window_drag_origin = None
-            self._set_color_window_cursor(self._color_window_hit_test(event.position()))
+            self._set_color_window_cursor(self._color_window_hit_test(pos))
             self.update()
             return
         # Rectangle drag finished — emit normalised rect to the hook.
         if (self._rect_hook is not None
                 and self._rect_drag_start is not None
                 and self._rect_drag_current is not None):
-            w = max(1, self.width())
-            h = max(1, self.height())
+            size = self.canvas_content_size()
+            w = max(1, size.width())
+            h = max(1, size.height())
             x1, y1 = self._rect_drag_start.x(), self._rect_drag_start.y()
             x2, y2 = self._rect_drag_current.x(), self._rect_drag_current.y()
             nx1, ny1 = min(x1, x2) / w, min(y1, y2) / h
@@ -4086,10 +4488,11 @@ class DrawingCanvas(QWidget):
             self.update()
             return
         if self._interaction_hook is not None and self._interaction_active:
-            w = max(1, self.width())
-            h = max(1, self.height())
+            size = self.canvas_content_size()
+            w = max(1, size.width())
+            h = max(1, size.height())
             try:
-                self._interaction_hook("release", event.position().x() / w, event.position().y() / h, event)
+                self._interaction_hook("release", pos.x() / w, pos.y() / h, event)
             except Exception:
                 pass
             self._interaction_active = False
@@ -4101,7 +4504,7 @@ class DrawingCanvas(QWidget):
             "crop",
             "zoom_area",
         }:
-            self._selection_drag_current = self._snap_canvas_point(event.position())
+            self._selection_drag_current = self._snap_canvas_point(pos)
             rect = self._selection_drag_rect()
             tool = self._selection_drag_tool or self._tool
             self._selection_drag_start = None
@@ -4109,12 +4512,15 @@ class DrawingCanvas(QWidget):
             self._selection_drag_tool = ""
             if rect.width() > 1.0 and rect.height() > 1.0:
                 if tool == "zoom_area":
+                    size = self.canvas_content_size()
+                    content_w = max(1, size.width())
+                    content_h = max(1, size.height())
                     self.zoom_requested.emit(
                         "zoom_area",
-                        rect.left() / max(1, self.width()),
-                        rect.top() / max(1, self.height()),
-                        rect.width() / max(1, self.width()),
-                        rect.height() / max(1, self.height()),
+                        rect.left() / content_w,
+                        rect.top() / content_h,
+                        rect.width() / content_w,
+                        rect.height() / content_h,
                     )
                 else:
                     shape = "ellipse" if tool == "ellipse_select" else "rect"
@@ -4128,13 +4534,18 @@ class DrawingCanvas(QWidget):
         from app.painter_stylus import mouse_stylus_sample
 
         self._append_current_stroke_sample(
-            event.position(),
+            pos,
             mouse_stylus_sample(),
             force=True,
         )
         self._finish_current_stroke()
 
     def _update_current_stroke_dirty(self, point: QPointF, previous: QPointF | None = None) -> None:
+        if abs(float(self._view_rotation_degrees)) > 1e-6:
+            # A rotated dirty rectangle is no longer axis-aligned in widget
+            # space. Repaint the cheap retained composite, never the strokes.
+            self.update()
+            return
         radius = max(8.0, float(getattr(self, "_pen_width", 6.0) or 6.0) * 1.75)
         if previous is None:
             rect = QRectF(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0)
@@ -4154,8 +4565,9 @@ class DrawingCanvas(QWidget):
     ) -> None:
         if len(self._path_points) < 2:
             return
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         norm_points = [(p.x() / w, p.y() / h) for p in self._path_points]
         if make_selection is None:
             make_selection = bool(closed)
@@ -4194,17 +4606,36 @@ class DrawingCanvas(QWidget):
         """Replace the backing strokes list (for standalone paint dialog use)."""
         self._embedded_strokes = list(strokes)
         self._get_strokes = lambda: self._embedded_strokes
+        self._stroke_revision += 1
+        self._invalidate_stroke_raster_cache()
         self.update()
 
     def add_stroke_direct(self, stroke: Stroke) -> None:
         """Append a stroke to the embedded list (dialog context)."""
         if hasattr(self, "_embedded_strokes"):
+            previous_revision = self._stroke_revision
             self._embedded_strokes.append(stroke)
+            self._stroke_revision += 1
+            if not self._append_stroke_to_cpu_cache(
+                stroke,
+                previous_revision=previous_revision,
+            ):
+                self._invalidate_stroke_raster_cache()
+            self.update()
+
+    def insert_stroke_direct(self, index: int, stroke: Stroke) -> None:
+        if hasattr(self, "_embedded_strokes"):
+            safe_index = max(0, min(len(self._embedded_strokes), int(index)))
+            self._embedded_strokes.insert(safe_index, stroke)
+            self._stroke_revision += 1
+            self._invalidate_stroke_raster_cache()
             self.update()
 
     def remove_stroke_direct(self, index: int) -> None:
         if hasattr(self, "_embedded_strokes") and 0 <= index < len(self._embedded_strokes):
             self._embedded_strokes.pop(index)
+            self._stroke_revision += 1
+            self._invalidate_stroke_raster_cache()
             self.update()
 
     def clear_strokes_direct(self, layer_id: str | None = None) -> None:
@@ -4218,6 +4649,8 @@ class DrawingCanvas(QWidget):
                 self._get_strokes = lambda: self._embedded_strokes
             else:
                 self._embedded_strokes.clear()
+            self._stroke_revision += 1
+            self._invalidate_stroke_raster_cache()
             self.update()
 
     def embedded_strokes(self) -> list[Stroke]:
@@ -4226,8 +4659,9 @@ class DrawingCanvas(QWidget):
         return []
 
     def _try_erase_at(self, px: float, py: float) -> None:
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         t_ms = int(self._get_time_ms())
         radius_sq = self.ERASE_RADIUS_PX * self.ERASE_RADIUS_PX
         strokes = self._get_strokes()
@@ -4335,8 +4769,9 @@ class DrawingCanvas(QWidget):
             win = normalize_tracking_window(payload)
         except Exception:
             return None
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         return QRectF(
             (win.x - win.w * 0.5) * w,
             (win.y - win.h * 0.5) * h,
@@ -4392,8 +4827,9 @@ class DrawingCanvas(QWidget):
             or self._color_window_drag_origin is None
         ):
             return
-        w = max(1, self.width())
-        h = max(1, self.height())
+        size = self.canvas_content_size()
+        w = max(1, size.width())
+        h = max(1, size.height())
         dx = (pos.x() - self._color_window_drag_start.x()) / w
         dy = (pos.y() - self._color_window_drag_start.y()) / h
         try:
@@ -6288,6 +6724,18 @@ class PaintDialog(QDialog):
         self._canvas_pan = QPoint(0, 0)
         self._canvas_pan_drag_start: QPoint | None = None
         self._canvas_pan_drag_origin = QPoint(0, 0)
+        self._canvas_rotation_degrees = 0.0
+        self._canvas_rotation_previous_degrees = 0.0
+        self._canvas_rotation_key_down = False
+        self._canvas_rotation_drag_start: QPoint | None = None
+        self._canvas_rotation_drag_origin = 0.0
+        self._canvas_rotation_drag_start_angle = 0.0
+        self._canvas_rotation_dragged = False
+        self._canvas_rotation_key_had_drag = False
+        self._canvas_rotation_temporary = False
+        self._canvas_rotation_temporary_origin = 0.0
+        self._canvas_rotation_last_tap_s = 0.0
+        self._canvas_pose_slots: list[dict | None] = [None, None, None, None]
         self._selected_path_item_id = "work-path"
         self._channel_visibility: dict[str, bool] = {
             "RGB": True,
@@ -6617,6 +7065,36 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(view_menu, "Pan Tool", lambda: self._set_tool("pan"), "H")
         self._add_painter_menu_action(view_menu, "Reset Pan", self._reset_canvas_pan)
         view_menu.addSeparator()
+        self._add_painter_menu_action(
+            view_menu,
+            "Rotate View Left 15°",
+            lambda: self._rotate_canvas_by(-15.0),
+        )
+        self._add_painter_menu_action(
+            view_menu,
+            "Rotate View Right 15°",
+            lambda: self._rotate_canvas_by(15.0),
+        )
+        self._add_painter_menu_action(
+            view_menu,
+            "Reset Rotate View",
+            self._reset_canvas_rotation,
+        )
+        pose_menu = view_menu.addMenu("Canvas Pose")
+        for slot in range(1, 5):
+            self._add_painter_menu_action(
+                pose_menu,
+                f"Recall Pose {slot}",
+                lambda _checked=False, value=slot: self._recall_canvas_pose(value),
+            )
+            self._add_painter_menu_action(
+                pose_menu,
+                f"Save Current as Pose {slot}",
+                lambda _checked=False, value=slot: self._save_canvas_pose(value),
+            )
+            if slot < 4:
+                pose_menu.addSeparator()
+        view_menu.addSeparator()
         self._add_painter_menu_action(view_menu, "Show Grid", lambda: self._set_grid_options(visible=not self._grid_visible))
         self._add_painter_menu_action(view_menu, "Snap To Grid", lambda: self._set_grid_options(snap=not self._snap_to_grid))
         view_menu.addSeparator()
@@ -6900,6 +7378,9 @@ class PaintDialog(QDialog):
             self.canvas.clear_selection()
             self.canvas.clear_path_preview()
         self._canvas_pan = QPoint(0, 0)
+        self._canvas_rotation_degrees = 0.0
+        self._canvas_rotation_previous_degrees = 0.0
+        self._canvas_pose_slots = [None, None, None, None]
         self._sync_canvas_layer_view()
         self._update_canvas_geometry()
         self._update_inspector_counts()
@@ -8583,6 +9064,18 @@ class PaintDialog(QDialog):
         self._status_zoom_spin.setFixedWidth(58)
         self._status_zoom_spin.valueChanged.connect(self._set_zoom_percent)
         status_layout.addWidget(self._status_zoom_spin)
+        self._status_rotation_spin = QSpinBox()
+        self._status_rotation_spin.setRange(-180, 180)
+        self._status_rotation_spin.setSuffix("°")
+        self._status_rotation_spin.setValue(0)
+        self._status_rotation_spin.setFixedWidth(64)
+        self._status_rotation_spin.setToolTip(
+            "Canvas Pose angle. Hold R and drag on the canvas."
+        )
+        self._status_rotation_spin.valueChanged.connect(
+            self._set_canvas_rotation
+        )
+        status_layout.addWidget(self._status_rotation_spin)
         status_separator = QFrame()
         status_separator.setObjectName("PaintOptionSeparator")
         status_layout.addWidget(status_separator)
@@ -13822,21 +14315,46 @@ class PaintDialog(QDialog):
         if not has_material_strokes(strokes, self._paint_layers):
             return
         stable_size = self.canvas.stable_render_size(width, height)
-        render_width = max(1, stable_size.width())
-        render_height = max(1, stable_size.height())
-        signature = material_paint_signature(
-            strokes,
-            self._paint_layers,
-            width=render_width,
-            height=render_height,
-            time_ms=self._time_ms,
-            light_azimuth_deg=self._material_preview_light_azimuth_deg,
-            light_elevation_deg=self._material_preview_light_elevation_deg,
+        stable_width = max(1, stable_size.width())
+        stable_height = max(1, stable_size.height())
+        preview_scale = min(
+            1.0,
+            768.0 / max(1.0, float(max(stable_width, stable_height))),
+        )
+        render_width = max(1, int(round(stable_width * preview_scale)))
+        render_height = max(1, int(round(stable_height * preview_scale)))
+        fast_key = (
+            int(getattr(self.canvas, "_stroke_revision", 0)),
+            int(getattr(self.canvas, "_layer_view_revision", 0)),
+            render_width,
+            render_height,
+            int(self._time_ms),
+            float(self._material_preview_light_azimuth_deg),
+            float(self._material_preview_light_elevation_deg),
         )
         cached = getattr(self, "_material_preview_cache", None)
-        if not isinstance(cached, dict) or cached.get("signature") != signature:
+        if not isinstance(cached, dict) or cached.get("fast_key") != fast_key:
+            preview_strokes = strokes
+            if preview_scale < 1.0:
+                preview_strokes = []
+                for stroke in strokes:
+                    scaled = copy.copy(stroke)
+                    scaled.width_px = max(
+                        0.25,
+                        float(stroke.width_px) * preview_scale,
+                    )
+                    preview_strokes.append(scaled)
+            signature = material_paint_signature(
+                preview_strokes,
+                self._paint_layers,
+                width=render_width,
+                height=render_height,
+                time_ms=self._time_ms,
+                light_azimuth_deg=self._material_preview_light_azimuth_deg,
+                light_elevation_deg=self._material_preview_light_elevation_deg,
+            )
             channels = rasterize_material_channels(
-                strokes,
+                preview_strokes,
                 self._paint_layers,
                 width=render_width,
                 height=render_height,
@@ -13854,6 +14372,7 @@ class PaintDialog(QDialog):
             ).copy()
             cached = {
                 "signature": signature,
+                "fast_key": fast_key,
                 "image": image,
                 "channels": channels,
                 "renderer": "painter_material_heightfield_preview_v1",
@@ -15071,7 +15590,6 @@ class PaintDialog(QDialog):
             if hasattr(self, "_tool_status_label"):
                 self._tool_status_label.setText(tr("paint.layer.locked_status"))
             return
-        self._push_undo_state("Paint stroke" if stroke.source_tool != "path" else "Commit path")
         stroke.start_ms = self._time_ms
         if self._standalone:
             stroke.layer_id = self._active_paint_layer_id
@@ -15126,9 +15644,17 @@ class PaintDialog(QDialog):
             self._material_preview_cache = None
             self._pbr_preview_maps_cache = None
             self._sync_canvas_layer_view()
-        self.canvas.add_stroke_direct(stroke)
-        for mirrored in self._mirrored_strokes_for(stroke):
-            self.canvas.add_stroke_direct(mirrored)
+        strokes_to_add = [stroke, *self._mirrored_strokes_for(stroke)]
+        self._push_history_command(
+            {
+                "kind": "stroke_add",
+                "start": len(self.canvas.embedded_strokes()),
+                "strokes": copy.deepcopy(strokes_to_add),
+            },
+            "Paint stroke" if stroke.source_tool != "path" else "Commit path",
+        )
+        for added_stroke in strokes_to_add:
+            self.canvas.add_stroke_direct(added_stroke)
         self._update_inspector_counts()
 
     def _mirrored_strokes_for(self, stroke: Stroke) -> list[Stroke]:
@@ -15164,7 +15690,16 @@ class PaintDialog(QDialog):
                 if hasattr(self, "_tool_status_label"):
                     self._tool_status_label.setText(tr("paint.layer.locked_status"))
                 return
-        self._push_undo_state("Erase stroke")
+        if not (0 <= idx < len(strokes)):
+            return
+        self._push_history_command(
+            {
+                "kind": "stroke_remove",
+                "index": int(idx),
+                "stroke": copy.deepcopy(strokes[idx]),
+            },
+            "Erase stroke",
+        )
         self.canvas.remove_stroke_direct(idx)
         self._update_inspector_counts()
 
@@ -15382,22 +15917,84 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._update_history_buttons()
 
+    def _push_history_command(self, command: dict, label: str) -> None:
+        """Record a small reversible edit without cloning the whole document."""
+        if self._restoring_state or not hasattr(self, "canvas"):
+            return
+        self._undo_stack.append(dict(command))
+        self._undo_labels.append(str(label or "Edit"))
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+            if self._undo_labels:
+                self._undo_labels.pop(0)
+        self._redo_stack.clear()
+        self._redo_labels.clear()
+        self._painter_document_dirty = True
+        self._update_history_buttons()
+
+    @staticmethod
+    def _is_stroke_history_command(value) -> bool:
+        return (
+            isinstance(value, dict)
+            and value.get("kind") in {"stroke_add", "stroke_remove"}
+        )
+
+    def _apply_stroke_history_command(self, command: dict, *, undo: bool) -> None:
+        kind = str(command.get("kind") or "")
+        if kind == "stroke_add":
+            start = max(0, int(command.get("start", 0) or 0))
+            rows = list(command.get("strokes") or [])
+            if undo:
+                current = self.canvas.embedded_strokes()
+                end = min(len(current), start + len(rows))
+                self.canvas.set_strokes_snapshot(current[:start] + current[end:])
+            else:
+                for offset, stroke in enumerate(rows):
+                    self.canvas.insert_stroke_direct(
+                        start + offset,
+                        copy.deepcopy(stroke),
+                    )
+        elif kind == "stroke_remove":
+            index = max(0, int(command.get("index", 0) or 0))
+            if undo:
+                self.canvas.insert_stroke_direct(
+                    index,
+                    copy.deepcopy(command.get("stroke")),
+                )
+            else:
+                self.canvas.remove_stroke_direct(index)
+        self._painter_document_dirty = True
+        self._update_inspector_counts()
+        self._update_history_buttons()
+
     def _undo(self) -> None:
         if not self._undo_stack:
             return
-        self._redo_stack.append(self._snapshot_state())
         label = self._undo_labels.pop() if self._undo_labels else "Edit"
-        self._redo_labels.append(label)
         snapshot = self._undo_stack.pop()
+        if self._is_stroke_history_command(snapshot):
+            self._apply_stroke_history_command(snapshot, undo=True)
+            self._redo_stack.append(snapshot)
+            self._redo_labels.append(label)
+            self._update_history_buttons()
+            return
+        self._redo_stack.append(self._snapshot_state())
+        self._redo_labels.append(label)
         self._restore_state(snapshot)
 
     def _redo(self) -> None:
         if not self._redo_stack:
             return
-        self._undo_stack.append(self._snapshot_state())
         label = self._redo_labels.pop() if self._redo_labels else "Edit"
-        self._undo_labels.append(label)
         snapshot = self._redo_stack.pop()
+        if self._is_stroke_history_command(snapshot):
+            self._apply_stroke_history_command(snapshot, undo=False)
+            self._undo_stack.append(snapshot)
+            self._undo_labels.append(label)
+            self._update_history_buttons()
+            return
+        self._undo_stack.append(self._snapshot_state())
+        self._undo_labels.append(label)
         self._restore_state(snapshot)
 
     def _restore_state(
@@ -18029,6 +18626,18 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def keyPressEvent(self, event) -> None:
+        if (
+            event.key() == Qt.Key.Key_R
+            and not event.isAutoRepeat()
+            and not isinstance(
+                QApplication.focusWidget(),
+                (QLineEdit, QTextEdit, QSpinBox),
+            )
+        ):
+            self._canvas_rotation_key_down = True
+            self._canvas_rotation_key_had_drag = False
+            event.accept()
+            return
         if str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place":
             key = event.key()
             if key in (Qt.Key.Key_W, Qt.Key.Key_A, Qt.Key.Key_S, Qt.Key.Key_D):
@@ -18038,6 +18647,29 @@ class PaintDialog(QDialog):
                     event.accept()
                     return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_R and not event.isAutoRepeat():
+            self._finish_canvas_rotation_key()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def _finish_canvas_rotation_key(self) -> None:
+        active_drag = self._canvas_rotation_drag_start is not None
+        had_drag = bool(self._canvas_rotation_key_had_drag or active_drag)
+        if active_drag:
+            self._finish_canvas_rotation_drag()
+        if not had_drag:
+            now = time.monotonic()
+            if now - float(self._canvas_rotation_last_tap_s) <= 0.32:
+                self._reset_canvas_rotation()
+                self._canvas_rotation_last_tap_s = 0.0
+            else:
+                self._toggle_previous_canvas_rotation()
+                self._canvas_rotation_last_tap_s = now
+        self._canvas_rotation_key_down = False
+        self._canvas_rotation_key_had_drag = False
 
     def eventFilter(self, obj, event) -> bool:
         shape_kind = str(obj.property("blockoutShapeKind") or "") if isinstance(obj, QPushButton) else ""
@@ -18079,6 +18711,21 @@ class PaintDialog(QDialog):
         if obj not in canvas_widgets:
             return super().eventFilter(obj, event)
         event_type = event.type()
+        if event_type == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_R:
+            if (
+                not event.isAutoRepeat()
+                and str(getattr(self, "_canvas_workspace_mode", "paint"))
+                == "paint"
+            ):
+                self._canvas_rotation_key_down = True
+                self._canvas_rotation_key_had_drag = False
+            event.accept()
+            return True
+        if event_type == QEvent.Type.KeyRelease and event.key() == Qt.Key.Key_R:
+            if not event.isAutoRepeat():
+                self._finish_canvas_rotation_key()
+            event.accept()
+            return True
         placement_mode = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
         if event_type in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
             if event.mimeData().hasFormat(PAINT_BLOCKOUT_SHAPE_MIME):
@@ -18119,6 +18766,19 @@ class PaintDialog(QDialog):
             except Exception:
                 return False
         if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if (
+                bool(getattr(self, "_canvas_rotation_key_down", False))
+                and not placement_mode
+                and str(getattr(self, "_canvas_workspace_mode", "paint"))
+                == "paint"
+            ):
+                self._begin_canvas_rotation(
+                    obj,
+                    event.position().toPoint(),
+                    event.modifiers(),
+                )
+                event.accept()
+                return True
             if placement_mode:
                 host = getattr(self, "_canvas_host", None)
                 if host is not None:
@@ -18126,8 +18786,27 @@ class PaintDialog(QDialog):
             if self._begin_3d_blockout_drag(obj, event.position().toPoint()):
                 event.accept()
                 return True
+        if (
+            event_type == QEvent.Type.MouseMove
+            and self._canvas_rotation_drag_start is not None
+        ):
+            self._update_canvas_rotation_drag(
+                obj,
+                event.position().toPoint(),
+                event.modifiers(),
+            )
+            event.accept()
+            return True
         if event_type == QEvent.Type.MouseMove and getattr(self, "_painter_3d_blockout_drag", None):
             self._update_3d_blockout_drag(obj, event.position().toPoint())
+            event.accept()
+            return True
+        if (
+            event_type == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._canvas_rotation_drag_start is not None
+        ):
+            self._finish_canvas_rotation_drag()
             event.accept()
             return True
         if (
@@ -18246,6 +18925,164 @@ class PaintDialog(QDialog):
 
     def _reset_canvas_pan(self) -> None:
         self._set_canvas_pan(QPoint(0, 0))
+
+    @staticmethod
+    def _normalized_canvas_rotation(value: float) -> float:
+        normalized = (float(value) + 180.0) % 360.0 - 180.0
+        return 0.0 if abs(normalized) < 1e-6 else normalized
+
+    def _set_canvas_rotation(
+        self,
+        value: float,
+        *,
+        remember_previous: bool = True,
+    ) -> None:
+        normalized = self._normalized_canvas_rotation(value)
+        current = float(getattr(self, "_canvas_rotation_degrees", 0.0))
+        if abs(normalized - current) < 1e-6:
+            return
+        if remember_previous:
+            self._canvas_rotation_previous_degrees = current
+        self._canvas_rotation_degrees = normalized
+        spin = getattr(self, "_status_rotation_spin", None)
+        if spin is not None:
+            spin.blockSignals(True)
+            try:
+                spin.setValue(int(round(normalized)))
+            finally:
+                spin.blockSignals(False)
+        self._update_canvas_geometry()
+        status = getattr(self, "_tool_status_label", None)
+        if status is not None:
+            status.setText(f"Canvas Pose {normalized:+.1f}°")
+            status.show()
+
+    def _rotate_canvas_by(self, delta_degrees: float) -> None:
+        self._set_canvas_rotation(
+            float(getattr(self, "_canvas_rotation_degrees", 0.0))
+            + float(delta_degrees)
+        )
+
+    def _reset_canvas_rotation(self) -> None:
+        self._set_canvas_rotation(0.0)
+
+    def _toggle_previous_canvas_rotation(self) -> None:
+        current = float(getattr(self, "_canvas_rotation_degrees", 0.0))
+        previous = float(
+            getattr(self, "_canvas_rotation_previous_degrees", 0.0)
+        )
+        self._canvas_rotation_previous_degrees = current
+        self._set_canvas_rotation(previous, remember_previous=False)
+
+    def _canvas_rotation_center_in_host(self) -> QPointF:
+        canvas = getattr(self, "canvas", None)
+        if canvas is None:
+            host = getattr(self, "_canvas_host", None)
+            return QPointF(
+                (host.width() if host is not None else 1) * 0.5,
+                (host.height() if host is not None else 1) * 0.5,
+            )
+        geometry = canvas.geometry()
+        return QPointF(geometry.center())
+
+    def _begin_canvas_rotation(
+        self,
+        obj,
+        point: QPoint,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
+        host_point = self._point_in_canvas_host(obj, point)
+        center = self._canvas_rotation_center_in_host()
+        self._canvas_rotation_drag_start = QPoint(host_point)
+        self._canvas_rotation_drag_origin = float(
+            getattr(self, "_canvas_rotation_degrees", 0.0)
+        )
+        self._canvas_rotation_drag_start_angle = math.degrees(
+            math.atan2(host_point.y() - center.y(), host_point.x() - center.x())
+        )
+        self._canvas_rotation_dragged = False
+        self._canvas_rotation_temporary = bool(
+            modifiers & Qt.KeyboardModifier.AltModifier
+        )
+        self._canvas_rotation_temporary_origin = (
+            self._canvas_rotation_drag_origin
+        )
+        host = getattr(self, "_canvas_host", None)
+        if host is not None:
+            host.setCursor(Qt.CursorShape.CrossCursor)
+
+    def _update_canvas_rotation_drag(
+        self,
+        obj,
+        point: QPoint,
+        modifiers: Qt.KeyboardModifier,
+    ) -> None:
+        if self._canvas_rotation_drag_start is None:
+            return
+        host_point = self._point_in_canvas_host(obj, point)
+        center = self._canvas_rotation_center_in_host()
+        angle = math.degrees(
+            math.atan2(host_point.y() - center.y(), host_point.x() - center.x())
+        )
+        target = self._canvas_rotation_drag_origin + (
+            angle - self._canvas_rotation_drag_start_angle
+        )
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            target = round(target / 15.0) * 15.0
+        if (
+            host_point - self._canvas_rotation_drag_start
+        ).manhattanLength() >= 2:
+            self._canvas_rotation_dragged = True
+            self._canvas_rotation_key_had_drag = True
+        self._set_canvas_rotation(target, remember_previous=False)
+
+    def _finish_canvas_rotation_drag(self) -> None:
+        if self._canvas_rotation_drag_start is None:
+            return
+        origin = float(self._canvas_rotation_drag_origin)
+        temporary = bool(self._canvas_rotation_temporary)
+        dragged = bool(self._canvas_rotation_dragged)
+        self._canvas_rotation_drag_start = None
+        self._canvas_rotation_dragged = False
+        self._canvas_rotation_temporary = False
+        if temporary:
+            self._set_canvas_rotation(origin, remember_previous=False)
+        elif dragged:
+            self._canvas_rotation_previous_degrees = origin
+        host = getattr(self, "_canvas_host", None)
+        if host is not None:
+            host.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _save_canvas_pose(self, slot: int) -> None:
+        index = max(1, min(4, int(slot))) - 1
+        self._canvas_pose_slots[index] = {
+            "rotation_degrees": float(self._canvas_rotation_degrees),
+            "zoom": float(self._canvas_zoom),
+            "pan": [int(self._canvas_pan.x()), int(self._canvas_pan.y())],
+        }
+        self._painter_document_dirty = True
+
+    def _recall_canvas_pose(self, slot: int) -> None:
+        index = max(1, min(4, int(slot))) - 1
+        pose = self._canvas_pose_slots[index]
+        if not isinstance(pose, dict):
+            return
+        self._canvas_zoom = max(
+            0.25,
+            min(
+                PAINT_MAX_ZOOM_PERCENT / 100.0,
+                float(pose.get("zoom", 1.0) or 1.0),
+            ),
+        )
+        pan = list(pose.get("pan") or [0, 0])
+        self._canvas_pan = QPoint(
+            int(pan[0]) if pan else 0,
+            int(pan[1]) if len(pan) > 1 else 0,
+        )
+        self._set_canvas_rotation(
+            float(pose.get("rotation_degrees", 0.0) or 0.0)
+        )
+        self._set_zoom_percent(int(round(self._canvas_zoom * 100.0)))
 
     @staticmethod
     def _clamped_canvas_pan(pan: QPoint, *, canvas_size: QSize, host_size: QSize) -> QPoint:
@@ -18409,19 +19246,67 @@ class PaintDialog(QDialog):
         # Position the bg_label centered in the host
         bw = max(1, int(round(base_width * zoom)))
         bh = max(1, int(round(base_height * zoom)))
+        rotation_degrees = float(
+            getattr(self, "_canvas_rotation_degrees", 0.0)
+        )
+        radians = math.radians(rotation_degrees)
+        canvas_bounds = QSize(
+            max(
+                1,
+                int(
+                    math.ceil(
+                        abs(math.cos(radians)) * bw
+                        + abs(math.sin(radians)) * bh
+                    )
+                ),
+            ),
+            max(
+                1,
+                int(
+                    math.ceil(
+                        abs(math.sin(radians)) * bw
+                        + abs(math.cos(radians)) * bh
+                    )
+                ),
+            ),
+        )
         pan = self._clamped_canvas_pan(
             QPoint(getattr(self, "_canvas_pan", QPoint(0, 0))),
-            canvas_size=QSize(bw, bh),
+            canvas_size=canvas_bounds,
             host_size=QSize(hw, hh),
         )
         self._canvas_pan = pan
-        bx = (hw - bw) // 2 + pan.x()
-        by = (hh - bh) // 2 + pan.y()
+        center_x = hw // 2 + pan.x()
+        center_y = hh // 2 + pan.y()
+        bx = center_x - bw // 2
+        by = center_y - bh // 2
+        canvas_x = center_x - canvas_bounds.width() // 2
+        canvas_y = center_y - canvas_bounds.height() // 2
         self._bg_label.setGeometry(bx, by, bw, bh)
-        # Canvas covers the bg area exactly so stroke coords map 1:1 with video
-        self.canvas.setGeometry(bx, by, bw, bh)
+        rotated = abs(rotation_degrees) > 1e-6
+        self._bg_label.setVisible(not rotated)
+        # The canvas expands to the rotated bounding box. Its retained images
+        # stay at the unrotated content size and are transformed only at blit.
+        self.canvas.setGeometry(
+            canvas_x,
+            canvas_y,
+            canvas_bounds.width(),
+            canvas_bounds.height(),
+        )
+        self.canvas.set_view_pose(
+            rotation_degrees=rotation_degrees,
+            content_size=QSize(bw, bh),
+            background_pixmap=display_bg if rotated else None,
+        )
         self.canvas.set_document_size(*self._canvas_document_size)
         self.canvas.set_view_zoom_percent(int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)))
+        rotation_spin = getattr(self, "_status_rotation_spin", None)
+        if rotation_spin is not None:
+            rotation_spin.blockSignals(True)
+            try:
+                rotation_spin.setValue(int(round(rotation_degrees)))
+            finally:
+                rotation_spin.blockSignals(False)
         ui_overlay = getattr(self, "_painter_ui_overlay", None)
         if ui_overlay is not None:
             if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
@@ -18561,6 +19446,8 @@ class PaintDialog(QDialog):
             "view": {
                 "zoom": float(self._canvas_zoom),
                 "pan": [int(self._canvas_pan.x()), int(self._canvas_pan.y())],
+                "rotation_degrees": float(self._canvas_rotation_degrees),
+                "pose_slots": copy.deepcopy(self._canvas_pose_slots),
                 "grid_visible": bool(self._grid_visible),
                 "snap_to_grid": bool(self._snap_to_grid),
                 "grid_size_px": int(self._grid_size_px),
@@ -18763,6 +19650,16 @@ class PaintDialog(QDialog):
             int(pan[0]) if len(pan) > 0 else 0,
             int(pan[1]) if len(pan) > 1 else 0,
         )
+        self._canvas_rotation_degrees = self._normalized_canvas_rotation(
+            float(view.get("rotation_degrees", 0.0) or 0.0)
+        )
+        pose_slots = list(view.get("pose_slots") or [])
+        self._canvas_pose_slots = [
+            copy.deepcopy(pose_slots[index])
+            if index < len(pose_slots) and isinstance(pose_slots[index], dict)
+            else None
+            for index in range(4)
+        ]
         brush = payload.get("brush")
         brush = brush if isinstance(brush, dict) else {}
         self._pen_color = QColor(str(brush.get("color") or "#EEF2F7"))
@@ -18928,6 +19825,12 @@ class PaintDialog(QDialog):
                 "zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),
                 "pan_x": int(getattr(self, "_canvas_pan", QPoint(0, 0)).x()),
                 "pan_y": int(getattr(self, "_canvas_pan", QPoint(0, 0)).y()),
+                "rotation_degrees": float(
+                    getattr(self, "_canvas_rotation_degrees", 0.0)
+                ),
+                "pose_slots": copy.deepcopy(
+                    getattr(self, "_canvas_pose_slots", [None] * 4)
+                ),
                 "grid_visible": bool(getattr(self, "_grid_visible", False)),
                 "snap_to_grid": bool(getattr(self, "_snap_to_grid", False)),
                 "grid_size_px": int(getattr(self, "_grid_size_px", 64)),
