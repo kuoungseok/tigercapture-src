@@ -1140,6 +1140,18 @@ class PainterUIInspector(QWidget):
         self.stress_preview_status_label.setWordWrap(True)
         stress_layout.addWidget(self.stress_preview_status_label)
         form.addRow(painter_text("Content Test"), stress_preview)
+        from app.painter_ui_token_suggestion import (
+            PainterUITokenSuggestionPanel,
+        )
+
+        self.token_suggestion_panel = PainterUITokenSuggestionPanel()
+        self.token_suggestion_panel.binding_requested.connect(
+            self.token_binding_requested
+        )
+        form.addRow(
+            painter_text("Suggested tokens"),
+            self.token_suggestion_panel,
+        )
         auto_padding = QFrame()
         auto_padding_layout = QHBoxLayout(auto_padding)
         auto_padding_layout.setContentsMargins(0, 0, 0, 0)
@@ -1667,6 +1679,7 @@ class PainterUIInspector(QWidget):
                 auto_cross,
             ),
             "content_stress": (stress_preview,),
+            "token_suggestions": (self.token_suggestion_panel,),
             "appearance": (
                 self.opacity_spin,
                 self.fill_edit,
@@ -1904,6 +1917,7 @@ class PainterUIInspector(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
+        self._sync_token_suggestions()
         self.component_library.set_document(self._document)
         self.token_library.set_document(self._document)
         self.production_panel.set_document(self._document)
@@ -2026,6 +2040,13 @@ class PainterUIInspector(QWidget):
     ) -> None:
         self._stress_preview_report = dict(value or {})
         self._sync_stress_preview_controls()
+
+    def _sync_token_suggestions(self) -> None:
+        from app.painter_ui_token_suggestion import suggest_ui_tokens
+
+        self.token_suggestion_panel.set_report(
+            suggest_ui_tokens(self._document)
+        )
 
     def _selected_id(self) -> str:
         return str(self._document["selection"]["object_id"] or "")
@@ -2497,6 +2518,17 @@ class PainterUIInspector(QWidget):
                 "state",
                 "arrange",
             }
+            if (
+                int(
+                    self.token_suggestion_panel.report().get(
+                        "suggestion_count",
+                        0,
+                    )
+                    or 0
+                )
+                > 0
+            ):
+                visible_groups.add("token_suggestions")
             if kind in {"frame", "group", "button"}:
                 visible_groups.add("auto_layout")
             visible_groups.add("content_stress")

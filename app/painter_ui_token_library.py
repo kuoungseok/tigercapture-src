@@ -31,6 +31,11 @@ TOKEN_BINDING_PATHS = (
     "style.shadow",
     "style.font_size",
     "layout.gap",
+    "layout.cross_gap",
+    "layout.padding.left",
+    "layout.padding.top",
+    "layout.padding.right",
+    "layout.padding.bottom",
     "opacity",
     "content.source",
 )

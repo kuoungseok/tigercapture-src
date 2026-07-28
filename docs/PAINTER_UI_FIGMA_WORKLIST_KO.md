@@ -91,6 +91,11 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
   `paint.ui.layout.stress_preview` now share non-destructive long Korean,
   long English, large-type, missing-image, and empty-list previews. The
   canonical document, revision, persistence, and Undo stack are invariant.
+- A contextual Suggested Tokens row appears only for exact, type-safe,
+  unbound raw-value matches after active-theme and alias resolution.
+  `paint.ui.token.suggest` shares the pure planner without mutation; accepting
+  a suggestion reuses the existing token bind, persistence, and one-step Undo
+  path.
 - Artboard title dragging moves frames in document space and persists the new
   position through the same undoable artboard mutation service.
 - Inspector presets add iPhone, Android, desktop, console, and broadcast

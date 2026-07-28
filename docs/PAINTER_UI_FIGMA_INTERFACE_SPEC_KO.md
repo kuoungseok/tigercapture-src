@@ -279,6 +279,11 @@ Canvas interaction checkpoint (2026-07-29):
   canonical document. `paint.ui.layout.stress_preview` uses the same stable-ID
   presentation path, and clearing the preview restores the canonical Overlay
   immediately without creating Undo history.
+- A selected object's unbound raw values expose a compact Suggested Tokens row
+  only when an existing token has a type-compatible exact match after active
+  theme and alias resolution. `paint.ui.token.suggest` is the non-mutating
+  Action equivalent; accepting a row uses the existing `paint.ui.token.bind`
+  mutation, persistence, and one-step Undo contract.
 
 ### 5.4 Shape 선택
 

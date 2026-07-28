@@ -448,6 +448,16 @@ Implementation checkpoint (2026-07-29):
 - Desktop and compact proof are generated as
   `painter_ui_designer_m2_content_stress.png` and
   `painter_ui_designer_m2_content_stress_compact.png`.
+- Raw Fill, Stroke, Radius, typography, spacing/padding, opacity, shadow, and
+  image values now receive a compact suggested-token affordance only when an
+  unbound, type-compatible token resolves to the exact same value in the
+  active artboard theme. Alias chains are resolved before comparison.
+- `paint.ui.token.suggest` calls the same pure planner and never changes the
+  document, revision, persistence, or Undo history. Accepting a suggestion
+  reuses the existing stable-ID token-binding mutation and one-step Undo path.
+- Desktop and compact proof are generated as
+  `painter_ui_designer_m2_token_suggestions.png` and
+  `painter_ui_designer_m2_token_suggestions_compact.png`.
 
 Required Actions:
 

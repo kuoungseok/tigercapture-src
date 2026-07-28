@@ -1547,23 +1547,50 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Remove UI token",
         dry_summary="a UI token would be removed",
     )
+    token_property_paths = [
+        "style.fill",
+        "style.stroke",
+        "style.text_color",
+        "style.stroke_width",
+        "style.radius",
+        "style.shadow",
+        "style.font_size",
+        "layout.gap",
+        "layout.cross_gap",
+        "layout.padding.left",
+        "layout.padding.top",
+        "layout.padding.right",
+        "layout.padding.bottom",
+        "opacity",
+        "content.source",
+    ]
+    registry.register_adapter_action(
+        "paint.ui.token.suggest",
+        (
+            "Find exact, type-safe design-token matches for raw values on the "
+            "selected UI object without changing the document."
+        ),
+        "paint",
+        "paint_ui_token_suggest",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {
+                    "type": "string",
+                    "enum": ["", *token_property_paths],
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="matching scoped design tokens would be suggested",
+    )
     token_binding_schema = schema_object(
         {
             "object_id": {"type": "string"},
             "path": {
                 "type": "string",
-                "enum": [
-                    "style.fill",
-                    "style.stroke",
-                    "style.text_color",
-                    "style.stroke_width",
-                    "style.radius",
-                    "style.shadow",
-                    "style.font_size",
-                    "layout.gap",
-                    "opacity",
-                    "content.source",
-                ],
+                "enum": token_property_paths,
             },
             "token_id": {"type": "string"},
         },

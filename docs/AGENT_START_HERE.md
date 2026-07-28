@@ -151,6 +151,11 @@ Focused entry points:
   `paint.ui.layout.stress_preview` and the Inspector share one presentation
   entry point; only the canvas Overlay receives the ephemeral preview document.
   Canonical revision, persistence, and Undo must remain unchanged.
+  M2 token suggestions live in `app/painter_ui_token_suggestion.py`.
+  `paint.ui.token.suggest` and the contextual Inspector row share that pure
+  planner. Suggestions require exact type-compatible values after active-theme
+  and alias resolution, never mutate the document, and must apply through the
+  existing stable-ID token bind/Undo path.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

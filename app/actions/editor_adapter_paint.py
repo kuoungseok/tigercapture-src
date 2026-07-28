@@ -2058,6 +2058,21 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Remove UI token")
         return self._paint_ui_commit(dialog, "Remove UI token", document)
 
+    def paint_ui_token_suggest(
+        self,
+        *,
+        object_id: str = "",
+        property_path: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_token_suggestion import suggest_ui_tokens
+
+        return suggest_ui_tokens(
+            dialog._painter_ui_document,
+            object_id=str(object_id or ""),
+            property_path=str(property_path or ""),
+        )
+
     def paint_ui_token_bind(
         self,
         *,

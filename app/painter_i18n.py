@@ -410,6 +410,17 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Empty List", "빈 목록", "空のリスト", "空列表", "Liste vide", "Leere Liste"),
     ("Clear content preview", "콘텐츠 프리뷰 지우기", "コンテンツプレビューを消去", "清除内容预览", "Effacer l'aperçu du contenu", "Inhaltsvorschau löschen"),
     ("Preview only - document is unchanged", "프리뷰 전용 · 문서는 변경되지 않음", "プレビューのみ・文書は変更されません", "仅预览，文档不会更改", "Aperçu uniquement · document inchangé", "Nur Vorschau · Dokument bleibt unverändert"),
+    ("Suggested tokens", "추천 토큰", "提案トークン", "建议令牌", "Jetons suggérés", "Vorgeschlagene Token"),
+    ("Bind suggested token", "추천 토큰 연결", "提案トークンをバインド", "绑定建议令牌", "Lier le jeton suggéré", "Vorgeschlagenes Token binden"),
+    ("Exact value match", "정확한 값 일치", "値が完全一致", "值完全匹配", "Valeur identique", "Exakter Wert"),
+    ("Text color", "텍스트 색상", "テキストカラー", "文本颜色", "Couleur du texte", "Textfarbe"),
+    ("Stroke width", "선 두께", "線の太さ", "描边宽度", "Épaisseur du contour", "Konturstärke"),
+    ("Font size", "글자 크기", "フォントサイズ", "字号", "Taille de police", "Schriftgröße"),
+    ("Cross gap", "교차 간격", "交差間隔", "交叉间距", "Espacement transversal", "Querabstand"),
+    ("Padding left", "왼쪽 패딩", "左パディング", "左内边距", "Marge interne gauche", "Innenabstand links"),
+    ("Padding top", "위쪽 패딩", "上パディング", "上内边距", "Marge interne supérieure", "Innenabstand oben"),
+    ("Padding right", "오른쪽 패딩", "右パディング", "右内边距", "Marge interne droite", "Innenabstand rechts"),
+    ("Padding bottom", "아래쪽 패딩", "下パディング", "下内边距", "Marge interne inférieure", "Innenabstand unten"),
 )
 
 _TABLE = {

@@ -38,7 +38,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Figma sections and comments | Sections tab and object-anchored Painter Review mapping | `paint.ui.section.inspect/create/update/remove`, `paint.ui.review.*` |
 | Components and Instances | Components library plus Inspector create/instance/Variant/switch/detach controls | `paint.ui.component.*` |
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |
-| Tokens and themes | Token library, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.*`, `paint.ui.theme.*` |
+| Tokens and themes | Token library, exact scoped-value suggestions, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.suggest`, `paint.ui.token.*`, `paint.ui.theme.*` |
 | Prototype interactions | Prototype authoring/preview and production panel | `paint.ui.interaction.*` |
 | Motion link | Inspector Animate/Preview and Motion Actor placement | `paint.ui.motion.*`, `paint.ui.motion_actor.*` |
 | Delivery/UMG | Production preflight/export and shared TigerStudioUMG flow | `paint.ui.delivery.*`, `paint.ui.handoff.export` |

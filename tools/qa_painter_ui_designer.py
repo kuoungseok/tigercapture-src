@@ -724,6 +724,71 @@ def main() -> int:
     dialog.grab().save(str(zoom_popover_screenshot_path), "PNG")
     toolbar.zoom_popover.hide()
 
+    registry.execute(
+        "paint.ui.token.add",
+        {
+            "name": "Action Primary",
+            "kind": "color",
+            "value": "#4C74DB",
+        },
+    )
+    registry.execute(
+        "paint.ui.token.add",
+        {
+            "name": "Radius Small",
+            "kind": "radius",
+            "value": 6,
+        },
+    )
+    registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": "artboard-1"},
+    )
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [button_id],
+            "primary_object_id": button_id,
+        },
+    )
+    registry.execute(
+        "paint.ui.inspector.presentation",
+        {"mode": "pinned"},
+    )
+    select_inspector_tab("Design")
+    app.processEvents()
+    token_canonical_before = json.dumps(
+        dialog._painter_ui_document,
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    token_undo_before = len(dialog._undo_stack)
+    token_suggestion = registry.execute(
+        "paint.ui.token.suggest",
+        {"object_id": button_id},
+    ).to_dict()
+    app.processEvents()
+    token_suggestion_ok = bool(
+        token_suggestion.get("ok") is True
+        and token_suggestion.get("changed") is False
+        and token_suggestion["result"]["suggestion_count"] >= 2
+        and dialog._paint_ui_inspector.design_group_visible(
+            "token_suggestions"
+        )
+        and not dialog._paint_ui_inspector.token_suggestion_panel.isHidden()
+        and json.dumps(
+            dialog._painter_ui_document,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        == token_canonical_before
+        and len(dialog._undo_stack) == token_undo_before
+    )
+    token_suggestion_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_token_suggestions.png"
+    )
+    dialog.grab().save(str(token_suggestion_screenshot_path), "PNG")
+
     dialog.resize(1100, 720)
     app.processEvents()
     dialog._sync_ui_design_toolbar_density()
@@ -742,6 +807,21 @@ def main() -> int:
     )
     dialog.grab().save(str(compact_screenshot_path), "PNG")
     toolbar.zoom_popover.hide()
+    app.processEvents()
+    token_suggestion_compact_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_token_suggestions_compact.png"
+    )
+    dialog.grab().save(
+        str(token_suggestion_compact_screenshot_path),
+        "PNG",
+    )
+    token_suggestion_compact_ok = bool(
+        token_suggestion_compact_screenshot_path.is_file()
+        and dialog._paint_ui_inspector.design_group_visible(
+            "token_suggestions"
+        )
+        and dialog._canvas_frame.width() >= 280
+    )
     compact_stress_canonical_before = json.dumps(
         dialog._painter_ui_document,
         sort_keys=True,
@@ -827,6 +907,8 @@ def main() -> int:
             and sizing_screenshot_path.is_file()
             and stress_preview_screenshot_path.is_file()
             and compact_stress_screenshot_path.is_file()
+            and token_suggestion_screenshot_path.is_file()
+            and token_suggestion_compact_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -846,6 +928,8 @@ def main() -> int:
             and property_contract_ok
             and stress_preview_ok
             and compact_stress_ok
+            and token_suggestion_ok
+            and token_suggestion_compact_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -875,6 +959,12 @@ def main() -> int:
         "content_stress_compact_screenshot": str(
             compact_stress_screenshot_path
         ),
+        "token_suggestion_screenshot": str(
+            token_suggestion_screenshot_path
+        ),
+        "token_suggestion_compact_screenshot": str(
+            token_suggestion_compact_screenshot_path
+        ),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -902,6 +992,8 @@ def main() -> int:
         "property_contract_ok": property_contract_ok,
         "content_stress_ok": stress_preview_ok,
         "content_stress_compact_ok": compact_stress_ok,
+        "token_suggestion_ok": token_suggestion_ok,
+        "token_suggestion_compact_ok": token_suggestion_compact_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,
