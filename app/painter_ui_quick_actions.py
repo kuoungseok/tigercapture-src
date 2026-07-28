@@ -127,6 +127,36 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "animate_selection"},
         "requires": "selection",
     },
+    {
+        "id": "inspector.auto_hide",
+        "label": "Auto-hide inspector",
+        "detail": "Show properties only when the selection needs them",
+        "keywords": "inspector properties contextual overlay hide",
+        "operation": {
+            "type": "inspector_presentation",
+            "mode": "auto_hide",
+        },
+    },
+    {
+        "id": "inspector.pin",
+        "label": "Pin inspector",
+        "detail": "Keep the contextual properties beside the canvas",
+        "keywords": "inspector properties sidebar dock fixed",
+        "operation": {
+            "type": "inspector_presentation",
+            "mode": "pinned",
+        },
+    },
+    {
+        "id": "inspector.float",
+        "label": "Open inspector as window",
+        "detail": "Move the contextual properties into a separate window",
+        "keywords": "inspector properties detach floating window",
+        "operation": {
+            "type": "inspector_presentation",
+            "mode": "floating",
+        },
+    },
 )
 
 

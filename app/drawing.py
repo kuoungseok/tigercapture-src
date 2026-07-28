@@ -13723,6 +13723,10 @@ class PaintDialog(QDialog):
             self._ungroup_painter_ui_object(primary_id)
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
+        elif operation_type == "inspector_presentation":
+            self._set_painter_ui_inspector_presentation(
+                str(operation.get("mode") or "auto_hide")
+            )
         elif operation_type == "select_object":
             object_id = str(operation.get("object_id") or "")
             self._set_painter_ui_selection([object_id], object_id)
@@ -23604,6 +23608,35 @@ class PaintDialog(QDialog):
             self._dock_painter_ui_inspector()
         else:
             self._detach_painter_ui_inspector()
+
+    def _set_painter_ui_inspector_presentation(
+        self,
+        mode: str,
+    ) -> dict[str, bool | str]:
+        value = str(mode or "").strip().casefold()
+        if value not in {"auto_hide", "pinned", "floating"}:
+            raise ValueError(
+                "Painter UI inspector mode must be "
+                "auto_hide, pinned, or floating"
+            )
+        self._set_canvas_workspace_mode("ui_design")
+        inspector = self._paint_ui_inspector
+        if value == "floating":
+            inspector.set_auto_hide(False)
+            self._detach_painter_ui_inspector()
+        else:
+            if bool(
+                getattr(self, "_painter_ui_inspector_detached", False)
+            ):
+                self._dock_painter_ui_inspector()
+            inspector.set_auto_hide(value == "auto_hide")
+        return {
+            "mode": value,
+            "auto_hide": inspector.is_auto_hide(),
+            "detached": bool(
+                getattr(self, "_painter_ui_inspector_detached", False)
+            ),
+        }
 
     def _detach_painter_ui_inspector(self) -> None:
         if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":

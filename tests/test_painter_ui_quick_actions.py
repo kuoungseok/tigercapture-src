@@ -98,6 +98,33 @@ def test_quick_action_context_disables_invalid_selection_commands() -> None:
     assert _result(report, "selection.scale")["enabled"] is True
 
 
+def test_quick_actions_expose_all_fluid_inspector_presentations() -> None:
+    from app.painter_ui_quick_actions import search_painter_ui_quick_actions
+
+    document, _hero, _component, _token, _mobile = _document()
+    report = search_painter_ui_quick_actions(document, "inspector")
+
+    operations = {
+        row["id"]: row["operation"]
+        for row in report["results"]
+        if row["id"].startswith("inspector.")
+    }
+    assert operations == {
+        "inspector.auto_hide": {
+            "type": "inspector_presentation",
+            "mode": "auto_hide",
+        },
+        "inspector.float": {
+            "type": "inspector_presentation",
+            "mode": "floating",
+        },
+        "inspector.pin": {
+            "type": "inspector_presentation",
+            "mode": "pinned",
+        },
+    }
+
+
 def test_quick_action_popover_is_transient_and_compact() -> None:
     app = _app()
     from PySide6.QtWidgets import QWidget
@@ -157,6 +184,52 @@ def test_quick_action_action_uses_the_shared_search_catalog() -> None:
     assert result["result"]["schema"].endswith("quick_actions.v1")
     assert result["result"]["results"][0]["id"] == f"layer.{hero['id']}"
     assert dialog._painter_ui_document == document
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_quick_action_and_action_share_inspector_presentation_service() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1200, 760)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog.show()
+    app.processEvents()
+
+    dialog._execute_painter_ui_quick_action(
+        {
+            "operation": {
+                "type": "inspector_presentation",
+                "mode": "pinned",
+            }
+        }
+    )
+    assert not dialog._paint_ui_inspector.is_auto_hide()
+    assert not dialog._paint_ui_inspector.is_collapsed()
+
+    registry = ActionRegistry(owner=dialog)
+    result = registry.execute(
+        "paint.ui.inspector.presentation",
+        {"mode": "auto_hide"},
+    )
+    assert result.ok
+    assert result.result["inspector_presentation"] == {
+        "mode": "auto_hide",
+        "auto_hide": True,
+        "detached": False,
+    }
+    assert dialog._paint_ui_inspector.is_collapsed()
+    assert dialog._paint_inspector_frame.maximumWidth() == 36
 
     dialog.close()
     dialog.deleteLater()

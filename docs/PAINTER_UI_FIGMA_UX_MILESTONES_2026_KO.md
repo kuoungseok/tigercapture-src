@@ -427,6 +427,10 @@ Implemented checkpoint (2026-07-29, Quick Actions slice):
 - UI search and `paint.ui.quick_action.search` share
   `app/painter_ui_quick_actions.py`; mutating results call their existing
   focused services and retain their established Undo contracts.
+- Quick Actions also exposes Inspector `Auto-hide`, `Pin`, and `Open as
+  window`. These presentation-only commands and
+  `paint.ui.inspector.presentation` call the same workspace service; no fixed
+  settings panel or document mutation is introduced.
 
 Exit criteria:
 

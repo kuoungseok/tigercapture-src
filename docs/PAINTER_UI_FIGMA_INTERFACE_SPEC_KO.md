@@ -840,19 +840,21 @@ overlay mode로 전환한다.
   collapsed by default and does not create a parallel mutation path.
 - The Inspector is not a permanently fixed canvas tax. Auto-hide is the
   default presentation, leaving a 36 px rail; it may be pinned at a remembered
-  240-420 px width or detached into a floating window. With the rail collapsed, selecting a
+  user-resized width or detached into a floating window. With the rail collapsed, selecting a
   new object temporarily reparents the canonical Inspector into a compact
   canvas overlay; no duplicate property editor or mutation service is created.
 - The navigator, canvas, and pinned Inspector live in one horizontal workspace
-  splitter. Expanded side panels keep bounded 136-320 px and 240-420 px ranges
-  instead of setting `minimumWidth == maximumWidth`; the user drags either
-  divider directly and the canvas receives all remaining width. Splitter moves
-  update the same persisted panel-width state with a debounced settings write.
+  splitter. Expanded side panels keep only usable minimum widths and no
+  arbitrary fixed maximum; the user drags either divider directly and the
+  canvas receives all remaining width. Splitter moves update the same
+  persisted panel-width state with a debounced settings write.
 - Collapsing, Auto-hide, floating, and re-docking must preserve the last
   expanded width. Mode changes restore the splitter after visibility changes
   so a hidden Paint/3D panel never leaves stale blank canvas space.
 - UI and automation share `paint.ui.inspector.presentation` with
   `auto_hide`, `pinned`, and `floating` modes.
+- The same three modes are discoverable from the transient Quick Actions
+  overlay, so presentation can change without adding another permanent panel.
 - Zoom is not a permanent three-button group. One toolbar icon opens a
   temporary percentage/Fit All/Fit Artboard/Fit Selection popover, and a
   short-lived percentage chip appears during navigation.
