@@ -6851,7 +6851,10 @@ AI Script Edit MVP integration:
   recovery checksum roundtrip, straight-storage/premultiplied-composite alpha,
   nested-composition Preview/Export pixel parity, HDR PQ H.265 preflight, an
   actual H.264 MP4 artifact, and an actual HDR H.265 artifact whose stream
-  reports Rec.2020 primaries and SMPTE ST 2084 transfer.
+  reports Rec.2020 primaries and SMPTE ST 2084 transfer. Before rendering, the
+  product gate executes `motion.trend.capabilities.inspect`; missing registered
+  actions or missing named QA evidence now fail the same release gate instead
+  of remaining a documentation-only discrepancy.
 - `tools/qa_motion_2026_trend_ui.py` captures the real Qt Motion Designer
   workspace and the 2026 Trends gallery, verifies that all eight templates are
   present, and records the active UI language and template control label.

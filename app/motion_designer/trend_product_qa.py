@@ -96,6 +96,13 @@ def run_trend_product_gate(
 ) -> dict[str, Any]:
     root = Path(output_root).expanduser().resolve(strict=False)
     root.mkdir(parents=True, exist_ok=True)
+    from app.actions.registry import ActionRegistry
+
+    capability_result = ActionRegistry().execute(
+        "motion.trend.capabilities.inspect",
+        {},
+    )
+    capability_report = dict(capability_result.result or {})
     composition = _small_trend_composition(duration_ms)
     sequence_dir = root / "png_sequence"
     cancel_calls = 0
@@ -258,7 +265,9 @@ def run_trend_product_gate(
     report = {
         "schema": TREND_PRODUCT_GATE_SCHEMA,
         "ok": bool(
-            cancelled
+            capability_result.ok
+            and capability_report.get("ok") is True
+            and cancelled
             and valid_partial_count == max(1, int(cancel_after_frames))
             and resumed["sequence_complete"]
             and int(resumed["frame_count"]) == expected_frames
@@ -281,6 +290,7 @@ def run_trend_product_gate(
             and mp4_path.is_file()
             and mp4_path.stat().st_size > 0
         ),
+        "trend_capabilities": capability_report,
         "duration_ms": composition.duration_ms,
         "sequence_fps": float(sequence_fps),
         "cancelled": cancelled,

@@ -17,6 +17,11 @@ painterly overrides and M25 physical clay deformation, miniature volumetric
 lighting, and automatic frame sculpting. These limits must remain visible
 until implementation and visual evidence exist.
 
+The integrated `tigerstudio.motion.trend_product_gate.v1` runs this live audit
+before its cancel/resume, recovery, alpha, nested-composition, HDR, tiled Glass,
+and MP4 checks. A missing action or evidence file therefore fails the product
+gate rather than surviving as a documentation-only discrepancy.
+
 작성일: 2026-07-29  
 상태: M21-M28 Complete v1; M24 재질-ID 세분화는 후속 범위
 대상: Tiger Studio Motion Designer

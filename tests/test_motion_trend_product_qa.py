@@ -22,6 +22,15 @@ def test_trend_product_gate_cancel_resume_recovery_alpha_nested_hdr_and_mp4(
     )
 
     assert report["ok"] is True
+    assert report["trend_capabilities"]["ok"] is True
+    assert report["trend_capabilities"]["summary"] == {
+        "trend_count": 10,
+        "supported_v1": 8,
+        "limited_v1": 2,
+        "unavailable": 0,
+    }
+    assert report["trend_capabilities"]["missing_actions"] == []
+    assert report["trend_capabilities"]["missing_evidence"] == []
     assert report["cancelled"] is True
     assert report["partial_frame_count"] == 2
     assert report["corrupt_frame_repaired"] is True
