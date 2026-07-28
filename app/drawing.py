@@ -698,6 +698,70 @@ QFrame#PainterUINavigator {
     border-right: 1px solid #303741;
 }
 
+QScrollArea#PainterUINavigatorScroll,
+QWidget#PainterUINavigatorContent {
+    background-color: #1e2228;
+    border: none;
+}
+
+QScrollArea#PainterUINavigatorScroll QScrollBar:vertical {
+    background-color: #181c22;
+    border: none;
+    width: 6px;
+    margin: 0;
+}
+
+QScrollArea#PainterUINavigatorScroll QScrollBar::handle:vertical {
+    background-color: #526071;
+    border-radius: 3px;
+    min-height: 30px;
+}
+
+QScrollArea#PainterUINavigatorScroll QScrollBar::handle:vertical:hover {
+    background-color: #70839b;
+}
+
+QScrollArea#PainterUINavigatorScroll QScrollBar::add-line:vertical,
+QScrollArea#PainterUINavigatorScroll QScrollBar::sub-line:vertical {
+    height: 0;
+    border: none;
+}
+
+QScrollArea#PainterUINavigatorScroll QScrollBar::add-page:vertical,
+QScrollArea#PainterUINavigatorScroll QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QFrame#PainterUINavigatorResizeHandle {
+    background-color: transparent;
+    border: none;
+}
+
+QFrame#PainterUINavigatorResizeHandle:hover,
+QFrame#PainterUINavigatorResizeHandle[dragging="true"] {
+    background-color: #6d91bd;
+}
+
+QFrame#PainterUIInspectorResizeHandle {
+    background-color: transparent;
+    border: none;
+}
+
+QFrame#PainterUIInspectorResizeHandle:hover,
+QFrame#PainterUIInspectorResizeHandle[dragging="true"] {
+    background-color: #6d91bd;
+}
+
+QDialog#PainterUIInspectorDockWindow {
+    background-color: #1e2228;
+    border: 1px solid #394654;
+}
+
+QScrollArea#PainterUIInspectorDockScroll {
+    background-color: #1e2228;
+    border: none;
+}
+
 QFrame#PainterUINavigatorHeader {
     background-color: #20242a;
     border: none;
@@ -737,19 +801,19 @@ QLabel#PainterUINavigatorSection {
     color: #8f9baa;
     background-color: #1e2228;
     border: none;
-    padding: 7px 8px 3px 8px;
+    padding: 3px 5px 1px 5px;
     font-size: 9px;
     font-weight: 700;
 }
 
 QLineEdit#PainterUINavigatorSearch {
-    margin: 6px 7px 3px 7px;
-    min-height: 23px;
+    margin: 3px 4px 1px 4px;
+    min-height: 18px;
     background-color: #15191e;
     color: #dfe6ef;
     border: 1px solid #303842;
     border-radius: 4px;
-    padding: 0 5px;
+    padding: 0 4px;
 }
 
 QListWidget#PainterUIPageList,
@@ -762,8 +826,8 @@ QWidget#PainterUILayersPage QListWidget {
 
 QListWidget#PainterUIPageList::item,
 QWidget#PainterUILayersPage QListWidget::item {
-    min-height: 24px;
-    padding: 1px 7px;
+    min-height: 18px;
+    padding: 0 4px;
 }
 
 QListWidget#PainterUIPageList::item:hover,
@@ -9556,10 +9620,28 @@ class PaintDialog(QDialog):
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
-        inspector.setMinimumWidth(252)
-        inspector.setMaximumWidth(268 if self._standalone else 280)
+        self._paint_inspector_expanded_width = (
+            268 if self._standalone else 280
+        )
+        inspector.setMinimumWidth(self._paint_inspector_expanded_width)
+        inspector.setMaximumWidth(self._paint_inspector_expanded_width)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self._paint_inspector_frame = inspector
+        from app.painter_ui_inspector_dock import (
+            PainterUIInspectorResizeHandle,
+        )
+
+        self._paint_inspector_resize_handle = PainterUIInspectorResizeHandle(
+            inspector
+        )
+        self._paint_inspector_resize_handle.width_requested.connect(
+            lambda width: self._set_painter_ui_inspector_width(
+                width,
+                user_initiated=True,
+            )
+        )
+        self._painter_ui_inspector_detached = False
+        self._painter_ui_inspector_dock_window = None
         inspector_layout = QVBoxLayout(inspector)
         inspector_layout.setContentsMargins(0, 0, 0, 0)
         inspector_layout.setSpacing(1)
@@ -10029,6 +10111,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector = PainterUIInspector()
         self._paint_ui_inspector.collapsed_changed.connect(
             self._set_painter_ui_inspector_collapsed
+        )
+        self._paint_ui_inspector.dock_toggle_requested.connect(
+            self._toggle_painter_ui_inspector_dock
         )
         self._paint_ui_inspector.selection_changed.connect(
             self._set_painter_ui_selection
@@ -12498,8 +12583,27 @@ class PaintDialog(QDialog):
             if ui_design:
                 self._sync_ui_design_toolbar_density()
         ui_inspector = getattr(self, "_paint_ui_inspector", None)
+        if (
+            not ui_design
+            and bool(getattr(self, "_painter_ui_inspector_detached", False))
+        ):
+            self._dock_painter_ui_inspector()
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
+        inspector_frame = getattr(self, "_paint_inspector_frame", None)
+        if inspector_frame is not None:
+            inspector_frame.setVisible(
+                not (
+                    ui_design
+                    and bool(
+                        getattr(
+                            self,
+                            "_painter_ui_inspector_detached",
+                            False,
+                        )
+                    )
+                )
+            )
         ui_navigator = getattr(self, "_painter_ui_navigator", None)
         if ui_navigator is not None:
             ui_navigator.setVisible(ui_design)
@@ -22173,12 +22277,123 @@ class PaintDialog(QDialog):
         frame = getattr(self, "_paint_inspector_frame", None)
         if frame is None:
             return
+        handle = getattr(self, "_paint_inspector_resize_handle", None)
         if bool(collapsed):
             frame.setMinimumWidth(36)
             frame.setMaximumWidth(36)
+            if handle is not None:
+                handle.hide()
         else:
-            frame.setMinimumWidth(252)
-            frame.setMaximumWidth(268 if self._standalone else 280)
+            width = int(
+                getattr(
+                    self,
+                    "_paint_inspector_expanded_width",
+                    268 if self._standalone else 280,
+                )
+            )
+            frame.setMinimumWidth(width)
+            frame.setMaximumWidth(width)
+            if handle is not None:
+                handle.show()
+        self._update_canvas_geometry()
+
+    def _set_painter_ui_inspector_width(
+        self,
+        width: int,
+        *,
+        user_initiated: bool = False,
+    ) -> int:
+        value = max(240, min(420, int(width)))
+        self._paint_inspector_expanded_width = value
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        collapsed = bool(
+            inspector is not None
+            and hasattr(inspector, "is_collapsed")
+            and inspector.is_collapsed()
+        )
+        if (
+            not collapsed
+            and not bool(
+                getattr(self, "_painter_ui_inspector_detached", False)
+            )
+        ):
+            frame = getattr(self, "_paint_inspector_frame", None)
+            if frame is not None:
+                frame.setMinimumWidth(value)
+                frame.setMaximumWidth(value)
+                frame.updateGeometry()
+        if user_initiated:
+            self._update_canvas_geometry()
+        return value
+
+    def _toggle_painter_ui_inspector_dock(self) -> None:
+        if bool(getattr(self, "_painter_ui_inspector_detached", False)):
+            self._dock_painter_ui_inspector()
+        else:
+            self._detach_painter_ui_inspector()
+
+    def _detach_painter_ui_inspector(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is None:
+            return
+        window = getattr(self, "_painter_ui_inspector_dock_window", None)
+        if window is None:
+            from app.painter_ui_inspector_dock import (
+                PainterUIInspectorDockWindow,
+            )
+
+            window = PainterUIInspectorDockWindow(self)
+            window.dock_requested.connect(self._dock_painter_ui_inspector)
+            self._painter_ui_inspector_dock_window = window
+        window.attach(inspector)
+        inspector.set_detached(True)
+        self._painter_ui_inspector_detached = True
+        frame = getattr(self, "_paint_inspector_frame", None)
+        if frame is not None:
+            frame.hide()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self._update_canvas_geometry()
+
+    def _dock_painter_ui_inspector(self) -> None:
+        if not bool(getattr(self, "_painter_ui_inspector_detached", False)):
+            return
+        window = getattr(self, "_painter_ui_inspector_dock_window", None)
+        inspector = (
+            window.take()
+            if window is not None
+            else getattr(self, "_paint_ui_inspector", None)
+        )
+        if inspector is None:
+            return
+        controls = getattr(self, "_paint_inspector_controls", None)
+        layout = controls.layout() if controls is not None else None
+        if layout is not None:
+            inspector.setParent(controls)
+            layout.insertWidget(max(0, layout.count() - 1), inspector, 1)
+        inspector.set_detached(False)
+        self._painter_ui_inspector_detached = False
+        if window is not None:
+            window.hide()
+        ui_design = (
+            str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design"
+        )
+        inspector.setVisible(ui_design)
+        frame = getattr(self, "_paint_inspector_frame", None)
+        if frame is not None:
+            frame.setVisible(True)
+        self._set_painter_ui_inspector_width(
+            int(
+                getattr(
+                    self,
+                    "_paint_inspector_expanded_width",
+                    268 if self._standalone else 280,
+                )
+            )
+        )
         self._update_canvas_geometry()
 
     def _restore_3d_workspace_after_resize(

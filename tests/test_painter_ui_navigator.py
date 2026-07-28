@@ -12,6 +12,7 @@ def _app():
 
 def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
     app = _app()
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 
     from app.painter_ui_navigator import PainterUINavigatorPanel
@@ -54,7 +55,38 @@ def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
     assert panel.maximumWidth() == 34
     panel.collapse_button.click()
     assert not panel.is_collapsed()
-    assert panel.minimumWidth() == 196
+    assert panel.minimumWidth() == panel.DEFAULT_EXPANDED_WIDTH
+    assert (
+        panel.content_scroll.verticalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+    )
+    panel.deleteLater()
+
+
+def test_ui_navigator_resizes_and_restores_last_expanded_width() -> None:
+    _app()
+    from PySide6.QtWidgets import QListWidget, QWidget
+
+    from app.painter_ui_navigator import PainterUINavigatorPanel
+
+    panel = PainterUINavigatorPanel(QWidget(), QListWidget())
+    changed: list[int] = []
+    panel.width_changed.connect(changed.append)
+
+    assert panel.set_expanded_width(300, user_initiated=True) == 300
+    assert panel.minimumWidth() == 300
+    assert panel.maximumWidth() == 300
+    assert panel._collapse_user_override is True
+    panel.set_collapsed(True)
+    assert panel.width() <= 34
+    panel.set_collapsed(False)
+    assert panel.minimumWidth() == 300
+    assert panel.maximumWidth() == 300
+    assert panel.expanded_width() == 300
+
+    assert panel.set_expanded_width(20) == panel.MIN_EXPANDED_WIDTH
+    assert panel.set_expanded_width(999) == panel.MAX_EXPANDED_WIDTH
+    assert changed == [300, panel.MIN_EXPANDED_WIDTH, panel.MAX_EXPANDED_WIDTH]
     panel.deleteLater()
 
 

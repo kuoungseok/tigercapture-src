@@ -273,6 +273,40 @@ def main() -> int:
         output_dir / "painter_ui_designer_m1_hierarchy.png"
     )
     dialog.grab().save(str(hierarchy_screenshot_path), "PNG")
+    navigator = dialog._painter_ui_navigator
+    navigator.set_collapsed(False, user_initiated=True)
+    navigator.set_expanded_width(
+        navigator.DEFAULT_EXPANDED_WIDTH,
+        user_initiated=True,
+    )
+    app.processEvents()
+    navigator_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_navigator.png"
+    )
+    dialog.grab().save(str(navigator_screenshot_path), "PNG")
+    dialog._set_painter_ui_inspector_width(340, user_initiated=True)
+    app.processEvents()
+    inspector_resized_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_inspector_resized.png"
+    )
+    dialog.grab().save(str(inspector_resized_screenshot_path), "PNG")
+    dialog._detach_painter_ui_inspector()
+    app.processEvents()
+    inspector_detached_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_inspector_detached.png"
+    )
+    dialog._painter_ui_inspector_dock_window.grab().save(
+        str(inspector_detached_screenshot_path),
+        "PNG",
+    )
+    detached_round_trip = bool(dialog._painter_ui_inspector_detached)
+    dialog._dock_painter_ui_inspector()
+    app.processEvents()
+    detached_round_trip = (
+        detached_round_trip
+        and not dialog._painter_ui_inspector_detached
+        and dialog._paint_inspector_frame.isVisible()
+    )
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -316,11 +350,27 @@ def main() -> int:
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
+            and navigator_screenshot_path.is_file()
+            and inspector_resized_screenshot_path.is_file()
+            and inspector_detached_screenshot_path.is_file()
+            and detached_round_trip
+            and navigator.expanded_width()
+            == navigator.DEFAULT_EXPANDED_WIDTH
         ),
         "screenshot": str(screenshot_path),
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
+        "navigator_screenshot": str(navigator_screenshot_path),
+        "inspector_resized_screenshot": str(
+            inspector_resized_screenshot_path
+        ),
+        "inspector_detached_screenshot": str(
+            inspector_detached_screenshot_path
+        ),
+        "navigator_width": navigator.expanded_width(),
+        "inspector_width": dialog._paint_inspector_expanded_width,
+        "inspector_detached_round_trip": detached_round_trip,
         "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],

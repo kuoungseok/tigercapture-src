@@ -191,6 +191,7 @@ class PainterUIInspector(QWidget):
     motion_binding_relink_requested = Signal(str, str, str)
     motion_binding_detach_requested = Signal(str)
     collapsed_changed = Signal(bool)
+    dock_toggle_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -213,6 +214,17 @@ class PainterUIInspector(QWidget):
         self.title_label = title
         title_layout.addWidget(title)
         title_layout.addStretch(1)
+        self.dock_button = QPushButton("")
+        self.dock_button.setObjectName("PainterUIPanelCollapse")
+        self.dock_button.setFixedSize(22, 22)
+        self.dock_button.setIcon(
+            app_icon("popout", size=12, color="#B8C4D3")
+        )
+        self.dock_button.setIconSize(icon_size(12))
+        self.dock_button.setToolTip("Detach inspector")
+        self.dock_button.setAccessibleName("Detach inspector")
+        self.dock_button.clicked.connect(self.dock_toggle_requested)
+        title_layout.addWidget(self.dock_button)
         self.collapse_button = QPushButton("")
         self.collapse_button.setObjectName("PainterUIPanelCollapse")
         self.collapse_button.setFixedSize(22, 22)
@@ -1345,6 +1357,20 @@ class PainterUIInspector(QWidget):
         self.title_label.setVisible(not value)
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
+
+    def set_detached(self, detached: bool) -> None:
+        value = bool(detached)
+        self.dock_button.setToolTip(
+            "Dock inspector" if value else "Detach inspector"
+        )
+        self.dock_button.setAccessibleName(self.dock_button.toolTip())
+        self.dock_button.setIcon(
+            app_icon(
+                "relink" if value else "popout",
+                size=12,
+                color="#B8C4D3",
+            )
+        )
 
     def is_collapsed(self) -> bool:
         return self._collapsed

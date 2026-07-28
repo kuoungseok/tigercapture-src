@@ -731,8 +731,12 @@ overlay mode로 전환한다.
 
 - The always-visible template access band is 34 px high. Larger template
   browsing belongs in the gallery, not in permanent canvas chrome.
-- The standalone right inspector uses a 252-268 px width envelope. Embedded
-  use may expand only to 280 px.
+- The left navigator defaults to a compact 168 px and can be resized from
+  136-320 px. Its vertical scrollbar remains available so compact width never
+  hides Pages, Layers, or Assets.
+- The standalone right inspector starts at 268 px and can be resized from
+  240-420 px. It can detach into a floating window and must re-dock
+  automatically when UI Design mode is left.
 - Inspector typography and controls use compact density while preserving
   readable Korean and English labels, keyboard focus, and tooltips.
 - Shape and content creation commands are grouped under icon-first flyouts so

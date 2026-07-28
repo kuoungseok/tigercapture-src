@@ -14,6 +14,10 @@ Completed in the first shell slice:
 - Sections, Components, and Tokens moved into Assets
 - right `Design / Prototype / Inspect` modes
 - manual side-panel collapse and automatic narrow-canvas navigator collapse
+- resizable 136-320 px left navigator with a compact 168 px default and a
+  persistent thin vertical scrollbar
+- resizable 240-420 px right inspector with detachable floating-window and
+  automatic re-dock when leaving UI Design
 - zoom-adaptive top/left rulers and ruler-drag guide creation
 - shared `paint.ui.guide.create/remove/clear` and
   `paint.ui.ruler.visibility.set` automation
@@ -596,6 +600,10 @@ workflow is production-ready.
   targets; the full gallery remains available from the leading grid button.
 - The right inspector is constrained to 252-268 px in the standalone Painter
   window and uses compact labels, tabs, fields, buttons, and list rows.
+- The left navigator defaults to 168 px, can be resized from 136-320 px, and
+  keeps Pages/Layers/Assets reachable through a thin vertical scrollbar.
+- The right inspector can be resized from 240-420 px or detached into a
+  floating window; leaving UI Design re-docks the canonical inspector widget.
 - Rulers and persistent artboard guides remain visible without consuming
   inspector space.
 - Compactness is covered by widget geometry tests and real offscreen screenshot
