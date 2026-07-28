@@ -224,7 +224,9 @@ def test_motion_glass_actions_create_bind_preflight_and_remove() -> None:
     })
     assert preflight.ok
     assert preflight.result["preview_backend"] == "shared_backdrop_raster"
-    assert preflight.result["umg_disposition"] == "deterministic_bake"
+    assert preflight.result["umg_disposition"] == "blocked_preflight"
+    assert preflight.result["umg_reason"] == "effect_requires_bake:tiger_glass"
+    assert preflight.result["recommended_output"] == "deterministic_tiled_bake"
     removed = registry.execute("motion.material.glass.remove", {
         "composition_id": composition_id,
         "layer_id": layer_id,

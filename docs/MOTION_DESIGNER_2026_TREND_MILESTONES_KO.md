@@ -256,9 +256,11 @@ UMG:
 - `tools/qa_motion_glass.py`는 `tiger_glass_pointer_driver.png`를 생성하고
   1920x1080에서 중앙과 우하단 포인터가 서로 다른 픽셀을 렌더링했는지
   보고한다.
-- 남은 M22 차단 항목은 non-raster GPU backdrop 경로, 안정적인 24fps
-  제품 기준, UMG UI Material native 또는 bake 최종 결정이다. HDR 및
-  Glass-only tiled export 증거는 완료됐다.
+- 남은 M22 차단 항목은 non-raster GPU backdrop 경로와 안정적인 24fps
+  제품 기준이다. HDR 및 Glass-only tiled export 증거는 완료됐다.
+  UMG v1은 arbitrary sibling backdrop을 같은 의미로 샘플링할 수 없으므로
+  native UI Material로 근사하지 않고 `effect_requires_bake:tiger_glass`
+  차단과 결정적 image/video bake 권고로 확정했다.
 
 ### 2026-07-29 viewport-resolution Preview 갱신
 
@@ -307,6 +309,23 @@ UMG:
   AI가 활성화와 호환성 검사를 수행할 수 있다. 최종 조립 image 자체는
   여전히 출력 해상도 크기이며, v1의 제품 주장은 중간 메모리 절감,
   seam 안전성, 결정적 parity에 한정한다.
+
+### 2026-07-29 Unreal Glass disposition 확정
+
+- 공유 Tiger UMG 계약을 schema v4로 올리고 Motion/Painter 양쪽 레이어에
+  정식 `BlockReasons` 배열을 추가했다. PayloadJson을 해석해야만 사유를
+  알 수 있던 v3와 달리 Unreal preflight가 layer ID와 사유를 직접
+  반환한다.
+- Motion 패키징 단계에서도 blocked layer를 발견하면 Unreal 실행 전에
+  중단하고 정확한 layer/reason 목록을 반환한다.
+- `D:\UE_5.8\Engine`으로 Editor, Game Development, Game Shipping
+  플러그인 빌드가 모두 성공했다. source-free bundle로 실제 임시
+  프로젝트에서 Widget Blueprint 1개와 UWidgetAnimation 1개를 생성,
+  컴파일, 재로드했다.
+- 별도 실제 UE preflight는 Glass 문서를
+  `glass:effect_requires_bake:tiger_glass`로 차단했다. 따라서 M22 v1은
+  Glass를 UI Material로 불완전하게 근사하지 않고 결정적 bake 경로를
+  권장한다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 

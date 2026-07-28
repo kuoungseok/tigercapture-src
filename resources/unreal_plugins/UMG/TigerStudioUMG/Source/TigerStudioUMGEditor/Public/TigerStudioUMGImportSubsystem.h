@@ -32,6 +32,9 @@ struct FTigerStudioUMGPreflightResult
     int32 BlockedLayerCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> BlockReasons;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
     int32 ResourceCount = 0;
 
     UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")

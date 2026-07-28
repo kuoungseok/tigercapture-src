@@ -128,8 +128,13 @@ class MotionGlassAdapterMixin:
             "ok": True,
             "issues": [],
             "preview_backend": "shared_backdrop_raster",
-            "umg_disposition": "deterministic_bake" if advanced else "ui_material_candidate",
-            "umg_reason": "effect_requires_bake:tiger_glass" if advanced else "",
+            "umg_disposition": "blocked_preflight",
+            "umg_reason": "effect_requires_bake:tiger_glass",
+            "recommended_output": (
+                "deterministic_tiled_bake"
+                if advanced
+                else "deterministic_bake"
+            ),
         }
 
     def motion_glass_tiled_export_set(

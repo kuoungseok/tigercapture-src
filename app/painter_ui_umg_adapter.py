@@ -12,7 +12,7 @@ from app.painter_ui_responsive import resolve_ui_responsive_document
 
 
 PAINTER_UMG_ADAPTER_SCHEMA = "tigerstudio.painter.ui.umg_adapter.v1"
-TIGER_UMG_SCHEMA_VERSION = 3
+TIGER_UMG_SCHEMA_VERSION = 4
 
 
 def _hash_file(path: Path) -> str:
@@ -204,6 +204,7 @@ def painter_ui_to_umg_document(
                 "Name": row["name"],
                 "Kind": kind,
                 "Disposition": disposition,
+                "BlockReasons": block_reasons,
                 "Position": {
                     "X": float(row["x"]) + float(row["width"]) * 0.5,
                     "Y": float(row["y"]) + float(row["height"]) * 0.5,
@@ -306,13 +307,12 @@ def preflight_painter_umg(
     for row in document["Layers"]:
         disposition = str(row["Disposition"] or "Blocked")
         counts[disposition] = counts.get(disposition, 0) + 1
-        payload = json.loads(str(row.get("PayloadJson") or "{}"))
         if disposition == "Blocked":
             blockers.append(
                 {
                     "object_id": row["Id"],
                     "name": row["Name"],
-                    "reasons": list(payload.get("umg_block_reasons") or []),
+                    "reasons": list(row.get("BlockReasons") or []),
                 }
             )
     missing_resources = [

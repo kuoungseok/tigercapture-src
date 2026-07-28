@@ -6598,8 +6598,13 @@ AI Script Edit MVP integration:
   report `backdrop_glass_requires_raster`; the shared raster result has
   Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
   candidate and reports `effect_requires_bake:tiger_glass`. The non-raster GPU
-  backdrop path and the native-versus-bake UI Material decision remain M22
-  work; deterministic Glass-only tiled export evidence is complete.
+  backdrop path remains M22 work. The v1 Unreal decision is explicit:
+  Tiger Glass is not mapped to a native UI Material because UMG cannot sample
+  arbitrary sibling backdrop content with equivalent semantics. Direct Widget
+  Blueprint generation is blocked with
+  `effect_requires_bake:tiger_glass`; deterministic image/video bake is the
+  recommended output. Deterministic Glass-only tiled export evidence is
+  complete.
   Draft/Preview
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
   QA tool records 138-172 ms/frame on the current shared CPU fallback after
@@ -6951,11 +6956,15 @@ AI Script Edit MVP integration:
   `motion.vector.offset_path.set`, `motion.vector.path_morph.set`, and
   `motion.vector.stroke.set`. Variable-width strokes explicitly fall back from
   the vector GPU packet to the shared painter render path.
-- Tiger UMG schema v3 blocks advanced Text/Shape features that do not yet have
-  native UMG or deterministic bake output and serializes exact block reasons.
-  The UE 5.8 plugin was rebuilt successfully; the public bundle remains
-  source-free. No Motion feature is silently omitted from Widget Blueprint
-  generation.
+- Tiger UMG schema v4 blocks advanced Text/Shape/Glass features that do not yet
+  have native UMG or deterministic bake output and serializes exact
+  per-layer `BlockReasons`. Python packaging stops before Unreal generation
+  when blocked content is present. The UE 5.8 plugin was rebuilt successfully;
+  the source-free bundle generated and reloaded a real Widget Blueprint with
+  one native button and one animation. A second real UE preflight rejected
+  Tiger Glass with the exact
+  `glass:effect_requires_bake:tiger_glass` reason. No Motion feature is
+  silently omitted from Widget Blueprint generation.
 - `motion.typography.character_3d.prepare` stores versioned, non-rendering
   per-grapheme source spans, extrusion depth, bevel, material slot, and 3-axis
   transform intent for the M19 renderer. Its payload explicitly reports

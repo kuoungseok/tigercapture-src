@@ -11,7 +11,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.motion_designer.interactive_button import ButtonAction, create_button_component
-from app.motion_designer.schema import Keyframe, MotionComposition, MotionLayer, SourceRef
+from app.motion_designer.schema import (
+    Keyframe,
+    MotionComposition,
+    MotionEffectRef,
+    MotionLayer,
+    SourceRef,
+)
 from app.unreal_umg_document import package_motion_composition_for_umg
 from app.unreal_umg_workflow import run_unreal_umg_generation
 
@@ -110,8 +116,35 @@ def main() -> int:
         report = {"ok": False, "stage": "package", "packet": packet}
     else:
         result = run_unreal_umg_generation(project, packet["document_path"])
+        blocked_packet = package_motion_composition_for_umg(
+            MotionComposition(
+                id="qa_glass_blocked",
+                name="Tiger Glass UMG Block QA",
+                width=320,
+                height=180,
+                layers=[
+                    MotionLayer(
+                        id="glass",
+                        name="Glass",
+                        layer_type="shape",
+                        effects=[MotionEffectRef(kind="tiger_glass")],
+                    )
+                ],
+            ),
+            workspace / "blocked_packet",
+        )
+        blocked_result = run_unreal_umg_generation(
+            project,
+            blocked_packet["document_path"],
+        )
+        blocked_reason = "glass:effect_requires_bake:tiger_glass"
+        blocked_ok = bool(
+            not blocked_packet["ok"]
+            and not blocked_result.get("ok")
+            and blocked_reason in str(blocked_result.get("message") or "")
+        )
         report = {
-            "ok": bool(result.get("ok")),
+            "ok": bool(result.get("ok")) and blocked_ok,
             "stage": "generation",
             "project_path": str(project),
             "packet": {
@@ -119,6 +152,12 @@ def main() -> int:
                 "asset_count": packet["asset_count"],
             },
             "generation": result,
+            "blocked_glass_preflight": {
+                "ok": blocked_ok,
+                "expected_reason": blocked_reason,
+                "package_preflight": blocked_packet["preflight"],
+                "unreal_result": blocked_result,
+            },
         }
     report_path = workspace / "qa_report.json"
     report_path.write_text(

@@ -151,6 +151,9 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGLayerRecord
     ETigerStudioUMGDisposition Disposition = ETigerStudioUMGDisposition::Native;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> BlockReasons;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FVector2D Position = FVector2D::ZeroVector;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
@@ -181,7 +184,7 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGDocumentRecord
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
-    int32 SchemaVersion = 3;
+    int32 SchemaVersion = 4;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString Provider;

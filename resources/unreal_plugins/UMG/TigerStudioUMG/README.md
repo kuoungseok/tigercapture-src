@@ -26,7 +26,7 @@ Motion Designer and Painter do not write Unreal assets directly. Each exports a
 versioned Tiger UMG document with a `Provider` value such as
 `motion_designer` or `painter`. The editor module converts that common document
 to native UMG assets and reports every layer as native, baked, or blocked.
-Schema v3 also carries explicit block reasons for Motion/Painter features that
+Schema v4 carries explicit per-layer `BlockReasons` for Motion/Painter features that
 need a deterministic raster or UI-material bake; these features are never
 silently omitted from generated Widget Blueprints. Motion effect stacks,
 keyers, and animated masks currently require that deterministic bake and are
@@ -36,9 +36,10 @@ Motion scoped effect groups are likewise reported as
 `motion_feature_requires_bake:effect_group`; their target scope is never
 silently flattened or omitted.
 
-The current source tree establishes the plugin and document boundary. Native
-WidgetTree/UWidgetAnimation generation must not be claimed until an actual
-generated asset has compiled and been captured from Unreal Editor.
+UE 5.8 QA compiles the source plugin, generates and reloads a real
+WidgetBlueprint with a native button and UWidgetAnimation, and separately
+proves that a Tiger Glass document is rejected with the exact
+`glass:effect_requires_bake:tiger_glass` reason.
 
 ## Distribution
 

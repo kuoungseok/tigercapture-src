@@ -7,8 +7,10 @@ from app.motion_designer.interactive_button import ButtonAction, create_button_c
 from app.actions.registry import ActionRegistry
 from app.motion_designer.schema import Keyframe, MotionComposition, MotionLayer, SourceRef
 from app.unreal_umg_document import (
+    TIGER_UMG_SCHEMA_VERSION,
     motion_composition_to_umg_document,
     package_motion_composition_for_umg,
+    preflight_umg_document,
 )
 
 
@@ -54,7 +56,7 @@ def test_motion_umg_document_keeps_resources_animation_and_click_actions(
     )
 
     document = motion_composition_to_umg_document(composition)
-    assert document["SchemaVersion"] == 3
+    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 4
     assert document["Layers"][0]["Kind"] == "Button"
     assert document["Animations"][0]["Property"] == "position"
     assert [row["Type"] for row in document["Interactions"][0]["Actions"]] == [
@@ -127,6 +129,7 @@ def test_umg_preflight_blocks_motion_features_that_require_a_real_bake() -> None
     exported = document["Layers"][0]
     payload = json.loads(exported["PayloadJson"])
     assert exported["Disposition"] == "Blocked"
+    assert exported["BlockReasons"] == payload["umg_block_reasons"]
     assert "shape_operator_requires_bake:offset_path" in payload["umg_block_reasons"]
     assert "motion_feature_requires_bake:path_morph" in payload["umg_block_reasons"]
 
@@ -207,6 +210,41 @@ def test_umg_preflight_marks_new_motion_effects_for_deterministic_bake() -> None
         "effect_requires_bake:craft_style",
         "effect_requires_bake:tiger_glass",
     } <= set(payload["umg_block_reasons"])
+    preflight = preflight_umg_document(document)
+    assert preflight["ok"] is False
+    assert preflight["counts"]["Blocked"] == 1
+    assert (
+        "effect_requires_bake:tiger_glass"
+        in preflight["blockers"][0]["reasons"]
+    )
+
+
+def test_umg_package_stops_before_unreal_when_glass_requires_bake(
+    tmp_path: Path,
+) -> None:
+    from app.motion_designer.schema import MotionEffectRef
+
+    composition = MotionComposition(
+        id="glass_blocked",
+        layers=[
+            MotionLayer(
+                id="glass",
+                layer_type="shape",
+                effects=[MotionEffectRef(kind="tiger_glass")],
+            )
+        ],
+    )
+    result = package_motion_composition_for_umg(
+        composition,
+        tmp_path / "glass_packet",
+    )
+
+    assert result["ok"] is False
+    assert result["preflight"]["counts"]["Blocked"] == 1
+    assert result["preflight"]["blockers"][0]["reasons"] == [
+        "effect_requires_bake:tiger_glass"
+    ]
+    assert Path(result["document_path"]).is_file()
 
 
 def test_umg_preflight_never_silently_drops_motion_color_management() -> None:

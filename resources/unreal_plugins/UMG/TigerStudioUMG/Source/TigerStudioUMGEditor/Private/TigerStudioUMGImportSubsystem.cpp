@@ -28,7 +28,7 @@ UTigerStudioUMGImportSubsystem::PreflightDocumentFile(const FString& DocumentPat
         return Result;
     }
 
-    if (Result.Document.SchemaVersion != 3)
+    if (Result.Document.SchemaVersion != 4)
     {
         Result.Message = FString::Printf(
             TEXT("Unsupported Tiger UMG schema version: %d"),
@@ -85,6 +85,19 @@ UTigerStudioUMGImportSubsystem::PreflightDocumentFile(const FString& DocumentPat
             break;
         case ETigerStudioUMGDisposition::Blocked:
             ++Result.BlockedLayerCount;
+            if (Layer.BlockReasons.IsEmpty())
+            {
+                Result.BlockReasons.Add(
+                    Layer.Id + TEXT(":unsupported_layer"));
+            }
+            else
+            {
+                for (const FString& Reason : Layer.BlockReasons)
+                {
+                    Result.BlockReasons.Add(
+                        Layer.Id + TEXT(":") + Reason);
+                }
+            }
             break;
         default:
             break;
@@ -94,8 +107,9 @@ UTigerStudioUMGImportSubsystem::PreflightDocumentFile(const FString& DocumentPat
     if (Result.BlockedLayerCount > 0)
     {
         Result.Message = FString::Printf(
-            TEXT("Preflight blocked by %d unsupported layer(s)."),
-            Result.BlockedLayerCount);
+            TEXT("Preflight blocked by %d unsupported layer(s): %s"),
+            Result.BlockedLayerCount,
+            *FString::Join(Result.BlockReasons, TEXT("; ")));
         return Result;
     }
 

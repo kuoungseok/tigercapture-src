@@ -11,7 +11,7 @@ from app.motion_designer.interactive_button import button_component
 from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionLayer
 
 
-TIGER_UMG_SCHEMA_VERSION = 3
+TIGER_UMG_SCHEMA_VERSION = 4
 SUPPORTED_NATIVE_LAYERS = {"group", "shape", "text", "image"}
 
 
@@ -270,6 +270,7 @@ def motion_composition_to_umg_document(
                 "Name": layer.name,
                 "Kind": layer_kind,
                 "Disposition": disposition,
+                "BlockReasons": block_reasons,
                 "Position": position,
                 "Size": {"X": width, "Y": height},
                 "Scale": scale,
@@ -408,6 +409,34 @@ def motion_composition_to_umg_document(
     }
 
 
+def preflight_umg_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    counts = {"Native": 0, "Material": 0, "Baked": 0, "Blocked": 0}
+    blockers: list[dict[str, Any]] = []
+    for row in document.get("Layers", []):
+        if not isinstance(row, Mapping):
+            continue
+        disposition = str(row.get("Disposition") or "Blocked")
+        counts[disposition] = counts.get(disposition, 0) + 1
+        if disposition != "Blocked":
+            continue
+        reasons = [
+            str(reason)
+            for reason in row.get("BlockReasons", [])
+            if str(reason)
+        ]
+        blockers.append({
+            "layer_id": str(row.get("Id") or ""),
+            "name": str(row.get("Name") or ""),
+            "reasons": reasons or ["unsupported_layer"],
+        })
+    return {
+        "schema_version": int(document.get("SchemaVersion", 0) or 0),
+        "ok": not blockers,
+        "counts": counts,
+        "blockers": blockers,
+    }
+
+
 def _resource_rows(document: Mapping[str, Any]) -> Iterable[dict[str, Any]]:
     for row in document.get("Resources", []):
         if isinstance(row, dict):
@@ -442,13 +471,15 @@ def package_umg_document(
         json.dumps(packaged, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    preflight = preflight_umg_document(packaged)
     return {
-        "ok": not missing,
+        "ok": not missing and preflight["ok"],
         "document_path": str(document_path),
         "asset_count": len(list(_resource_rows(packaged))),
         "copied": copied,
         "missing": missing,
         "document": packaged,
+        "preflight": preflight,
     }
 
 
@@ -469,4 +500,5 @@ __all__ = [
     "motion_composition_to_umg_document",
     "package_motion_composition_for_umg",
     "package_umg_document",
+    "preflight_umg_document",
 ]

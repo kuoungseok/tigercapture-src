@@ -25,6 +25,7 @@ def test_bundled_umg_plugin_has_shared_runtime_and_editor_modules() -> None:
     assert root.parent.name == "UMG"
     assert PLUGIN_SOURCE_RELATIVE_ROOT.parts[-2:] == ("UMG", PLUGIN_NAME)
     assert manifest["FriendlyName"] == "Tiger Studio UMG"
+    assert manifest["VersionName"] == "0.3.0"
     assert source_manifest["EnabledByDefault"] is False
     assert modules == {
         "TigerStudioUMG": "Runtime",
@@ -39,6 +40,24 @@ def test_bundled_umg_plugin_has_shared_runtime_and_editor_modules() -> None:
         / "TigerStudioUMGEditor"
         / "TigerStudioUMGEditor.Build.cs"
     ).is_file()
+    types = (
+        source_root
+        / "Source"
+        / "TigerStudioUMG"
+        / "Public"
+        / "TigerStudioUMGTypes.h"
+    ).read_text(encoding="utf-8")
+    preflight = (
+        source_root
+        / "Source"
+        / "TigerStudioUMGEditor"
+        / "Private"
+        / "TigerStudioUMGImportSubsystem.cpp"
+    ).read_text(encoding="utf-8")
+    assert "int32 SchemaVersion = 4;" in types
+    assert "TArray<FString> BlockReasons;" in types
+    assert "Result.Document.SchemaVersion != 4" in preflight
+    assert "FString::Join(Result.BlockReasons" in preflight
     if "bundled" in root.parts:
         assert not (root / "Source").exists()
         assert not (root / "Intermediate").exists()
