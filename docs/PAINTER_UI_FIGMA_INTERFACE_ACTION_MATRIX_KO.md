@@ -56,3 +56,12 @@ Undo/Redo completion rule before moving to Implemented.
 - New Action families are added in `app/actions/paint_namespace.py`; editor
   implementations stay in focused Painter modules or
   `app/actions/editor_adapter_paint.py`.
+## Ruler And Guides
+
+| UI gesture | Action | Persistent | Undo |
+| --- | --- | --- | --- |
+| Drag horizontal ruler | `paint.ui.guide.create` (`horizontal`) | artboard `guides.horizontal` | yes |
+| Drag vertical ruler | `paint.ui.guide.create` (`vertical`) | artboard `guides.vertical` | yes |
+| Remove guide | `paint.ui.guide.remove` | artboard guides | yes |
+| Clear guides | `paint.ui.guide.clear` | artboard guides | yes |
+| Show/hide rulers | `paint.ui.ruler.visibility.set` | workspace session | no |

@@ -61,6 +61,7 @@ class PainterUIDesignOverlay(QWidget):
     key_command = Signal(str, bool)
     artboard_activation_requested = Signal(str)
     artboard_geometry_requested = Signal(str, float, float)
+    guide_create_requested = Signal(str, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -94,6 +95,9 @@ class PainterUIDesignOverlay(QWidget):
         self._guide_y: float | None = None
         self._active_artboard_drag_id = ""
         self._artboard_drag_origin = QPointF()
+        self._rulers_visible = True
+        self._ruler_size = 20.0
+        self._ruler_guide_preview: tuple[str, float] | None = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -228,6 +232,110 @@ class PainterUIDesignOverlay(QWidget):
 
     def snap_enabled(self) -> bool:
         return self._snap_enabled
+
+    def set_rulers_visible(self, visible: bool) -> None:
+        self._rulers_visible = bool(visible)
+        self.update()
+
+    def rulers_visible(self) -> bool:
+        return self._rulers_visible
+
+    @staticmethod
+    def _ruler_step(scale: float) -> float:
+        target_world = 72.0 / max(0.0001, float(scale))
+        exponent = math.floor(math.log10(max(0.0001, target_world)))
+        unit = 10.0 ** exponent
+        for multiplier in (1.0, 2.0, 5.0, 10.0):
+            step = multiplier * unit
+            if step >= target_world:
+                return step
+        return 10.0 * unit
+
+    def _paint_rulers(self, painter: QPainter) -> None:
+        if not self._rulers_visible:
+            return
+        size = self._ruler_size
+        viewport, scale = self._artboard_viewport()
+        painter.save()
+        painter.fillRect(QRectF(0.0, 0.0, self.width(), size), QColor("#20242A"))
+        painter.fillRect(QRectF(0.0, 0.0, size, self.height()), QColor("#20242A"))
+        painter.fillRect(QRectF(0.0, 0.0, size, size), QColor("#171B21"))
+        painter.setPen(QPen(QColor("#3A424D"), 1.0))
+        painter.drawLine(QPointF(size, 0.0), QPointF(size, self.height()))
+        painter.drawLine(QPointF(0.0, size), QPointF(self.width(), size))
+
+        step = self._ruler_step(scale)
+        minor = step / 5.0
+        left_world = (size - viewport.left()) / max(0.0001, scale)
+        right_world = (self.width() - viewport.left()) / max(0.0001, scale)
+        top_world = (size - viewport.top()) / max(0.0001, scale)
+        bottom_world = (self.height() - viewport.top()) / max(0.0001, scale)
+        painter.setFont(self.font())
+        painter.setPen(QColor("#AEB8C5"))
+
+        painter.save()
+        painter.setClipRect(
+            QRectF(size, 0.0, max(0.0, self.width() - size), size)
+        )
+        first_x = math.floor(left_world / minor) * minor
+        x = first_x
+        guard = 0
+        while x <= right_world and guard < 2000:
+            screen_x = viewport.left() + x * scale
+            major = abs((x / step) - round(x / step)) < 0.001
+            tick = 8.0 if major else 4.0
+            painter.drawLine(
+                QPointF(screen_x, size),
+                QPointF(screen_x, size - tick),
+            )
+            if major and screen_x >= size + 18.0:
+                painter.drawText(
+                    QPointF(screen_x + 2.0, 10.0),
+                    str(int(round(x))),
+                )
+            x += minor
+            guard += 1
+        painter.restore()
+
+        painter.save()
+        painter.setClipRect(
+            QRectF(0.0, size, size, max(0.0, self.height() - size))
+        )
+        first_y = math.floor(top_world / minor) * minor
+        y = first_y
+        guard = 0
+        while y <= bottom_world and guard < 2000:
+            screen_y = viewport.top() + y * scale
+            major = abs((y / step) - round(y / step)) < 0.001
+            tick = 8.0 if major else 4.0
+            painter.drawLine(
+                QPointF(size, screen_y),
+                QPointF(size - tick, screen_y),
+            )
+            if major and screen_y >= size + 18.0:
+                painter.save()
+                painter.translate(9.0, screen_y - 2.0)
+                painter.rotate(-90.0)
+                painter.drawText(QPointF(0.0, 0.0), str(int(round(y))))
+                painter.restore()
+            y += minor
+            guard += 1
+        painter.restore()
+
+        if self._ruler_guide_preview is not None:
+            orientation, position = self._ruler_guide_preview
+            painter.setPen(QPen(QColor("#35B9FF"), 1.0))
+            if orientation == "vertical":
+                painter.drawLine(
+                    QPointF(position, size),
+                    QPointF(position, self.height()),
+                )
+            else:
+                painter.drawLine(
+                    QPointF(size, position),
+                    QPointF(self.width(), position),
+                )
+        painter.restore()
 
     def _active_artboard(self) -> dict[str, Any]:
         active = self._document["active_artboard_id"]
@@ -1174,6 +1282,7 @@ class PainterUIDesignOverlay(QWidget):
                     QPointF(viewport.left(), self._guide_y),
                     QPointF(viewport.right(), self._guide_y),
                 )
+        self._paint_rulers(painter)
 
     def _cancel_interaction(self) -> None:
         self._interaction = ""
@@ -1182,6 +1291,7 @@ class PainterUIDesignOverlay(QWidget):
         self._preview_rect = QRectF()
         self._guide_x = None
         self._guide_y = None
+        self._ruler_guide_preview = None
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -1199,6 +1309,31 @@ class PainterUIDesignOverlay(QWidget):
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._press_position = QPointF(event.position())
         viewport, _scale = self._artboard_viewport()
+        if self._rulers_visible:
+            if (
+                event.position().y() <= self._ruler_size
+                and event.position().x() > self._ruler_size
+            ):
+                self._interaction = "guide_horizontal"
+                self._ruler_guide_preview = (
+                    "horizontal",
+                    float(event.position().y()),
+                )
+                self.setCursor(Qt.CursorShape.SplitVCursor)
+                event.accept()
+                return
+            if (
+                event.position().x() <= self._ruler_size
+                and event.position().y() > self._ruler_size
+            ):
+                self._interaction = "guide_vertical"
+                self._ruler_guide_preview = (
+                    "vertical",
+                    float(event.position().x()),
+                )
+                self.setCursor(Qt.CursorShape.SplitHCursor)
+                event.accept()
+                return
 
         if self._tool == "select":
             for artboard in reversed(self._document["artboards"]):
@@ -1347,6 +1482,21 @@ class PainterUIDesignOverlay(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
+        if self._interaction in {"guide_horizontal", "guide_vertical"}:
+            orientation = (
+                "horizontal"
+                if self._interaction == "guide_horizontal"
+                else "vertical"
+            )
+            position = (
+                float(event.position().y())
+                if orientation == "horizontal"
+                else float(event.position().x())
+            )
+            self._ruler_guide_preview = (orientation, position)
+            self.update()
+            event.accept()
+            return
         if self._interaction == "create":
             viewport, _scale = self._artboard_viewport()
             position = QPointF(
@@ -1504,7 +1654,34 @@ class PainterUIDesignOverlay(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         interaction = self._interaction
         object_id = self._active_object_id
-        if interaction == "create":
+        if interaction in {"guide_horizontal", "guide_vertical"}:
+            viewport, scale = self._artboard_viewport()
+            orientation = (
+                "horizontal"
+                if interaction == "guide_horizontal"
+                else "vertical"
+            )
+            screen_position = (
+                float(event.position().y())
+                if orientation == "horizontal"
+                else float(event.position().x())
+            )
+            inside = (
+                viewport.top() <= screen_position <= viewport.bottom()
+                if orientation == "horizontal"
+                else viewport.left() <= screen_position <= viewport.right()
+            )
+            if inside:
+                origin = (
+                    viewport.top()
+                    if orientation == "horizontal"
+                    else viewport.left()
+                )
+                self.guide_create_requested.emit(
+                    orientation,
+                    (screen_position - origin) / max(0.0001, scale),
+                )
+        elif interaction == "create":
             rect = self._preview_rect.normalized()
             if rect.width() >= 6.0 and rect.height() >= 6.0:
                 viewport, scale = self._artboard_viewport()

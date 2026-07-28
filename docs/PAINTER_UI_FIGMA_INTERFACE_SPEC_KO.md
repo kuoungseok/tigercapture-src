@@ -14,13 +14,16 @@ Implemented:
 - right contextual `Design / Prototype / Inspect` modes
 - collapsible navigator and properties panels
 - automatic navigator compaction when the usable canvas becomes too narrow
+- zoom-adaptive horizontal and vertical canvas rulers
+- ruler drag to create persistent, undoable artboard guides
+- shared UI/Action guide mutations with create/remove/clear automation
 - localized shell labels through the Painter i18n surface
 - focused UI tests and reproducible screenshot QA
 
 Still required by this contract:
 
 - grouped-tool flyouts and the complete creation set
-- rulers and draggable guides
+- guide drag-to-move/delete, ruler origin controls, and guide locking
 - selection-kind-specific Inspector sections
 - temporary compact properties popover when both panels are minimized
 - persisted panel widths and minimized state

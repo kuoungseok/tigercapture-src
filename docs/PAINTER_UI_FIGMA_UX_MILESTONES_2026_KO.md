@@ -14,13 +14,16 @@ Completed in the first shell slice:
 - Sections, Components, and Tokens moved into Assets
 - right `Design / Prototype / Inspect` modes
 - manual side-panel collapse and automatic narrow-canvas navigator collapse
+- zoom-adaptive top/left rulers and ruler-drag guide creation
+- shared `paint.ui.guide.create/remove/clear` and
+  `paint.ui.ruler.visibility.set` automation
 - Korean and supported-language shell label coverage
 - focused tests, architecture guard, and screenshot QA
 
 Not complete yet:
 
 - toolbar flyout groups and mode-specific Paint/3D variants
-- rulers, draggable guides, and transient zoom popover
+- guide move/delete/lock, ruler origin controls, and transient zoom popover
 - selection-type progressive disclosure in Design
 - prototype interaction authoring surface and on-canvas connection editing
 - persisted panel widths/minimized state and temporary properties popover

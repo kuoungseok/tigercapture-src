@@ -743,6 +743,75 @@ class PaintAdapterMixin(
             changes=changes,
         )
 
+    def paint_ui_guide_create(
+        self,
+        *,
+        orientation: str,
+        position: float,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import add_ui_guide
+
+        document = add_ui_guide(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            orientation=orientation,
+            position=position,
+        )
+        dialog._push_undo_state("Create UI guide")
+        return self._paint_ui_commit(dialog, "Create UI guide", document)
+
+    def paint_ui_guide_remove(
+        self,
+        *,
+        orientation: str,
+        position: float,
+        artboard_id: str = "",
+        tolerance: float = 0.5,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import remove_ui_guide
+
+        document = remove_ui_guide(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            orientation=orientation,
+            position=position,
+            tolerance=tolerance,
+        )
+        dialog._push_undo_state("Remove UI guide")
+        return self._paint_ui_commit(dialog, "Remove UI guide", document)
+
+    def paint_ui_guide_clear(
+        self,
+        *,
+        artboard_id: str = "",
+        orientation: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import clear_ui_guides
+
+        document = clear_ui_guides(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            orientation=orientation,
+        )
+        dialog._push_undo_state("Clear UI guides")
+        return self._paint_ui_commit(dialog, "Clear UI guides", document)
+
+    def paint_ui_ruler_visibility_set(
+        self,
+        *,
+        visible: bool,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        overlay = getattr(dialog, "_painter_ui_overlay", None)
+        if overlay is None:
+            raise ValueError("Painter UI canvas is unavailable")
+        overlay.set_rulers_visible(bool(visible))
+        return dialog.painter_action_state()
+
     def paint_ui_artboard_activate(self, *, artboard_id: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_document import set_active_ui_artboard

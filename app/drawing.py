@@ -9471,6 +9471,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.artboard_geometry_requested.connect(
             self._update_painter_ui_artboard_position
         )
+        self._painter_ui_overlay.guide_create_requested.connect(
+            self._create_painter_ui_guide
+        )
         self._painter_ui_overlay.hide()
 
         self._bg_label = QLabel(canvas_host)
@@ -12636,6 +12639,22 @@ class PaintDialog(QDialog):
             current,
             str(artboard_id),
             changes,
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _create_painter_ui_guide(
+        self,
+        orientation: str,
+        position: float,
+    ) -> None:
+        from app.painter_ui_guides import add_ui_guide
+
+        self._push_undo_state("Create UI guide")
+        self._painter_ui_document = add_ui_guide(
+            getattr(self, "_painter_ui_document", None) or {},
+            orientation=orientation,
+            position=position,
         )
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

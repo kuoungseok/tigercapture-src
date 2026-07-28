@@ -155,3 +155,125 @@ def test_artboard_layout_renderer_draws_columns_and_safe_area() -> None:
     assert image.pixelColor(15, 50) != QColor("#FFFFFF")
     assert image.pixelColor(60, 50) != QColor("#FFFFFF")
     assert image.pixelColor(8, 8) != QColor("#FFFFFF")
+
+
+def test_ui_canvas_rulers_draw_and_drag_guides() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 480)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.show()
+    app.processEvents()
+    viewport, _scale = overlay._artboard_viewport()
+    emitted: list[tuple[str, float]] = []
+    overlay.guide_create_requested.connect(
+        lambda orientation, position: emitted.append(
+            (orientation, position)
+        )
+    )
+
+    image = overlay.grab().toImage()
+    assert image.pixelColor(15, 15).name().upper() == "#171B21"
+
+    target_y = int(viewport.top() + viewport.height() * 0.25)
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(max(30, int(viewport.center().x())), 5),
+    )
+    QTest.mouseMove(
+        overlay,
+        QPoint(max(30, int(viewport.center().x())), target_y),
+    )
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(max(30, int(viewport.center().x())), target_y),
+    )
+    app.processEvents()
+
+    assert emitted
+    assert emitted[-1][0] == "horizontal"
+    assert abs(emitted[-1][1] - 844 * 0.25) < 4.0
+    overlay.deleteLater()
+
+
+def test_ui_canvas_guide_creation_uses_document_undo_path() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    original = dict(dialog._painter_ui_document["artboards"][0])
+    dialog._create_painter_ui_guide("vertical", 123.0)
+
+    guides = dialog._painter_ui_document["artboards"][0]["guides"]
+    assert guides["visible"] is True
+    assert guides["vertical"] == [123.0]
+    dialog._undo()
+    assert dialog._painter_ui_document["artboards"][0] == original
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_ui_guide_actions_share_mutation_and_ruler_surface() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    created = registry.execute(
+        "paint.ui.guide.create",
+        {
+            "orientation": "vertical",
+            "position": 96,
+        },
+    ).to_dict()
+    assert created["ok"] is True
+    assert created["result"]["ui_design"]["document"]["artboards"][0][
+        "guides"
+    ]["vertical"] == [96.0]
+
+    removed = registry.execute(
+        "paint.ui.guide.remove",
+        {
+            "orientation": "vertical",
+            "position": 96.2,
+            "tolerance": 0.5,
+        },
+    ).to_dict()
+    assert removed["ok"] is True
+    assert removed["result"]["ui_design"]["document"]["artboards"][0][
+        "guides"
+    ]["vertical"] == []
+
+    registry.execute(
+        "paint.ui.ruler.visibility.set",
+        {"visible": False},
+    )
+    assert dialog._painter_ui_overlay.rulers_visible() is False
+    registry.execute(
+        "paint.ui.ruler.visibility.set",
+        {"visible": True},
+    )
+    assert dialog._painter_ui_overlay.rulers_visible() is True
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()

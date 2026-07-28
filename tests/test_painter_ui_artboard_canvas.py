@@ -73,7 +73,7 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
 
     pixel = overlay.grab().toImage().pixelColor(2, 2)
     assert pixel.alpha() == 255
-    assert pixel == QColor("#3F4145")
+    assert pixel == QColor("#171B21")
     overlay.close()
     overlay.deleteLater()
     app.processEvents()

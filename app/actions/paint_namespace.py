@@ -426,6 +426,76 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Remove UI artboard",
         dry_summary="a UI artboard and its owned objects would be removed",
     )
+    for action_name, adapter_method, description, undo_label in (
+        (
+            "paint.ui.guide.create",
+            "paint_ui_guide_create",
+            "Create a horizontal or vertical guide on a Painter UI artboard.",
+            "Create UI guide",
+        ),
+        (
+            "paint.ui.guide.remove",
+            "paint_ui_guide_remove",
+            "Remove a guide near a provider-neutral artboard coordinate.",
+            "Remove UI guide",
+        ),
+    ):
+        properties = {
+            "artboard_id": {"type": "string"},
+            "orientation": {
+                "type": "string",
+                "enum": ["horizontal", "vertical"],
+            },
+            "position": {"type": "number", "minimum": 0},
+        }
+        if action_name.endswith(".remove"):
+            properties["tolerance"] = {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 100,
+            }
+        registry.register_adapter_action(
+            action_name,
+            description,
+            "paint",
+            adapter_method,
+            params_schema=schema_object(
+                properties,
+                required=("orientation", "position"),
+            ),
+            required=("orientation", "position"),
+            undo_label=undo_label,
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.ui.guide.clear",
+        "Clear horizontal, vertical, or all guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_clear",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["", "horizontal", "vertical"],
+                },
+            }
+        ),
+        undo_label="Clear UI guides",
+        dry_summary="the requested Painter UI guides would be cleared",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.visibility.set",
+        "Show or hide the Painter UI canvas rulers.",
+        "paint",
+        "paint_ui_ruler_visibility_set",
+        params_schema=schema_object(
+            {"visible": {"type": "boolean"}},
+            required=("visible",),
+        ),
+        required=("visible",),
+        dry_summary="the Painter UI ruler visibility would change",
+    )
     registry.register_adapter_action(
         "paint.ui.object.add",
         "Add a provider-neutral UI object to a Painter artboard.",
