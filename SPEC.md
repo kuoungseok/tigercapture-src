@@ -5788,6 +5788,14 @@ AI Script Edit MVP integration:
   Position, Scale, Rotation, Opacity, and Anchor Point and dragging a graph
   keyframe updates the shared composition document through the same undoable
   controller used by the inspector and AI actions.
+- A top-toolbar language selector uses the shared Tiger Studio
+  `en`, `ko`, `ja`, `zh`, `fr`, and `de` application preference; switching
+  language retranslates the open authoring window, tabs, toolbar, high-traffic
+  panels, tooltips, template gallery, Unreal Link dialog, and project
+  open/save prompts without rebuilding the composition. Missing translations
+  fall back to authored English rather than altering project data. Locale is a
+  user preference and is never serialized into `.tgmotion` or `.tgp`.
+  Automation uses `motion.ui.language.get` and `motion.ui.language.set`.
 - Image layers expose `tilt_x`, `tilt_y`, and `perspective` beside ordinary
   transform controls. Each control can create source-parameter keyframes; the
   Layer Timeline paints their diamonds and the Graph panel edits their curves

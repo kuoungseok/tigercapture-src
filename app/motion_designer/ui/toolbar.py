@@ -4,6 +4,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QStyle, QToolBar, QToolButton
 
+from app.i18n import SUPPORTED_LANGUAGES
 from app.icons import app_icon, unreal_engine_icon
 
 from .catalog import BEHAVIOR_ITEMS, FILTER_ITEMS, OBJECT_ITEMS
@@ -30,6 +31,7 @@ class MotionToolbar(QToolBar):
     output_requested = Signal()
     template_gallery_requested = Signal()
     unreal_link_requested = Signal()
+    language_requested = Signal(str)
     workspace_panel_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -192,10 +194,27 @@ class MotionToolbar(QToolBar):
         self.ai_action.toggled.connect(self.ai_toggled)
         self.addAction(self.ai_action)
         self.addSeparator()
+        self.language_button = QToolButton(self)
+        self.language_button.setText("Language")
+        self.language_button.setIcon(app_icon("language", size=18, color="#d9dde3"))
+        self.language_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.language_button.setPopupMode(QToolButton.InstantPopup)
+        self.addWidget(self.language_button)
         output = QAction(style.standardIcon(QStyle.SP_DialogSaveButton), "Export", self)
         output.setToolTip("Open Motion delivery and color settings")
         output.triggered.connect(self.output_requested)
         self.addAction(output)
+
+    def rebuild_language_menu(self, active_language: str) -> None:
+        menu = QMenu(self.language_button)
+        for code, label in SUPPORTED_LANGUAGES.items():
+            action = menu.addAction(str(label))
+            action.setCheckable(True)
+            action.setChecked(str(code) == str(active_language))
+            action.triggered.connect(
+                lambda _checked=False, value=code: self.language_requested.emit(value)
+            )
+        self.language_button.setMenu(menu)
 
     def set_ai_visible(self, visible: bool) -> None:
         self.ai_action.blockSignals(True)

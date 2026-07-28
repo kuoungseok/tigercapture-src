@@ -640,6 +640,9 @@ class MotionAIPanel(QWidget):
             if isinstance(item, dict)
         )
         dialog = LayerExtractionDialog(decomposition, self)
+        from app.motion_designer.localization import retranslate_motion_ui
+
+        retranslate_motion_ui(dialog)
         if dialog.exec() == dialog.Accepted:
             self.decomposition_repaired.emit(dialog.result_dict())
 

@@ -83,6 +83,31 @@ class MotionAdapterMixin:
         window.activateWindow()
         return {"opened": True, "composition_id": composition.id}
 
+    def motion_ui_language_get(self) -> dict[str, Any]:
+        from app.i18n import SUPPORTED_LANGUAGES, current_language
+
+        return {
+            "language": current_language(),
+            "supported_languages": dict(SUPPORTED_LANGUAGES),
+        }
+
+    def motion_ui_language_set(self, *, language: str) -> dict[str, Any]:
+        from app.i18n import SUPPORTED_LANGUAGES, save_language, set_language
+
+        code = str(language or "").split("_", 1)[0].lower()
+        if code not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"Unsupported Motion Designer language: {language}")
+        set_language(code)
+        save_language(code)
+        owner = self._require_owner()
+        window = getattr(owner, "_motion_designer_window", None)
+        if window is not None:
+            window.set_ui_language(code, persist=False)
+        return {
+            "language": code,
+            "supported_languages": dict(SUPPORTED_LANGUAGES),
+        }
+
     def motion_composition_create(self, **params: Any) -> dict[str, Any]:
         service = self._motion_service()
         result = service.create(**params)

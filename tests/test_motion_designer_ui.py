@@ -19,6 +19,16 @@ from app.motion_designer.audio_analysis import AudioAnalysisCache, AudioEnvelope
 from app.motion_designer.evaluator import evaluate_composition
 
 
+@pytest.fixture(autouse=True)
+def _stable_motion_ui_language():
+    from app.i18n import current_language, set_language
+
+    previous = current_language()
+    set_language("en")
+    yield
+    set_language(previous)
+
+
 def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):
@@ -91,6 +101,35 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert len(window.controller.composition.layers[0].behaviors) == 0
     window.controller.undo()
     assert window.controller.composition.layers == []
+    window.close()
+
+
+def test_motion_designer_language_switch_retranslates_open_window() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(
+        MotionComposition(width=960, height=540, duration_ms=1000),
+    )
+
+    assert window.toolbar.language_button.text() == "Language"
+    assert window.inspector_tabs.tabText(0) == "Properties"
+    assert len(window.toolbar.language_button.menu().actions()) == 6
+
+    window.set_ui_language("ko", persist=False)
+    assert window.windowTitle().startswith("모션 디자이너 -")
+    assert window.toolbar.templates_button.text() == "템플릿"
+    assert window.toolbar.unreal_link_button.text() == "언리얼 링크"
+    assert window.toolbar.language_button.text() == "언어"
+    assert window.inspector_tabs.tabText(0) == "속성"
+    assert window.left_tabs.tabText(0) == "추가"
+    assert window.library.templates_button.text() == "템플릿"
+
+    window.set_ui_language("ja", persist=False)
+    assert window.windowTitle().startswith("モーションデザイナー -")
+    assert window.toolbar.templates_button.text() == "テンプレート"
+    assert window.inspector_tabs.tabText(0) == "プロパティ"
     window.close()
     app.processEvents()
 

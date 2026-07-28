@@ -12,6 +12,33 @@ class Owner:
         self._motion_compositions = {}
 
 
+def test_motion_ui_language_actions_are_automation_ready(monkeypatch) -> None:
+    import app.i18n as i18n
+
+    previous = i18n.current_language()
+    monkeypatch.setattr(i18n, "save_language", lambda _code: None)
+    try:
+        registry = ActionRegistry(Owner())
+        specs = {row["id"]: row for row in registry.list_actions()}
+        assert "motion.ui.language.get" in specs
+        assert "motion.ui.language.set" in specs
+
+        changed = registry.execute(
+            "motion.ui.language.set",
+            {"language": "ja"},
+        )
+        assert changed.ok
+        assert changed.result["language"] == "ja"
+        inspected = registry.execute("motion.ui.language.get", {})
+        assert inspected.ok
+        assert inspected.result["language"] == "ja"
+        assert set(inspected.result["supported_languages"]) == {
+            "ko", "en", "ja", "zh", "fr", "de",
+        }
+    finally:
+        i18n.set_language(previous)
+
+
 def test_motion_actions_share_service_and_support_dry_run() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)

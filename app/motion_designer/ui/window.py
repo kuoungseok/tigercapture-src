@@ -19,6 +19,8 @@ from app.motion_designer.schema import (
     MotionEffectRef, MotionLayer, MotionMaskRef, SourceRef,
 )
 from app.motion_designer.vector_shapes import default_pen_path
+from app.motion_designer.localization import motion_text, retranslate_motion_ui
+from app.i18n import current_language, save_language, set_language
 
 from .behavior_panel import BehaviorPanel
 from .button_panel import ButtonComponentPanel
@@ -965,6 +967,7 @@ class MotionDesignerWindow(QMainWindow):
         self.toolbar.output_requested.connect(lambda: self.left_tabs.setCurrentWidget(self.output))
         self.toolbar.template_gallery_requested.connect(self._open_template_gallery)
         self.toolbar.unreal_link_requested.connect(self._open_unreal_link)
+        self.toolbar.language_requested.connect(self.set_ui_language)
         self.toolbar.workspace_panel_requested.connect(self._show_workspace_panel)
         self.toolbar.precompose_requested.connect(self._precompose_selected)
         self.toolbar.time_remap_requested.connect(self._apply_time_remap_preset)
@@ -1102,7 +1105,22 @@ class MotionDesignerWindow(QMainWindow):
         self._on_model_changed(self.controller.composition)
         self._document_initializing = False
         self._document_dirty = False
+        self.set_ui_language(current_language(), persist=False)
         self._update_document_title()
+
+    def set_ui_language(self, language: str, *, persist: bool = True) -> str:
+        code = str(language or "").split("_", 1)[0].lower()
+        from app.i18n import SUPPORTED_LANGUAGES
+
+        if code not in SUPPORTED_LANGUAGES:
+            raise ValueError(f"Unsupported Motion Designer language: {language}")
+        set_language(code)
+        if persist:
+            save_language(code)
+        self.toolbar.rebuild_language_menu(code)
+        retranslate_motion_ui(self, code)
+        self._update_document_title()
+        return code
 
     def _on_model_changed(self, composition: MotionComposition) -> None:
         self.canvas.set_composition(composition, self._time_ms)
@@ -1141,7 +1159,7 @@ class MotionDesignerWindow(QMainWindow):
         )
         dirty = " *" if self._document_dirty else ""
         self.setWindowTitle(
-            f"Motion Designer - {name} - {breadcrumb}{dirty}",
+            f"{motion_text('Motion Designer')} - {name} - {breadcrumb}{dirty}",
         )
 
     def _root_composition_snapshot(self) -> MotionComposition:
@@ -1170,8 +1188,8 @@ class MotionDesignerWindow(QMainWindow):
             return True
         answer = QMessageBox.question(
             self,
-            "Unsaved Motion Project",
-            "Save changes to the current Motion project?",
+            motion_text("Unsaved Motion Project"),
+            motion_text("Save changes to the current Motion project?"),
             QMessageBox.StandardButton.Save
             | QMessageBox.StandardButton.Discard
             | QMessageBox.StandardButton.Cancel,
@@ -1192,14 +1210,14 @@ class MotionDesignerWindow(QMainWindow):
         )
 
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Motion Project", "", MOTION_PROJECT_FILTER,
+            self, motion_text("Open Motion Project"), "", MOTION_PROJECT_FILTER,
         )
         if not path:
             return False
         try:
             composition = load_motion_project(path)
         except Exception as exc:
-            QMessageBox.critical(self, "Open Motion Project", str(exc))
+            QMessageBox.critical(self, motion_text("Open Motion Project"), str(exc))
             return False
         self._managed_document = True
         self._document_path = Path(path).expanduser().resolve(strict=False)
@@ -1210,7 +1228,10 @@ class MotionDesignerWindow(QMainWindow):
         self.controller.load(composition)
         self._document_dirty = False
         self._update_document_title()
-        self.statusBar().showMessage(f"Opened {self._document_path.name}", 5000)
+        self.statusBar().showMessage(
+            motion_text("Opened {name}", name=self._document_path.name),
+            5000,
+        )
         return True
 
     def _save_motion_project(self) -> bool:
@@ -1224,13 +1245,16 @@ class MotionDesignerWindow(QMainWindow):
                 self._document_path,
             )
         except Exception as exc:
-            QMessageBox.critical(self, "Save Motion Project", str(exc))
+            QMessageBox.critical(self, motion_text("Save Motion Project"), str(exc))
             return False
         self._managed_document = True
         self._document_dirty = False
         self._remove_document_recovery()
         self._update_document_title()
-        self.statusBar().showMessage(f"Saved {self._document_path.name}", 5000)
+        self.statusBar().showMessage(
+            motion_text("Saved {name}", name=self._document_path.name),
+            5000,
+        )
         return True
 
     def _save_motion_project_as(self) -> bool:
@@ -1240,7 +1264,7 @@ class MotionDesignerWindow(QMainWindow):
             f"{self.controller.composition.name or 'motion_project'}.tgmotion"
         ))
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Motion Project", initial, MOTION_PROJECT_FILTER,
+            self, motion_text("Save Motion Project"), initial, MOTION_PROJECT_FILTER,
         )
         if not path:
             return False
@@ -1286,6 +1310,7 @@ class MotionDesignerWindow(QMainWindow):
                 selected_layer_id=self._selected_layer_id,
                 parent=self,
             )
+            retranslate_motion_ui(dialog, current_language())
             if dialog.exec() == QDialog.Accepted:
                 candidate = MotionComposition.from_dict(
                     self.controller.composition.to_dict()
@@ -1301,11 +1326,13 @@ class MotionDesignerWindow(QMainWindow):
         if len(self.controller.composition.layers) < 4:
             return
         dialog = CutoutArmRigDialog(self.controller.composition, self)
+        retranslate_motion_ui(dialog, current_language())
         if dialog.exec() == QDialog.Accepted:
             self.controller.replace(dialog.result_composition())
 
     def _open_unreal_link(self) -> None:
         self.umg.set_composition(self.controller.composition)
+        retranslate_motion_ui(self.unreal_link_dialog, current_language())
         self.unreal_link_dialog.show()
         self.unreal_link_dialog.raise_()
         self.unreal_link_dialog.activateWindow()
@@ -1391,6 +1418,7 @@ class MotionDesignerWindow(QMainWindow):
             target_property,
             self,
         )
+        retranslate_motion_ui(dialog, current_language())
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         if not dialog.source_layer_id or not dialog.source_property_name:
@@ -1468,6 +1496,7 @@ class MotionDesignerWindow(QMainWindow):
             self,
             variant=recommended_variant(composition.width, composition.height),
         )
+        retranslate_motion_ui(dialog, current_language())
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         template_id = dialog.selected_template_id

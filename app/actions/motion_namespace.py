@@ -14,6 +14,33 @@ def register_motion_actions(registry: Any) -> None:
         params_schema=schema_object(cid), mutating=False, changed=False,
     )
     registry.register_adapter_action(
+        "motion.ui.language.get",
+        "Get the Motion Designer interface language.",
+        "motion",
+        "motion_ui_language_get",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ui.language.set",
+        "Set and persist the Motion Designer interface language.",
+        "motion",
+        "motion_ui_language_set",
+        params_schema=schema_object(
+            {
+                "language": {
+                    "type": "string",
+                    "enum": ["ko", "en", "ja", "zh", "fr", "de"],
+                },
+            },
+            required=("language",),
+        ),
+        required=("language",),
+        mutating=True,
+        changed=False,
+    )
+    registry.register_adapter_action(
         "motion.composition.list", "List Motion Designer compositions.", "motion",
         "motion_composition_list", params_schema=schema_object({}), mutating=False, changed=False,
     )
