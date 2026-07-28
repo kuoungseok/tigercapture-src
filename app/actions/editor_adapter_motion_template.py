@@ -10,6 +10,10 @@ from app.motion_designer.templates import (
     list_templates,
     template_cost,
 )
+from app.motion_designer.trend_templates import (
+    preflight_trend_templates,
+    trend_template_capabilities,
+)
 
 
 class MotionTemplateAdapterMixin:
@@ -75,6 +79,16 @@ class MotionTemplateAdapterMixin:
                              controls: Mapping[str, Any] | None = None) -> dict[str, Any]:
         return {"template_id": template_id, "variant": variant,
                 **template_cost(template_id, variant=variant, controls=controls)}
+
+    def motion_template_trend_capabilities(self) -> dict[str, Any]:
+        return trend_template_capabilities()
+
+    def motion_template_trend_preflight(
+        self,
+        *,
+        template_id: str = "",
+    ) -> dict[str, Any]:
+        return preflight_trend_templates(template_id)
 
 
 __all__ = ["MotionTemplateAdapterMixin"]

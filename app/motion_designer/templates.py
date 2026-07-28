@@ -15,6 +15,13 @@ from .schema import (
     SourceRef,
     new_motion_id,
 )
+from .trend_templates import (
+    TREND_TEMPLATE_SPECS,
+    build_trend_template_layers,
+    clear_managed_trend_state,
+    configure_trend_template,
+    is_trend_template,
+)
 
 
 TEMPLATE_SCHEMA = "tigercapture.motion.template.v1"
@@ -366,6 +373,34 @@ _TEMPLATES = (
         workflow="Microlearning and classroom video",
         replace_items=("Lesson copy", "Examples", "Diagram media", "Quiz choices", "Next lesson"),
         tags=("education", "explainer", "microlearning", "quiz", "60 second"),
+    ),
+    *(
+        MotionTemplate(
+            str(spec["id"]),
+            str(spec["name"]),
+            str(spec["category"]),
+            tuple(str(item) for item in spec["variants"]),
+            _production_controls(
+                int(spec["duration_ms"]),
+                cta=str(spec["cta"]),
+            ),
+            "cached" if spec["style"] in {"glass", "collage"} else "realtime",
+            description=str(spec["description"]),
+            features=tuple(str(item) for item in spec["features"]),
+            tutorial_steps=(
+                "Replace each media slot while keeping its timing and parent scene.",
+                "Edit the scene headline, body, accent, and surface controls.",
+                "Play all scenes and inspect the style-specific layer or composition data.",
+                "Run preflight, then export the required aspect-ratio variant.",
+            ),
+            difficulty="Intermediate",
+            estimated_minutes=12,
+            scene_count=len(spec["scenes"]),
+            workflow=str(spec["workflow"]),
+            replace_items=tuple(str(item) for item in spec["replace_items"]),
+            tags=tuple(str(item) for item in spec["tags"]),
+        )
+        for spec in TREND_TEMPLATE_SPECS
     ),
 )
 TEMPLATE_CATALOG = {item.id: item for item in _TEMPLATES}
@@ -962,6 +997,8 @@ def _build_layers(template_id: str, width: int, height: int, controls: Mapping[s
     safe_x, safe_y = width * .07, height * .08
     title_size = max(42.0, min(width, height) * (.09 if landscape else .075))
     layers: list[MotionLayer] = []
+    if is_trend_template(template_id):
+        return build_trend_template_layers(template_id, width, height, controls)
     if template_id in _PRODUCTION_STORYBOARDS:
         return _build_production_storyboard(
             template_id,
@@ -1249,6 +1286,7 @@ def apply_template_to_composition(composition: MotionComposition, template_id: s
     previous_instance_id = str(previous_state.get("template_instance_id") or "")
     removed_layer_ids: list[str] = []
     if replace_existing and previous_instance_id:
+        clear_managed_trend_state(candidate)
         removed_layer_ids = [
             layer.id
             for layer in candidate.layers
@@ -1288,6 +1326,12 @@ def apply_template_to_composition(composition: MotionComposition, template_id: s
         candidate.duration_ms = max(
             int(candidate.duration_ms),
             int(values["duration_ms"]),
+        )
+    if is_trend_template(template.id):
+        configure_trend_template(
+            candidate,
+            template.id,
+            [layer.id for layer in layers],
         )
     candidate.metadata["last_applied_template"] = {
         "schema": TEMPLATE_SCHEMA, "template_id": template.id,

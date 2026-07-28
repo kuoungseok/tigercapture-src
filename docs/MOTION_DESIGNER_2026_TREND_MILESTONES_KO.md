@@ -1,7 +1,7 @@
 # Motion Designer 2026 Trend Gap and Implementation Milestones
 
 작성일: 2026-07-29  
-상태: M21, M23, M25-M27 Complete v1; M22 진행 중; M24, M28 계획
+상태: M21, M23, M25-M27 Complete v1; M22, M28 진행 중; M24 계획
 대상: Tiger Studio Motion Designer
 
 ## 1. 목적
@@ -93,7 +93,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Complete v1 |
 | M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Complete v1 |
 | M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Complete v1 |
-| M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | Planned |
+| M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | In progress: 7-template pack |
 
 의존 관계:
 
@@ -537,6 +537,32 @@ QA:
 - CPU/GPU fallback과 backend missing UX
 - HDR/SDR, alpha, nested composition, adjustment scope
 - UMG native/bake/blocked 결과 누락 0
+
+현재 구현:
+
+- `tigerstudio.motion.trend_template.v1` 기반으로 다음 7개 제품 템플릿을
+  템플릿 갤러리에 추가했다.
+  Luxury Craft Product Reveal, Editorial Mixed Media Collage,
+  Liquid Glass App Promo, Clay Stop-motion Mascot,
+  Emotional Brand Story, VHS Nostalgia Music Promo,
+  Kinetic Type Vertical Short.
+- 각 템플릿은 10~15초, 3~5개 scene, 실제 교체 media slot, 4단계 tutorial,
+  16:9/9:16/1:1 중 해당 제품 variant, 일반 layer/effect/story/stop-motion
+  데이터로 구성된다. 템플릿 전환은 이전 템플릿이 소유한 composition
+  상태만 정리하고 사용자의 별도 metadata는 유지한다.
+- `motion.template.trend.capabilities`와
+  `motion.template.trend.preflight`는 지원 템플릿, 모든 variant validation,
+  UMG native/bake/blocked 사유를 반환한다.
+- `tools/qa_motion_2026_trend_matrix.py`는 7개 템플릿의 모든 장면을
+  `MotionExportRenderer`로 렌더하고 contact sheet, 장면 차이, 문서 validation,
+  UMG 누락 여부를 기록한다. 현재 7개 템플릿과 17개 variant가 유효하며
+  QA contact sheet는 비어 있지 않고 장면별 픽셀 차이가 있다.
+
+M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
+갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
+대체안을 반환한다. 실제 60초 반복, cancel/resume/recovery, HDR/SDR,
+alpha/nested composition, 설치본의 실제 MP4/PNG sequence와 UI 캡처 게이트도
+후속 M28 작업으로 남는다.
 
 ## 13. 착수 결정
 

@@ -863,3 +863,29 @@ def test_motion_live2d_spine_actor_actions_and_lipsync() -> None:
         "motion.live2d.add", "motion.spine.add", "motion.actor.update",
         "motion.actor.lipsync.set", "motion.actor.diagnostics",
     } <= specs
+
+
+def test_motion_2026_trend_template_actions_disclose_supported_and_blocked_paths() -> None:
+    registry = ActionRegistry(Owner())
+
+    capabilities = registry.execute("motion.template.trend.capabilities", {})
+    assert capabilities.ok
+    assert len(capabilities.result["available_template_ids"]) == 7
+    assert capabilities.result["blocked"][0]["id"] == "painterly_3d_character_spot"
+
+    preflight = registry.execute(
+        "motion.template.trend.preflight",
+        {"template_id": "liquid_glass_app_promo"},
+    )
+    assert preflight.ok
+    assert preflight.result["ok"] is True
+    assert preflight.result["summary"] == {
+        "template_count": 1,
+        "variant_count": 2,
+        "blocked_capability_count": 1,
+    }
+    specs = {row["id"] for row in registry.list_actions()}
+    assert {
+        "motion.template.trend.capabilities",
+        "motion.template.trend.preflight",
+    } <= specs

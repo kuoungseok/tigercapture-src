@@ -6727,6 +6727,27 @@ AI Script Edit MVP integration:
   M27 v1 is a reviewable editable style compiler, not a claim that a
   generative model autonomously produces finished art direction or replaces
   the underlying Motion tools.
+- M28 Trend Template and Product QA is in progress. The built-in gallery now
+  contains seven editable 2026 product templates under
+  `tigerstudio.motion.trend_template.v1`: Luxury Craft Product Reveal,
+  Editorial Mixed Media Collage, Liquid Glass App Promo, Clay Stop-motion
+  Mascot, Emotional Brand Story, VHS Nostalgia Music Promo, and Kinetic Type
+  Vertical Short. Each is a 10-15 second, three-to-five-scene composition with
+  real replacement media slots, four tutorial steps, relevant 16:9/9:16/1:1
+  variants, and ordinary Motion layer/effect/story/stop-motion data.
+- Replacing a managed trend template clears only composition-level state owned
+  by that template and preserves unrelated user metadata.
+  `motion.template.trend.capabilities` and
+  `motion.template.trend.preflight` expose supported templates, validate every
+  variant, and retain explicit UMG native/bake/blocked outcomes.
+- `tools/qa_motion_2026_trend_matrix.py` renders every scene through
+  `MotionExportRenderer` and writes a real contact sheet plus validation,
+  scene-difference, editability, and UMG omission evidence. Current evidence
+  covers seven templates and 17 variants. M28 is not complete:
+  Painterly 3D Character Spot remains explicitly blocked until M24 and offers
+  a 2D Craft/Collage fallback; 60-second loop, cancel/resume/recovery,
+  HDR/SDR, alpha/nested-composition, packaged-build MP4/PNG sequence, and
+  real-window capture gates remain outstanding.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

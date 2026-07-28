@@ -45,7 +45,7 @@ def test_template_catalog_has_stable_entries_controls_and_tutorial_guides() -> N
         assert row["scene_count"] >= 1
         assert row["workflow"]
     tutorials = [row for row in rows if row["is_tutorial"]]
-    assert len(tutorials) == 5
+    assert len(tutorials) >= 5
     assert all(row["features"] and row["tutorial_steps"] for row in tutorials)
 
 

@@ -1601,6 +1601,26 @@ def register_motion_actions(registry: Any) -> None:
         required=("template_id",), mutating=False, changed=False,
     )
     registry.register_adapter_action(
+        "motion.template.trend.capabilities",
+        "List supported 2026 trend templates and explicit unavailable capabilities.",
+        "motion",
+        "motion_template_trend_capabilities",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.template.trend.preflight",
+        "Validate editable trend variants and explicit Unreal bake or block results.",
+        "motion",
+        "motion_template_trend_preflight",
+        params_schema=schema_object({
+            "template_id": {"type": "string"},
+        }),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
         "motion.broadcast.preflight", "Validate Motion cost, cache, and Program Output readiness.",
         "motion", "motion_broadcast_preflight",
         params_schema=schema_object({
