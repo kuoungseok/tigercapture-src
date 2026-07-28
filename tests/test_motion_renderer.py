@@ -14,7 +14,7 @@ import pytest
 from app.motion_designer.effect_adapter import apply_effects
 from app.motion_designer.export_renderer import MotionExportRenderer
 from app.motion_designer.effect_group import set_effect_group_scope
-from app.motion_designer.render_graph import build_render_graph
+from app.motion_designer.render_graph import build_render_graph, render_graph_image
 from app.motion_designer.typography_gpu_renderer import MotionTypographyGpuRenderer
 from app.motion_designer.vector_gpu_renderer import MotionVectorGpuRenderer
 from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionEffectRef, MotionLayer, MotionMaskRef, SourceRef
@@ -353,6 +353,132 @@ def test_craft_style_is_deterministic_and_changes_over_time() -> None:
     assert np.array_equal(first, repeated)
     assert not np.array_equal(first, later)
     assert np.all(first[..., 3] == 255)
+
+
+def test_craft_style_extended_artifacts_loop_without_boundary_jump() -> None:
+    from app.motion_designer.craft_style import make_craft_style_effect
+
+    _app()
+    source = QImage(80, 60, QImage.Format_RGBA8888_Premultiplied)
+    source.fill(QColor("#d7b884"))
+    effect = make_craft_style_effect({
+        "seed": 191,
+        "loop_period": 2.5,
+        "dust_amount": 0.2,
+        "scratch_amount": 0.15,
+        "misregistration": 2.0,
+        "halation_amount": 0.2,
+        "warmth": 0.2,
+        "vhs_amount": 0.15,
+        "edge_roughness": 0.1,
+    }, preset="archive_print")
+
+    def pixels(image: QImage) -> np.ndarray:
+        straight = image.convertToFormat(QImage.Format_RGBA8888)
+        rows = np.frombuffer(straight.constBits(), dtype=np.uint8).reshape(
+            straight.height(), straight.bytesPerLine(),
+        )
+        return rows[:, : straight.width() * 4].reshape(
+            straight.height(), straight.width(), 4,
+        ).copy()
+
+    start = pixels(apply_effects(source, [effect], 0))
+    boundary = pixels(apply_effects(source, [effect], 2500))
+    middle = pixels(apply_effects(source, [effect], 1250))
+    assert np.array_equal(start, boundary)
+    assert not np.array_equal(start, middle)
+
+
+def test_craft_style_texture_overlay_is_rendered(tmp_path) -> None:
+    from app.motion_designer.craft_style import make_craft_style_effect
+
+    _app()
+    source = QImage(32, 32, QImage.Format_RGBA8888_Premultiplied)
+    source.fill(QColor("#808080"))
+    texture = QImage(4, 4, QImage.Format_RGBA8888)
+    texture.fill(QColor("#404040"))
+    texture_path = tmp_path / "canvas.png"
+    assert texture.save(str(texture_path))
+    effect = make_craft_style_effect({
+        "grain_amount": 0.0,
+        "dust_amount": 0.0,
+        "scratch_amount": 0.0,
+        "misregistration": 0.0,
+        "halation_amount": 0.0,
+        "warmth": 0.0,
+    })
+    effect.metadata["texture"] = {
+        "uri": str(texture_path),
+        "blend_mode": "multiply",
+        "opacity": 1.0,
+    }
+    rendered = apply_effects(source, [effect], 0)
+    assert rendered.pixelColor(16, 16).red() < source.pixelColor(16, 16).red()
+
+
+def test_craft_style_preview_export_parity_and_300_frame_loop() -> None:
+    from app.motion_designer.craft_style import make_craft_style_effect
+
+    _app()
+    layer = MotionLayer(
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 64,
+            "height": 36,
+            "fill": "#d6a25e",
+            "stroke_width": 0,
+        }),
+        out_ms=10_001,
+    )
+    layer.transform.position.default = [32, 18]
+    layer.effects.append(make_craft_style_effect({
+        "seed": 90210,
+        "loop_period": 10.0,
+        "vhs_amount": 0.08,
+        "edge_roughness": 0.08,
+    }, preset="archive_print"))
+    composition = MotionComposition(
+        width=64,
+        height=36,
+        duration_ms=10_001,
+        fps=30,
+        layers=[layer],
+    )
+    preview = render_graph_image(build_render_graph(
+        composition,
+        3333.333,
+        render_quality="preview",
+        output_size=(64, 36),
+    ))
+    exported = MotionExportRenderer(cache_capacity=2).render_frame(
+        composition,
+        3333.333,
+        width=64,
+        height=36,
+        use_cache=False,
+    )
+    assert preview == exported
+
+    renderer = MotionExportRenderer(cache_capacity=2)
+    frames = [
+        renderer.render_frame(
+            composition,
+            index * 1000.0 / 30.0,
+            width=64,
+            height=36,
+            use_cache=False,
+        )
+        for index in range(300)
+    ]
+    boundary = renderer.render_frame(
+        composition,
+        10_000.0,
+        width=64,
+        height=36,
+        use_cache=False,
+    )
+    assert frames[0] == boundary
+    assert any(frame != frames[0] for frame in frames[1:30])
 
 
 def test_gpu_only_preview_backends_fall_back_when_effects_are_active() -> None:

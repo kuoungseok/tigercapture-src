@@ -6571,16 +6571,23 @@ AI Script Edit MVP integration:
   platform direction, editable AI style direction, and trend-template QA.
   M21-M28 remain product milestones and must not be described as fully
   complete until their schema, Action/MCP, Preview/Export parity, stress test,
-  and real artifact gates pass. The first M21 core slice is implemented:
+  and real artifact gates pass. M21 Craft and Imperfection Style Stack v1 is
+  complete:
   `tigerstudio.motion.craft_style.v1` stores deterministic Film Grain, Gate
   Weave, Light Flicker/Warmth, locked seed, and preset metadata in an ordinary
   Motion effect. Subtle Film, Handmade, and Archive Print are available from
   the dedicated Craft Inspector and through
-  `motion.craft.presets/get/apply/clear`. Preview and export share
-  `effect_adapter`; UMG preflight reports
+  `motion.craft.get/set/clear`, preset list/apply, durable texture
+  attach/relink, seed randomize/lock, and preflight actions. The shared effect
+  additionally implements Dust/Scratch, print misregistration, halation,
+  warmth, VHS scan wobble, edge roughness, and multiply/screen/overlay texture
+  blending. Preview and export share `effect_adapter`; UMG preflight reports
   `effect_requires_bake:craft_style` instead of silently dropping the look.
-  Dust/scratch, print misregistration, halation/VHS, durable texture relinking,
-  loop-boundary evidence, and product comparison captures remain M21 work.
+  Nine designed presets plus Clean are rendered by
+  `tools/qa_motion_craft_style.py`; automated QA covers 300 frames, zero loop
+  boundary jump, deterministic seed, and Preview/Export pixel parity. Advanced
+  RGB-grain separation, dust lifetime/direction, and a fibrous-edge authoring
+  UI remain post-v1 quality extensions rather than shipped v1 claims.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

@@ -1040,6 +1040,7 @@ class MotionDesignerWindow(QMainWindow):
         )
         self.craft.apply_requested.connect(self._apply_craft_style)
         self.craft.clear_requested.connect(self._clear_craft_style)
+        self.craft.texture_requested.connect(self._attach_craft_texture)
         self.masks.add_requested.connect(self._add_mask)
         self.masks.delete_requested.connect(self._delete_mask)
         self.masks.parameter_changed.connect(self._set_mask_param)
@@ -2619,6 +2620,8 @@ class MotionDesignerWindow(QMainWindow):
             rows.append(effect.to_dict())
         else:
             effect.id = previous.id
+            if "texture" in previous.metadata:
+                effect.metadata["texture"] = dict(previous.metadata["texture"])
             rows[layer.effects.index(previous)] = effect.to_dict()
         self.controller.update_layer(layer.id, {"effects": rows})
 
@@ -2635,6 +2638,39 @@ class MotionDesignerWindow(QMainWindow):
                 if not is_craft_style_effect(item)
             ],
         })
+
+    def _attach_craft_texture(self, uri: str) -> None:
+        if not self._selected_layer_id:
+            return
+        from pathlib import Path
+        from app.motion_designer.craft_style import (
+            is_craft_style_effect,
+            make_craft_style_effect,
+        )
+
+        path = Path(uri).resolve()
+        if "debugcapture" in {part.lower() for part in path.parts} or not path.is_file():
+            return
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        effect = next(
+            (item for item in layer.effects if is_craft_style_effect(item)),
+            None,
+        )
+        rows = [item.to_dict() for item in layer.effects]
+        if effect is None:
+            effect = make_craft_style_effect()
+            rows.append(effect.to_dict())
+            effect_index = len(rows) - 1
+        else:
+            effect_index = layer.effects.index(effect)
+        effect.metadata["texture"] = {
+            "uri": str(path),
+            "blend_mode": "multiply",
+            "opacity": 0.25,
+            "revision": str(path.stat().st_mtime_ns),
+        }
+        rows[effect_index] = effect.to_dict()
+        self.controller.update_layer(layer.id, {"effects": rows})
 
     def _set_adjustment_scope(self, mode: str, layer_ids: object) -> None:
         if not self._selected_layer_id:

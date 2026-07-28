@@ -2130,7 +2130,11 @@ def register_motion_actions(registry: Any) -> None:
             **lid,
             "preset": {
                 "type": "string",
-                "enum": ["subtle_film", "handmade", "archive_print"],
+                "enum": [
+                    "subtle_film", "handmade", "archive_print", "luxury_paper",
+                    "documentary_handheld", "vhs_tape", "printed_poster",
+                    "warm_film", "rough_cut",
+                ],
             },
             "settings": {"type": "object"},
         }, required=("composition_id", "layer_id")),
@@ -2147,4 +2151,114 @@ def register_motion_actions(registry: Any) -> None:
         required=("composition_id", "layer_id"),
         undo_label="Clear Craft Style",
         dry_summary="The craft style would be removed",
+    )
+    registry.register_adapter_action(
+        "motion.craft.set",
+        "Set or replace the editable craft style on a Motion layer.",
+        "motion",
+        "motion_craft_apply",
+        params_schema=schema_object({
+            **lid,
+            "preset": {
+                "type": "string",
+                "enum": [
+                    "subtle_film", "handmade", "archive_print", "luxury_paper",
+                    "documentary_handheld", "vhs_tape", "printed_poster",
+                    "warm_film", "rough_cut",
+                ],
+            },
+            "settings": {"type": "object"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Set Craft Style",
+        dry_summary="The craft style would be replaced",
+    )
+    registry.register_adapter_action(
+        "motion.craft.preset.list",
+        "List Motion craft-style presets.",
+        "motion",
+        "motion_craft_presets",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.craft.preset.apply",
+        "Apply a named Motion craft-style preset.",
+        "motion",
+        "motion_craft_apply",
+        params_schema=schema_object({
+            **lid,
+            "preset": {
+                "type": "string",
+                "enum": [
+                    "subtle_film", "handmade", "archive_print", "luxury_paper",
+                    "documentary_handheld", "vhs_tape", "printed_poster",
+                    "warm_film", "rough_cut",
+                ],
+            },
+            "settings": {"type": "object"},
+        }, required=("composition_id", "layer_id", "preset")),
+        required=("composition_id", "layer_id", "preset"),
+        undo_label="Apply Craft Preset",
+        dry_summary="A named craft preset would be applied",
+    )
+    texture_props = {
+        **lid,
+        "uri": {"type": "string"},
+        "blend_mode": {
+            "type": "string",
+            "enum": ["multiply", "screen", "overlay"],
+        },
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+    }
+    for action_id in ("motion.craft.texture.attach", "motion.craft.texture.relink"):
+        registry.register_adapter_action(
+            action_id,
+            "Attach or relink a durable texture to a Motion craft style.",
+            "motion",
+            "motion_craft_texture_attach",
+            params_schema=schema_object(
+                texture_props,
+                required=("composition_id", "layer_id", "uri"),
+            ),
+            required=("composition_id", "layer_id", "uri"),
+            undo_label="Attach Craft Texture",
+            dry_summary="A durable craft texture would be linked",
+        )
+    registry.register_adapter_action(
+        "motion.craft.seed.randomize",
+        "Randomize or explicitly set the deterministic Motion craft seed.",
+        "motion",
+        "motion_craft_seed_randomize",
+        params_schema=schema_object({
+            **lid,
+            "seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Randomize Craft Seed",
+        dry_summary="The craft seed would change",
+    )
+    registry.register_adapter_action(
+        "motion.craft.seed.lock",
+        "Lock or unlock the Motion craft seed.",
+        "motion",
+        "motion_craft_seed_lock",
+        params_schema=schema_object({
+            **lid,
+            "locked": {"type": "boolean"},
+        }, required=("composition_id", "layer_id", "locked")),
+        required=("composition_id", "layer_id", "locked"),
+        undo_label="Set Craft Seed Lock",
+        dry_summary="The craft seed lock would change",
+    )
+    registry.register_adapter_action(
+        "motion.craft.preflight",
+        "Validate deterministic craft resources and output disposition.",
+        "motion",
+        "motion_craft_preflight",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
     )

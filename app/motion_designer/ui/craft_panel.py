@@ -7,6 +7,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -27,6 +28,7 @@ from app.motion_designer.schema import MotionLayer
 class CraftStylePanel(QWidget):
     apply_requested = Signal(str, object)
     clear_requested = Signal()
+    texture_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -55,6 +57,14 @@ class CraftStylePanel(QWidget):
             ("weave_y", "Gate Weave Y", 0.0, 100.0, 0.1, 2),
             ("flicker_amount", "Light Flicker", 0.0, 1.0, 0.001, 3),
             ("flicker_warmth", "Flicker Warmth", -1.0, 1.0, 0.01, 2),
+            ("dust_amount", "Dust", 0.0, 1.0, 0.01, 3),
+            ("scratch_amount", "Scratches", 0.0, 1.0, 0.01, 3),
+            ("misregistration", "Print Offset", 0.0, 20.0, 0.1, 2),
+            ("halation_amount", "Halation", 0.0, 1.0, 0.01, 3),
+            ("warmth", "Film Warmth", -1.0, 1.0, 0.01, 2),
+            ("vhs_amount", "VHS Wobble", 0.0, 1.0, 0.01, 3),
+            ("edge_roughness", "Edge Roughness", 0.0, 1.0, 0.01, 3),
+            ("loop_period", "Loop Period (s)", 0.1, 3600.0, 0.1, 2),
         )
         self.controls: dict[str, QDoubleSpinBox] = {}
         for key, label, minimum, maximum, step, decimals in specs:
@@ -71,9 +81,11 @@ class CraftStylePanel(QWidget):
 
         buttons = QHBoxLayout()
         randomize = QPushButton("Randomize", self)
+        texture = QPushButton("Texture...", self)
         apply = QPushButton("Apply", self)
         clear = QPushButton("Clear", self)
         buttons.addWidget(randomize)
+        buttons.addWidget(texture)
         buttons.addStretch(1)
         buttons.addWidget(clear)
         buttons.addWidget(apply)
@@ -82,9 +94,20 @@ class CraftStylePanel(QWidget):
 
         self.preset.currentIndexChanged.connect(self._load_preset)
         randomize.clicked.connect(self._randomize_seed)
+        texture.clicked.connect(self._choose_texture)
         apply.clicked.connect(self._emit_apply)
         clear.clicked.connect(self.clear_requested)
         self.set_layer(None)
+
+    def _choose_texture(self) -> None:
+        uri, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Attach Craft Texture",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff)",
+        )
+        if uri:
+            self.texture_requested.emit(uri)
 
     def _load_preset(self) -> None:
         if self._loading:

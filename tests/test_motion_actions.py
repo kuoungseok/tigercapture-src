@@ -97,7 +97,9 @@ def test_motion_effect_actions_preserve_light_noise_and_stylize_parameters() -> 
     assert effects[3].params["levels"].default == 7.0
 
 
-def test_motion_craft_actions_apply_replace_and_clear_one_style() -> None:
+def test_motion_craft_actions_apply_replace_and_clear_one_style(tmp_path) -> None:
+    from PySide6.QtGui import QColor, QImage
+
     owner = Owner()
     registry = ActionRegistry(owner)
     created = registry.execute("motion.composition.create", {"name": "Craft"})
@@ -111,7 +113,9 @@ def test_motion_craft_actions_apply_replace_and_clear_one_style() -> None:
     presets = registry.execute("motion.craft.presets", {})
     assert presets.ok
     assert {row["id"] for row in presets.result["presets"]} == {
-        "subtle_film", "handmade", "archive_print",
+        "subtle_film", "handmade", "archive_print", "luxury_paper",
+        "documentary_handheld", "vhs_tape", "printed_poster", "warm_film",
+        "rough_cut",
     }
     first = registry.execute("motion.craft.apply", {
         "composition_id": composition_id,
@@ -135,6 +139,38 @@ def test_motion_craft_actions_apply_replace_and_clear_one_style() -> None:
     assert inspected.ok and inspected.result["enabled"]
     assert inspected.result["effect"]["metadata"]["preset"] == "archive_print"
     assert len(owner._motion_compositions[composition_id].layers[0].effects) == 1
+    texture_path = tmp_path / "paper.png"
+    texture = QImage(8, 8, QImage.Format_RGBA8888)
+    texture.fill(QColor("#d8c49b"))
+    assert texture.save(str(texture_path))
+    attached = registry.execute("motion.craft.texture.attach", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "uri": str(texture_path),
+        "blend_mode": "overlay",
+        "opacity": 0.4,
+    })
+    assert attached.ok
+    assert attached.result["texture"]["blend_mode"] == "overlay"
+    randomized = registry.execute("motion.craft.seed.randomize", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "seed": 512,
+    })
+    assert randomized.ok and randomized.result["seed"] == 512
+    unlocked = registry.execute("motion.craft.seed.lock", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "locked": False,
+    })
+    assert unlocked.ok and not unlocked.result["seed_locked"]
+    preflight = registry.execute("motion.craft.preflight", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert preflight.ok
+    assert preflight.result["issues"] == ["craft_seed_unlocked"]
+    assert preflight.result["umg_disposition"] == "deterministic_bake"
     cleared = registry.execute("motion.craft.clear", {
         "composition_id": composition_id,
         "layer_id": layer_id,

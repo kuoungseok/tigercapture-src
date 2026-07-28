@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 import math
+from functools import lru_cache
+from pathlib import Path
 
 from PySide6.QtGui import QImage
 
@@ -30,6 +32,16 @@ def _qimage(array) -> QImage:
     height, width = rgba.shape[:2]
     straight = QImage(rgba.data, width, height, rgba.strides[0], QImage.Format_RGBA8888).copy()
     return straight.convertToFormat(QImage.Format_RGBA8888_Premultiplied)
+
+
+@lru_cache(maxsize=24)
+def _craft_texture(uri: str, width: int, height: int, revision: str):
+    del revision
+    image = QImage(str(uri))
+    if image.isNull():
+        return None
+    scaled = image.scaled(width, height)
+    return _rgba_array(scaled).astype("float32")
 
 
 def _color(value: Any, default: str = "#ffffff"):
@@ -100,9 +112,11 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
     amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))
     seed = max(0, int(_value(effect, "seed", time_ms, 1)))
     height, width = rgba.shape[:2]
+    loop_period = max(0.1, float(_value(effect, "loop_period", time_ms, 4.0)))
+    loop_time = (float(time_ms) * 0.001) % loop_period
 
     weave_frequency = max(0.0, float(_value(effect, "weave_frequency", time_ms, 0.8)))
-    phase = float(time_ms) * 0.001 * weave_frequency
+    phase = loop_time * weave_frequency
     drift_x = float(_value(effect, "weave_x", time_ms, 0.8))
     drift_y = float(_value(effect, "weave_y", time_ms, 0.55))
     rotation = float(_value(effect, "weave_rotation", time_ms, 0.05))
@@ -128,7 +142,7 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
     flicker_frequency = max(0.0, float(
         _value(effect, "flicker_frequency", time_ms, 7.0)
     ))
-    flicker_sample = int(math.floor(float(time_ms) * 0.001 * flicker_frequency))
+    flicker_sample = int(math.floor(loop_time * flicker_frequency))
     flicker = (_temporal_noise(seed + 19, flicker_sample) * 2.0 - 1.0) * flicker_amount
     warmth = max(-1.0, min(1.0, float(
         _value(effect, "flicker_warmth", time_ms, 0.08)
@@ -144,7 +158,7 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
     ))) * amount
     if grain_amount > 1e-6:
         cadence = max(0.1, float(_value(effect, "grain_cadence", time_ms, 12.0)))
-        grain_sample = int(math.floor(float(time_ms) * 0.001 * cadence))
+        grain_sample = int(math.floor(loop_time * cadence))
         grain_size = max(1.0, min(12.0, float(
             _value(effect, "grain_size", time_ms, 1.4)
         )))
@@ -158,6 +172,148 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
         ) / 255.0
         response = np.clip(1.0 - np.abs(luminance - 0.5) * 1.4, 0.25, 1.0)
         rgba[..., :3] += grain[..., None] * response[..., None] * grain_amount * 42.0
+
+    source_alpha = rgba[..., 3] / 255.0
+    artifact_cadence = max(1, int(round(loop_period * 12.0)))
+    artifact_sample = int(math.floor(loop_time / loop_period * artifact_cadence))
+    artifact_rng = np.random.default_rng(seed + artifact_sample * 130363)
+
+    dust_amount = max(0.0, min(1.0, float(
+        _value(effect, "dust_amount", time_ms, 0.015)
+    ))) * amount
+    scratch_amount = max(0.0, min(1.0, float(
+        _value(effect, "scratch_amount", time_ms, 0.008)
+    ))) * amount
+    if dust_amount > 1e-6 or scratch_amount > 1e-6:
+        artifacts = np.zeros((height, width), dtype=np.float32)
+        dust_count = int(round(dust_amount * width * height / 220.0))
+        for _ in range(min(500, dust_count)):
+            x = int(artifact_rng.integers(0, max(1, width)))
+            y = int(artifact_rng.integers(0, max(1, height)))
+            radius = int(artifact_rng.integers(1, max(2, int(min(width, height) * 0.012))))
+            cv2.circle(artifacts, (x, y), radius, float(artifact_rng.uniform(0.25, 1.0)), -1)
+        scratch_count = int(round(scratch_amount * width / 3.0))
+        for _ in range(min(80, scratch_count)):
+            x = int(artifact_rng.integers(0, max(1, width)))
+            y = int(artifact_rng.integers(0, max(1, height)))
+            length = int(artifact_rng.integers(max(2, height // 12), max(3, height // 2)))
+            cv2.line(
+                artifacts,
+                (x, y),
+                (x + int(artifact_rng.integers(-2, 3)), min(height - 1, y + length)),
+                float(artifact_rng.uniform(0.3, 0.85)),
+                1,
+            )
+        artifacts *= source_alpha
+        artifact_color = np.where(
+            artifact_rng.random((height, width)) > 0.25,
+            255.0,
+            22.0,
+        ).astype(np.float32)
+        rgba[..., :3] = (
+            rgba[..., :3] * (1.0 - artifacts[..., None] * 0.45)
+            + artifact_color[..., None] * artifacts[..., None] * 0.45
+        )
+
+    misregistration = max(0.0, min(20.0, float(
+        _value(effect, "misregistration", time_ms, 0.25)
+    ))) * amount
+    if misregistration > 1e-4:
+        registered = rgba[..., :3].copy()
+        for channel, direction in ((0, 1.0), (2, -1.0)):
+            registered[..., channel] = cv2.warpAffine(
+                rgba[..., channel],
+                np.asarray([[1.0, 0.0, direction * misregistration], [0.0, 1.0, 0.0]], dtype=np.float32),
+                (width, height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT_101,
+            )
+        rgba[..., :3] = registered
+
+    halation_amount = max(0.0, min(1.0, float(
+        _value(effect, "halation_amount", time_ms, 0.05)
+    ))) * amount
+    if halation_amount > 1e-6:
+        radius = max(0.1, float(_value(effect, "halation_radius", time_ms, 5.0)))
+        luminance = (
+            rgba[..., 0] * 0.2126 + rgba[..., 1] * 0.7152 + rgba[..., 2] * 0.0722
+        )
+        highlights = np.clip((luminance - 145.0) / 110.0, 0.0, 1.0) * source_alpha
+        halo = cv2.GaussianBlur(highlights, (0, 0), sigmaX=radius, sigmaY=radius)
+        rgba[..., 0] += halo * 255.0 * halation_amount
+        rgba[..., 1] += halo * 72.0 * halation_amount
+
+    warmth = max(-1.0, min(1.0, float(
+        _value(effect, "warmth", time_ms, 0.06)
+    ))) * amount
+    if abs(warmth) > 1e-6:
+        rgba[..., 0] *= 1.0 + warmth * 0.18
+        rgba[..., 1] *= 1.0 + warmth * 0.035
+        rgba[..., 2] *= 1.0 - warmth * 0.16
+
+    vhs_amount = max(0.0, min(1.0, float(
+        _value(effect, "vhs_amount", time_ms, 0.0)
+    ))) * amount
+    if vhs_amount > 1e-6:
+        yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+        wobble = np.sin(yy * 0.12 + loop_time * math.tau * 3.0) * vhs_amount * 4.0
+        rgba = cv2.remap(
+            rgba,
+            xx + wobble,
+            yy,
+            cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+        scan = 1.0 - ((np.arange(height) % 3) == 0).astype(np.float32) * vhs_amount * 0.18
+        rgba[..., :3] *= scan[:, None, None]
+
+    edge_roughness = max(0.0, min(1.0, float(
+        _value(effect, "edge_roughness", time_ms, 0.0)
+    ))) * amount
+    if edge_roughness > 1e-6:
+        rough = _fractal_noise(
+            height,
+            width,
+            scale=max(3.0, min(width, height) * 0.035),
+            octaves=3,
+            seed=seed + 991,
+            phase=float(artifact_sample),
+        )
+        alpha = rgba[..., 3] / 255.0
+        edge = cv2.morphologyEx(alpha, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+        rgba[..., 3] = np.clip(
+            alpha - edge * np.clip((rough - 0.42) * 3.0, 0.0, 1.0) * edge_roughness,
+            0.0,
+            1.0,
+        ) * 255.0
+
+    texture = effect.metadata.get("texture")
+    if isinstance(texture, dict):
+        uri = str(texture.get("uri") or "")
+        if uri:
+            try:
+                revision = str(Path(uri).stat().st_mtime_ns)
+            except OSError:
+                revision = str(texture.get("revision") or "")
+            texture_rgba = _craft_texture(uri, width, height, revision)
+            if texture_rgba is not None:
+                texture_opacity = max(0.0, min(1.0, float(
+                    texture.get("opacity", 0.25)
+                ))) * amount * (texture_rgba[..., 3:4] / 255.0)
+                texture_rgb = texture_rgba[..., :3]
+                base = rgba[..., :3]
+                blend_mode = str(texture.get("blend_mode") or "multiply").lower()
+                if blend_mode == "screen":
+                    blended = 255.0 - (255.0 - base) * (255.0 - texture_rgb) / 255.0
+                elif blend_mode == "overlay":
+                    blended = np.where(
+                        base <= 127.5,
+                        2.0 * base * texture_rgb / 255.0,
+                        255.0 - 2.0 * (255.0 - base) * (255.0 - texture_rgb) / 255.0,
+                    )
+                else:
+                    blended = base * texture_rgb / 255.0
+                rgba[..., :3] = base * (1.0 - texture_opacity) + blended * texture_opacity
     return rgba
 
 
