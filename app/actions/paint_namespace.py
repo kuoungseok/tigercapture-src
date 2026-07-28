@@ -1018,6 +1018,38 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the deepest or next overlapping UI object would be selected",
     )
     registry.register_adapter_action(
+        "paint.ui.selection.scope.inspect",
+        "Inspect the current non-document-mutating Painter UI group edit scope.",
+        "paint",
+        "paint_ui_selection_scope_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the current Painter UI edit scope would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.scope.enter",
+        "Enter a frame or group edit scope and dim objects outside it.",
+        "paint",
+        "paint_ui_selection_scope_enter",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the requested Painter UI group edit scope would open",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.scope.exit",
+        "Exit one level of the current Painter UI group edit scope.",
+        "paint",
+        "paint_ui_selection_scope_exit",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="one Painter UI group edit scope level would close",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.arrange",
         "Align or distribute the selected Painter UI objects.",
         "paint",

@@ -55,10 +55,17 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - The right Inspector defaults to Auto-hide and reuses one canonical widget for
   selection overlay, pinned, and floating presentations. UI and automation
   share `paint.ui.inspector.presentation`.
+- Inspector content is adaptive rather than fixed: no selection owns artboard
+  controls, single selection exposes object Design/Prototype/Inspect, and
+  multiple selection removes the irrelevant Prototype surface without
+  resetting panel presentation.
 - Clicking another artboard or one of its objects activates that artboard.
 - Nested selections expose a compact ancestor breadcrumb. Alt-click cycles the
   deterministic overlap stack, while `paint.ui.selection.parent/deep_select`
   provide the same navigation to automation without document mutation.
+- Double-click/Escape and `paint.ui.selection.scope.inspect/enter/exit` share a
+  nested frame/group edit scope; outside objects are dimmed and excluded from
+  hit testing.
 - Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
   toggles intersecting objects on the active artboard.
 - Corner resize supports Shift aspect lock and Alt center-based scaling.

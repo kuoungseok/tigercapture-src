@@ -67,6 +67,8 @@ class PainterUIDesignOverlay(QWidget):
     ruler_origin_requested = Signal(float, float)
     ruler_origin_reset_requested = Signal()
     view_changed = Signal(object)
+    edit_scope_enter_requested = Signal(str)
+    edit_scope_exit_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -106,6 +108,7 @@ class PainterUIDesignOverlay(QWidget):
         self._ruler_guide_preview: tuple[str, float] | None = None
         self._ruler_origin_preview: QPointF | None = None
         self._active_guide_position = 0.0
+        self._edit_scope_id = ""
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -119,7 +122,51 @@ class PainterUIDesignOverlay(QWidget):
             self._effective_document,
             resolved_ui_geometry(self._effective_document),
         )
+        if self._edit_scope_id not in {
+            row["id"] for row in self._document["objects"]
+        }:
+            self._edit_scope_id = ""
         self.update()
+
+    def set_edit_scope(self, object_id: str = "") -> str:
+        target = str(object_id or "")
+        if target:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == target
+                ),
+                None,
+            )
+            if row is None or row["kind"] not in {"frame", "group"}:
+                target = ""
+        self._edit_scope_id = target
+        self.update()
+        return target
+
+    def edit_scope_id(self) -> str:
+        return str(self._edit_scope_id)
+
+    def _edit_scope_object_ids(self) -> set[str]:
+        if not self._edit_scope_id:
+            return set()
+        result = {self._edit_scope_id}
+        changed = True
+        while changed:
+            before = len(result)
+            result.update(
+                str(row["id"])
+                for row in self._document["objects"]
+                if str(row.get("parent_id") or "") in result
+            )
+            changed = len(result) != before
+        return result
+
+    def _row_in_edit_scope(self, row: Mapping[str, Any]) -> bool:
+        if not self._edit_scope_id:
+            return True
+        return str(row["id"]) in self._edit_scope_object_ids()
 
     @staticmethod
     def _paint_artboard_layout(
@@ -662,7 +709,10 @@ class PainterUIDesignOverlay(QWidget):
     def object_ids_at(self, x: float, y: float) -> list[str]:
         position = QPointF(float(x), float(y))
         hits: list[str] = []
+        scope_ids = self._edit_scope_object_ids()
         for row in self._visible_objects(reverse=True):
+            if scope_ids and str(row["id"]) not in scope_ids:
+                continue
             if not self._point_visible_in_parent_clips(row, position):
                 continue
             if not self._point_visible_in_object_mask(row, position):
@@ -1396,6 +1446,8 @@ class PainterUIDesignOverlay(QWidget):
                 scene_painter.translate(-pivot)
             display_row = dict(row)
             display_row["opacity"] = self._display_opacity(row)
+            if not self._row_in_edit_scope(row):
+                display_row["opacity"] *= 0.2
             self._paint_object(
                 scene_painter,
                 display_row,
@@ -1407,9 +1459,32 @@ class PainterUIDesignOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawImage(0, 0, surface)
+        if self._edit_scope_id:
+            scope_row = next(
+                (
+                    row
+                    for row in self._document["objects"]
+                    if row["id"] == self._edit_scope_id
+                ),
+                None,
+            )
+            if scope_row is not None:
+                painter.save()
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(
+                    QPen(
+                        QColor("#63B3ED"),
+                        1.5,
+                        Qt.PenStyle.DashLine,
+                    )
+                )
+                painter.drawRect(self._object_rect(scope_row))
+                painter.restore()
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         for row in self._visible_objects():
+            if not self._row_in_edit_scope(row):
+                continue
             is_selected = row["id"] in selected_ids
             if not is_selected:
                 continue
@@ -2068,6 +2143,44 @@ class PainterUIDesignOverlay(QWidget):
             self.ruler_origin_reset_requested.emit()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            hit_ids = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            selected = str(
+                self._document["selection"]["object_id"] or ""
+            )
+            candidates = (
+                [selected]
+                if selected in hit_ids
+                else []
+            ) + [object_id for object_id in hit_ids if object_id != selected]
+            parent_ids = {
+                str(row.get("parent_id") or "")
+                for row in self._document["objects"]
+            }
+            target = next(
+                (
+                    object_id
+                    for object_id in candidates
+                    if object_id in parent_ids
+                    and next(
+                        (
+                            row["kind"]
+                            for row in self._document["objects"]
+                            if row["id"] == object_id
+                        ),
+                        "",
+                    )
+                    in {"frame", "group"}
+                ),
+                "",
+            )
+            if target:
+                self.edit_scope_enter_requested.emit(target)
+                event.accept()
+                return
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event) -> None:
@@ -2109,6 +2222,10 @@ class PainterUIDesignOverlay(QWidget):
             return
         if key == Qt.Key.Key_Delete:
             self.key_command.emit("delete", False)
+            event.accept()
+            return
+        if key == Qt.Key.Key_Escape and self._edit_scope_id:
+            self.edit_scope_exit_requested.emit()
             event.accept()
             return
         if (

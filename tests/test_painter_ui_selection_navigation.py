@@ -133,7 +133,8 @@ def test_breadcrumb_emits_requested_ancestor_and_hides_for_root() -> None:
 
 def test_overlay_hit_stack_returns_topmost_then_ancestors() -> None:
     app = _app()
-    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtTest import QTest
 
     from app.painter_ui_workspace import PainterUIDesignOverlay
 
@@ -153,6 +154,36 @@ def test_overlay_hit_stack_returns_topmost_then_ancestors() -> None:
         group["id"],
         root["id"],
     ]
+    overlay.set_edit_scope(group["id"])
+    assert overlay.edit_scope_id() == group["id"]
+    assert overlay.object_ids_at(point.x(), point.y())[:3] == [
+        badge["id"],
+        text["id"],
+        group["id"],
+    ]
+    assert root["id"] not in overlay.object_ids_at(point.x(), point.y())
+    assert overlay._row_in_edit_scope(badge)
+    assert not overlay._row_in_edit_scope(root)
+    exit_requests: list[bool] = []
+    overlay.edit_scope_exit_requested.connect(
+        lambda: exit_requests.append(True)
+    )
+    QTest.keyClick(overlay, Qt.Key.Key_Escape)
+    assert exit_requests == [True]
+
+    overlay.set_edit_scope("")
+    enter_requests: list[str] = []
+    overlay.edit_scope_enter_requested.connect(enter_requests.append)
+    group_rect = overlay._object_rect(group)
+    QTest.mouseDClick(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(
+            round(group_rect.right() - 4),
+            round(group_rect.bottom() - 4),
+        ),
+    )
+    assert enter_requests == [group["id"]]
     overlay.close()
     overlay.deleteLater()
     app.processEvents()
@@ -193,6 +224,45 @@ def test_selection_navigation_actions_share_dialog_selection_state() -> None:
         "selected_object_id"
     ] == badge["id"]
     assert deep["result"]["ui_design"]["selected_object_id"] == badge["id"]
+
+    revision = dialog._painter_ui_document["revision"]
+    entered_root = registry.execute(
+        "paint.ui.selection.scope.enter",
+        {"object_id": root["id"]},
+    ).to_dict()
+    assert entered_root["ok"]
+    assert entered_root["result"]["selection_scope"]["scope_stack"] == [
+        root["id"]
+    ]
+    entered_group = registry.execute(
+        "paint.ui.selection.scope.enter",
+        {"object_id": group["id"]},
+    ).to_dict()
+    assert entered_group["ok"]
+    assert entered_group["result"]["selection_scope"]["scope_stack"] == [
+        root["id"],
+        group["id"],
+    ]
+    assert dialog._painter_ui_overlay.edit_scope_id() == group["id"]
+    assert dialog._painter_ui_document["revision"] == revision
+
+    inspected = registry.execute(
+        "paint.ui.selection.scope.inspect",
+        {},
+    ).to_dict()
+    assert inspected["ok"]
+    assert inspected["result"]["selection_scope"]["scope_id"] == group["id"]
+
+    exited = registry.execute(
+        "paint.ui.selection.scope.exit",
+        {},
+    ).to_dict()
+    assert exited["ok"]
+    assert exited["result"]["selection_scope"]["scope_id"] == root["id"]
+    assert exited["result"]["selection_scope"][
+        "exited_scope_id"
+    ] == group["id"]
+    assert dialog._painter_ui_document["revision"] == revision
 
     invalid = registry.execute(
         "paint.ui.selection.deep_select",

@@ -19,7 +19,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Figma REST import/export | `Publish > Figma` URL/token, JSON import, compatibility report, plugin bundle export | `paint.ui.figma.compatibility.inspect`, `paint.ui.figma.import`, `paint.ui.figma.export` |
 | Artboards and viewport | Artboard preset/add/activate, free placement, pointer-centered zoom, wheel/Space pan, fit all/artboard/selection | `paint.ui.artboard.*`, `paint.ui.view.focus/pan/zoom/fit`, `paint.ui.workspace.set` |
 | Inspector presentation | Auto-hide selection overlay, pinned resizable panel, detachable floating window | `paint.ui.inspector.presentation` |
-| Object geometry and hierarchy | Canvas selection/marquee/resize, Layers reorder/reparent/group, ancestor breadcrumb, Alt-click overlap cycle | `paint.ui.object.*`, `paint.ui.selection.set/parent/deep_select` |
+| Object geometry and hierarchy | Canvas selection/marquee/resize, Layers reorder/reparent/group, ancestor breadcrumb, Alt-click overlap cycle, nested frame/group edit scope | `paint.ui.object.*`, `paint.ui.selection.set/parent/deep_select`, `paint.ui.selection.scope.inspect/enter/exit` |
 | Constraints and Auto Layout | Inspector constraints, Horizontal/Vertical flow, padding/gap/wrap/Hug/Fill | `paint.ui.layout.set`, `paint.ui.layout.diagnostics`, `paint.ui.responsive.override.*` |
 | Solid Fill, Stroke, Radius, Opacity | Inspector fields | `paint.ui.object.update` |
 | Linear/Radial Gradient | Inspector `Appearance` dialog with type, angle/center/radius, ordered color stops | `paint.ui.appearance.inspect`, `paint.ui.appearance.gradient.set/remove` |

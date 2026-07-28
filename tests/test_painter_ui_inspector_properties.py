@@ -110,6 +110,7 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     app = _app()
     from app.painter_ui_document import add_ui_object, create_ui_document
     from app.painter_ui_inspector import PainterUIInspector
+    from app.painter_i18n import painter_text
 
     document = create_ui_document(390, 844, name="Phone")
     document, frame = add_ui_object(
@@ -136,6 +137,13 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     }
     inspector.set_document(document)
     assert inspector.design_context() == "text"
+    assert inspector.visible_context_tabs() == (
+        "design",
+        "prototype",
+        "inspect",
+    )
+    assert inspector.artboard_bar.isHidden()
+    assert inspector.title_label.text() == f"UI · {painter_text('Text')}"
     assert inspector.design_group_visible("text")
     assert inspector.design_group_visible("appearance")
     assert not inspector.design_group_visible("image")
@@ -175,6 +183,7 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     }
     inspector.set_document(document)
     assert inspector.design_context() == "multi"
+    assert inspector.visible_context_tabs() == ("design", "inspect")
     assert inspector.design_group_visible("arrange")
     assert not inspector.design_group_visible("geometry")
     assert not inspector.design_group_visible("appearance")
@@ -182,6 +191,9 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     document["selection"] = {"object_id": "", "object_ids": []}
     inspector.set_document(document)
     assert inspector.design_context() == "artboard"
+    assert inspector.visible_context_tabs() == ("design", "inspect")
+    assert not inspector.artboard_bar.isHidden()
+    assert inspector.title_label.text() == painter_text("UI DESIGN")
     assert not inspector.artboard_settings_toggle.isHidden()
     assert not any(
         inspector.design_group_visible(group)

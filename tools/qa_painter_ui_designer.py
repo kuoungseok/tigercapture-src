@@ -316,6 +316,31 @@ def main() -> int:
             ]
         )
     )
+    scope_entered = registry.execute(
+        "paint.ui.selection.scope.enter",
+        {"object_id": group_id},
+    ).to_dict()
+    app.processEvents()
+    scope_ok = (
+        scope_entered.get("ok") is True
+        and scope_entered["result"]["selection_scope"]["scope_id"]
+        == group_id
+        and dialog._painter_ui_overlay.edit_scope_id() == group_id
+    )
+    scope_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_group_scope.png"
+    )
+    dialog.grab().save(str(scope_screenshot_path), "PNG")
+    scope_exited = registry.execute(
+        "paint.ui.selection.scope.exit",
+        {},
+    ).to_dict()
+    scope_ok = (
+        scope_ok
+        and scope_exited.get("ok") is True
+        and not scope_exited["result"]["selection_scope"]["scope_id"]
+        and not dialog._painter_ui_overlay.edit_scope_id()
+    )
     navigator = dialog._painter_ui_navigator
     navigator.set_collapsed(False, user_initiated=True)
     navigator.set_expanded_width(
@@ -366,6 +391,9 @@ def main() -> int:
         dialog._paint_ui_inspector.design_context() == "text"
         and dialog._paint_ui_inspector.design_group_visible("text")
         and not dialog._paint_ui_inspector.design_group_visible("image")
+        and dialog._paint_ui_inspector.visible_context_tabs()
+        == ("design", "prototype", "inspect")
+        and dialog._paint_ui_inspector.artboard_bar.isHidden()
     )
     text_inspector_screenshot_path = (
         output_dir / "painter_ui_designer_m1_text_inspector.png"
@@ -403,6 +431,9 @@ def main() -> int:
         dialog._paint_ui_inspector.design_context() == "multi"
         and dialog._paint_ui_inspector.design_group_visible("arrange")
         and not dialog._paint_ui_inspector.design_group_visible("geometry")
+        and dialog._paint_ui_inspector.visible_context_tabs()
+        == ("design", "inspect")
+        and dialog._paint_ui_inspector.artboard_bar.isHidden()
     )
     multi_inspector_screenshot_path = (
         output_dir / "painter_ui_designer_m1_multi_inspector.png"
@@ -413,6 +444,12 @@ def main() -> int:
         {"object_ids": [], "primary_object_id": ""},
     )
     app.processEvents()
+    adaptive_context_ok = (
+        dialog._paint_ui_inspector.design_context() == "artboard"
+        and dialog._paint_ui_inspector.visible_context_tabs()
+        == ("design", "inspect")
+        and not dialog._paint_ui_inspector.artboard_bar.isHidden()
+    )
     dialog._paint_ui_inspector.set_collapsed(True)
     registry.execute(
         "paint.ui.selection.set",
@@ -518,6 +555,7 @@ def main() -> int:
             and desktop_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
+            and scope_screenshot_path.is_file()
             and navigator_screenshot_path.is_file()
             and inspector_resized_screenshot_path.is_file()
             and inspector_detached_screenshot_path.is_file()
@@ -531,11 +569,13 @@ def main() -> int:
             and text_context_ok
             and image_context_ok
             and multi_context_ok
+            and adaptive_context_ok
             and quick_properties_ok
             and zoom_popover_ok
             and compact_zoom_ok
             and breadcrumb_ok
             and hierarchy_navigation_ok
+            and scope_ok
             and navigator.expanded_width()
             == navigator.DEFAULT_EXPANDED_WIDTH
         ),
@@ -544,6 +584,7 @@ def main() -> int:
         "desktop_screenshot": str(desktop_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
+        "group_scope_screenshot": str(scope_screenshot_path),
         "navigator_screenshot": str(navigator_screenshot_path),
         "inspector_resized_screenshot": str(
             inspector_resized_screenshot_path
@@ -567,10 +608,12 @@ def main() -> int:
         "compact_zoom_ok": compact_zoom_ok,
         "breadcrumb_ok": breadcrumb_ok,
         "hierarchy_navigation_ok": hierarchy_navigation_ok,
+        "group_scope_ok": scope_ok,
         "context_visibility": {
             "text": text_context_ok,
             "image": image_context_ok,
             "multi": multi_context_ok,
+            "adaptive": adaptive_context_ok,
         },
         "guide_state": guide_state,
         "workspace": state["workspace"],

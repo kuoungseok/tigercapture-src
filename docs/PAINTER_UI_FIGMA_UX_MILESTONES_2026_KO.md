@@ -291,7 +291,23 @@ Implemented checkpoint (2026-07-29, hierarchy navigation slice):
 - A compact canvas breadcrumb appears only for nested selections and lets the
   user jump to any visible ancestor without mutating document history.
 - The UI context menu, breadcrumb, and Actions share the same selection service.
-- Enter/exit group editing remains a separate follow-up.
+- Double-click enters a frame/group editing scope and Escape exits one level.
+  Nested scopes use a stack, dim and exclude outside objects from canvas hit
+  testing, and keep the active scope outlined without changing document
+  revision or undo history.
+- `paint.ui.selection.scope.inspect/enter/exit` expose the same group scope to
+  automation.
+
+Implemented checkpoint (2026-07-29, adaptive Inspector slice):
+
+- The right Inspector is not a fixed set of controls. The artboard selector is
+  visible only in the no-selection document context.
+- Single selection changes the header to the selected object kind and exposes
+  Design, Prototype, and Inspect; no selection and multiple selection hide the
+  irrelevant Prototype surface.
+- Context changes preserve the user's pinned, Auto-hide, resized, or detached
+  presentation and fall back to Design only when the active tab becomes
+  unavailable.
 
 Exit criteria:
 

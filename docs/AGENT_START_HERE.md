@@ -79,10 +79,14 @@ Focused entry points:
   automation. The Design tab progressively discloses
   rows for artboard, text, image, frame/group/button, component, and multiple
   selection; advanced rows stay behind the shared Advanced properties toggle.
+  Its header, artboard bar, and Prototype tab are context-adaptive instead of
+  remaining fixed: Prototype appears only for a single selected object.
   User-adjusted side-panel widths and collapsed states persist independently
   from responsive automatic collapse.
   Nested UI selections expose a canvas breadcrumb; parent/deep selection and
   Alt-click overlap cycling share `paint.ui.selection.parent/deep_select`.
+  Double-click/Escape and `paint.ui.selection.scope.inspect/enter/exit` share
+  the nested frame/group edit-scope stack without document mutation.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

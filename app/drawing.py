@@ -9616,6 +9616,7 @@ class PaintDialog(QDialog):
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
+        self._painter_ui_edit_scope_stack: list[str] = []
         self._painter_ui_overlay.view_changed.connect(
             self._on_painter_ui_view_changed
         )
@@ -9657,6 +9658,12 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_overlay.ruler_origin_reset_requested.connect(
             self._reset_painter_ui_ruler_origin
+        )
+        self._painter_ui_overlay.edit_scope_enter_requested.connect(
+            self._enter_painter_ui_edit_scope
+        )
+        self._painter_ui_overlay.edit_scope_exit_requested.connect(
+            self._exit_painter_ui_edit_scope
         )
         self._painter_ui_overlay.hide()
         from app.painter_ui_selection_breadcrumb import (
@@ -12952,12 +12959,109 @@ class PaintDialog(QDialog):
         self._refresh_painter_ui_overlay()
         return report
 
+    def _painter_ui_edit_scope_state(self) -> dict:
+        document = getattr(self, "_painter_ui_document", {}) or {}
+        by_id = {
+            str(row["id"]): row
+            for row in document.get("objects", [])
+        }
+        stack = [
+            object_id
+            for object_id in getattr(
+                self,
+                "_painter_ui_edit_scope_stack",
+                [],
+            )
+            if object_id in by_id
+        ]
+        self._painter_ui_edit_scope_stack = stack
+        return {
+            "scope_id": stack[-1] if stack else "",
+            "scope_stack": list(stack),
+            "scope_names": [
+                str(by_id[object_id]["name"])
+                for object_id in stack
+            ],
+        }
+
+    def _enter_painter_ui_edit_scope(
+        self,
+        object_id: str = "",
+    ) -> dict:
+        document = getattr(self, "_painter_ui_document", {}) or {}
+        target = str(
+            object_id
+            or (document.get("selection") or {}).get("object_id")
+            or ""
+        )
+        by_id = {
+            str(row["id"]): row
+            for row in document.get("objects", [])
+        }
+        row = by_id.get(target)
+        has_children = any(
+            str(item.get("parent_id") or "") == target
+            for item in by_id.values()
+        )
+        if (
+            row is None
+            or row.get("kind") not in {"frame", "group"}
+            or not has_children
+        ):
+            return {
+                **self._painter_ui_edit_scope_state(),
+                "entered": False,
+                "reason": "object_is_not_an_editable_container",
+            }
+        stack = list(
+            getattr(self, "_painter_ui_edit_scope_stack", [])
+        )
+        if target in stack:
+            stack = stack[: stack.index(target) + 1]
+        else:
+            current = stack[-1] if stack else ""
+            parent_id = str(row.get("parent_id") or "")
+            ancestors: set[str] = set()
+            while parent_id and parent_id not in ancestors:
+                ancestors.add(parent_id)
+                parent = by_id.get(parent_id)
+                parent_id = (
+                    str(parent.get("parent_id") or "")
+                    if parent is not None
+                    else ""
+                )
+            if current and current not in ancestors:
+                stack = []
+            stack.append(target)
+        self._painter_ui_edit_scope_stack = stack
+        self._select_painter_ui_object(target)
+        self._refresh_painter_ui_overlay()
+        return {
+            **self._painter_ui_edit_scope_state(),
+            "entered": True,
+        }
+
+    def _exit_painter_ui_edit_scope(self) -> dict:
+        stack = list(
+            getattr(self, "_painter_ui_edit_scope_stack", [])
+        )
+        exited = stack.pop() if stack else ""
+        self._painter_ui_edit_scope_stack = stack
+        if exited:
+            self._select_painter_ui_object(exited)
+        self._refresh_painter_ui_overlay()
+        return {
+            **self._painter_ui_edit_scope_state(),
+            "exited_scope_id": exited,
+        }
+
     def _set_painter_ui_artboard(self, artboard_id: str) -> None:
         from app.painter_ui_document import set_active_ui_artboard
 
         current = getattr(self, "_painter_ui_document", None)
         if str((current or {}).get("active_artboard_id") or "") == str(artboard_id):
             return
+        self._painter_ui_edit_scope_stack = []
         self._push_undo_state("Switch UI artboard")
         self._painter_ui_document = set_active_ui_artboard(current, artboard_id)
         self._painter_document_dirty = True
@@ -14651,6 +14755,8 @@ class PaintDialog(QDialog):
         if overlay is None:
             return
         overlay.set_document(getattr(self, "_painter_ui_document", None))
+        scope = self._painter_ui_edit_scope_state()
+        overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
             getattr(self, "_painter_ui_motion_compositions", {})
         )
@@ -22587,6 +22693,39 @@ class PaintDialog(QDialog):
                 lambda _checked=False: (
                     self._deep_select_painter_ui_object()
                 )
+            )
+            enter_scope_action = menu.addAction(
+                painter_text("Enter group")
+            )
+            exit_scope_action = menu.addAction(
+                painter_text("Exit group")
+            )
+            selected_row = next(
+                (
+                    row
+                    for row in current.get("objects", [])
+                    if row.get("id") == selected
+                ),
+                None,
+            )
+            enter_scope_action.setEnabled(
+                bool(
+                    selected_row
+                    and selected_row.get("kind") in {"frame", "group"}
+                    and any(
+                        str(row.get("parent_id") or "") == selected
+                        for row in current.get("objects", [])
+                    )
+                )
+            )
+            exit_scope_action.setEnabled(
+                bool(self._painter_ui_edit_scope_state()["scope_id"])
+            )
+            enter_scope_action.triggered.connect(
+                lambda _checked=False: self._enter_painter_ui_edit_scope()
+            )
+            exit_scope_action.triggered.connect(
+                lambda _checked=False: self._exit_painter_ui_edit_scope()
             )
             menu.addSeparator()
             fit_action = menu.addAction(painter_text("Fit selection"))

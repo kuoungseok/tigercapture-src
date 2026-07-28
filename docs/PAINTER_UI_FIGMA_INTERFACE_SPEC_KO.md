@@ -749,12 +749,21 @@ overlay mode로 전환한다.
 - The Design inspector is selection-driven rather than fixed. No selection
   shows artboard controls; a single selection routes by object kind; multiple
   selection shows only operations that mutate the full selection.
+- The Inspector header and available tabs also follow that context. The
+  artboard selector is not repeated above object properties; Prototype exists
+  only for one selected object, while Design and document Inspect remain
+  available where relevant. Context switching must not reset user width,
+  Auto-hide, pin, or floating-window state.
 - Text-only, image-only, frame/auto-layout, and component controls must not
   remain visible for unrelated object kinds.
 - Nested selection is canvas-first: Alt-click cycles a deterministic overlap
   stack, while a compact stable-ID breadcrumb exposes visible ancestors.
   `paint.ui.selection.parent/deep_select` use the same selection service and
   never add document history.
+- Frame/group editing uses a nested scope stack. Double-click enters, Escape
+  exits one level, outside objects are dimmed and excluded from hit testing,
+  and `paint.ui.selection.scope.inspect/enter/exit` provide Action parity
+  without document mutation.
 - Advanced disclosure owns constraints and responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-component controls. It is
   collapsed by default and does not create a parallel mutation path.

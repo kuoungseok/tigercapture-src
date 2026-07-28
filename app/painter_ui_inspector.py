@@ -241,6 +241,7 @@ class PainterUIInspector(QWidget):
         self.artboard_combo.currentIndexChanged.connect(self._on_artboard_changed)
         artboard_bar = QFrame()
         artboard_bar.setObjectName("PainterUIArtboardBar")
+        self.artboard_bar = artboard_bar
         artboard_add_row = QHBoxLayout()
         artboard_add_row.setContentsMargins(5, 3, 5, 4)
         artboard_add_row.setSpacing(3)
@@ -1451,7 +1452,42 @@ class PainterUIInspector(QWidget):
             index = self._tabs.addTab(widget, label)
             self._tabs.setTabToolTip(index, label)
             self._tabs.setTabWhatsThis(index, label)
+        self._context_pages = {
+            "design": design_page,
+            "prototype": prototype_page,
+            "inspect": inspect_page,
+        }
         self._tabs.setCurrentWidget(design_page)
+
+    def _sync_context_tabs(self, selection_count: int) -> None:
+        """Expose only tools that make sense for the current canvas context."""
+        pages = dict(getattr(self, "_context_pages", {}) or {})
+        if not pages:
+            return
+        visible = {
+            "design": True,
+            "prototype": selection_count == 1,
+            "inspect": True,
+        }
+        current = self._tabs.currentWidget()
+        for key, page in pages.items():
+            index = self._tabs.indexOf(page)
+            if index >= 0:
+                self._tabs.setTabVisible(index, bool(visible.get(key, True)))
+        current_index = self._tabs.indexOf(current)
+        if current_index < 0 or not self._tabs.isTabVisible(current_index):
+            self._tabs.setCurrentWidget(pages["design"])
+
+    def visible_context_tabs(self) -> tuple[str, ...]:
+        context_pages = set(
+            (getattr(self, "_context_pages", {}) or {}).values()
+        )
+        return tuple(
+            self._tabs.tabWhatsThis(index).casefold()
+            for index in range(self._tabs.count())
+            if self._tabs.isTabVisible(index)
+            and self._tabs.widget(index) in context_pages
+        )
 
     def set_collapsed(self, collapsed: bool) -> None:
         value = bool(collapsed)
@@ -2198,8 +2234,16 @@ class PainterUIInspector(QWidget):
                 if kind == "image":
                     visible_groups.add("image_advanced")
         self._design_context = context
-        self.selection_context_title.setText(title)
-        self.selection_context_hint.setText(hint)
+        self.artboard_bar.setVisible(count == 0)
+        localized_title = painter_text(title)
+        self.title_label.setText(
+            painter_text("UI DESIGN")
+            if count == 0
+            else f"UI · {localized_title}"
+        )
+        self._sync_context_tabs(count)
+        self.selection_context_title.setText(localized_title)
+        self.selection_context_hint.setText(painter_text(hint))
         self.advanced_properties_toggle.setVisible(count == 1)
         self.artboard_settings_toggle.setVisible(count == 0)
         self.artboard_layout_frame.setVisible(

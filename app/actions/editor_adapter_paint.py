@@ -1444,6 +1444,34 @@ class PaintAdapterMixin(
         state["selection_navigation"] = report
         return state
 
+    def paint_ui_selection_scope_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        state = dialog.painter_action_state()
+        state["selection_scope"] = (
+            dialog._painter_ui_edit_scope_state()
+        )
+        return state
+
+    def paint_ui_selection_scope_enter(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        report = dialog._enter_painter_ui_edit_scope(
+            str(object_id or "")
+        )
+        state = dialog.painter_action_state()
+        state["selection_scope"] = report
+        return state
+
+    def paint_ui_selection_scope_exit(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        report = dialog._exit_painter_ui_edit_scope()
+        state = dialog.painter_action_state()
+        state["selection_scope"] = report
+        return state
+
     def paint_ui_object_arrange(self, *, command: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         selected = str(
