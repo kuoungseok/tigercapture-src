@@ -187,10 +187,17 @@ Glass material을 구현한다.
 - Glass가 있는 vector node는 GPU에서 잘못 그리지 않고
   `backdrop_glass_requires_raster` 진단과 shared backdrop raster로
   fallback한다. Preview/Export 픽셀 parity가 자동 검증된다.
+- Draft/Preview blur는 multi-resolution pyramid를 사용하고 실제 glass
+  mask bounds와 blur/refraction padding만 처리하는 ROI 경로를 사용한다.
+- `tools/qa_motion_glass.py`는 1920x1080에서 5개 프리셋을 3프레임씩
+  실렌더하고 contact sheet와 timing JSON을 남긴다. 2026-07-29 CPU
+  fallback 측정은 ROI 전 278-374ms/frame, ROI 후 138-172ms/frame이다.
+  정확도 기준선은 개선됐지만 30fps 목표에는 미달하므로 M22는 아직
+  완료 상태가 아니다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
-- 남은 M22 범위는 multi-resolution blur pyramid, 실시간 pointer/scroll
-  driver feed, 중첩 glass/HDR/1080p 성능 QA, UI Material native 후보 변환,
+- 남은 M22 범위는 GPU backdrop shader 또는 viewport-resolution preview,
+  실시간 pointer/scroll driver feed, HDR QA, UI Material native 후보 변환,
   결정적 tiled export 증거다.
 
 렌더 구조:

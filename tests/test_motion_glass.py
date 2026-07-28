@@ -5,7 +5,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 import pytest
 
@@ -100,3 +100,44 @@ def test_glass_preview_export_pixel_parity() -> None:
         use_cache=False,
     )
     assert preview == exported
+
+
+def test_glass_quality_selects_deterministic_blur_pyramid() -> None:
+    from app.motion_designer.glass_renderer import render_glass_surface
+
+    _app()
+    backdrop = QImage(1200, 600, QImage.Format_RGBA8888_Premultiplied)
+    backdrop.fill(QColor("#163c61"))
+    painter = QPainter(backdrop)
+    for x in range(0, 1200, 32):
+        painter.fillRect(x, 0, 16, 600, QColor("#e8a94b"))
+    painter.end()
+    mask = QImage(1200, 600, QImage.Format_RGBA8888_Premultiplied)
+    mask.fill(QColor("#ffffff"))
+    effect = make_glass_effect({"blur_radius": 18.0}, preset="frosted")
+    effect.metadata["quality"] = "draft"
+    draft_a = render_glass_surface(backdrop, mask, effect, 500)
+    draft_b = render_glass_surface(backdrop, mask, effect, 500)
+    effect.metadata["quality"] = "final"
+    final = render_glass_surface(backdrop, mask, effect, 500)
+    assert draft_a == draft_b
+    assert draft_a != final
+
+
+def test_overlapping_glass_layers_composite_in_order() -> None:
+    _app()
+    composition = _composition()
+    renderer = MotionExportRenderer()
+    one = renderer.render_frame(composition, 900, use_cache=False)
+    second = _shape("Glass 2", "#ffffff", 74, 42, 96, 48)
+    second.effects.append(make_glass_effect({
+        "blur_radius": 14.0,
+        "refraction": 8.0,
+        "tint": "#ffb7dc",
+        "tint_strength": 0.3,
+    }, preset="tinted"))
+    composition.layers.append(second)
+    composition.revision += 1
+    two = renderer.render_frame(composition, 900, use_cache=False)
+    assert one != two
+    assert two.pixelColor(96, 48).alpha() > 0

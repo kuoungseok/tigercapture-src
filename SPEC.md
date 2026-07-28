@@ -6599,7 +6599,12 @@ AI Script Edit MVP integration:
   Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
   candidate and reports `effect_requires_bake:tiger_glass`. Multi-resolution
   blur, live pointer/scroll feeds, nested/HDR/1080p evidence, native UI
-  Material conversion, and tiled-export proof remain M22 work.
+  Material conversion, and tiled-export proof remain M22 work. Draft/Preview
+  blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
+  QA tool records 138-172 ms/frame on the current shared CPU fallback after
+  ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
+  not a realtime-performance claim; M22 remains incomplete until a GPU
+  backdrop path or viewport-resolution preview meets the interactive target.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

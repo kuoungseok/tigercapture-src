@@ -67,21 +67,61 @@ def render_glass_surface(
 
     background = _rgba(backdrop)
     mask = _rgba(mask_surface)[..., 3] / 255.0
-    height, width = mask.shape
+    full_height, full_width = mask.shape
     if mask.max(initial=0.0) <= 1e-6:
         return mask_surface
 
     blur_radius = max(0.0, _value(effect, "blur_radius", time_ms, 4.0))
+    refraction = max(0.0, _value(effect, "refraction", time_ms, 3.0))
+    dispersion = max(0.0, _value(effect, "dispersion", time_ms, 0.35))
+    active_y, active_x = np.nonzero(mask > 1e-4)
+    padding = int(math.ceil(blur_radius * 3.0 + refraction + dispersion + 4.0))
+    left = max(0, int(active_x.min()) - padding)
+    top = max(0, int(active_y.min()) - padding)
+    right = min(full_width, int(active_x.max()) + padding + 1)
+    bottom = min(full_height, int(active_y.max()) + padding + 1)
+    background = background[top:bottom, left:right].copy()
+    mask = mask[top:bottom, left:right].copy()
+    height, width = mask.shape
     sampled = background.copy()
     if blur_radius > 0.01:
-        sampled = cv2.GaussianBlur(
-            sampled,
-            (0, 0),
-            sigmaX=blur_radius,
-            sigmaY=blur_radius,
+        quality = str(effect.metadata.get("quality") or "preview").lower()
+        long_edge_budget = {
+            "draft": 480.0,
+            "preview": 960.0,
+            "final": float(max(width, height)),
+        }.get(quality, 960.0)
+        pyramid_scale = min(
+            1.0,
+            long_edge_budget / max(1.0, float(max(width, height))),
         )
+        if pyramid_scale < 0.999:
+            small_width = max(2, int(round(width * pyramid_scale)))
+            small_height = max(2, int(round(height * pyramid_scale)))
+            small = cv2.resize(
+                sampled,
+                (small_width, small_height),
+                interpolation=cv2.INTER_AREA,
+            )
+            small = cv2.GaussianBlur(
+                small,
+                (0, 0),
+                sigmaX=max(0.01, blur_radius * pyramid_scale),
+                sigmaY=max(0.01, blur_radius * pyramid_scale),
+            )
+            sampled = cv2.resize(
+                small,
+                (width, height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        else:
+            sampled = cv2.GaussianBlur(
+                sampled,
+                (0, 0),
+                sigmaX=blur_radius,
+                sigmaY=blur_radius,
+            )
 
-    refraction = max(0.0, _value(effect, "refraction", time_ms, 3.0))
     normal_scale = max(0.1, _value(effect, "normal_scale", time_ms, 1.4))
     driver_x = _value(effect, "driver_x", time_ms, 0.0)
     driver_y = _value(effect, "driver_y", time_ms, 0.0)
@@ -103,7 +143,6 @@ def render_glass_surface(
         borderMode=cv2.BORDER_REFLECT_101,
     )
 
-    dispersion = max(0.0, _value(effect, "dispersion", time_ms, 0.35))
     if dispersion > 1e-4:
         sampled[..., 0] = cv2.warpAffine(
             sampled[..., 0],
@@ -149,7 +188,9 @@ def render_glass_surface(
         ) * bloom
     sampled[..., :3] += highlight[..., None] * 255.0
     sampled[..., 3] = mask * 255.0
-    return _qimage(sampled)
+    output = np.zeros((full_height, full_width, 4), dtype=np.float32)
+    output[top:bottom, left:right] = sampled
+    return _qimage(output)
 
 
 __all__ = ["render_glass_surface"]
