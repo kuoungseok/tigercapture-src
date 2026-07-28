@@ -6564,8 +6564,13 @@ AI Script Edit MVP integration:
   cutout rigging, Puppet mesh deformation, nested compositions and advanced
   animation curves, typography/vector motion, video matte/roto/keying,
   tracking/stabilization, unified 2.5D/3D composition, and product-scale
-  effects/color/templates/rendering. These are planned milestones and must not
-  be described as current features until their schema, Action/MCP,
+  effects/color/templates. The 2026 style and market gap analysis is recorded
+  separately in `docs/MOTION_DESIGNER_2026_TREND_MILESTONES_KO.md`. M21-M28
+  add a craft/imperfection style stack, dynamic backdrop glass, mixed-media
+  authoring, painterly 2D/3D look development, stop-motion timing, story and
+  platform direction, editable AI style direction, and trend-template QA.
+  M21-M28 are planned milestones and must not be described as current features
+  until their schema, Action/MCP,
   Preview/Export parity, stress test, and real artifact gates pass.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
