@@ -143,6 +143,11 @@ Focused entry points:
   canvas-first wheel/Space navigation are implemented and verified. View
   automation uses `paint.ui.view.focus/pan/zoom/fit`; remaining milestone work
   continues in the focused roadmap.
+  Selected UI images now use
+  `app/painter_ui_image_context_bar.py`: Fit/Fill/Stretch/Tile, Replace,
+  original-size restore, and the direct canvas focal handle are transient and
+  reuse `paint.ui.image.place` / `paint.ui.image.fill.set`. Do not reintroduce
+  these controls as a permanently visible Inspector section.
   As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
   main/cross alignment, gap, four-edge padding, and child Flow/Absolute
   controls. The implementation lives in

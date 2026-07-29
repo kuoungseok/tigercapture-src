@@ -82,6 +82,7 @@ class PainterUIDesignOverlay(QWidget):
     text_edit_started = Signal(str)
     text_edit_finished = Signal(str, bool)
     vector_edit_changed = Signal(object)
+    image_focal_requested = Signal(str, float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -140,6 +141,7 @@ class PainterUIDesignOverlay(QWidget):
         self._vector_active_handle = ""
         self._vector_active_segment_id = ""
         self._vector_original_content: dict[str, Any] | None = None
+        self._image_focal_edit_object_id = ""
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -495,6 +497,29 @@ class PainterUIDesignOverlay(QWidget):
     def set_motion_actor_time(self, time_ms: int) -> None:
         self._motion_actor_time_ms = max(0, int(time_ms))
         self.update()
+
+    def set_image_focal_edit(self, object_id: str, enabled: bool) -> None:
+        target = str(object_id or "") if enabled else ""
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == target
+            ),
+            None,
+        )
+        content = (row or {}).get("content") or {}
+        self._image_focal_edit_object_id = (
+            target
+            if row is not None
+            and str(content.get("source_path") or "")
+            and str(content.get("image_fit") or "fit") == "fill"
+            else ""
+        )
+        self.update()
+
+    def image_focal_edit_object_id(self) -> str:
+        return self._image_focal_edit_object_id
 
     def set_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
@@ -1396,6 +1421,67 @@ class PainterUIDesignOverlay(QWidget):
             if row["id"] in selected_ids and row["visible"]
         ]
 
+    def _image_focal_control(
+        self,
+    ) -> tuple[dict[str, Any], QRectF, QPointF] | None:
+        object_id = str(self._image_focal_edit_object_id or "")
+        if not object_id:
+            return None
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == object_id
+            ),
+            None,
+        )
+        if (
+            row is None
+            or row["id"] != self._document["selection"]["object_id"]
+            or len(self._selected_rows()) != 1
+        ):
+            return None
+        content = row.get("content") or {}
+        if (
+            not str(content.get("source_path") or "")
+            or str(content.get("image_fit") or "fit") != "fill"
+        ):
+            return None
+        rect = self._object_rect(row)
+        focal = QPointF(
+            rect.left()
+            + float(content.get("focal_x", 0.5)) * rect.width(),
+            rect.top()
+            + float(content.get("focal_y", 0.5)) * rect.height(),
+        )
+        return row, rect, focal
+
+    def _paint_image_focal_control(self, painter: QPainter) -> None:
+        control = self._image_focal_control()
+        if control is None:
+            return
+        row, rect, focal = control
+        painter.save()
+        rotation = self._display_rotation(row)
+        pivot = ui_pivot_point(rect, row.get("constraints"))
+        if abs(rotation) >= 0.001:
+            painter.translate(pivot)
+            painter.rotate(rotation)
+            painter.translate(-pivot)
+        painter.setBrush(QColor("#111923CC"))
+        painter.setPen(QPen(QColor("#F5F8FC"), 1.5))
+        painter.drawEllipse(focal, 8.0, 8.0)
+        painter.setPen(QPen(QColor("#72A7FF"), 1.5))
+        painter.drawLine(
+            QPointF(focal.x() - 12.0, focal.y()),
+            QPointF(focal.x() + 12.0, focal.y()),
+        )
+        painter.drawLine(
+            QPointF(focal.x(), focal.y() - 12.0),
+            QPointF(focal.x(), focal.y() + 12.0),
+        )
+        painter.restore()
+
     def _begin_object_move(
         self,
         row: Mapping[str, Any],
@@ -2280,6 +2366,7 @@ class PainterUIDesignOverlay(QWidget):
                 for handle in self._handle_rects(multi_bounds).values():
                     painter.drawRect(handle)
             painter.restore()
+        self._paint_image_focal_control(painter)
 
         if self._interaction == "create" and not self._preview_rect.isNull():
             painter.setBrush(QColor(80, 130, 210, 48))
@@ -2439,6 +2526,27 @@ class PainterUIDesignOverlay(QWidget):
             )
             event.accept()
             return
+
+        image_control = self._image_focal_control()
+        if image_control is not None:
+            row, rect, focal = image_control
+            local_position = self._unrotated_point(
+                event.position(),
+                rect,
+                float(row.get("rotation", 0.0)),
+                row.get("constraints"),
+            )
+            if QRectF(
+                focal.x() - 13.0,
+                focal.y() - 13.0,
+                26.0,
+                26.0,
+            ).contains(local_position):
+                self._interaction = "image_focal"
+                self._active_object_id = str(row["id"])
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+                event.accept()
+                return
 
         controls = self._auto_layout_canvas_controls()
         auto_layout_target = (
@@ -2738,6 +2846,48 @@ class PainterUIDesignOverlay(QWidget):
             self._begin_object_move(row, QPointF(self._press_position))
             self._drag_offset = original_offset
             self._alt_duplicate_drag_active = True
+        if self._interaction == "image_focal":
+            row = next(
+                item
+                for item in self._document["objects"]
+                if item["id"] == self._active_object_id
+            )
+            rect = self._object_rect(row)
+            local_position = self._unrotated_point(
+                event.position(),
+                rect,
+                float(row.get("rotation", 0.0)),
+                row.get("constraints"),
+            )
+            focal_x = max(
+                0.0,
+                min(
+                    1.0,
+                    (local_position.x() - rect.left())
+                    / max(0.0001, rect.width()),
+                ),
+            )
+            focal_y = max(
+                0.0,
+                min(
+                    1.0,
+                    (local_position.y() - rect.top())
+                    / max(0.0001, rect.height()),
+                ),
+            )
+            for document in (self._document, self._effective_document):
+                target = next(
+                    item
+                    for item in document["objects"]
+                    if item["id"] == self._active_object_id
+                )
+                content = copy.deepcopy(dict(target.get("content") or {}))
+                content["focal_x"] = focal_x
+                content["focal_y"] = focal_y
+                target["content"] = content
+            self.update()
+            event.accept()
+            return
         if self._interaction == "ruler_origin":
             self._ruler_origin_preview = QPointF(event.position())
             self.update()
@@ -3158,6 +3308,22 @@ class PainterUIDesignOverlay(QWidget):
                 self.object_changes_requested.emit(
                     object_id,
                     {"content": copy.deepcopy(row["content"])},
+                )
+        elif interaction == "image_focal" and object_id:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == object_id
+                ),
+                None,
+            )
+            if row is not None:
+                content = row.get("content") or {}
+                self.image_focal_requested.emit(
+                    object_id,
+                    float(content.get("focal_x", 0.5)),
+                    float(content.get("focal_y", 0.5)),
                 )
         elif interaction == "auto_layout_drag" and object_id:
             row = next(

@@ -182,6 +182,17 @@ P2 implementation checkpoint (2026-07-26, image layout slice):
 - Embedding referenced image bytes, resource hashes, density variants, and
   delivery packaging remains P8 asset-delivery work.
 
+M1 implementation checkpoint (2026-07-29, contextual image controls):
+
+- Image fit modes, Replace, and original-size restore are available from a
+  transient canvas-local bar instead of permanently occupying Inspector space.
+- Fill mode exposes a direct focal target on the selected image. Selection
+  changes clear stale focal-edit state.
+- Replace preserves fit, focal, and tile settings; UI, Undo, `.tspaint`, and
+  `paint.ui.image.fill.set` remain on the shared mutation contract.
+- Desktop/compact QA lives only in the disposable
+  `debugCapture/painter_ui_image_context_m1` evidence folder.
+
 P6-P10 implementation checkpoint (2026-07-27):
 
 - Object-anchored comments, replies, resolve state, checkpoints, revision diff,

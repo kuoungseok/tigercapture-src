@@ -245,7 +245,8 @@ QWidget#PaintUIDesignToolHost {
 }
 
 QFrame#PainterUIVectorContextBar,
-QFrame#PainterUIBooleanContextBar {
+QFrame#PainterUIBooleanContextBar,
+QFrame#PainterUIImageContextBar {
     background-color: #1b2129;
     border: 1px solid #4b5b6d;
     border-radius: 6px;
@@ -9781,6 +9782,19 @@ class PaintDialog(QDialog):
         self._painter_ui_boolean_context_bar.command_requested.connect(
             self._handle_painter_ui_boolean_command
         )
+        from app.painter_ui_image_context_bar import (
+            PainterUIImageContextBar,
+        )
+
+        self._painter_ui_image_context_bar = PainterUIImageContextBar(
+            canvas_host
+        )
+        self._painter_ui_image_context_bar.command_requested.connect(
+            self._handle_painter_ui_image_context_command
+        )
+        self._painter_ui_overlay.image_focal_requested.connect(
+            self._update_painter_ui_image_focal
+        )
         self._painter_ui_overlay.hide()
         from app.painter_ui_selection_breadcrumb import (
             PainterUISelectionBreadcrumb,
@@ -14109,6 +14123,15 @@ class PaintDialog(QDialog):
         )
         if not object_id:
             return
+        row = next(
+            (
+                item
+                for item in current.get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        content = (row or {}).get("content") or {}
         path, _selected = QFileDialog.getOpenFileName(
             self,
             painter_text("Set UI Image Fill"),
@@ -14118,7 +14141,14 @@ class PaintDialog(QDialog):
         if not path:
             return
         try:
-            self._set_painter_ui_image_fill_path(object_id, path)
+            self._set_painter_ui_image_fill_path(
+                object_id,
+                path,
+                image_fit=str(content.get("image_fit") or "fill"),
+                focal_x=float(content.get("focal_x", 0.5)),
+                focal_y=float(content.get("focal_y", 0.5)),
+                tile_scale=float(content.get("tile_scale", 1.0)),
+            )
         except Exception as exc:
             QMessageBox.warning(
                 self,
@@ -14132,6 +14162,9 @@ class PaintDialog(QDialog):
         source_path: str,
         *,
         image_fit: str = "fill",
+        focal_x: float = 0.5,
+        focal_y: float = 0.5,
+        tile_scale: float = 1.0,
         restore_original_size: bool = False,
     ) -> dict:
         from app.painter_ui_image_assets import set_ui_image_fill
@@ -14141,6 +14174,9 @@ class PaintDialog(QDialog):
             object_id,
             source_path,
             image_fit=image_fit,
+            focal_x=focal_x,
+            focal_y=focal_y,
+            tile_scale=tile_scale,
             restore_original_size=restore_original_size,
         )
         self._push_undo_state("Set UI image fill")
@@ -14425,6 +14461,132 @@ class PaintDialog(QDialog):
         toolbar = getattr(self, "_ui_design_tool_host", None)
         if toolbar is not None:
             bar.place_above(toolbar)
+
+    def _sync_painter_ui_image_context(self) -> None:
+        bar = getattr(self, "_painter_ui_image_context_bar", None)
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if bar is None or overlay is None:
+            return
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) != "ui_design":
+            bar.hide()
+            overlay.set_image_focal_edit("", False)
+            return
+        document = getattr(self, "_painter_ui_document", None) or {}
+        selection = document.get("selection") or {}
+        selected_ids = list(selection.get("object_ids") or [])
+        row = next(
+            (
+                item
+                for item in document.get("objects", [])
+                if item.get("id") == selection.get("object_id")
+            ),
+            None,
+        )
+        content = (row or {}).get("content") or {}
+        eligible = bool(
+            len(selected_ids) == 1
+            and row is not None
+            and str(content.get("source_path") or "")
+        )
+        state = {
+            "eligible": eligible,
+            "object_id": str((row or {}).get("id") or ""),
+            "image_fit": str(content.get("image_fit") or "fit"),
+            "original_width": int(content.get("original_width") or 0),
+            "original_height": int(content.get("original_height") or 0),
+        }
+        bar.set_state(state)
+        if not eligible:
+            overlay.set_image_focal_edit("", False)
+        else:
+            focal_object_id = overlay.image_focal_edit_object_id()
+            if focal_object_id and focal_object_id != state["object_id"]:
+                overlay.set_image_focal_edit("", False)
+            bar.set_focal_editing(
+                overlay.image_focal_edit_object_id() == state["object_id"]
+            )
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None:
+            bar.place_above(toolbar)
+
+    def _handle_painter_ui_image_context_command(self, command: str) -> None:
+        bar = getattr(self, "_painter_ui_image_context_bar", None)
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if bar is None or overlay is None:
+            return
+        state = bar.state()
+        object_id = str(state.get("object_id") or "")
+        row = next(
+            (
+                item
+                for item in self._painter_ui_document.get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        if row is None:
+            return
+        content = row.get("content") or {}
+        value = str(command or "").strip().casefold()
+        if value in {"fit", "fill", "stretch", "tile"}:
+            self._set_painter_ui_image_fill_path(
+                object_id,
+                str(content.get("source_path") or ""),
+                image_fit=value,
+                focal_x=float(content.get("focal_x", 0.5)),
+                focal_y=float(content.get("focal_y", 0.5)),
+                tile_scale=float(content.get("tile_scale", 1.0)),
+            )
+            if value != "fill":
+                overlay.set_image_focal_edit("", False)
+            return
+        if value == "focal":
+            enabled = (
+                overlay.image_focal_edit_object_id() != object_id
+                and str(content.get("image_fit") or "fit") == "fill"
+            )
+            overlay.set_image_focal_edit(object_id, enabled)
+            bar.set_focal_editing(enabled)
+            return
+        if value == "original_size":
+            self._set_painter_ui_image_fill_path(
+                object_id,
+                str(content.get("source_path") or ""),
+                image_fit=str(content.get("image_fit") or "fit"),
+                focal_x=float(content.get("focal_x", 0.5)),
+                focal_y=float(content.get("focal_y", 0.5)),
+                tile_scale=float(content.get("tile_scale", 1.0)),
+                restore_original_size=True,
+            )
+            return
+        if value == "replace":
+            self._prompt_set_painter_ui_image_fill()
+
+    def _update_painter_ui_image_focal(
+        self,
+        object_id: str,
+        focal_x: float,
+        focal_y: float,
+    ) -> None:
+        row = next(
+            (
+                item
+                for item in self._painter_ui_document.get("objects", [])
+                if item.get("id") == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            return
+        content = row.get("content") or {}
+        self._set_painter_ui_image_fill_path(
+            str(object_id),
+            str(content.get("source_path") or ""),
+            image_fit=str(content.get("image_fit") or "fill"),
+            focal_x=float(focal_x),
+            focal_y=float(focal_y),
+            tile_scale=float(content.get("tile_scale", 1.0)),
+        )
 
     def _handle_painter_ui_boolean_command(self, command: str) -> None:
         bar = getattr(self, "_painter_ui_boolean_context_bar", None)
@@ -15693,12 +15855,6 @@ class PaintDialog(QDialog):
             self._painter_ui_stress_preview_document()
         )
         overlay.set_document(preview_document)
-        self._sync_painter_ui_vector_context(
-            overlay._vector_edit_state()
-            if overlay._vector_edit_object_id
-            else {}
-        )
-        self._sync_painter_ui_boolean_context()
         scope = self._painter_ui_edit_scope_state()
         overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
@@ -15710,6 +15866,13 @@ class PaintDialog(QDialog):
         if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
             overlay.show()
             overlay.raise_()
+        self._sync_painter_ui_vector_context(
+            overlay._vector_edit_state()
+            if overlay._vector_edit_object_id
+            else {}
+        )
+        self._sync_painter_ui_boolean_context()
+        self._sync_painter_ui_image_context()
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is not None:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
@@ -24026,6 +24189,17 @@ class PaintDialog(QDialog):
             and toolbar is not None
         ):
             boolean_bar.place_above(toolbar)
+        image_bar = getattr(
+            self,
+            "_painter_ui_image_context_bar",
+            None,
+        )
+        if (
+            image_bar is not None
+            and image_bar.isVisible()
+            and toolbar is not None
+        ):
+            image_bar.place_above(toolbar)
         quick_actions = getattr(self, "_painter_ui_quick_actions", None)
         if quick_actions is not None and quick_actions.isVisible():
             quick_actions._place()
@@ -24867,6 +25041,13 @@ class PaintDialog(QDialog):
             )
             if boolean_bar is not None and boolean_bar.isVisible():
                 boolean_bar.place_above(ui_toolbar)
+            image_bar = getattr(
+                self,
+                "_painter_ui_image_context_bar",
+                None,
+            )
+            if image_bar is not None and image_bar.isVisible():
+                image_bar.place_above(ui_toolbar)
         breadcrumb = getattr(
             self,
             "_painter_ui_selection_breadcrumb",

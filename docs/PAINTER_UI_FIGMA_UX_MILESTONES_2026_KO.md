@@ -383,6 +383,22 @@ Implemented checkpoint (2026-07-29, real image Place/Fill slice):
   translated command palette, zero-width Auto-hide, temporary Properties
   popover, and resizable/detachable Inspector states.
 
+Implemented checkpoint (2026-07-29, contextual image editing slice):
+
+- A single selected image fill exposes Fit, Fill, Stretch, Tile, focal-point
+  editing, original-size restore, and Replace in a transient canvas-local bar.
+  It disappears for unrelated selections and does not become a fixed Inspector
+  section.
+- Fill focal position is edited with a direct on-canvas target handle. The
+  handle follows selection changes and commits through the existing image-fill
+  mutation service as one Undo step.
+- Replace preserves the current fit mode, focal coordinates, and tile scale.
+  `.tspaint` save/load retains the resulting values.
+- The UI continues to share `paint.ui.image.place` and
+  `paint.ui.image.fill.set`; no parallel image document contract was added.
+- Desktop and compact evidence is regenerated at
+  `debugCapture/painter_ui_image_context_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

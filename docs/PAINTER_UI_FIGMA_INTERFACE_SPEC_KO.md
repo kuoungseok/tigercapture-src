@@ -34,6 +34,9 @@ Implemented:
 - real image Place/Fill through file chooser, drag/drop, context menu, Quick
   Actions, and `paint.ui.image.*`
 - image fit/fill/stretch/tile, focal point, replace, and original-size restore
+- selected image controls appear in a transient canvas-local bar above the
+  bottom toolbar; direct focal-point editing stays on the image and never
+  reserves fixed Inspector width
 - durable `.tspaint` embedding of UI image sources
 - Polygon, Star, and Arc creation from the grouped Shape flyout
 - contextual Polygon/Star point count, Star/Arc inner radius, Polygon/Star
