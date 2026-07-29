@@ -69,7 +69,9 @@ def _document():
 
 def test_dev_snippets_use_real_web_and_umg_adapters() -> None:
     from app.painter_ui_dev_snippets import (
+        COMPOSE_ADAPTER,
         DEV_SNIPPET_SCHEMA,
+        SWIFTUI_ADAPTER,
         WEB_CSS_ADAPTER,
         inspect_ui_dev_snippets,
     )
@@ -86,8 +88,18 @@ def test_dev_snippets_use_real_web_and_umg_adapters() -> None:
     umg_layer = json.loads(snippets["umg"]["code"])
     assert umg_layer["Id"] == row["id"]
     assert umg_layer["Disposition"] == "Native"
-    assert snippets["ios"]["available"] is False
-    assert snippets["android"]["unsupported"] == ["adapter_not_implemented"]
+    assert snippets["ios"]["available"] is True
+    assert snippets["ios"]["adapter"] == SWIFTUI_ADAPTER
+    assert "import SwiftUI" in snippets["ios"]["code"]
+    assert "struct ContinueView: View" in snippets["ios"]["code"]
+    assert "Button(action:" in snippets["ios"]["code"]
+    assert ".frame(width: 180, height: 48)" in snippets["ios"]["code"]
+    assert snippets["android"]["available"] is True
+    assert snippets["android"]["adapter"] == COMPOSE_ADAPTER
+    assert "androidx.compose" in snippets["android"]["code"]
+    assert "@Composable\nfun Continue()" in snippets["android"]["code"]
+    assert "Button(" in snippets["android"]["code"]
+    assert ".size(width = 180.dp, height = 48.dp)" in snippets["android"]["code"]
 
 
 def test_dev_handoff_resolves_active_mode_and_alias_terminal() -> None:
@@ -122,8 +134,82 @@ def test_dev_panel_shows_variables_snippets_and_copies_code() -> None:
     panel.copy_button.click()
     assert app.clipboard().text() == panel.snippet_view.toPlainText()
     panel.snippet_combo.setCurrentIndex(3)
-    assert not panel.copy_button.isEnabled()
-    assert not panel.snippet_view.isVisible()
+    assert panel.copy_button.isEnabled()
+    assert not panel.snippet_view.isHidden()
+    assert "import SwiftUI" in panel.snippet_view.toPlainText()
+
+
+def test_native_snippets_report_lossy_properties_instead_of_dropping_them() -> None:
+    from app.painter_ui_dev_snippets import inspect_ui_dev_snippets
+    from app.painter_ui_document import update_ui_object
+
+    document, row, _base, _alias = _document()
+    document, row = update_ui_object(
+        document,
+        row["id"],
+        {
+            "style": {
+                **row["style"],
+                "font_axes": {"wght": 620.0},
+                "blend_mode": "multiply",
+                "fills": [
+                    {"kind": "solid", "color": "#FFFFFF"},
+                    {"kind": "solid", "color": "#000000"},
+                ],
+            }
+        },
+    )
+    snippets = {
+        item["target"]: item
+        for item in inspect_ui_dev_snippets(document, row["id"])["snippets"]
+    }
+    for target in ("ios", "android"):
+        assert "variable_font_axes" in snippets[target]["unsupported"]
+        assert "multiple_fills" in snippets[target]["unsupported"]
+        assert "blend_mode" in snippets[target]["unsupported"]
+
+
+def test_native_snippets_normalize_platform_specific_identifiers() -> None:
+    from app.painter_ui_dev_snippets import inspect_ui_dev_snippets
+    from app.painter_ui_document import add_ui_object, update_ui_object
+
+    document, _row, _base, _alias = _document()
+    document, text = add_ui_object(
+        document,
+        kind="text",
+        name="Headline",
+        x=10,
+        y=12,
+        width=120,
+        height=32,
+        style={"fill": "#112233", "font_size": 18, "font_weight": 600},
+    )
+    snippets = {
+        item["target"]: item
+        for item in inspect_ui_dev_snippets(document, text["id"])["snippets"]
+    }
+    assert ".fontWeight(.semibold)" in snippets["ios"]["code"]
+
+    document, image = add_ui_object(
+        document,
+        kind="image",
+        name="2X Hero Art",
+        x=0,
+        y=0,
+        width=80,
+        height=80,
+    )
+    document, image = update_ui_object(
+        document,
+        image["id"],
+        {"content": {**image["content"], "resource_id": "2X Hero-Art.PNG"}},
+    )
+    compose = {
+        item["target"]: item
+        for item in inspect_ui_dev_snippets(document, image["id"])["snippets"]
+    }["android"]["code"]
+    assert "R.drawable.asset_2x_hero_art_png" in compose
+    assert "androidx.compose.ui.res.painterResource" in compose
 
 
 def test_dev_snippet_action_is_read_only() -> None:

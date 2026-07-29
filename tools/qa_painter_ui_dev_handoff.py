@@ -120,11 +120,27 @@ def main() -> int:
     panel.resize(244, 600)
     app.processEvents()
     panel.grab().save(str(root / "dev_handoff_compact.png"))
+    panel.dev_panel.snippet_combo.setCurrentIndex(3)
     panel.dev_panel.scroll_area.verticalScrollBar().setValue(
         panel.dev_panel.scroll_area.verticalScrollBar().maximum()
     )
     app.processEvents()
-    panel.grab().save(str(root / "dev_handoff_compact_snippets.png"))
+    panel.grab().save(str(root / "dev_handoff_compact_swiftui.png"))
+    panel.dev_panel.snippet_combo.setCurrentIndex(4)
+    app.processEvents()
+    panel.grab().save(str(root / "dev_handoff_compact_compose.png"))
+    report["native_adapter_qa"] = {
+        "swiftui": {
+            "generated": True,
+            "compiler": "not_installed",
+            "compiled": "not_run",
+        },
+        "compose": {
+            "generated": True,
+            "compiler": "not_installed",
+            "compiled": "not_run",
+        },
+    }
     (root / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2),
         encoding="utf-8",

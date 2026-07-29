@@ -1199,8 +1199,9 @@ Implemented checkpoint (2026-07-29, adapter-owned developer values):
 - Unreal snippets are selected directly from the real
   `painter_ui_to_umg_document()` layer output, preserving the object stable ID,
   disposition, payload, and blocker reasons.
-- iOS and Android remain visible but unavailable with
-  `adapter_not_implemented`; no synthetic platform code is presented.
+- At this historical checkpoint iOS and Android remained visible but
+  unavailable with `adapter_not_implemented`; the native-adapter checkpoint
+  below supersedes that limitation.
 - `paint.ui.dev.snippet.inspect` exposes the same read-only report to AI and
   automation. The compact Inspector provides adapter selection, copy, variable
   drill-down, and an internal vertical scroll surface so cards are not
@@ -1210,6 +1211,30 @@ Implemented checkpoint (2026-07-29, adapter-owned developer values):
   `dev_handoff_compact.png`, `dev_handoff_compact_snippets.png`, and
   `report.json`.
 - Verification: 393 Painter UI tests and 20 architecture/i18n guards pass.
+
+Implemented checkpoint (2026-07-29, native developer adapters):
+
+- `tigerstudio.painter.ui.dev_snippets.v2` adds explicit
+  `tigerstudio.painter.ui.swiftui.v1` and
+  `tigerstudio.painter.ui.compose.v1` adapters without relabeling the
+  provider-neutral App contract.
+- Inspect now emits a complete named `SwiftUI View` and Compose
+  `@Composable` component skeleton for the selected object. Resolved bounds,
+  opacity, rotation, solid fill, stroke, radius, text metrics, simple shadow,
+  and Auto Layout direction/gap are mapped where the target owns an equivalent.
+- Platform color values, SwiftUI font weights, and Android drawable names are
+  normalized deterministically. Unsupported masks, Boolean geometry, mixed
+  text, variable axes, multiple paints, non-solid fills, blend behavior, and
+  custom Compose shadows remain visible in `unsupported`.
+- `paint.ui.dev.snippet.inspect` and the existing compact Inspect selector use
+  the same read-only report. SwiftUI and Compose are selectable and copyable at
+  244 px without another fixed panel.
+- Regenerable evidence:
+  `debugCapture/painter_ui_designer/dev_handoff/dev_handoff_compact_swiftui.png`,
+  `dev_handoff_compact_compose.png`, and `report.json`.
+- Verification: 490 Painter UI tests pass; focused Dev/architecture tests pass
+  15/15. This Windows workstation has no `swiftc` or `kotlinc`, therefore
+  native compilation and device/runtime captures are explicitly `not_run`.
 
 Implemented checkpoint (2026-07-29, Inspect component playground entry):
 
@@ -1259,9 +1284,11 @@ Implemented checkpoint (2026-07-29, explicit desktop artifact opening):
   uses `QDesktopServices`.
 - Verification: 400 Painter UI tests and 20 architecture/i18n guards pass.
 
-Remaining M6 scope:
+Remaining M6 validation scope:
 
-- native iOS and Android adapters; current UI reports them as unavailable;
+- compile the generated SwiftUI and Compose skeletons with their native
+  toolchains and capture one real target runtime for each before making
+  platform-build claims;
 
 Exit criteria:
 
