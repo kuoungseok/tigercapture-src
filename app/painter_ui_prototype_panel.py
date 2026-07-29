@@ -30,6 +30,7 @@ from app.painter_ui_prototype_authoring import (
 class PainterUIPrototypePanel(QWidget):
     connection_add_requested = Signal(object)
     connection_remove_requested = Signal(str)
+    connection_reorder_requested = Signal(str, int)
     transition_set_requested = Signal(str, object)
     flow_add_requested = Signal(object)
     flow_activate_requested = Signal(str)
@@ -94,9 +95,17 @@ class PainterUIPrototypePanel(QWidget):
         self.add_button.clicked.connect(self._emit_add)
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self._emit_remove)
+        self.move_up_button = QPushButton("↑")
+        self.move_up_button.setToolTip("Move interaction earlier")
+        self.move_up_button.clicked.connect(lambda: self._emit_reorder(-1))
+        self.move_down_button = QPushButton("↓")
+        self.move_down_button.setToolTip("Move interaction later")
+        self.move_down_button.clicked.connect(lambda: self._emit_reorder(1))
         target_row.addWidget(self.target_combo, 1)
         target_row.addWidget(self.add_button)
         target_row.addWidget(self.remove_button)
+        target_row.addWidget(self.move_up_button)
+        target_row.addWidget(self.move_down_button)
         layout.addLayout(target_row)
 
         transition_row = QHBoxLayout()
@@ -174,6 +183,8 @@ class PainterUIPrototypePanel(QWidget):
         row = self._selected_interaction()
         enabled = bool(row)
         self.remove_button.setEnabled(enabled)
+        self.move_up_button.setEnabled(enabled)
+        self.move_down_button.setEnabled(enabled)
         self.transition_button.setEnabled(enabled)
         if not row:
             return
@@ -206,6 +217,14 @@ class PainterUIPrototypePanel(QWidget):
         row = self._selected_interaction()
         if row:
             self.connection_remove_requested.emit(str(row["id"]))
+
+    def _emit_reorder(self, direction: int) -> None:
+        row = self._selected_interaction()
+        if row:
+            self.connection_reorder_requested.emit(
+                str(row["id"]),
+                int(direction),
+            )
 
     def _emit_transition(self) -> None:
         row = self._selected_interaction()

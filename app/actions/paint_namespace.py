@@ -2542,6 +2542,26 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the active prototype Flow would change",
     )
     registry.register_adapter_action(
+        "paint.ui.prototype.connection.reorder",
+        "Move an ordered prototype interaction earlier or later.",
+        "paint",
+        "paint_ui_prototype_connection_reorder",
+        params_schema=schema_object(
+            {
+                "interaction_id": {"type": "string"},
+                "direction": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 1,
+                },
+            },
+            required=("interaction_id", "direction"),
+        ),
+        required=("interaction_id", "direction"),
+        undo_label="Reorder prototype connection",
+        dry_summary="a prototype interaction would move in execution order",
+    )
+    registry.register_adapter_action(
         "paint.ui.prototype.transition.set",
         "Set a validated transition on an existing interaction.",
         "paint",

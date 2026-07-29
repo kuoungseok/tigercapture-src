@@ -7911,6 +7911,9 @@ AI Script Edit MVP integration:
   source and target artboards and reports `partial`, `fallback`, or `blocked`
   with explicit reasons; browser output currently uses a transform/fade
   approximation rather than claiming complete property interpolation.
+  Multiple interactions preserve document order and can be moved earlier or
+  later through the Prototype icon controls or
+  `paint.ui.prototype.connection.reorder`.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

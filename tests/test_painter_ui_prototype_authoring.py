@@ -23,6 +23,7 @@ def test_prototype_flow_and_transition_round_trip() -> None:
     from app.painter_ui_prototype_authoring import (
         add_ui_prototype_flow,
         inspect_ui_prototype_authoring,
+        reorder_ui_prototype_interaction,
         set_ui_prototype_transition,
     )
 
@@ -69,6 +70,20 @@ def test_prototype_flow_and_transition_round_trip() -> None:
     )
     assert validate_ui_document(document)["ok"] is True
     assert normalize_ui_document(document) == document
+    document, second_interaction = add_ui_interaction(
+        document,
+        source_object_id=button["id"],
+        trigger="click",
+        action="play_sound",
+        parameters={"uri": "click.wav"},
+    )
+    document, reorder = reorder_ui_prototype_interaction(
+        document,
+        second_interaction["id"],
+        -1,
+    )
+    assert reorder["to_index"] == 0
+    assert document["interactions"][0]["id"] == second_interaction["id"]
 
 
 def test_prototype_authoring_actions_share_document_and_undo() -> None:
@@ -100,6 +115,24 @@ def test_prototype_authoring_actions_share_document_and_undo() -> None:
     interaction_id = interaction["result"]["ui_design"]["document"][
         "interactions"
     ][0]["id"]
+    second = registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "source_object_id": object_id,
+            "trigger": "click",
+            "action": "play_sound",
+            "parameters": {"uri": "click.wav"},
+        },
+    ).to_dict()
+    second_id = second["result"]["ui_design"]["document"]["interactions"][1][
+        "id"
+    ]
+    reordered_action = registry.execute(
+        "paint.ui.prototype.connection.reorder",
+        {"interaction_id": second_id, "direction": -1},
+    ).to_dict()
+    assert reordered_action["ok"] is True
+    assert reordered_action["result"]["reorder"]["to_index"] == 0
     flow = registry.execute(
         "paint.ui.prototype.flow.add",
         {
@@ -125,8 +158,13 @@ def test_prototype_authoring_actions_share_document_and_undo() -> None:
         "paint.ui.prototype.authoring.inspect",
         {"object_id": object_id},
     ).to_dict()
-    assert inspected["result"]["interaction_count"] == 1
-    assert inspected["result"]["interactions"][0]["transition"]["kind"] == "dissolve"
+    assert inspected["result"]["interaction_count"] == 2
+    transition_row = next(
+        row
+        for row in inspected["result"]["interactions"]
+        if row["id"] == interaction_id
+    )
+    assert transition_row["transition"]["kind"] == "dissolve"
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
@@ -162,6 +200,7 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
     added: list[dict] = []
     transitions: list[tuple[str, dict]] = []
     flows: list[dict] = []
+    reordered: list[tuple[str, int]] = []
     panel.connection_add_requested.connect(added.append)
     panel.transition_set_requested.connect(
         lambda interaction_id, value: transitions.append(
@@ -169,6 +208,11 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
         )
     )
     panel.flow_add_requested.connect(flows.append)
+    panel.connection_reorder_requested.connect(
+        lambda interaction_id, direction: reordered.append(
+            (interaction_id, direction)
+        )
+    )
     panel.add_button.click()
     panel.connection_list.setCurrentRow(0)
     panel.transition_combo.setCurrentIndex(
@@ -177,11 +221,13 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
     panel.duration_spin.setValue(220)
     panel.transition_button.click()
     panel.flow_add_button.click()
+    panel.move_down_button.click()
     app.processEvents()
     assert added[0]["source_object_id"] == button["id"]
     assert transitions[0][1]["kind"] == "dissolve"
     assert transitions[0][1]["duration_ms"] == 220
     assert flows[0]["start_object_id"] == button["id"]
+    assert reordered[0][1] == 1
     panel.close()
     panel.deleteLater()
     app.processEvents()

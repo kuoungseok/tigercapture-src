@@ -230,6 +230,42 @@ def set_ui_prototype_transition(
     )
 
 
+def reorder_ui_prototype_interaction(
+    value: Mapping[str, Any],
+    interaction_id: str,
+    direction: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    current_index = next(
+        (
+            index
+            for index, row in enumerate(document["interactions"])
+            if row["id"] == str(interaction_id)
+        ),
+        -1,
+    )
+    if current_index < 0:
+        raise ValueError(f"UI interaction not found: {interaction_id}")
+    target_index = max(
+        0,
+        min(
+            len(document["interactions"]) - 1,
+            current_index + (-1 if int(direction) < 0 else 1),
+        ),
+    )
+    if target_index != current_index:
+        row = document["interactions"].pop(current_index)
+        document["interactions"].insert(target_index, row)
+        document["revision"] += 1
+    return document, {
+        "interaction_id": str(interaction_id),
+        "from_index": current_index,
+        "to_index": target_index,
+    }
+
+
 def _smart_animate_match_key(row: Mapping[str, Any]) -> str:
     scope_id = str(row.get("component_scope_id") or "")
     source_id = str(row.get("component_scope_source_object_id") or "")
@@ -360,6 +396,7 @@ __all__ = [
     "inspect_ui_smart_animate",
     "normalize_ui_prototype_contract",
     "normalize_ui_transition",
+    "reorder_ui_prototype_interaction",
     "remove_ui_prototype_flow",
     "set_active_ui_prototype_flow",
     "set_ui_prototype_transition",

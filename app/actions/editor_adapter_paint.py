@@ -553,6 +553,31 @@ class PaintAdapterMixin(
         result["interaction"] = row
         return result
 
+    def paint_ui_prototype_connection_reorder(
+        self,
+        *,
+        interaction_id: str,
+        direction: int,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import (
+            reorder_ui_prototype_interaction,
+        )
+
+        document, reorder = reorder_ui_prototype_interaction(
+            dialog._painter_ui_document,
+            interaction_id,
+            direction,
+        )
+        dialog._push_undo_state("Reorder prototype connection")
+        result = self._paint_ui_commit(
+            dialog,
+            "Reorder prototype connection",
+            document,
+        )
+        result["reorder"] = reorder
+        return result
+
     def paint_ui_prototype_trigger(
         self,
         *,

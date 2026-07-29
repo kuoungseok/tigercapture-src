@@ -358,6 +358,7 @@ class PainterUIInspector(QWidget):
     motion_binding_detach_requested = Signal(str)
     prototype_connection_add_requested = Signal(object)
     prototype_connection_remove_requested = Signal(str)
+    prototype_connection_reorder_requested = Signal(str, int)
     prototype_transition_set_requested = Signal(str, object)
     prototype_flow_add_requested = Signal(object)
     prototype_flow_activate_requested = Signal(str)
@@ -954,6 +955,9 @@ class PainterUIInspector(QWidget):
         )
         self.prototype_panel.connection_remove_requested.connect(
             self.prototype_connection_remove_requested
+        )
+        self.prototype_panel.connection_reorder_requested.connect(
+            self.prototype_connection_reorder_requested
         )
         self.prototype_panel.transition_set_requested.connect(
             self.prototype_transition_set_requested

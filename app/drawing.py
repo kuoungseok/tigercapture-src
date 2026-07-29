@@ -10430,6 +10430,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.prototype_connection_remove_requested.connect(
             self._remove_painter_ui_prototype_connection
         )
+        self._paint_ui_inspector.prototype_connection_reorder_requested.connect(
+            self._reorder_painter_ui_prototype_connection
+        )
         self._paint_ui_inspector.prototype_transition_set_requested.connect(
             self._set_painter_ui_prototype_transition
         )
@@ -15912,6 +15915,30 @@ class PaintDialog(QDialog):
             str(interaction_id),
         )
         self._push_undo_state("Remove prototype connection")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _reorder_painter_ui_prototype_connection(
+        self,
+        interaction_id: str,
+        direction: int,
+    ) -> None:
+        from app.painter_ui_prototype_authoring import (
+            reorder_ui_prototype_interaction,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = reorder_ui_prototype_interaction(
+            current,
+            str(interaction_id),
+            int(direction),
+        )
+        if updated == current:
+            return
+        self._push_undo_state("Reorder prototype connection")
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

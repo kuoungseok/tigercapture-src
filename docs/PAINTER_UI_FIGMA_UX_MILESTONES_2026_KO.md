@@ -1008,6 +1008,10 @@ Implemented checkpoint (2026-07-29):
   artboards and exposes `partial`, `fallback`, or `blocked` with concrete
   reasons in the compact connection list and Action result. Property-level
   interpolation remains open M4 work.
+- Ordered interactions can be moved earlier or later from the compact
+  Prototype list with icon controls. UI and automation share
+  `paint.ui.prototype.connection.reorder`, so execution order, Undo, save, and
+  AI authoring use the same document mutation.
 
 Exit criteria:
 
