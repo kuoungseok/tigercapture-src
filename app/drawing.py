@@ -10518,6 +10518,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.review_export_requested.connect(
             self._export_painter_ui_review
         )
+        self._paint_ui_inspector.artifact_open_requested.connect(
+            self._open_painter_ui_artifact
+        )
         self._paint_ui_inspector.prototype_export_requested.connect(
             self._export_painter_ui_prototype
         )
@@ -15473,6 +15476,9 @@ class PaintDialog(QDialog):
         self._painter_ui_production_status(
             f"Review exported: {report['entrypoint']}"
         )
+        self._paint_ui_inspector.production_panel.set_artifact(
+            report["entrypoint"]
+        )
 
     def _export_painter_ui_prototype(self, output_dir: str) -> None:
         from app.painter_ui_prototype import export_ui_prototype
@@ -15483,6 +15489,21 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_production_status(
             f"Prototype exported: {report['entrypoint']}"
+        )
+        self._paint_ui_inspector.production_panel.set_artifact(
+            report["entrypoint"]
+        )
+
+    def _open_painter_ui_artifact(self, path: str) -> None:
+        from app.painter_ui_artifact import open_painter_ui_artifact
+
+        report = open_painter_ui_artifact(path)
+        self._painter_ui_production_status(
+            (
+                f"Opened artifact: {report['path']}"
+                if report["launched"]
+                else f"Could not open artifact: {report['path']}"
+            )
         )
 
     def _export_painter_ui_assets(

@@ -291,6 +291,7 @@ class PainterUIInspector(QWidget):
     ai_plan_requested = Signal(str)
     ai_apply_requested = Signal(object)
     ai_audit_requested = Signal()
+    artifact_open_requested = Signal(str)
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
     artboard_delete_requested = Signal(str)
@@ -1054,6 +1055,7 @@ class PainterUIInspector(QWidget):
             (self.production_panel.ai_plan_requested, self.ai_plan_requested),
             (self.production_panel.ai_apply_requested, self.ai_apply_requested),
             (self.production_panel.ai_audit_requested, self.ai_audit_requested),
+            (self.production_panel.artifact_open_requested, self.artifact_open_requested),
         ):
             source.connect(target)
         add_inspector_tab(self.production_panel, "Publish", "export")

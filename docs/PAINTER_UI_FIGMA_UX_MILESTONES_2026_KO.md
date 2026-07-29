@@ -1244,10 +1244,24 @@ Implemented checkpoint (2026-07-29, pinned annotation completion):
   omitted from export.
 - Verification: 396 Painter UI tests and 20 architecture/i18n guards pass.
 
+Implemented checkpoint (2026-07-29, explicit desktop artifact opening):
+
+- Review and prototype exports register their generated entrypoint as the last
+  artifact. `Open Last Artifact` remains disabled until a valid export exists
+  and launches only after an explicit desktop UI click.
+- `resolve_painter_ui_artifact` is the shared validation boundary for UI and
+  Actions. It accepts generated handoff formats and directories while blocking
+  executable/unknown file types.
+- The existing `paint.ui.delivery.artifact.open` Action remains read-only: it
+  resolves and validates the artifact, returns
+  `launch_policy=explicit_desktop_ui_only`, and never launches the shell.
+  `open_painter_ui_artifact` is reserved for the explicit desktop command and
+  uses `QDesktopServices`.
+- Verification: 400 Painter UI tests and 20 architecture/i18n guards pass.
+
 Remaining M6 scope:
 
 - native iOS and Android adapters; current UI reports them as unavailable;
-- real runtime opening of validated artifacts from the desktop shell.
 
 Exit criteria:
 

@@ -39,6 +39,7 @@ class PainterUIProductionPanel(QWidget):
     ai_plan_requested = Signal(str)
     ai_apply_requested = Signal(object)
     ai_audit_requested = Signal()
+    artifact_open_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -193,6 +194,13 @@ class PainterUIProductionPanel(QWidget):
         self.status_label = QLabel("Production tools ready")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
+        self._artifact_path = ""
+        self.open_artifact_button = QPushButton("Open Last Artifact")
+        self.open_artifact_button.setEnabled(False)
+        self.open_artifact_button.clicked.connect(
+            lambda: self.artifact_open_requested.emit(self._artifact_path)
+        )
+        root.addWidget(self.open_artifact_button)
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
@@ -221,6 +229,10 @@ class PainterUIProductionPanel(QWidget):
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(str(text))
+
+    def set_artifact(self, path: str) -> None:
+        self._artifact_path = str(path or "")
+        self.open_artifact_button.setEnabled(bool(self._artifact_path))
 
     def _choose_template_package(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

@@ -245,16 +245,12 @@ class PaintUIAdvancedAdapterMixin:
         *,
         path: str,
     ) -> dict[str, Any]:
-        from pathlib import Path
+        from app.painter_ui_artifact import resolve_painter_ui_artifact
 
-        target = Path(path).expanduser().resolve()
-        if not target.exists():
-            raise ValueError(f"Painter UI delivery artifact not found: {path}")
         return {
-            "schema": "tigerstudio.painter.ui.delivery_artifact.v1",
-            "path": str(target),
-            "kind": "directory" if target.is_dir() else target.suffix.casefold().lstrip("."),
-            "bytes": target.stat().st_size if target.is_file() else 0,
+            **resolve_painter_ui_artifact(path),
+            "launched": False,
+            "launch_policy": "explicit_desktop_ui_only",
         }
 
     def paint_ui_smart_guide_inspect(

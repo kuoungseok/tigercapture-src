@@ -680,6 +680,10 @@ Implemented Inspect/Dev contract (2026-07-29):
   service across UI and Actions. Measurement annotations export deterministic
   stable-ID overlays through `dev_handoff.json` and the embedded developer
   inspection report; normal design editing does not render those overlays.
+- Generated review/prototype entrypoints can be opened through the explicit
+  desktop `Open Last Artifact` command. The identically named automation Action
+  only validates and resolves safe handoff paths; it never launches the OS
+  shell without a user click.
 
 코드 스니펫은 실제 adapter가 생성한 경우에만 표시한다. Painter가 지원하지
 않는 CSS/iOS/Android/UMG 코드를 임의로 만들어 보여주지 않는다.
