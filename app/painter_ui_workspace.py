@@ -63,6 +63,8 @@ class PainterUIDesignOverlay(QWidget):
     object_geometry_requested = Signal(str, float, float, float, float)
     object_changes_requested = Signal(str, object)
     objects_changes_requested = Signal(object)
+    objects_continuation_changes_requested = Signal(object)
+    objects_duplicate_requested = Signal(object)
     object_create_requested = Signal(str, float, float, float, float)
     key_command = Signal(str, bool)
     artboard_activation_requested = Signal(str)
@@ -93,6 +95,9 @@ class PainterUIDesignOverlay(QWidget):
         self._preview_rect = QRectF()
         self._drag_offset = QPointF()
         self._move_original_positions: dict[str, tuple[float, float]] = {}
+        self._alt_duplicate_cycle_id = ""
+        self._alt_duplicate_source_ids: list[str] = []
+        self._alt_duplicate_drag_active = False
         self._resize_original_geometries: dict[
             str,
             tuple[float, float, float, float],
@@ -1403,6 +1408,47 @@ class PainterUIDesignOverlay(QWidget):
             if row["id"] in selected_ids and row["visible"]
         ]
 
+    def _begin_object_move(
+        self,
+        row: Mapping[str, Any],
+        position: QPointF,
+    ) -> None:
+        self._interaction = "move"
+        self._active_object_id = str(row["id"])
+        self._original_rect = QRectF(self._object_rect(row))
+        self._drag_offset = position - self._original_rect.topLeft()
+        selected_ids = list(self._document["selection"]["object_ids"])
+        if row["id"] not in selected_ids:
+            selected_ids = [str(row["id"])]
+        descendants = set(selected_ids)
+        changed = True
+        while changed:
+            before = len(descendants)
+            descendants.update(
+                str(item["id"])
+                for item in self._document["objects"]
+                if str(item["parent_id"]) in descendants
+            )
+            for item in self._document["objects"]:
+                if str(item["id"]) not in descendants:
+                    continue
+                boolean = (item.get("content") or {}).get("boolean") or {}
+                mask = item.get("mask") or {}
+                descendants.update(
+                    str(object_id)
+                    for object_id in boolean.get("operand_ids", [])
+                )
+                descendants.update(
+                    str(object_id)
+                    for object_id in mask.get("target_ids", [])
+                )
+            changed = len(descendants) != before
+        self._move_original_positions = {
+            str(item["id"]): (float(item["x"]), float(item["y"]))
+            for item in self._document["objects"]
+            if str(item["id"]) in descendants and not item["locked"]
+        }
+
     def _auto_layout_canvas_controls(self):
         if self._tool != "select":
             return None
@@ -2251,6 +2297,9 @@ class PainterUIDesignOverlay(QWidget):
         self._active_guide_position = 0.0
         self._auto_layout_active_target = ""
         self._auto_layout_drag_original = None
+        self._alt_duplicate_cycle_id = ""
+        self._alt_duplicate_source_ids = []
+        self._alt_duplicate_drag_active = False
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -2507,16 +2556,15 @@ class PainterUIDesignOverlay(QWidget):
             float(event.position().y()),
         )
         selected = hit_ids[0] if hit_ids else ""
-        if (
-            hit_ids
-            and event.modifiers() & Qt.KeyboardModifier.AltModifier
-        ):
-            current = str(self._document["selection"]["object_id"] or "")
-            selected = (
-                hit_ids[(hit_ids.index(current) + 1) % len(hit_ids)]
-                if current in hit_ids
-                else hit_ids[0]
-            )
+        alt_pressed = bool(
+            event.modifiers() & Qt.KeyboardModifier.AltModifier
+        )
+        current = str(self._document["selection"]["object_id"] or "")
+        if hit_ids and alt_pressed and current in hit_ids:
+            selected = current
+            self._alt_duplicate_cycle_id = hit_ids[
+                (hit_ids.index(current) + 1) % len(hit_ids)
+            ]
         selected_row = next(
             (
                 row
@@ -2564,34 +2612,58 @@ class PainterUIDesignOverlay(QWidget):
             if selected not in self._document["selection"]["object_ids"]:
                 self.object_selection_requested.emit(selected, "replace")
             if selected_row is not None and not selected_row["locked"]:
-                self._interaction = "move"
-                self._active_object_id = selected
-                self._original_rect = QRectF(self._object_rect(selected_row))
-                self._drag_offset = event.position() - self._original_rect.topLeft()
-                selected_ids = list(self._document["selection"]["object_ids"])
-                if selected not in selected_ids:
-                    selected_ids = [selected]
-                descendants = set(selected_ids)
-                changed = True
-                while changed:
-                    before = len(descendants)
-                    descendants.update(
-                        row["id"]
-                        for row in self._document["objects"]
-                        if row["parent_id"] in descendants
+                if alt_pressed:
+                    self._interaction = "alt_duplicate_pending"
+                    self._active_object_id = selected
+                    self._original_rect = QRectF(
+                        self._object_rect(selected_row)
                     )
-                    changed = len(descendants) != before
-                self._move_original_positions = {
-                    row["id"]: (float(row["x"]), float(row["y"]))
-                    for row in self._document["objects"]
-                    if row["id"] in descendants and not row["locked"]
-                }
+                    self._drag_offset = (
+                        event.position() - self._original_rect.topLeft()
+                    )
+                    self._alt_duplicate_source_ids = list(
+                        self._document["selection"]["object_ids"]
+                    )
+                    if selected not in self._alt_duplicate_source_ids:
+                        self._alt_duplicate_source_ids = [selected]
+                else:
+                    self._begin_object_move(
+                        selected_row,
+                        QPointF(event.position()),
+                    )
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         self.set_measurements_visible(
             bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         )
+        if self._interaction == "alt_duplicate_pending":
+            delta = event.position() - self._press_position
+            if abs(delta.x()) + abs(delta.y()) < 4.0:
+                event.accept()
+                return
+            self.objects_duplicate_requested.emit(
+                list(self._alt_duplicate_source_ids)
+            )
+            selected = str(
+                self._document["selection"]["object_id"] or ""
+            )
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == selected
+                ),
+                None,
+            )
+            if row is None:
+                self._cancel_interaction()
+                event.accept()
+                return
+            original_offset = QPointF(self._drag_offset)
+            self._begin_object_move(row, QPointF(self._press_position))
+            self._drag_offset = original_offset
+            self._alt_duplicate_drag_active = True
         if self._interaction == "ruler_origin":
             self._ruler_origin_preview = QPointF(event.position())
             self.update()
@@ -2906,7 +2978,13 @@ class PainterUIDesignOverlay(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         interaction = self._interaction
         object_id = self._active_object_id
-        if interaction in {"guide_horizontal", "guide_vertical"}:
+        if interaction == "alt_duplicate_pending":
+            if self._alt_duplicate_cycle_id:
+                self.object_selection_requested.emit(
+                    self._alt_duplicate_cycle_id,
+                    "replace",
+                )
+        elif interaction in {"guide_horizontal", "guide_vertical"}:
             viewport, scale = self._artboard_viewport()
             orientation = (
                 "horizontal"
@@ -3086,30 +3164,45 @@ class PainterUIDesignOverlay(QWidget):
             )
             if row is not None:
                 if interaction == "move" and len(self._move_original_positions) > 1:
-                    self.objects_changes_requested.emit(
-                        {
-                            selected_id: {
-                                "x": float(selected_row["x"]),
-                                "y": float(selected_row["y"]),
-                            }
-                            for selected_id in self._move_original_positions
-                            for selected_row in self._document["objects"]
-                            if selected_row["id"] == selected_id
+                    changes = {
+                        selected_id: {
+                            "x": float(selected_row["x"]),
+                            "y": float(selected_row["y"]),
                         }
-                    )
+                        for selected_id in self._move_original_positions
+                        for selected_row in self._document["objects"]
+                        if selected_row["id"] == selected_id
+                    }
+                    (
+                        self.objects_continuation_changes_requested
+                        if self._alt_duplicate_drag_active
+                        else self.objects_changes_requested
+                    ).emit(changes)
                 elif interaction == "rotate":
                     self.object_changes_requested.emit(
                         object_id,
                         {"rotation": float(row["rotation"])},
                     )
                 else:
-                    self.object_geometry_requested.emit(
-                        object_id,
-                        float(row["x"]),
-                        float(row["y"]),
-                        float(row["width"]),
-                        float(row["height"]),
-                    )
+                    if self._alt_duplicate_drag_active:
+                        self.objects_continuation_changes_requested.emit(
+                            {
+                                object_id: {
+                                    "x": float(row["x"]),
+                                    "y": float(row["y"]),
+                                    "width": float(row["width"]),
+                                    "height": float(row["height"]),
+                                }
+                            }
+                        )
+                    else:
+                        self.object_geometry_requested.emit(
+                            object_id,
+                            float(row["x"]),
+                            float(row["y"]),
+                            float(row["width"]),
+                            float(row["height"]),
+                        )
         self._cancel_interaction()
         self._active_artboard_drag_id = ""
         if self._tool == "select":

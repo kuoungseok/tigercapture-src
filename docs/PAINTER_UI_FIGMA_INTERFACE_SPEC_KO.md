@@ -59,6 +59,10 @@ Implemented:
 - Alt-held canvas distance measurements to the nearest overlapping objects or
   artboard edges, with no persistent panel or document mutation
 - read-only UI/Action parity through `paint.ui.dev.measurement.inspect`
+- Figma-style Alt-drag duplicate for complete object hierarchies; the copy and
+  its drag commit share one Undo step and keep only copied roots selected
+- Ctrl+D, Alt-drag, and `paint.ui.object.duplicate` share the same stable-ID
+  duplication service
 - Painter UI document schema version 18; schema 17 remains the typed Vector
   Network checkpoint and schema 18 marks explicit non-destructive Boolean
   groups

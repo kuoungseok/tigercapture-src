@@ -499,6 +499,21 @@ Implemented checkpoint (2026-07-29, transient measurement slice):
 - Desktop and 900x650 proof plus a machine-readable report regenerate through
   `tools/qa_painter_ui_measurements.py`.
 
+Implemented checkpoint (2026-07-29, Alt-drag duplicate slice):
+
+- Alt press preserves overlap-cycle behavior when released without movement;
+  crossing the drag threshold duplicates the current selected roots instead.
+- Ctrl+D, Alt-drag, and `paint.ui.object.duplicate` use
+  `app/painter_ui_duplicate.py` to copy descendants, Boolean/Mask
+  dependencies, nested stable IDs, owned interactions, and component links.
+- Copied component definitions become linked instances and conflicting
+  accessibility focus orders reset explicitly instead of duplicating invalid
+  definitions or focus positions.
+- The copy and its drag coordinate commit form one Undo step. Moving a copied
+  hierarchy does not add descendants to the visible selection.
+- Desktop and 900x650 proof plus a machine-readable report regenerate through
+  `tools/qa_painter_ui_alt_duplicate.py`; both side panels remain Auto-hide.
+
 Implemented checkpoint (2026-07-29, Figma-style Scale slice):
 
 - Scale is selection-local and appears in the canvas context menu only when an

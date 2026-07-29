@@ -36,6 +36,28 @@ class PaintUIAdvancedAdapterMixin:
         )
         return {**result, "duplicate": report}
 
+    def paint_ui_object_duplicate(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        offset_x: float = 12.0,
+        offset_y: float = 12.0,
+    ) -> dict[str, Any]:
+        from app.painter_ui_duplicate import duplicate_ui_selection
+
+        dialog = self._paint_dialog_owner()
+        document, report = duplicate_ui_selection(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+            offset_x=offset_x,
+            offset_y=offset_y,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Duplicate UI selection",
+            document,
+        )
+        return {**result, "duplicate": report}
+
     def paint_ui_dev_measurement_inspect(
         self,
         *,

@@ -21,6 +21,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Inspector presentation | Auto-hide selection overlay, pinned resizable panel, detachable floating window | `paint.ui.inspector.presentation` |
 | Numeric property editing | Drag, absolute/arithmetic/relative input, percentage scale, localized Reset | Existing focused property Actions and `paint.ui.object.update` |
 | Object geometry and hierarchy | Canvas selection/marquee/resize, Layers reorder/reparent/group, ancestor breadcrumb, Alt-click overlap cycle, nested frame/group edit scope | `paint.ui.object.*`, `paint.ui.selection.set/parent/deep_select`, `paint.ui.selection.scope.inspect/enter/exit` |
+| Same-artboard duplicate | Ctrl+D or Alt-drag copies selected roots, descendants, Boolean/Mask dependencies, nested stable IDs, and owned interactions; Alt-drag copy plus movement is one Undo step | `paint.ui.object.duplicate` |
 | Multi-selection editing | Common bounds, proportional resize, mixed-value Common properties, partial state checks, one-step Undo | `paint.ui.property.batch_set` |
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Object property clipboard | Context-menu Copy/Paste Properties and Paste to Replace; stable IDs, hierarchy, position, and z-order preserved | `paint.ui.object.properties.copy/paste`, `paint.ui.object.paste_replace` |

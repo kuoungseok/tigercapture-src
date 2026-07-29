@@ -202,6 +202,7 @@ Actions:
 - `paint.ui.vector.segment.set/split`
 - `paint.ui.vector.path.closed.set/join/reverse/simplify/outline`
 - `paint.ui.vector.boolean.inspect/compose/set/release`
+- `paint.ui.object.duplicate`
 - `paint.ui.selection.set`
 - `paint.ui.object.arrange`
 - `paint.ui.object.group/ungroup/reorder`

@@ -9713,6 +9713,12 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.objects_changes_requested.connect(
             self._update_painter_ui_objects_batch
         )
+        self._painter_ui_overlay.objects_continuation_changes_requested.connect(
+            self._update_painter_ui_objects_batch_without_undo
+        )
+        self._painter_ui_overlay.objects_duplicate_requested.connect(
+            self._duplicate_painter_ui_selection_for_drag
+        )
         self._painter_ui_overlay.object_create_requested.connect(
             self._create_painter_ui_object_from_rect
         )
@@ -15222,10 +15228,14 @@ class PaintDialog(QDialog):
         changes_by_id: object,
         *,
         label: str = "Transform UI objects",
+        record_undo: bool = True,
     ) -> None:
         if not isinstance(changes_by_id, dict) or not changes_by_id:
             return
         current = getattr(self, "_painter_ui_document", None)
+        preserved_selection = dict(
+            ((current or {}).get("selection") or {})
+        )
         from app.painter_ui_batch_mutation import apply_ui_object_batch
 
         updated, changed_ids = apply_ui_object_batch(
@@ -15234,10 +15244,22 @@ class PaintDialog(QDialog):
         )
         if not changed_ids:
             return
-        self._push_undo_state(label)
+        updated["selection"] = preserved_selection
+        if record_undo:
+            self._push_undo_state(label)
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_objects_batch_without_undo(
+        self,
+        changes_by_id: object,
+    ) -> None:
+        self._update_painter_ui_objects_batch(
+            changes_by_id,
+            label="Continue UI transform",
+            record_undo=False,
+        )
 
     def _update_painter_ui_batch_properties(
         self,
@@ -15484,54 +15506,54 @@ class PaintDialog(QDialog):
         self._refresh_painter_ui_overlay()
 
     def _duplicate_painter_ui_object(self, object_id: str = "") -> None:
-        from app.painter_ui_document import add_ui_object, update_ui_object
-
         current = getattr(self, "_painter_ui_document", None)
         target = str(
             object_id
             or ((current or {}).get("selection") or {}).get("object_id")
             or ""
         )
-        row = next(
-            (
-                item
-                for item in (current or {}).get("objects", [])
-                if item.get("id") == target
-            ),
-            None,
-        )
-        if row is None:
+        if not target:
             return
-        self._push_undo_state("Duplicate UI object")
-        updated, created = add_ui_object(
-            current,
-            kind=row["kind"],
-            name=f"{row['name']} Copy",
-            artboard_id=row["artboard_id"],
-            parent_id=row["parent_id"],
-            x=float(row["x"]) + 12.0,
-            y=float(row["y"]) + 12.0,
-            width=row["width"],
-            height=row["height"],
-            style=row["style"],
-            content=row["content"],
-        )
-        updated, _created = update_ui_object(
-            updated,
-            created["id"],
-            {
-                "rotation": row["rotation"],
-                "opacity": row["opacity"],
-                "visible": row["visible"],
-                "locked": row["locked"],
-                "constraints": row["constraints"],
-                "layout": row["layout"],
-                "accessibility": row["accessibility"],
-            },
-        )
+        self._duplicate_painter_ui_selection([target])
+
+    def _duplicate_painter_ui_selection(
+        self,
+        object_ids: list[str] | None = None,
+        *,
+        offset_x: float = 12.0,
+        offset_y: float = 12.0,
+        label: str = "Duplicate UI selection",
+    ) -> dict:
+        from app.painter_ui_duplicate import duplicate_ui_selection
+
+        current = getattr(self, "_painter_ui_document", None)
+        try:
+            updated, report = duplicate_ui_selection(
+                current,
+                object_ids=object_ids,
+                offset_x=offset_x,
+                offset_y=offset_y,
+            )
+        except Exception as exc:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(str(exc))
+            return {"ok": False, "message": str(exc)}
+        self._push_undo_state(label)
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+        return {"ok": True, **report}
+
+    def _duplicate_painter_ui_selection_for_drag(
+        self,
+        object_ids: list[str],
+    ) -> None:
+        self._duplicate_painter_ui_selection(
+            list(object_ids),
+            offset_x=0.0,
+            offset_y=0.0,
+            label="Alt-drag duplicate UI selection",
+        )
 
     def _duplicate_painter_ui_selection_to_artboard(
         self,

@@ -203,6 +203,11 @@ Focused entry points:
   canvas Alt overlay and read-only `paint.ui.dev.measurement.inspect` Action
   must share its resolved geometry and must never reserve panel width or
   mutate the Painter document.
+  `app/painter_ui_duplicate.py` owns same-artboard Ctrl+D and Alt-drag
+  duplication. Keep object trees, Boolean/Mask dependencies, nested IDs,
+  interactions, component links, focus-order reporting, root selection, and
+  the single copy-plus-drag Undo unit aligned with
+  `paint.ui.object.duplicate`.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

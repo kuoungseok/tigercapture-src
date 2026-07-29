@@ -279,6 +279,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   resolved Auto Layout/Constraint geometry is available without mutation
   through `paint.ui.dev.measurement.inspect`; nearest overlapping objects are
   preferred and artboard edges are the directional fallback.
+- Ctrl+D and Alt-drag now duplicate the complete selected hierarchy rather
+  than rebuilding one shallow object. Object/nested IDs, Boolean and Mask
+  dependencies, owned interactions, component links, and focus-order conflict
+  reporting share `app/painter_ui_duplicate.py` with
+  `paint.ui.object.duplicate`. Alt-drag movement continues the initial
+  duplicate mutation so one Undo removes both the copy and its move.
 
 ## P2. 인스펙터 확장
 
