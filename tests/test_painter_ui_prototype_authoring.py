@@ -165,6 +165,15 @@ def test_prototype_authoring_actions_share_document_and_undo() -> None:
         if row["id"] == interaction_id
     )
     assert transition_row["transition"]["kind"] == "dissolve"
+    dialog._set_painter_ui_prototype_preview(True)
+    dialog._execute_painter_ui_prototype_trigger(
+        object_id,
+        "click",
+        "",
+    )
+    assert dialog._painter_ui_prototype_state["events"][-1]["action"] == "play_sound"
+    assert dialog._painter_ui_overlay.prototype_preview_enabled() is True
+    assert dialog._paint_ui_inspector.prototype_panel.preview_check.isChecked()
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
@@ -201,6 +210,8 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
     transitions: list[tuple[str, dict]] = []
     flows: list[dict] = []
     reordered: list[tuple[str, int]] = []
+    preview: list[bool] = []
+    resets: list[bool] = []
     panel.connection_add_requested.connect(added.append)
     panel.transition_set_requested.connect(
         lambda interaction_id, value: transitions.append(
@@ -213,6 +224,8 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
             (interaction_id, direction)
         )
     )
+    panel.preview_changed.connect(preview.append)
+    panel.preview_reset_requested.connect(lambda: resets.append(True))
     panel.add_button.click()
     panel.connection_list.setCurrentRow(0)
     panel.transition_combo.setCurrentIndex(
@@ -222,12 +235,25 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
     panel.transition_button.click()
     panel.flow_add_button.click()
     panel.move_down_button.click()
+    panel.preview_check.click()
+    panel.set_preview_state(
+        {
+            "artboard_id": "artboard-1",
+            "variables": {"theme": "dark"},
+            "events": [{"action": "navigate"}],
+        },
+        enabled=True,
+    )
+    panel.preview_reset_button.click()
     app.processEvents()
     assert added[0]["source_object_id"] == button["id"]
     assert transitions[0][1]["kind"] == "dissolve"
     assert transitions[0][1]["duration_ms"] == 220
     assert flows[0]["start_object_id"] == button["id"]
     assert reordered[0][1] == 1
+    assert preview == [True]
+    assert resets == [True]
+    assert "1 vars" in panel.preview_state_label.text()
     panel.close()
     panel.deleteLater()
     app.processEvents()

@@ -86,6 +86,7 @@ class PainterUIDesignOverlay(QWidget):
     image_focal_requested = Signal(str, float, float)
     objects_move_reparent_requested = Signal(object, str, object)
     prototype_connection_requested = Signal(str, str, str)
+    prototype_trigger_requested = Signal(str, str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -150,6 +151,11 @@ class PainterUIDesignOverlay(QWidget):
         self._prototype_drag_position: QPointF | None = None
         self._prototype_hover_artboard_id = ""
         self._prototype_authoring_visible = False
+        self._prototype_preview_enabled = False
+        self._prototype_preview_state: dict[str, Any] = {}
+        self._prototype_pressed_object_id = ""
+        self._prototype_hover_object_id = ""
+        self._prototype_focus_object_id = ""
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -1098,6 +1104,39 @@ class PainterUIDesignOverlay(QWidget):
             self._cancel_interaction()
         self.update()
 
+    def set_prototype_preview(
+        self,
+        enabled: bool,
+        state: Mapping[str, Any] | None = None,
+    ) -> None:
+        self._prototype_preview_enabled = bool(enabled)
+        self._prototype_preview_state = (
+            copy.deepcopy(dict(state))
+            if isinstance(state, Mapping)
+            else {}
+        )
+        self._prototype_pressed_object_id = ""
+        self._prototype_hover_object_id = ""
+        self._prototype_focus_object_id = ""
+        if self._prototype_preview_enabled:
+            self._cancel_interaction()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
+    def set_prototype_preview_state(
+        self,
+        state: Mapping[str, Any] | None,
+    ) -> None:
+        self._prototype_preview_state = (
+            copy.deepcopy(dict(state))
+            if isinstance(state, Mapping)
+            else {}
+        )
+        self.update()
+
+    def prototype_preview_enabled(self) -> bool:
+        return bool(self._prototype_preview_enabled)
+
     def _prototype_target_artboard(self, point: QPointF) -> str:
         for artboard in reversed(self._document["artboards"]):
             viewport, _scale = self._artboard_viewport(artboard)
@@ -1225,6 +1264,13 @@ class PainterUIDesignOverlay(QWidget):
         return float(row.get("rotation", 0.0))
 
     def _display_opacity(self, row: Mapping[str, Any]) -> float:
+        if self._prototype_preview_enabled:
+            values = self._prototype_preview_state.get("object_opacity") or {}
+            if str(row["id"]) in values:
+                return max(
+                    0.0,
+                    min(1.0, float(values[str(row["id"])])),
+                )
         preview = self._motion_preview.get(str(row["id"]))
         if preview is not None:
             return max(0.0, min(1.0, float(preview.get("opacity", 1.0))))
@@ -1996,11 +2042,35 @@ class PainterUIDesignOverlay(QWidget):
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
         boolean_operands = self._boolean_operand_ids()
+        preview_artboards: set[str] | None = None
+        preview_visibility: Mapping[str, Any] = {}
+        if self._prototype_preview_enabled:
+            current = str(
+                self._prototype_preview_state.get("artboard_id") or ""
+            )
+            overlays = {
+                str(value)
+                for value in (
+                    self._prototype_preview_state.get(
+                        "overlay_artboard_ids"
+                    )
+                    or []
+                )
+            }
+            preview_artboards = ({current} if current else set()) | overlays
+            preview_visibility = (
+                self._prototype_preview_state.get("object_visibility") or {}
+            )
         return sorted(
             (
                 row
                 for row in self._effective_document["objects"]
                 if row["visible"] and row["id"] not in boolean_operands
+                and (
+                    preview_artboards is None
+                    or row["artboard_id"] in preview_artboards
+                )
+                and bool(preview_visibility.get(row["id"], True))
             ),
             key=lambda row: row["z_index"],
             reverse=reverse,
@@ -2482,36 +2552,61 @@ class PainterUIDesignOverlay(QWidget):
         scene_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         scene_painter.fillRect(self.rect(), QColor("#3F4145"))
         active_id = self._document["active_artboard_id"]
+        preview_artboards: set[str] | None = None
+        if self._prototype_preview_enabled:
+            current = str(
+                self._prototype_preview_state.get("artboard_id") or ""
+            )
+            preview_artboards = {
+                str(value)
+                for value in (
+                    self._prototype_preview_state.get(
+                        "overlay_artboard_ids"
+                    )
+                    or []
+                )
+            }
+            if current:
+                preview_artboards.add(current)
         for artboard in self._document["artboards"]:
+            if (
+                preview_artboards is not None
+                and artboard["id"] not in preview_artboards
+            ):
+                continue
             viewport, scale = self._artboard_viewport(artboard)
             scene_painter.fillRect(
                 viewport,
                 QColor(str(artboard.get("background") or "#FFFFFF")),
             )
-            self._paint_artboard_layout(
-                scene_painter,
-                artboard,
-                viewport,
-                scale,
-            )
-            scene_painter.setBrush(Qt.BrushStyle.NoBrush)
-            scene_painter.setPen(
-                QPen(
-                    QColor("#72A7FF")
-                    if artboard["id"] == active_id
-                    else QColor("#657184"),
-                    2.0 if artboard["id"] == active_id else 1.0,
+            if not self._prototype_preview_enabled:
+                self._paint_artboard_layout(
+                    scene_painter,
+                    artboard,
+                    viewport,
+                    scale,
                 )
-            )
-            scene_painter.drawRect(viewport)
-            if self._artboard_labels_visible:
-                scene_painter.setPen(QColor("#B7C0CD"))
-                scene_painter.drawText(
-                    QPointF(viewport.left(), viewport.top() - 7.0),
-                    str(artboard["name"]),
+                scene_painter.setBrush(Qt.BrushStyle.NoBrush)
+                scene_painter.setPen(
+                    QPen(
+                        QColor("#72A7FF")
+                        if artboard["id"] == active_id
+                        else QColor("#657184"),
+                        2.0 if artboard["id"] == active_id else 1.0,
+                    )
                 )
+                scene_painter.drawRect(viewport)
+                if self._artboard_labels_visible:
+                    scene_painter.setPen(QColor("#B7C0CD"))
+                    scene_painter.drawText(
+                        QPointF(viewport.left(), viewport.top() - 7.0),
+                        str(artboard["name"]),
+                    )
         scale, offset = self._view_transform()
-        for section in self._document.get("sections", []):
+        for section in (
+            [] if self._prototype_preview_enabled
+            else self._document.get("sections", [])
+        ):
             section_rect = QRectF(
                 offset.x() + float(section["x"]) * scale,
                 offset.y() + float(section["y"]) * scale,
@@ -2554,6 +2649,9 @@ class PainterUIDesignOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawImage(0, 0, surface)
+        if self._prototype_preview_enabled:
+            painter.end()
+            return
         if self._edit_scope_id:
             scope_row = next(
                 (
@@ -2575,10 +2673,22 @@ class PainterUIDesignOverlay(QWidget):
                 )
                 painter.drawRect(self._object_rect(scope_row))
                 painter.restore()
-        selected = self._document["selection"]["object_id"]
-        selected_ids = set(self._document["selection"]["object_ids"])
-        selected_rows = self._selected_rows()
-        multi_rows = self._multi_transform_rows()
+        selected = (
+            ""
+            if self._prototype_preview_enabled
+            else self._document["selection"]["object_id"]
+        )
+        selected_ids = (
+            set()
+            if self._prototype_preview_enabled
+            else set(self._document["selection"]["object_ids"])
+        )
+        selected_rows = (
+            [] if self._prototype_preview_enabled else self._selected_rows()
+        )
+        multi_rows = (
+            [] if self._prototype_preview_enabled else self._multi_transform_rows()
+        )
         multi_bounds = (
             self._selection_bounds(selected_rows)
             if len(selected_rows) > 1
@@ -2653,7 +2763,8 @@ class PainterUIDesignOverlay(QWidget):
                 for handle in self._handle_rects(multi_bounds).values():
                     painter.drawRect(handle)
             painter.restore()
-        self._paint_prototype_connections(painter)
+        if not self._prototype_preview_enabled:
+            self._paint_prototype_connections(painter)
         self._paint_image_focal_control(painter)
         if self._prototype_hover_artboard_id:
             target_artboard = next(
@@ -2807,6 +2918,19 @@ class PainterUIDesignOverlay(QWidget):
             return
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._press_position = QPointF(event.position())
+        if self._prototype_preview_enabled:
+            hit_ids = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            target = hit_ids[0] if hit_ids else ""
+            self._prototype_pressed_object_id = target
+            self._prototype_focus_object_id = target
+            if target:
+                self.prototype_trigger_requested.emit(target, "press", "")
+                self.prototype_trigger_requested.emit(target, "focus", "")
+            event.accept()
+            return
         viewport, _scale = self._artboard_viewport()
         if self._rulers_visible:
             if (
@@ -3163,6 +3287,38 @@ class PainterUIDesignOverlay(QWidget):
         self.set_measurements_visible(
             bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         )
+        if self._prototype_preview_enabled:
+            hit_ids = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            target = hit_ids[0] if hit_ids else ""
+            if target != self._prototype_hover_object_id:
+                if self._prototype_hover_object_id:
+                    self.prototype_trigger_requested.emit(
+                        self._prototype_hover_object_id,
+                        "mouse_leave",
+                        "",
+                    )
+                self._prototype_hover_object_id = target
+                if target:
+                    self.prototype_trigger_requested.emit(
+                        target,
+                        "mouse_enter",
+                        "",
+                    )
+                    self.prototype_trigger_requested.emit(
+                        target,
+                        "hover",
+                        "",
+                    )
+            self.setCursor(
+                Qt.CursorShape.PointingHandCursor
+                if target
+                else Qt.CursorShape.ArrowCursor
+            )
+            event.accept()
+            return
         if self._interaction == "prototype_connection":
             self._prototype_drag_position = QPointF(event.position())
             target = self._prototype_target_artboard(event.position())
@@ -3590,6 +3746,17 @@ class PainterUIDesignOverlay(QWidget):
         event.ignore()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._prototype_preview_enabled:
+            hit_ids = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            target = hit_ids[0] if hit_ids else ""
+            if target and target == self._prototype_pressed_object_id:
+                self.prototype_trigger_requested.emit(target, "click", "")
+            self._prototype_pressed_object_id = ""
+            event.accept()
+            return
         interaction = self._interaction
         object_id = self._active_object_id
         if interaction == "prototype_connection" and object_id:
@@ -3928,6 +4095,19 @@ class PainterUIDesignOverlay(QWidget):
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:
+        if self._prototype_preview_enabled:
+            hit_ids = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            if hit_ids:
+                self.prototype_trigger_requested.emit(
+                    hit_ids[0],
+                    "double_click",
+                    "",
+                )
+            event.accept()
+            return
         if (
             self._rulers_visible
             and event.button() == Qt.MouseButton.LeftButton
@@ -4110,6 +4290,15 @@ class PainterUIDesignOverlay(QWidget):
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
+        if self._prototype_preview_enabled:
+            if self._prototype_focus_object_id:
+                self.prototype_trigger_requested.emit(
+                    self._prototype_focus_object_id,
+                    "keyboard",
+                    str(event.text() or event.key()),
+                )
+            event.accept()
+            return
         if key == Qt.Key.Key_Alt and not event.isAutoRepeat():
             self.set_measurements_visible(True)
             event.accept()
@@ -4189,6 +4378,16 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._prototype_preview_enabled and self._prototype_hover_object_id:
+            self.prototype_trigger_requested.emit(
+                self._prototype_hover_object_id,
+                "mouse_leave",
+                "",
+            )
+            self._prototype_hover_object_id = ""
+        super().leaveEvent(event)
 
     def keyReleaseEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Alt and not event.isAutoRepeat():

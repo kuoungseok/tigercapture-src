@@ -15,6 +15,7 @@ from app.painter_ui_document import (
     set_active_ui_artboard,
     update_ui_artboard,
 )
+from app.painter_ui_prototype import prototype_initial_state
 from app.painter_ui_workspace import PainterUIDesignOverlay
 
 
@@ -124,3 +125,32 @@ def test_inspector_emits_context_mode_for_prototype_tab() -> None:
     app.processEvents()
 
     assert emitted[-1] == "prototype"
+
+
+def test_canvas_preview_routes_pointer_triggers_without_editing() -> None:
+    app = _app()
+    document, source, _second = _prototype_document()
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1100, 700)
+    overlay.set_document(document)
+    overlay.set_prototype_preview(True, prototype_initial_state(document))
+    overlay.show()
+    app.processEvents()
+    rect = overlay._object_rect(source)
+    emitted: list[tuple[str, str, str]] = []
+    overlay.prototype_trigger_requested.connect(
+        lambda object_id, trigger, key: emitted.append(
+            (object_id, trigger, key)
+        )
+    )
+
+    QTest.mouseClick(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=rect.center().toPoint(),
+    )
+
+    assert (source["id"], "press", "") in emitted
+    assert (source["id"], "focus", "") in emitted
+    assert (source["id"], "click", "") in emitted
+    assert overlay.prototype_connection_handle_rect().isNull()

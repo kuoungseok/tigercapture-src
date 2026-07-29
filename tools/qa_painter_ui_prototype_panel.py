@@ -60,6 +60,14 @@ def main() -> int:
     panel = PainterUIPrototypePanel()
     panel.resize(360, 410)
     panel.set_document(document)
+    panel.set_preview_state(
+        {
+            "artboard_id": "artboard-1",
+            "variables": {"theme": "dark"},
+            "events": [{"action": "navigate"}],
+        },
+        enabled=True,
+    )
     panel.connection_list.setCurrentRow(0)
     panel.show()
     app.processEvents()

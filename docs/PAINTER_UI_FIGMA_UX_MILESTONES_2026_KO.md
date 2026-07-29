@@ -1012,6 +1012,14 @@ Implemented checkpoint (2026-07-29):
   Prototype list with icon controls. UI and automation share
   `paint.ui.prototype.connection.reorder`, so execution order, Undo, save, and
   AI authoring use the same document mutation.
+- The compact Prototype panel now provides an inline, non-mutating Play/Reset
+  preview debugger. It starts from the active Flow artboard, routes pointer and
+  keyboard input through the authored runtime, and reports the current
+  artboard, variable count, and latest event without adding a timeline.
+  Preview suppresses artboard labels, grids, rulers, measurements, sections,
+  selections, and edit handles so the canvas reads as the delivered UI.
+  Delay scheduling and actual sound/Motion playback remain explicit follow-up
+  work rather than being silently claimed.
 
 Exit criteria:
 

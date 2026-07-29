@@ -10,6 +10,7 @@ from app.painter_ui_document import (
 )
 from app.painter_ui_prototype import export_ui_prototype
 from app.painter_ui_prototype_authoring import set_ui_prototype_transition
+from app.painter_ui_prototype_authoring import add_ui_prototype_flow
 
 
 def test_html_export_includes_extended_runtime_and_transition(
@@ -56,3 +57,22 @@ def test_html_export_includes_extended_runtime_and_transition(
     assert 'x.trigger==="delay"' in html
     assert '"gamepadconnected"' in html
     assert '"smart_animate"' in html
+
+
+def test_initial_state_uses_active_flow_artboard() -> None:
+    from app.painter_ui_prototype import prototype_initial_state
+
+    document = create_ui_document(390, 844)
+    document, second = add_ui_artboard(
+        document,
+        name="Flow Start",
+        width=390,
+        height=844,
+    )
+    document, _flow = add_ui_prototype_flow(
+        document,
+        name="Primary",
+        artboard_id=second["id"],
+    )
+
+    assert prototype_initial_state(document)["artboard_id"] == second["id"]

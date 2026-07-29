@@ -8195,6 +8195,8 @@ class PaintDialog(QDialog):
         from app.painter_ui_document import create_ui_document
 
         self._painter_ui_document = create_ui_document(*self._canvas_document_size)
+        self._painter_ui_prototype_preview_enabled = False
+        self._painter_ui_prototype_state: dict = {}
         self._painter_ui_artboard_viewports: dict[str, dict[str, float]] = {}
         self._painter_ui_view_artboard_id = ""
         self._painter_ui_motion_compositions: dict[str, object] = {}
@@ -9738,6 +9740,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.prototype_connection_requested.connect(
             self._add_painter_ui_canvas_prototype_connection
         )
+        self._painter_ui_overlay.prototype_trigger_requested.connect(
+            self._execute_painter_ui_prototype_trigger
+        )
         self._painter_ui_overlay.key_command.connect(
             self._handle_painter_ui_key_command
         )
@@ -10441,6 +10446,12 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.prototype_flow_activate_requested.connect(
             self._activate_painter_ui_prototype_flow
+        )
+        self._paint_ui_inspector.prototype_preview_changed.connect(
+            self._set_painter_ui_prototype_preview
+        )
+        self._paint_ui_inspector.prototype_preview_reset_requested.connect(
+            self._reset_painter_ui_prototype_preview
         )
         self._paint_ui_inspector.stress_preview_requested.connect(
             self._set_painter_ui_stress_preview
@@ -15995,6 +16006,68 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 
+    def _set_painter_ui_prototype_preview(self, enabled: bool) -> None:
+        self._painter_ui_prototype_preview_enabled = bool(enabled)
+        if enabled:
+            self._reset_painter_ui_prototype_preview()
+            return
+        self._painter_ui_prototype_state = {}
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_prototype_preview(False, {})
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is not None:
+            inspector.set_prototype_preview_state({}, enabled=False)
+
+    def _reset_painter_ui_prototype_preview(self) -> None:
+        from app.painter_ui_prototype import prototype_initial_state
+
+        self._painter_ui_prototype_preview_enabled = True
+        self._painter_ui_prototype_state = prototype_initial_state(
+            self._painter_ui_document
+        )
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_prototype_preview(
+                True,
+                self._painter_ui_prototype_state,
+            )
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is not None:
+            inspector.set_prototype_preview_state(
+                self._painter_ui_prototype_state,
+                enabled=True,
+            )
+
+    def _execute_painter_ui_prototype_trigger(
+        self,
+        source_object_id: str,
+        trigger: str,
+        key: str,
+    ) -> None:
+        if not self._painter_ui_prototype_preview_enabled:
+            return
+        from app.painter_ui_prototype import execute_ui_prototype_trigger
+
+        self._painter_ui_prototype_state = execute_ui_prototype_trigger(
+            self._painter_ui_document,
+            self._painter_ui_prototype_state,
+            source_object_id=str(source_object_id),
+            trigger=str(trigger),
+            key=str(key),
+        )
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_prototype_preview_state(
+                self._painter_ui_prototype_state
+            )
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is not None:
+            inspector.set_prototype_preview_state(
+                self._painter_ui_prototype_state,
+                enabled=True,
+            )
+
     def _bind_painter_ui_token(
         self,
         object_id: str,
@@ -16714,6 +16787,16 @@ class PaintDialog(QDialog):
             != str(getattr(self, "_painter_ui_view_artboard_id", "") or "")
         )
         overlay.set_document(canvas_document)
+        overlay.set_prototype_preview(
+            bool(
+                getattr(
+                    self,
+                    "_painter_ui_prototype_preview_enabled",
+                    False,
+                )
+            ),
+            getattr(self, "_painter_ui_prototype_state", {}),
+        )
         if restore_view and active_artboard_id:
             self._painter_ui_view_artboard_id = active_artboard_id
             saved_view = (
@@ -16763,6 +16846,17 @@ class PaintDialog(QDialog):
         if inspector_needs_sync:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
             inspector.set_stress_preview_report(stress_report)
+        if inspector is not None:
+            inspector.set_prototype_preview_state(
+                getattr(self, "_painter_ui_prototype_state", {}),
+                enabled=bool(
+                    getattr(
+                        self,
+                        "_painter_ui_prototype_preview_enabled",
+                        False,
+                    )
+                ),
+            )
         navigator = getattr(self, "_painter_ui_navigator", None)
         if navigator is not None:
             navigator.set_document(

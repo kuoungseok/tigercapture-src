@@ -362,6 +362,8 @@ class PainterUIInspector(QWidget):
     prototype_transition_set_requested = Signal(str, object)
     prototype_flow_add_requested = Signal(object)
     prototype_flow_activate_requested = Signal(str)
+    prototype_preview_changed = Signal(bool)
+    prototype_preview_reset_requested = Signal()
     stress_preview_requested = Signal(str, str)
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
@@ -967,6 +969,12 @@ class PainterUIInspector(QWidget):
         )
         self.prototype_panel.flow_activate_requested.connect(
             self.prototype_flow_activate_requested
+        )
+        self.prototype_panel.preview_changed.connect(
+            self.prototype_preview_changed
+        )
+        self.prototype_panel.preview_reset_requested.connect(
+            self.prototype_preview_reset_requested
         )
         motion_layout.addWidget(self.prototype_panel)
         self.motion_binding_panel = PainterUIMotionBindingPanel()
@@ -2241,6 +2249,14 @@ class PainterUIInspector(QWidget):
             if self._tabs.isTabVisible(index)
             and self._tabs.widget(index) in context_pages
         )
+
+    def set_prototype_preview_state(
+        self,
+        state: Mapping[str, Any] | None,
+        *,
+        enabled: bool,
+    ) -> None:
+        self.prototype_panel.set_preview_state(state, enabled=enabled)
 
     def set_collapsed(self, collapsed: bool) -> None:
         value = bool(collapsed)

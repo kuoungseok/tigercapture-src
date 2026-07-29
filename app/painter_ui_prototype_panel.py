@@ -5,12 +5,14 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -34,6 +36,8 @@ class PainterUIPrototypePanel(QWidget):
     transition_set_requested = Signal(str, object)
     flow_add_requested = Signal(object)
     flow_activate_requested = Signal(str)
+    preview_changed = Signal(bool)
+    preview_reset_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -72,6 +76,27 @@ class PainterUIPrototypePanel(QWidget):
         flow_row.addWidget(self.flow_combo, 1)
         flow_row.addWidget(self.flow_add_button)
         layout.addLayout(flow_row)
+
+        preview_row = QHBoxLayout()
+        self.preview_check = QCheckBox("Play")
+        self.preview_check.setToolTip("Preview interactions on canvas")
+        self.preview_check.toggled.connect(self.preview_changed)
+        self.preview_reset_button = QPushButton("Reset")
+        self.preview_reset_button.setFixedWidth(48)
+        self.preview_reset_button.clicked.connect(
+            self.preview_reset_requested
+        )
+        self.preview_state_label = QLabel("Preview is off")
+        self.preview_state_label.setMinimumWidth(0)
+        self.preview_state_label.setFixedHeight(24)
+        self.preview_state_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Fixed,
+        )
+        preview_row.addWidget(self.preview_check)
+        preview_row.addWidget(self.preview_reset_button)
+        preview_row.addWidget(self.preview_state_label, 1)
+        layout.addLayout(preview_row)
 
         self.connection_list = QListWidget()
         self.connection_list.setFixedHeight(112)
@@ -173,6 +198,38 @@ class PainterUIPrototypePanel(QWidget):
         ):
             widget.setEnabled(enabled)
         self._sync_connection(self.connection_list.currentItem())
+
+    def set_preview_state(
+        self,
+        state: Mapping[str, Any] | None,
+        *,
+        enabled: bool | None = None,
+    ) -> None:
+        if enabled is not None:
+            self.preview_check.blockSignals(True)
+            self.preview_check.setChecked(bool(enabled))
+            self.preview_check.blockSignals(False)
+        if not self.preview_check.isChecked():
+            self.preview_state_label.setText("Preview is off")
+            return
+        runtime = dict(state) if isinstance(state, Mapping) else {}
+        artboard_id = str(runtime.get("artboard_id") or "-")
+        variables = dict(runtime.get("variables") or {})
+        events = list(runtime.get("events") or [])
+        last_event = (
+            str(events[-1].get("action") or "")
+            if events and isinstance(events[-1], Mapping)
+            else ""
+        )
+        summary = f"{artboard_id} | {len(variables)} vars"
+        if last_event:
+            summary += f" | {last_event}"
+        self.preview_state_label.setText(summary)
+        self.preview_state_label.setToolTip(
+            f"Current artboard: {artboard_id}\n"
+            f"Variables: {variables}\n"
+            f"Last event: {last_event or '-'}"
+        )
 
     def _selected_interaction(self) -> dict[str, Any]:
         item = self.connection_list.currentItem()

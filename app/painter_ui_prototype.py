@@ -15,10 +15,29 @@ PROTOTYPE_PACKAGE_SCHEMA = "tigerstudio.painter.ui.prototype_package.v1"
 
 def prototype_initial_state(value: Mapping[str, Any]) -> dict[str, Any]:
     document = normalize_ui_document(value)
+    from app.painter_ui_prototype_authoring import (
+        normalize_ui_prototype_contract,
+    )
+
+    prototype = normalize_ui_prototype_contract(
+        document["linked_targets"].get("prototype")
+    )
+    active_flow = next(
+        (
+            row
+            for row in prototype["flows"]
+            if row["id"] == prototype["active_flow_id"]
+        ),
+        None,
+    )
     return {
         "schema": PROTOTYPE_SCHEMA,
         "document_id": document["document_id"],
-        "artboard_id": document["active_artboard_id"],
+        "artboard_id": (
+            active_flow["artboard_id"]
+            if active_flow is not None and active_flow["artboard_id"]
+            else document["active_artboard_id"]
+        ),
         "history": [],
         "overlay_artboard_ids": [],
         "object_states": {},
