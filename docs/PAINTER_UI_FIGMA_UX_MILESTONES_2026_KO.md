@@ -454,6 +454,23 @@ Implemented checkpoint (2026-07-29, equal-size Smart Guide slice):
   resulting `180 x 120` document geometry, and zero-width side panels under
   `debugCapture/painter_ui_equal_size_guides_m1`.
 
+Implemented checkpoint (2026-07-29, remembered viewport slice):
+
+- The current artboard-backed Page list remembers an independent zoom and
+  canvas center for every artboard. Switching through the canvas, Navigator,
+  or `paint.ui.artboard.activate` restores the same view.
+- View state stores a world-space center rather than a raw widget-pixel offset,
+  so resizing the Painter window does not move the remembered design focus.
+- Pan, zoom, fit, pointer navigation, and `paint.ui.view.*` Actions all pass
+  through the overlay's shared `view_changed` contract.
+- Viewport changes remain non-document, non-Undo workspace state, while
+  `.tspaint` saves and restores them under
+  `workspace.ui_artboard_viewports`.
+- `tools/qa_painter_ui_page_viewports.py` verifies independent Phone/Desktop
+  restoration at desktop and compact sizes with zero-width Auto-hide panels.
+  Regenerable evidence stays under
+  `debugCapture/painter_ui_page_viewports_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

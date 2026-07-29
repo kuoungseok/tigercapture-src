@@ -245,6 +245,52 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         panned["result"]["ui_view"]["offset_y"]
         == before_pan["offset_y"] - 18
     )
+    phone_view = dict(panned["result"]["ui_view"])
+    switched_desktop = registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": desktop_id},
+    ).to_dict()
+    assert switched_desktop["ok"]
+    desktop_zoom = registry.execute(
+        "paint.ui.view.zoom",
+        {"percent": 82},
+    ).to_dict()
+    assert desktop_zoom["ok"]
+    desktop_pan = registry.execute(
+        "paint.ui.view.pan",
+        {"dx": -31, "dy": 27},
+    ).to_dict()
+    assert desktop_pan["ok"]
+    desktop_view = dict(desktop_pan["result"]["ui_view"])
+    restored_phone = registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": "artboard-1"},
+    ).to_dict()
+    assert restored_phone["ok"]
+    phone_after_switch = dialog._painter_ui_overlay.view_state()
+    assert phone_after_switch["zoom_percent"] == phone_view["zoom_percent"]
+    assert abs(
+        phone_after_switch["center_x"] - phone_view["center_x"]
+    ) < 0.001
+    assert abs(
+        phone_after_switch["center_y"] - phone_view["center_y"]
+    ) < 0.001
+    registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": desktop_id},
+    )
+    desktop_after_switch = dialog._painter_ui_overlay.view_state()
+    assert desktop_after_switch["zoom_percent"] == desktop_view["zoom_percent"]
+    assert abs(
+        desktop_after_switch["center_x"] - desktop_view["center_x"]
+    ) < 0.001
+    assert abs(
+        desktop_after_switch["center_y"] - desktop_view["center_y"]
+    ) < 0.001
+    registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": "artboard-1"},
+    )
     component_result = registry.execute(
         "paint.ui.component.add",
         {"name": "Primary Button", "root_object_id": object_id},
@@ -365,6 +411,22 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert stored_link["binding_id"] == f"ui-binding-{object_id}"
     assert stored["ui_motion_compositions"][composition_id]["duration_ms"] == 800
     assert stored["workspace"]["mode"] == "ui_design"
+    assert set(stored["workspace"]["ui_artboard_viewports"]) == {
+        "artboard-1",
+        desktop_id,
+    }
+    assert (
+        stored["workspace"]["ui_artboard_viewports"]["artboard-1"][
+            "zoom_percent"
+        ]
+        == phone_view["zoom_percent"]
+    )
+    assert (
+        stored["workspace"]["ui_artboard_viewports"][desktop_id][
+            "zoom_percent"
+        ]
+        == desktop_view["zoom_percent"]
+    )
 
     restored = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(64, 64, "transparent"),
@@ -375,6 +437,16 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     restored.open_document_from_path(document_path)
     restored_state = restored.painter_action_state()
     assert restored_state["workspace"]["mode"] == "ui_design"
+    assert set(restored._painter_ui_artboard_viewports) == {
+        "artboard-1",
+        desktop_id,
+    }
+    assert (
+        restored._painter_ui_artboard_viewports["artboard-1"][
+            "zoom_percent"
+        ]
+        == phone_view["zoom_percent"]
+    )
     assert restored_state["ui_design"]["validation"]["object_count"] == 1
     assert (
         restored_state["ui_design"]["document"]["objects"][0]["content"]["text"]
@@ -948,6 +1020,52 @@ def test_painter_ui_overlay_multi_artboard_fit_pan_and_activation() -> None:
         desktop_viewport.center().toPoint(),
     )
     assert activated == [desktop["id"]]
+
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_view_state_restores_world_center_after_resize() -> None:
+    app = _app()
+    from app.drawing import PaintDialog
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    normalized = PaintDialog._normalize_painter_ui_artboard_viewports(
+        {
+            "artboard-1": {
+                "zoom_percent": "not-a-number",
+                "center_x": "12.5",
+                "center_y": None,
+            },
+            "removed-artboard": {"zoom_percent": 200},
+        },
+        valid_artboard_ids={"artboard-1"},
+    )
+    assert normalized == {
+        "artboard-1": {
+            "zoom_percent": 100.0,
+            "center_x": 12.5,
+            "center_y": 0.0,
+        }
+    }
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(720, 520)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.fit_artboard()
+    overlay.set_zoom_percent(143)
+    overlay.pan_view(dx=37, dy=-29)
+    saved = overlay.view_state()
+
+    overlay.resize(1180, 760)
+    restored = overlay.set_view_state(saved)
+    assert restored["zoom_percent"] == 143.0
+    assert abs(restored["center_x"] - saved["center_x"]) < 0.001
+    assert abs(restored["center_y"] - saved["center_y"]) < 0.001
+    assert restored["offset_x"] != saved["offset_x"]
+    assert restored["offset_y"] != saved["offset_y"]
 
     overlay.close()
     overlay.deleteLater()

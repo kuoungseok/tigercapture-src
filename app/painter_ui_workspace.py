@@ -904,17 +904,67 @@ class PainterUIDesignOverlay(QWidget):
         self._emit_view_changed()
         return self.view_state()
 
+    def set_view_state(
+        self,
+        value: Mapping[str, Any] | None,
+        *,
+        emit: bool = True,
+    ) -> dict[str, Any]:
+        state = value if isinstance(value, Mapping) else {}
+        def _view_number(key: str, default: float) -> float:
+            try:
+                return float(state.get(key, default) or default)
+            except (TypeError, ValueError):
+                return float(default)
+
+        percent = state.get("zoom_percent")
+        if percent is None:
+            percent = _view_number("scale", 1.0) * 100.0
+        try:
+            percent = float(percent)
+        except (TypeError, ValueError):
+            percent = 100.0
+        scale = max(0.03, min(8.0, percent / 100.0))
+        if "center_x" in state or "center_y" in state:
+            center_x = _view_number("center_x", 0.0)
+            center_y = _view_number("center_y", 0.0)
+            offset = QPointF(
+                float(self.width()) * 0.5 - center_x * scale,
+                float(self.height()) * 0.5 - center_y * scale,
+            )
+        else:
+            offset = QPointF(
+                _view_number("offset_x", 0.0),
+                _view_number("offset_y", 0.0),
+            )
+        self._view_scale = scale
+        self._view_offset = offset
+        self.update()
+        if emit:
+            self._emit_view_changed()
+        return self.view_state()
+
     def _emit_view_changed(self) -> None:
         self._position_text_editor()
         self.view_changed.emit(self.view_state())
 
     def view_state(self) -> dict[str, Any]:
         scale, offset = self._view_transform()
+        center_x = (float(self.width()) * 0.5 - offset.x()) / max(
+            0.0001,
+            scale,
+        )
+        center_y = (float(self.height()) * 0.5 - offset.y()) / max(
+            0.0001,
+            scale,
+        )
         return {
             "scale": scale,
             "zoom_percent": round(scale * 100.0, 2),
             "offset_x": offset.x(),
             "offset_y": offset.y(),
+            "center_x": center_x,
+            "center_y": center_y,
         }
 
     def artboard_point_at(

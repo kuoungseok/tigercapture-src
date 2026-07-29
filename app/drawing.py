@@ -8195,6 +8195,8 @@ class PaintDialog(QDialog):
         from app.painter_ui_document import create_ui_document
 
         self._painter_ui_document = create_ui_document(*self._canvas_document_size)
+        self._painter_ui_artboard_viewports: dict[str, dict[str, float]] = {}
+        self._painter_ui_view_artboard_id = ""
         self._painter_ui_motion_compositions: dict[str, object] = {}
         self._painter_ui_motion_windows: dict[str, object] = {}
         self._painter_ui_motion_active_id = ""
@@ -8850,6 +8852,8 @@ class PaintDialog(QDialog):
         from app.painter_ui_document import create_ui_document
 
         self._painter_ui_document = create_ui_document(width, height)
+        self._painter_ui_artboard_viewports = {}
+        self._painter_ui_view_artboard_id = ""
         self._painter_ui_motion_timer.stop()
         self._painter_ui_motion_preview_playing = False
         self._painter_ui_motion_active_id = ""
@@ -13769,12 +13773,65 @@ class PaintDialog(QDialog):
 
     def _on_painter_ui_view_changed(self, view: object) -> None:
         payload = dict(view) if isinstance(view, dict) else {}
+        document = getattr(self, "_painter_ui_document", {}) or {}
+        artboard_id = str(document.get("active_artboard_id") or "")
+        if artboard_id:
+            viewports = dict(
+                getattr(self, "_painter_ui_artboard_viewports", {}) or {}
+            )
+            viewports[artboard_id] = {
+                "zoom_percent": float(
+                    payload.get("zoom_percent") or 100.0
+                ),
+                "center_x": float(payload.get("center_x") or 0.0),
+                "center_y": float(payload.get("center_y") or 0.0),
+            }
+            self._painter_ui_artboard_viewports = viewports
         toolbar = getattr(self, "_ui_design_tool_host", None)
         if toolbar is not None and hasattr(toolbar, "set_zoom_percent"):
             toolbar.set_zoom_percent(
                 float(payload.get("zoom_percent") or 100.0),
                 transient=True,
             )
+
+    @staticmethod
+    def _normalize_painter_ui_artboard_viewports(
+        value: object,
+        *,
+        valid_artboard_ids: set[str] | None = None,
+    ) -> dict[str, dict[str, float]]:
+        rows = value if isinstance(value, dict) else {}
+
+        def _number(raw: object, default: float) -> float:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                return float(default)
+
+        result: dict[str, dict[str, float]] = {}
+        for artboard_id, raw_state in rows.items():
+            target = str(artboard_id or "")
+            if (
+                not target
+                or (
+                    valid_artboard_ids is not None
+                    and target not in valid_artboard_ids
+                )
+            ):
+                continue
+            state = raw_state if isinstance(raw_state, dict) else {}
+            result[target] = {
+                "zoom_percent": max(
+                    3.0,
+                    min(
+                        800.0,
+                        _number(state.get("zoom_percent"), 100.0),
+                    ),
+                ),
+                "center_x": _number(state.get("center_x"), 0.0),
+                "center_y": _number(state.get("center_y"), 0.0),
+            }
+        return result
 
     def _toggle_painter_ui_quick_actions(self) -> None:
         if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
@@ -15892,7 +15949,34 @@ class PaintDialog(QDialog):
         preview_document, stress_report = (
             self._painter_ui_stress_preview_document()
         )
+        valid_artboard_ids = {
+            str(row.get("id") or "")
+            for row in preview_document.get("artboards", [])
+            if str(row.get("id") or "")
+        }
+        self._painter_ui_artboard_viewports = (
+            self._normalize_painter_ui_artboard_viewports(
+                getattr(self, "_painter_ui_artboard_viewports", {}),
+                valid_artboard_ids=valid_artboard_ids,
+            )
+        )
+        active_artboard_id = str(
+            preview_document.get("active_artboard_id") or ""
+        )
+        restore_view = (
+            active_artboard_id
+            != str(getattr(self, "_painter_ui_view_artboard_id", "") or "")
+        )
         overlay.set_document(preview_document)
+        if restore_view and active_artboard_id:
+            self._painter_ui_view_artboard_id = active_artboard_id
+            saved_view = (
+                getattr(self, "_painter_ui_artboard_viewports", {}) or {}
+            ).get(active_artboard_id)
+            if saved_view:
+                overlay.set_view_state(saved_view)
+            else:
+                overlay.fit_artboard(active_artboard_id)
         scope = self._painter_ui_edit_scope_state()
         overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
@@ -25400,6 +25484,23 @@ class PaintDialog(QDialog):
                 "mode": str(self._canvas_workspace_mode),
                 "transform_mode": str(self._blockout_transform_mode),
                 "active_axis": str(self._blockout_active_axis),
+                "ui_artboard_viewports": (
+                    self._normalize_painter_ui_artboard_viewports(
+                        getattr(
+                            self,
+                            "_painter_ui_artboard_viewports",
+                            {},
+                        ),
+                        valid_artboard_ids={
+                            str(row.get("id") or "")
+                            for row in self._painter_ui_document.get(
+                                "artboards",
+                                [],
+                            )
+                            if str(row.get("id") or "")
+                        },
+                    )
+                ),
             },
         }
 
@@ -25654,6 +25755,18 @@ class PaintDialog(QDialog):
         self._painter_ui_motion_windows = {}
         workspace = payload.get("workspace")
         workspace = workspace if isinstance(workspace, dict) else {}
+        raw_viewports = workspace.get("ui_artboard_viewports")
+        self._painter_ui_artboard_viewports = (
+            self._normalize_painter_ui_artboard_viewports(
+                raw_viewports,
+                valid_artboard_ids={
+                    str(row.get("id") or "")
+                    for row in self._painter_ui_document.get("artboards", [])
+                    if str(row.get("id") or "")
+                },
+            )
+        )
+        self._painter_ui_view_artboard_id = ""
         self._canvas_workspace_mode = str(workspace.get("mode") or "paint")
         self._blockout_transform_mode = str(
             workspace.get("transform_mode") or "move"
