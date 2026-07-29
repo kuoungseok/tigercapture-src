@@ -1284,6 +1284,27 @@ Implemented checkpoint (2026-07-29, explicit desktop artifact opening):
   uses `QDesktopServices`.
 - Verification: 400 Painter UI tests and 20 architecture/i18n guards pass.
 
+Implemented checkpoint (2026-07-30, real Painter UMG generation evidence):
+
+- `tools/qa_painter_ui_unreal_umg.py` instantiates the built-in
+  `mobile_onboarding` template, selects its active `390 x 844` artboard, and
+  sends all eight objects through `painter_ui_to_umg_document()` and the shared
+  `TigerStudioUMG` plugin. It does not create a Painter-specific Unreal plugin.
+- UE 5.8 generated eight widgets, compiled and saved the Widget Blueprint, and
+  returned the real asset path with no generation warning or error.
+- A second `UnrealEditor-Cmd` process reopened the saved asset and its
+  GeneratedClass. UE 5.8 does not expose `WidgetBlueprint.WidgetTree` through
+  Python reflection after reopen, so widget count is asserted at generation
+  while reopen asserts the persisted Blueprint and GeneratedClass explicitly.
+- Optional `--capture-ui` launches a disposable QA project, opens the generated
+  Widget Blueprint through `AssetEditorSubsystem`, captures the real Unreal
+  window with WGC, and removes its one-time startup script before terminating
+  only the launched QA editor.
+- Evidence:
+  `debugCapture/painter_ui_designer/unreal_umg/qa_report.json` and
+  `painter_umg_unreal_editor.png`. The capture shows the compiled Designer
+  asset with parent class `Tiger Studio Generated Widget`.
+
 Remaining M6 validation scope:
 
 - compile the generated SwiftUI and Compose skeletons with their native
@@ -1492,7 +1513,9 @@ Implemented checkpoint (2026-07-29, release round-trip corpus slice):
   provider-neutral Tiger UMG contract.
 - The first six paths compare normalized document fingerprints after reload.
   UMG validates the provider-neutral package exactly and records Unreal compile
-  and real capture as `not_run`.
+  and real capture as `not_run` inside the fast corpus itself. The separate
+  `tools/qa_painter_ui_unreal_umg.py --capture-ui` gate now owns the real UE 5.8
+  compile, reopen, and capture evidence.
 - UI > UI Release Corpus and searchable Quick Actions expose a transient,
   responsive report. Desktop shows package, status, timing, and scope; compact
   layout hides timing and scope without clipping the result.

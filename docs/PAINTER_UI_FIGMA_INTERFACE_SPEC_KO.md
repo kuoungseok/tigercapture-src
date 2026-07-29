@@ -692,6 +692,12 @@ Implemented Inspect/Dev contract (2026-07-29):
   desktop `Open Last Artifact` command. The identically named automation Action
   only validates and resolves safe handoff paths; it never launches the OS
   shell without a user click.
+- Shared UMG delivery is proved by
+  `tools/qa_painter_ui_unreal_umg.py --capture-ui`: the built-in mobile
+  template's active artboard produces eight native widgets, compiles and saves
+  in UE 5.8, reopens in a second process, and is captured as a real Widget
+  Blueprint editor window. This is Unreal evidence, not a claim that the
+  fast release corpus itself launches Unreal.
 
 코드 스니펫은 실제 adapter가 생성한 경우에만 표시한다. Painter가 지원하지
 않는 CSS/iOS/Android/UMG 코드를 임의로 만들어 보여주지 않는다.

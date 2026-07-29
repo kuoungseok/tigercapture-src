@@ -131,8 +131,11 @@ Focused entry points:
   revision diff, self-contained prototype, production asset export, shared
   Painter UMG adapter, and safe AI plan/preview/partial apply/audit Actions.
   Cloud multi-user sync and broader template content remain optional follow-up
-  scope. UE 5.8 generated and loaded an eight-widget Painter sample; refresh
-  visible Unreal capture evidence before making screenshot-based release claims.
+  scope. UE 5.8 generated, compiled, saved, reopened, and visibly captured an
+  eight-widget Painter sample through the shared plugin. Regenerate the
+  evidence with `tools/qa_painter_ui_unreal_umg.py --capture-ui`; the report
+  and real Widget Blueprint capture live under the disposable
+  `debugCapture/painter_ui_designer/unreal_umg` evidence directory.
   Painter Figma exchange lives in `app/painter_ui_figma.py` and
   `app/painter_ui_figma_panel.py`. It uses official REST JSON for import and
   exports a Figma development-plugin bundle; it must never claim native `.fig`
