@@ -220,6 +220,60 @@ def _alias_chain(
     return chain
 
 
+def _token_resolution(
+    token_id: str,
+    *,
+    token_by_id: Mapping[str, Mapping[str, Any]],
+    collection_by_id: Mapping[str, Mapping[str, Any]],
+    artboard_modes: Mapping[str, str],
+) -> dict[str, Any]:
+    chain = _alias_chain(token_id, token_by_id)
+    terminal = token_by_id.get(chain[-1]) if chain else None
+    collection = (
+        collection_by_id.get(str(terminal.get("collection_id") or ""))
+        if terminal
+        else None
+    )
+    mode_id = (
+        str(
+            artboard_modes.get(
+                str(collection.get("id") or ""),
+                collection.get("default_mode_id") or "",
+            )
+        )
+        if collection
+        else ""
+    )
+    mode = next(
+        (
+            row
+            for row in collection.get("modes", [])
+            if str(row.get("id") or "") == mode_id
+        ),
+        None,
+    )
+    mode_values = dict(terminal.get("mode_values") or {}) if terminal else {}
+    resolved_value = (
+        copy.deepcopy(mode_values[mode_id])
+        if mode_id in mode_values
+        else copy.deepcopy(terminal.get("value"))
+        if terminal
+        else None
+    )
+    return {
+        "collection_name": str(collection.get("name") or "") if collection else "",
+        "mode_id": mode_id,
+        "mode_name": str(mode.get("name") or "") if mode else "",
+        "resolved_token_id": str(terminal.get("id") or "") if terminal else "",
+        "resolved_value": resolved_value,
+        "alias_cycle": bool(
+            chain
+            and token_by_id.get(chain[-1])
+            and str(token_by_id[chain[-1]].get("alias_token_id") or "") in chain
+        ),
+    }
+
+
 def inspect_ui_dev_handoff(
     value: Mapping[str, Any] | None,
     *,
@@ -235,6 +289,10 @@ def inspect_ui_dev_handoff(
     selected = [row for row in document["objects"] if row["id"] in selected_ids]
     geometry = resolved_ui_geometry(document)
     token_by_id = {row["id"]: row for row in document["tokens"]}
+    collection_by_id = {
+        row["id"]: row for row in document["variable_collections"]
+    }
+    artboard_by_id = {row["id"]: row for row in document["artboards"]}
     readiness = {
         (row["target_type"], row["target_id"]): row
         for row in contract["readiness"]
@@ -244,8 +302,16 @@ def inspect_ui_dev_handoff(
     objects = []
     for row in selected:
         token_details = []
+        artboard = artboard_by_id.get(row["artboard_id"], {})
+        artboard_modes = dict(artboard.get("variable_modes") or {})
         for property_path, token_id in row.get("token_bindings", {}).items():
             token = token_by_id.get(str(token_id))
+            resolution = _token_resolution(
+                str(token_id),
+                token_by_id=token_by_id,
+                collection_by_id=collection_by_id,
+                artboard_modes=artboard_modes,
+            )
             token_details.append(
                 {
                     "property": str(property_path),
@@ -257,8 +323,11 @@ def inspect_ui_dev_handoff(
                     else "",
                     "scope": list(token.get("scope") or []) if token else [],
                     "alias_chain": _alias_chain(str(token_id), token_by_id),
+                    **resolution,
                 }
             )
+        from app.painter_ui_dev_snippets import inspect_ui_dev_snippets
+
         objects.append(
             {
                 "id": row["id"],
@@ -299,6 +368,10 @@ def inspect_ui_dev_handoff(
                 "delivery": ui_object_delivery_statuses(document, row["id"])[
                     "targets"
                 ],
+                "developer_snippets": inspect_ui_dev_snippets(
+                    document,
+                    row["id"],
+                )["snippets"],
             }
         )
     annotations = [

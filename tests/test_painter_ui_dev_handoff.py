@@ -109,6 +109,7 @@ def test_dev_actions_share_document_and_undo() -> None:
     assert {
         "paint.ui.dev.ready.set",
         "paint.ui.dev.inspect",
+        "paint.ui.dev.snippet.inspect",
         "paint.ui.dev.annotation.add",
         "paint.ui.dev.annotation.update",
         "paint.ui.dev.annotation.remove",

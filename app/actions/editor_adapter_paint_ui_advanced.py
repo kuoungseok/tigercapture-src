@@ -143,6 +143,19 @@ class PaintUIAdvancedAdapterMixin:
             object_ids=object_ids,
         )
 
+    def paint_ui_dev_snippet_inspect(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_snippets import inspect_ui_dev_snippets
+
+        dialog = self._paint_dialog_owner()
+        return inspect_ui_dev_snippets(
+            dialog._painter_ui_document,
+            object_id,
+        )
+
     def paint_ui_dev_annotation_add(
         self,
         *,

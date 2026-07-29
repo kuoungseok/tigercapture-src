@@ -385,6 +385,13 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_dev_inspect",
         {"object_ids": string_array},
     )
+    read_action(
+        "paint.ui.dev.snippet.inspect",
+        "Inspect adapter-owned Web, App, and Unreal UMG snippets without inventing unsupported platform output",
+        "paint_ui_dev_snippet_inspect",
+        {"object_id": {"type": "string"}},
+        required=("object_id",),
+    )
     undo_action(
         "paint.ui.dev.annotation.add",
         "Pin a developer annotation to a stable UI target",

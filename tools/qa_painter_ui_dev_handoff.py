@@ -101,6 +101,11 @@ def main() -> int:
     panel.resize(244, 600)
     app.processEvents()
     panel.grab().save(str(root / "dev_handoff_compact.png"))
+    panel.dev_panel.scroll_area.verticalScrollBar().setValue(
+        panel.dev_panel.scroll_area.verticalScrollBar().maximum()
+    )
+    app.processEvents()
+    panel.grab().save(str(root / "dev_handoff_compact_snippets.png"))
     (root / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2),
         encoding="utf-8",

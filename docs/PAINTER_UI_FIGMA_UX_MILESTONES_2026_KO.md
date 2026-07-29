@@ -1152,6 +1152,7 @@ Required Actions:
 
 - `paint.ui.dev.ready.set`
 - `paint.ui.dev.inspect`
+- `paint.ui.dev.snippet.inspect`
 - `paint.ui.dev.annotation.*`
 - `paint.ui.dev.measurement.inspect`
 - `paint.ui.dev.revision.compare`
@@ -1183,10 +1184,36 @@ Implemented checkpoint (2026-07-29, Dev handoff vertical slice):
   `dev_handoff_compact.png`, and `report.json`.
 - Verification: 389 Painter UI tests and 20 architecture/i18n guards pass.
 
+Implemented checkpoint (2026-07-29, adapter-owned developer values):
+
+- The selected object's variable detail now resolves its collection, active
+  artboard mode, terminal alias token, resolved value, scope, alias chain, and
+  alias-cycle status. Inspect does not confuse a token's base value with the
+  value active on the current artboard.
+- `tigerstudio.painter.ui.web_css.v1` is the first explicit Web adapter. It
+  emits stable-ID CSS for supported geometry, appearance, typography, and Auto
+  Layout properties and lists unsupported masks, boolean geometry, rich text,
+  variable font axes, multi-fill/stroke, and blend behavior.
+- App handoff exposes provider-neutral `Tiger JSON`; it is not labeled as
+  SwiftUI, Compose, or another native framework adapter.
+- Unreal snippets are selected directly from the real
+  `painter_ui_to_umg_document()` layer output, preserving the object stable ID,
+  disposition, payload, and blocker reasons.
+- iOS and Android remain visible but unavailable with
+  `adapter_not_implemented`; no synthetic platform code is presented.
+- `paint.ui.dev.snippet.inspect` exposes the same read-only report to AI and
+  automation. The compact Inspector provides adapter selection, copy, variable
+  drill-down, and an internal vertical scroll surface so cards are not
+  compressed at remote-work widths.
+- Evidence:
+  `debugCapture/painter_ui_designer/dev_handoff/dev_handoff_desktop.png`,
+  `dev_handoff_compact.png`, `dev_handoff_compact_snippets.png`, and
+  `report.json`.
+- Verification: 393 Painter UI tests and 20 architecture/i18n guards pass.
+
 Remaining M6 scope:
 
-- adapter-owned copyable CSS/Web, iOS, Android, App, and UMG snippets;
-- richer variable mode resolution and a dedicated alias-chain drill-down;
+- native iOS and Android adapters; current UI reports them as unavailable;
 - component playground/variant table inside Inspect;
 - annotation edit/remove controls and exported pinned measurement overlays;
 - real runtime opening of validated artifacts from the desktop shell.

@@ -5,7 +5,9 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -13,6 +15,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -51,12 +55,38 @@ _DEV_TRANSLATIONS = {
     },
 }
 
+_DEV_EXTRA_TRANSLATIONS = {
+    "ko": {
+        "Variables": "\ubcc0\uc218",
+        "No variables are bound.": "\uc5f0\uacb0\ub41c \ubcc0\uc218\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.",
+        "Developer values": "\uac1c\ubc1c\uc790 \uac12",
+        "Copy": "\ubcf5\uc0ac",
+        "Adapter unavailable": "\uc5b4\ub311\ud130\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
+    },
+    "ja": {
+        "Variables": "\u5909\u6570",
+        "Developer values": "\u958b\u767a\u8005\u5024",
+        "Copy": "\u30b3\u30d4\u30fc",
+        "Adapter unavailable": "\u30a2\u30c0\u30d7\u30bf\u30fc\u306f\u5229\u7528\u3067\u304d\u307e\u305b\u3093",
+    },
+    "zh": {
+        "Variables": "\u53d8\u91cf",
+        "Developer values": "\u5f00\u53d1\u8005\u503c",
+        "Copy": "\u590d\u5236",
+        "Adapter unavailable": "\u9002\u914d\u5668\u4e0d\u53ef\u7528",
+    },
+}
+
 
 def _text(source: str) -> str:
     translated = painter_text(source)
     if translated != source:
         return translated
-    return _DEV_TRANSLATIONS.get(current_language(), {}).get(source, source)
+    language = current_language()
+    return _DEV_EXTRA_TRANSLATIONS.get(language, {}).get(
+        source,
+        _DEV_TRANSLATIONS.get(language, {}).get(source, source),
+    )
 
 
 class PainterUIDevPanel(QWidget):
@@ -68,7 +98,21 @@ class PainterUIDevPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("PainterUIDevPanel")
         self._report: dict[str, Any] = {}
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        self.scroll_area.viewport().setAutoFillBackground(False)
+        body = QWidget()
+        body.setObjectName("PainterUIDevPanelBody")
+        self.scroll_area.setWidget(body)
+        outer.addWidget(self.scroll_area)
+        layout = QVBoxLayout(body)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
@@ -109,6 +153,33 @@ class PainterUIDevPanel(QWidget):
         self.delivery_list.setMaximumHeight(126)
         layout.addWidget(self.delivery_list)
 
+        variables_title = QLabel(_text("Variables"))
+        variables_title.setObjectName("PaintSectionTitle")
+        layout.addWidget(variables_title)
+        self.variable_list = QListWidget()
+        self.variable_list.setMaximumHeight(92)
+        layout.addWidget(self.variable_list)
+
+        code_title = QLabel(_text("Developer values"))
+        code_title.setObjectName("PaintSectionTitle")
+        layout.addWidget(code_title)
+        code_header = QHBoxLayout()
+        self.snippet_combo = QComboBox()
+        self.snippet_combo.currentIndexChanged.connect(self._show_snippet)
+        self.copy_button = QPushButton(_text("Copy"))
+        self.copy_button.clicked.connect(self._copy_snippet)
+        code_header.addWidget(self.snippet_combo, 1)
+        code_header.addWidget(self.copy_button)
+        layout.addLayout(code_header)
+        self.snippet_status = QLabel("")
+        self.snippet_status.setObjectName("PaintMuted")
+        self.snippet_status.setWordWrap(True)
+        layout.addWidget(self.snippet_status)
+        self.snippet_view = QTextEdit()
+        self.snippet_view.setReadOnly(True)
+        self.snippet_view.setMaximumHeight(132)
+        layout.addWidget(self.snippet_view)
+
         annotation_title = QLabel(_text("Pinned annotations"))
         annotation_title.setObjectName("PaintSectionTitle")
         layout.addWidget(annotation_title)
@@ -129,6 +200,37 @@ class PainterUIDevPanel(QWidget):
         layout.addWidget(self.compare_button)
         layout.addStretch(1)
         self.set_report(None)
+
+    def _snippet(self) -> Mapping[str, Any] | None:
+        value = self.snippet_combo.currentData()
+        return value if isinstance(value, Mapping) else None
+
+    def _show_snippet(self, *_args) -> None:
+        row = self._snippet()
+        available = bool(row and row.get("available"))
+        code = str(row.get("code") or "") if row else ""
+        self.snippet_view.setPlainText(code)
+        self.copy_button.setEnabled(available and bool(code))
+        self.snippet_view.setVisible(available and bool(code))
+        if row is None:
+            self.snippet_status.clear()
+            return
+        unsupported = [str(item) for item in row.get("unsupported") or []]
+        if not available:
+            self.snippet_status.setText(_text("Adapter unavailable"))
+        elif unsupported:
+            self.snippet_status.setText(
+                f"{row.get('adapter', '')}\n"
+                + ", ".join(unsupported)
+            )
+        else:
+            self.snippet_status.setText(str(row.get("adapter") or ""))
+
+    def _copy_snippet(self) -> None:
+        row = self._snippet()
+        code = str(row.get("code") or "") if row else ""
+        if code:
+            QApplication.clipboard().setText(code)
 
     def _selection(self) -> Mapping[str, Any] | None:
         rows = self._report.get("objects")
@@ -168,6 +270,8 @@ class PainterUIDevPanel(QWidget):
         ):
             control.setEnabled(enabled)
         self.delivery_list.clear()
+        self.variable_list.clear()
+        self.snippet_combo.clear()
         self.annotation_list.clear()
         if not objects:
             self.summary.setText(
@@ -176,6 +280,7 @@ class PainterUIDevPanel(QWidget):
             self.metrics.clear()
             self.ready_check.setChecked(False)
             self.ready_note.clear()
+            self._show_snippet()
             return
         if len(objects) > 1:
             self.summary.setText(
@@ -184,6 +289,7 @@ class PainterUIDevPanel(QWidget):
             self.metrics.setText(
                 _text("Measurements are shown for the selection bounds.")
             )
+            self._show_snippet()
             return
         row = single or {}
         self.summary.setText(
@@ -210,6 +316,27 @@ class PainterUIDevPanel(QWidget):
             item = QListWidgetItem(f"{target}  ·  {disposition}")
             item.setToolTip(str(delivery.get("reason") or ""))
             self.delivery_list.addItem(item)
+        for token in row.get("tokens") or []:
+            mode = str(token.get("mode_name") or token.get("mode_id") or "")
+            value = token.get("resolved_value")
+            item = QListWidgetItem(
+                f"{token.get('property', '')}  \u00b7  {token.get('name', '')}"
+                f"\n{mode}  \u00b7  {value}"
+            )
+            chain = " \u2192 ".join(token.get("alias_chain") or [])
+            item.setToolTip(
+                f"{token.get('collection_name', '')}\n{chain}"
+            )
+            self.variable_list.addItem(item)
+        if not row.get("tokens"):
+            item = QListWidgetItem(_text("No variables are bound."))
+            self.variable_list.addItem(item)
+        for snippet in row.get("developer_snippets") or []:
+            label = str(snippet.get("label") or snippet.get("target") or "")
+            if not snippet.get("available"):
+                label += "  \u00b7  N/A"
+            self.snippet_combo.addItem(label, dict(snippet))
+        self._show_snippet()
         for annotation in self._report.get("annotations") or []:
             item = QListWidgetItem(str(annotation.get("text") or ""))
             item.setToolTip(str(annotation.get("id") or ""))
