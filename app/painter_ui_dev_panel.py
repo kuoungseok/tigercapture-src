@@ -62,18 +62,27 @@ _DEV_EXTRA_TRANSLATIONS = {
         "Developer values": "\uac1c\ubc1c\uc790 \uac12",
         "Copy": "\ubcf5\uc0ac",
         "Adapter unavailable": "\uc5b4\ub311\ud130\ub97c \uc0ac\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
+        "Component": "\ucef4\ud3ec\ub10c\ud2b8",
+        "Open Playground": "\ud50c\ub808\uc774\uadf8\ub77c\uc6b4\ub4dc \uc5f4\uae30",
+        "States": "\uc0c1\ud0dc",
     },
     "ja": {
         "Variables": "\u5909\u6570",
         "Developer values": "\u958b\u767a\u8005\u5024",
         "Copy": "\u30b3\u30d4\u30fc",
         "Adapter unavailable": "\u30a2\u30c0\u30d7\u30bf\u30fc\u306f\u5229\u7528\u3067\u304d\u307e\u305b\u3093",
+        "Component": "\u30b3\u30f3\u30dd\u30fc\u30cd\u30f3\u30c8",
+        "Open Playground": "\u30d7\u30ec\u30a4\u30b0\u30e9\u30a6\u30f3\u30c9\u3092\u958b\u304f",
+        "States": "\u72b6\u614b",
     },
     "zh": {
         "Variables": "\u53d8\u91cf",
         "Developer values": "\u5f00\u53d1\u8005\u503c",
         "Copy": "\u590d\u5236",
         "Adapter unavailable": "\u9002\u914d\u5668\u4e0d\u53ef\u7528",
+        "Component": "\u7ec4\u4ef6",
+        "Open Playground": "\u6253\u5f00\u8bd5\u9a8c\u573a",
+        "States": "\u72b6\u6001",
     },
 }
 
@@ -93,6 +102,7 @@ class PainterUIDevPanel(QWidget):
     ready_set_requested = Signal(str, str, bool, str)
     annotation_add_requested = Signal(str, str, str)
     revision_compare_requested = Signal()
+    component_playground_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -160,6 +170,16 @@ class PainterUIDevPanel(QWidget):
         self.variable_list.setMaximumHeight(92)
         layout.addWidget(self.variable_list)
 
+        self.component_title = QLabel(_text("Component"))
+        self.component_title.setObjectName("PaintSectionTitle")
+        layout.addWidget(self.component_title)
+        self.component_list = QListWidget()
+        self.component_list.setMaximumHeight(118)
+        layout.addWidget(self.component_list)
+        self.component_button = QPushButton(_text("Open Playground"))
+        self.component_button.clicked.connect(self._emit_component_playground)
+        layout.addWidget(self.component_button)
+
         code_title = QLabel(_text("Developer values"))
         code_title.setObjectName("PaintSectionTitle")
         layout.addWidget(code_title)
@@ -178,6 +198,18 @@ class PainterUIDevPanel(QWidget):
         self.snippet_view = QTextEdit()
         self.snippet_view.setReadOnly(True)
         self.snippet_view.setMaximumHeight(132)
+        self.snippet_view.setStyleSheet(
+            "QTextEdit {"
+            " background: #0D131B;"
+            " color: #DCE5F0;"
+            " border: 1px solid #2C394A;"
+            " border-radius: 4px;"
+            " padding: 4px;"
+            " font-family: Consolas, monospace;"
+            " font-size: 10px;"
+            " selection-background-color: #315A88;"
+            "}"
+        )
         layout.addWidget(self.snippet_view)
 
         annotation_title = QLabel(_text("Pinned annotations"))
@@ -232,6 +264,12 @@ class PainterUIDevPanel(QWidget):
         if code:
             QApplication.clipboard().setText(code)
 
+    def _emit_component_playground(self) -> None:
+        row = self._selection()
+        component = row.get("component") if row else None
+        if isinstance(component, Mapping) and component.get("id"):
+            self.component_playground_requested.emit(str(component["id"]))
+
     def _selection(self) -> Mapping[str, Any] | None:
         rows = self._report.get("objects")
         return rows[0] if isinstance(rows, list) and len(rows) == 1 else None
@@ -271,6 +309,7 @@ class PainterUIDevPanel(QWidget):
             control.setEnabled(enabled)
         self.delivery_list.clear()
         self.variable_list.clear()
+        self.component_list.clear()
         self.snippet_combo.clear()
         self.annotation_list.clear()
         if not objects:
@@ -281,6 +320,7 @@ class PainterUIDevPanel(QWidget):
             self.ready_check.setChecked(False)
             self.ready_note.clear()
             self._show_snippet()
+            self._set_component_visible(False)
             return
         if len(objects) > 1:
             self.summary.setText(
@@ -290,6 +330,7 @@ class PainterUIDevPanel(QWidget):
                 _text("Measurements are shown for the selection bounds.")
             )
             self._show_snippet()
+            self._set_component_visible(False)
             return
         row = single or {}
         self.summary.setText(
@@ -331,6 +372,31 @@ class PainterUIDevPanel(QWidget):
         if not row.get("tokens"):
             item = QListWidgetItem(_text("No variables are bound."))
             self.variable_list.addItem(item)
+        component = row.get("component")
+        component = component if isinstance(component, Mapping) else {}
+        self._set_component_visible(bool(component))
+        if component:
+            self.component_list.addItem(
+                f"{component.get('name', '')}  \u00b7  "
+                f"{component.get('role', '')}"
+            )
+            for variant in component.get("variants") or []:
+                marker = "\u25cf" if variant.get("active") else "\u25cb"
+                self.component_list.addItem(
+                    f"{marker} {variant.get('name', '')}"
+                )
+            for name, definition in (
+                component.get("property_definitions") or {}
+            ).items():
+                value = (component.get("property_values") or {}).get(name)
+                self.component_list.addItem(
+                    f"{name}: {value}  \u00b7  {definition.get('type', '')}"
+                )
+            states = component.get("states") or []
+            if states:
+                self.component_list.addItem(
+                    _text("States") + ": " + ", ".join(states)
+                )
         for snippet in row.get("developer_snippets") or []:
             label = str(snippet.get("label") or snippet.get("target") or "")
             if not snippet.get("available"):
@@ -341,6 +407,11 @@ class PainterUIDevPanel(QWidget):
             item = QListWidgetItem(str(annotation.get("text") or ""))
             item.setToolTip(str(annotation.get("id") or ""))
             self.annotation_list.addItem(item)
+
+    def _set_component_visible(self, visible: bool) -> None:
+        self.component_title.setVisible(visible)
+        self.component_list.setVisible(visible)
+        self.component_button.setVisible(visible)
 
 
 __all__ = ["PainterUIDevPanel"]

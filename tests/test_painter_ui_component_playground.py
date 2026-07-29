@@ -130,6 +130,42 @@ def test_component_playground_panel_and_inspector_button_are_contextual() -> Non
     app.processEvents()
 
 
+def test_dev_inspect_surfaces_component_variants_properties_and_playground() -> None:
+    _app()
+    from app.painter_ui_components import create_ui_component_variant
+    from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+    from app.painter_ui_dev_panel import PainterUIDevPanel
+
+    document, component, _label = _component_document()
+    document, variant = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Button Card Emphasis",
+    )
+    report = inspect_ui_dev_handoff(
+        document,
+        object_ids=[component["root_object_id"]],
+    )
+    context = report["objects"][0]["component"]
+    assert context["id"] == component["id"]
+    assert {row["id"] for row in context["variants"]} == {
+        component["id"],
+        variant["id"],
+    }
+    assert context["property_definitions"]["Label"]["type"] == "text"
+    assert context["property_values"]["Label"] == "Profile"
+    assert context["states"] == ["hover"]
+
+    panel = PainterUIDevPanel()
+    requests: list[str] = []
+    panel.component_playground_requested.connect(requests.append)
+    panel.set_report(report)
+    assert not panel.component_list.isHidden()
+    assert panel.component_list.count() >= 5
+    panel.component_button.click()
+    assert requests == [component["id"]]
+
+
 def test_component_playground_action_is_read_only() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry

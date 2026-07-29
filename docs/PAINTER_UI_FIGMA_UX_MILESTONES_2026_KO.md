@@ -1211,10 +1211,25 @@ Implemented checkpoint (2026-07-29, adapter-owned developer values):
   `report.json`.
 - Verification: 393 Painter UI tests and 20 architecture/i18n guards pass.
 
+Implemented checkpoint (2026-07-29, Inspect component playground entry):
+
+- Inspect reuses the existing non-destructive component playground instead of
+  creating a second preview engine.
+- A selected definition or instance exposes its family, active variant,
+  property definitions, resolved property values, and authored states in the
+  Dev surface. `Open Playground` forwards the stable component ID to the
+  existing preview-only property playground.
+- The existing `paint.ui.component.playground.inspect` Action and the UI both
+  use `build_ui_component_playground`; preview changes do not mutate the source
+  document or create Undo entries.
+- Component rows remain contextual and disappear for ordinary objects. The
+  compact evidence includes the component table, playground command, and
+  themed code viewer without card compression.
+- Verification: 394 Painter UI tests and 20 architecture/i18n guards pass.
+
 Remaining M6 scope:
 
 - native iOS and Android adapters; current UI reports them as unavailable;
-- component playground/variant table inside Inspect;
 - annotation edit/remove controls and exported pinned measurement overlays;
 - real runtime opening of validated artifacts from the desktop shell.
 

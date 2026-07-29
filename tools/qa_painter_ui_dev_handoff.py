@@ -27,6 +27,10 @@ from app.painter_ui_document import (
     create_ui_document,
     update_ui_object,
 )
+from app.painter_ui_components import (
+    convert_ui_object_to_component,
+    create_ui_component_variant,
+)
 
 
 def _document_and_report() -> tuple[dict, dict]:
@@ -73,6 +77,20 @@ def _document_and_report() -> tuple[dict, dict]:
         target_id=row["id"],
         text="Export icon assets at @2x and @3x.",
     )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=row["id"],
+        name="Continue Button",
+    )
+    document, _variant = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Continue Button Emphasis",
+    )
+    document["selection"] = {
+        "object_id": row["id"],
+        "object_ids": [row["id"]],
+    }
     return document, inspect_ui_dev_handoff(document, object_ids=[row["id"]])
 
 

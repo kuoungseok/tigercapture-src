@@ -274,6 +274,58 @@ def _token_resolution(
     }
 
 
+def _component_context(
+    document: Mapping[str, Any],
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    component_id = str(row.get("component_id") or "")
+    if not component_id:
+        return {}
+    component_by_id = {item["id"]: item for item in document["components"]}
+    component = component_by_id.get(component_id)
+    if component is None:
+        return {}
+    family_id = str(component.get("base_component_id") or component["id"])
+    family = component_by_id.get(family_id, component)
+    variant_ids = [family_id, *family.get("variant_ids", [])]
+    variants = [
+        {
+            "id": variant["id"],
+            "name": variant["name"],
+            "active": variant["id"] == component_id,
+        }
+        for variant_id in variant_ids
+        if (variant := component_by_id.get(variant_id)) is not None
+    ]
+    properties = dict(row.get("component_properties") or {})
+    if not properties and str(row.get("component_role") or "") == "instance":
+        object_by_id = {item["id"]: item for item in document["objects"]}
+        current = row
+        while current and not properties:
+            if (
+                str(current.get("component_role") or "") == "instance"
+                and str(current.get("component_id") or "") == component_id
+            ):
+                properties = dict(current.get("component_properties") or {})
+            current = object_by_id.get(str(current.get("parent_id") or ""))
+    from app.painter_ui_components import component_property_defaults
+
+    resolved_properties = component_property_defaults(component)
+    resolved_properties.update(copy.deepcopy(properties))
+    return {
+        "id": component["id"],
+        "name": component["name"],
+        "role": str(row.get("component_role") or "none"),
+        "family_id": family_id,
+        "variants": variants,
+        "property_definitions": copy.deepcopy(
+            component.get("property_definitions") or {}
+        ),
+        "property_values": resolved_properties,
+        "states": sorted((component.get("state_overrides") or {}).keys()),
+    }
+
+
 def inspect_ui_dev_handoff(
     value: Mapping[str, Any] | None,
     *,
@@ -354,6 +406,7 @@ def inspect_ui_dev_handoff(
                     for interaction in document["interactions"]
                     if interaction["source_object_id"] == row["id"]
                 ],
+                "component": _component_context(document, row),
                 "ready": copy.deepcopy(
                     readiness.get(
                         ("object", row["id"]),

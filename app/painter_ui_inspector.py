@@ -1068,6 +1068,9 @@ class PainterUIInspector(QWidget):
         self.dev_panel.revision_compare_requested.connect(
             self.dev_revision_compare_requested
         )
+        self.dev_panel.component_playground_requested.connect(
+            self.component_playground_requested
+        )
         self.production_panel.tabs.insertTab(
             0,
             self.dev_panel,

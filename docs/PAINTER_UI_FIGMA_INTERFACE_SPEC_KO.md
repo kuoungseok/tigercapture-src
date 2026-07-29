@@ -672,6 +672,10 @@ Implemented Inspect/Dev contract (2026-07-29):
   full token alias chain and reports the terminal token and resolved value.
 - The compact Dev surface scrolls internally instead of shrinking cards. The
   UI and `paint.ui.dev.snippet.inspect` consume the same read-only report.
+- Component definitions and instances expose a contextual family/variant,
+  property, and state table in Inspect. `Open Playground` reuses the existing
+  preview-only `build_ui_component_playground` path and stable component ID;
+  Inspect does not duplicate component state or mutate the canonical document.
 
 코드 스니펫은 실제 adapter가 생성한 경우에만 표시한다. Painter가 지원하지
 않는 CSS/iOS/Android/UMG 코드를 임의로 만들어 보여주지 않는다.
