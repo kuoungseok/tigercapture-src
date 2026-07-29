@@ -4,7 +4,7 @@ Status: canonical implementation backlog; P0-P10 local production foundation com
 
 M1 Page checkpoint (2026-07-29):
 
-- Painter UI document schema is version 21. Version 19 Page documents migrate
+- Painter UI document schema is version 22. Version 19 Page documents migrate
   with stable-ID Theme Variable Collection/Mode records, and version 20
   documents gain empty named-Style collections without changing object IDs.
 - M3 named Color/Text/Effect Styles and existing Layout Grid Styles share one
@@ -12,6 +12,9 @@ M1 Page checkpoint (2026-07-29):
 - M3 `.tsuilib` local packages and the compact Libraries Assets tab implement
   hash/license validation, version review, accept, defer, and rollback.
   Cross-document insertion from installed packages remains pending.
+- M4 now has stable Flow starting points, expanded trigger/action enums,
+  validated transitions, a selection-driven compact Prototype panel, and
+  `paint.ui.prototype.flow.*` / `transition.set` Action parity.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

@@ -93,12 +93,14 @@ Implemented:
   per-artboard Page ownership, page-scoped canvas rendering, last-active
   artboard restoration, Quick Actions Page search, and Figma CANVAS-to-Page
   preservation
-- Painter UI document schema version 21 adds stable-ID Variable Collections
+- Painter UI document schema version 22 adds stable-ID Variable Collections
   and Modes, per-artboard active mode selection, typed variable values, and
   backward-compatible Light/Dark/High Contrast migration
 - Schema 21 also adds stable-ID Color, Text, and Effect Styles with per-object
   links. Existing Layout Grid Styles appear in the same Assets library while
   retaining their established artboard service.
+- Schema 22 adds stable prototype Flow starting points and transition metadata
+  while keeping Motion keyframes outside Painter.
 
 Still required by this contract:
 

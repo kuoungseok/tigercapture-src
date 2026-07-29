@@ -156,7 +156,7 @@ preview. The format preserves:
   `tigerstudio.painter.ui.template_package.v1` manifests. A manifest includes
   stable template ID, version, category, tags, artboard presets, feature list,
   author, source, and explicit license terms. Applying a built-in template
-  creates a normal current-version UI document (version 21 at this checkpoint)
+  creates a normal current-version UI document (version 22 at this checkpoint)
   and stores immutable source provenance in `linked_targets.template_source`;
   all template contents remain ordinary editable artboards, objects, tokens,
   components, and interactions.
@@ -174,6 +174,10 @@ preview. The format preserves:
   materializes its values into every linked object; detaching preserves those
   values. Existing Layout Grid Styles remain artboard-owned internally but are
   exposed in the same `Styles` Assets library and Action namespace.
+- UI schema 22 normalizes prototype Flow starting points under
+  `linked_targets.prototype` and transition metadata under each Interaction's
+  parameters. Flow and Transition changes are document revisions with one-step
+  Undo; Motion clips remain stable-ID links and no keyframes are duplicated.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`,
   guide visibility/locking, and a per-artboard ruler origin

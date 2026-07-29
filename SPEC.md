@@ -7894,6 +7894,13 @@ AI Script Edit MVP integration:
   `paint.ui.library.update.*`, and `paint.ui.library.rollback` share one
   validated store. Accept/Defer/Rollback change local library state only;
   installation never silently alters the active `.tspaint` document.
+- Painter UI schema 22 adds stable prototype Flow starting points, expanded
+  interaction triggers/actions, and normalized transitions. The
+  selection-driven Prototype panel and
+  `paint.ui.prototype.authoring.inspect`, `paint.ui.prototype.flow.*`, and
+  `paint.ui.prototype.transition.set` share the same Undoable document
+  services. Motion clips remain canonical stable-ID links; Painter does not
+  duplicate Motion keyframes.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

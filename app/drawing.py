@@ -10416,6 +10416,21 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.motion_binding_detach_requested.connect(
             self._detach_painter_ui_motion_binding
         )
+        self._paint_ui_inspector.prototype_connection_add_requested.connect(
+            self._add_painter_ui_prototype_connection
+        )
+        self._paint_ui_inspector.prototype_connection_remove_requested.connect(
+            self._remove_painter_ui_prototype_connection
+        )
+        self._paint_ui_inspector.prototype_transition_set_requested.connect(
+            self._set_painter_ui_prototype_transition
+        )
+        self._paint_ui_inspector.prototype_flow_add_requested.connect(
+            self._add_painter_ui_prototype_flow
+        )
+        self._paint_ui_inspector.prototype_flow_activate_requested.connect(
+            self._activate_painter_ui_prototype_flow
+        )
         self._paint_ui_inspector.stress_preview_requested.connect(
             self._set_painter_ui_stress_preview
         )
@@ -15843,6 +15858,90 @@ class PaintDialog(QDialog):
 
         rollback_ui_library(str(library_id))
         self._refresh_painter_ui_library_panel()
+
+    def _add_painter_ui_prototype_connection(self, values: object) -> None:
+        from app.painter_ui_document import add_ui_interaction
+
+        if not isinstance(values, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _row = add_ui_interaction(current, **values)
+        self._push_undo_state("Add prototype connection")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_prototype_connection(
+        self,
+        interaction_id: str,
+    ) -> None:
+        from app.painter_ui_document import remove_ui_interaction
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _row = remove_ui_interaction(
+            current,
+            str(interaction_id),
+        )
+        self._push_undo_state("Remove prototype connection")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _set_painter_ui_prototype_transition(
+        self,
+        interaction_id: str,
+        transition: object,
+    ) -> None:
+        from app.painter_ui_prototype_authoring import (
+            set_ui_prototype_transition,
+        )
+
+        if not isinstance(transition, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _row = set_ui_prototype_transition(
+            current,
+            str(interaction_id),
+            transition,
+        )
+        self._push_undo_state("Set prototype transition")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_prototype_flow(self, values: object) -> None:
+        from app.painter_ui_prototype_authoring import add_ui_prototype_flow
+
+        if not isinstance(values, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _row = add_ui_prototype_flow(current, **values)
+        self._push_undo_state("Add prototype flow")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _activate_painter_ui_prototype_flow(self, flow_id: str) -> None:
+        from app.painter_ui_prototype_authoring import (
+            set_active_ui_prototype_flow,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _row = set_active_ui_prototype_flow(current, str(flow_id))
+        self._push_undo_state("Set active prototype flow")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
 
     def _bind_painter_ui_token(
         self,

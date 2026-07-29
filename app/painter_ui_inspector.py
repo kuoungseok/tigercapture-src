@@ -355,6 +355,11 @@ class PainterUIInspector(QWidget):
     motion_binding_migrate_requested = Signal(str)
     motion_binding_relink_requested = Signal(str, str, str)
     motion_binding_detach_requested = Signal(str)
+    prototype_connection_add_requested = Signal(object)
+    prototype_connection_remove_requested = Signal(str)
+    prototype_transition_set_requested = Signal(str, object)
+    prototype_flow_add_requested = Signal(object)
+    prototype_flow_activate_requested = Signal(str)
     stress_preview_requested = Signal(str, str)
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
@@ -939,6 +944,25 @@ class PainterUIInspector(QWidget):
         motion_layout = QVBoxLayout(motion_page)
         motion_layout.setContentsMargins(0, 0, 0, 0)
         motion_layout.setSpacing(4)
+        from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+        self.prototype_panel = PainterUIPrototypePanel()
+        self.prototype_panel.connection_add_requested.connect(
+            self.prototype_connection_add_requested
+        )
+        self.prototype_panel.connection_remove_requested.connect(
+            self.prototype_connection_remove_requested
+        )
+        self.prototype_panel.transition_set_requested.connect(
+            self.prototype_transition_set_requested
+        )
+        self.prototype_panel.flow_add_requested.connect(
+            self.prototype_flow_add_requested
+        )
+        self.prototype_panel.flow_activate_requested.connect(
+            self.prototype_flow_activate_requested
+        )
+        motion_layout.addWidget(self.prototype_panel)
         self.motion_binding_panel = PainterUIMotionBindingPanel()
         self.motion_binding_panel.migrate_requested.connect(
             self.motion_binding_migrate_requested
@@ -2336,6 +2360,7 @@ class PainterUIInspector(QWidget):
         self.style_library.set_document(self._document)
         self.library_panel.set_document(self._document)
         self.token_library.set_document(self._document)
+        self.prototype_panel.set_document(self._document)
         self.production_panel.set_document(self._document)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])

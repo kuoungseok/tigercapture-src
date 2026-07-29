@@ -429,6 +429,130 @@ class PaintAdapterMixin(
 
         return inspect_ui_prototype(dialog._painter_ui_document)
 
+    def paint_ui_prototype_authoring_inspect(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import (
+            inspect_ui_prototype_authoring,
+        )
+
+        return inspect_ui_prototype_authoring(
+            dialog._painter_ui_document,
+            object_id=object_id,
+        )
+
+    def paint_ui_prototype_flow_add(
+        self,
+        *,
+        name: str,
+        artboard_id: str,
+        start_object_id: str = "",
+        device_preset: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import add_ui_prototype_flow
+
+        document, row = add_ui_prototype_flow(
+            dialog._painter_ui_document,
+            name=name,
+            artboard_id=artboard_id,
+            start_object_id=start_object_id,
+            device_preset=device_preset,
+            description=description,
+        )
+        dialog._push_undo_state("Add prototype flow")
+        result = self._paint_ui_commit(dialog, "Add prototype flow", document)
+        result["flow"] = row
+        return result
+
+    def paint_ui_prototype_flow_update(
+        self,
+        *,
+        flow_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import update_ui_prototype_flow
+
+        document, row = update_ui_prototype_flow(
+            dialog._painter_ui_document,
+            flow_id,
+            changes,
+        )
+        dialog._push_undo_state("Update prototype flow")
+        result = self._paint_ui_commit(dialog, "Update prototype flow", document)
+        result["flow"] = row
+        return result
+
+    def paint_ui_prototype_flow_remove(
+        self,
+        *,
+        flow_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import remove_ui_prototype_flow
+
+        document, row = remove_ui_prototype_flow(
+            dialog._painter_ui_document,
+            flow_id,
+        )
+        dialog._push_undo_state("Remove prototype flow")
+        result = self._paint_ui_commit(dialog, "Remove prototype flow", document)
+        result["removed_flow"] = row
+        return result
+
+    def paint_ui_prototype_flow_activate(
+        self,
+        *,
+        flow_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import (
+            set_active_ui_prototype_flow,
+        )
+
+        document, row = set_active_ui_prototype_flow(
+            dialog._painter_ui_document,
+            flow_id,
+        )
+        dialog._push_undo_state("Set active prototype flow")
+        result = self._paint_ui_commit(
+            dialog,
+            "Set active prototype flow",
+            document,
+        )
+        result["flow"] = row
+        return result
+
+    def paint_ui_prototype_transition_set(
+        self,
+        *,
+        interaction_id: str,
+        transition: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype_authoring import (
+            set_ui_prototype_transition,
+        )
+
+        document, row = set_ui_prototype_transition(
+            dialog._painter_ui_document,
+            interaction_id,
+            transition,
+        )
+        dialog._push_undo_state("Set prototype transition")
+        result = self._paint_ui_commit(
+            dialog,
+            "Set prototype transition",
+            document,
+        )
+        result["interaction"] = row
+        return result
+
     def paint_ui_prototype_trigger(
         self,
         *,

@@ -13,6 +13,10 @@ from app.painter_ui_document import (
     UI_TOKEN_KINDS,
 )
 from app.painter_ui_object_scale import UI_SCALE_ORIGINS
+from app.painter_ui_prototype_authoring import (
+    UI_PROTOTYPE_EASINGS,
+    UI_PROTOTYPE_TRANSITIONS,
+)
 from app.painter_ui_styles import UI_STYLE_KINDS
 from app.painter_ui_variables import (
     UI_VARIABLE_COLLECTION_KINDS,
@@ -2468,6 +2472,107 @@ def register_paint_actions(registry: Any) -> None:
         required=("interaction_id",),
         undo_label="Remove UI interaction",
         dry_summary="a UI interaction would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.authoring.inspect",
+        "Inspect ordered connections, transitions, and Flow starting points.",
+        "paint",
+        "paint_ui_prototype_authoring_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="prototype authoring state would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.add",
+        "Create a stable prototype Flow starting point.",
+        "paint",
+        "paint_ui_prototype_flow_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "start_object_id": {"type": "string"},
+                "device_preset": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            required=("name", "artboard_id"),
+        ),
+        required=("name", "artboard_id"),
+        undo_label="Add prototype flow",
+        dry_summary="a prototype Flow starting point would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.update",
+        "Update a prototype Flow without changing its stable ID.",
+        "paint",
+        "paint_ui_prototype_flow_update",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}, "changes": any_object},
+            required=("flow_id", "changes"),
+        ),
+        required=("flow_id", "changes"),
+        undo_label="Update prototype flow",
+        dry_summary="a prototype Flow would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.remove",
+        "Remove a prototype Flow starting point.",
+        "paint",
+        "paint_ui_prototype_flow_remove",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}},
+            required=("flow_id",),
+        ),
+        required=("flow_id",),
+        undo_label="Remove prototype flow",
+        dry_summary="a prototype Flow would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.activate",
+        "Select the Flow used by device preview.",
+        "paint",
+        "paint_ui_prototype_flow_activate",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}},
+            required=("flow_id",),
+        ),
+        required=("flow_id",),
+        undo_label="Set active prototype flow",
+        dry_summary="the active prototype Flow would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.transition.set",
+        "Set a validated transition on an existing interaction.",
+        "paint",
+        "paint_ui_prototype_transition_set",
+        params_schema=schema_object(
+            {
+                "interaction_id": {"type": "string"},
+                "transition": schema_object(
+                    {
+                        "kind": {
+                            "type": "string",
+                            "enum": list(UI_PROTOTYPE_TRANSITIONS),
+                        },
+                        "duration_ms": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                        },
+                        "easing": {
+                            "type": "string",
+                            "enum": list(UI_PROTOTYPE_EASINGS),
+                        },
+                        "direction": {"type": "string"},
+                    }
+                ),
+            },
+            required=("interaction_id", "transition"),
+        ),
+        required=("interaction_id", "transition"),
+        undo_label="Set prototype transition",
+        dry_summary="a prototype transition would be updated",
     )
     registry.register_adapter_action(
         "paint.ui.motion.attach",

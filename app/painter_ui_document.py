@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 21
+UI_DOCUMENT_VERSION = 22
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -61,6 +61,11 @@ UI_INTERACTION_TRIGGERS = {
     "press",
     "focus",
     "keyboard",
+    "delay",
+    "mouse_enter",
+    "mouse_leave",
+    "drag",
+    "gamepad",
 }
 UI_INTERACTION_ACTIONS = {
     "navigate",
@@ -73,6 +78,12 @@ UI_INTERACTION_ACTIONS = {
     "set_visibility",
     "set_opacity",
     "set_material_scalar",
+    "swap_overlay",
+    "scroll_to",
+    "change_variant",
+    "set_variable",
+    "set_variable_mode",
+    "conditional_branch",
 }
 
 
@@ -213,7 +224,9 @@ def create_ui_document(
         "sections": [],
         "layout_grid_styles": [],
         "delivery_profiles": _default_delivery_profiles(),
-        "linked_targets": {},
+        "linked_targets": {
+            "prototype": {"flows": [], "active_flow_id": ""},
+        },
     }
 
 
@@ -651,6 +664,12 @@ def normalize_ui_document(
         for row in _default_delivery_profiles()
         if row["target"] not in known_targets
     )
+    from app.painter_ui_prototype_authoring import normalize_ui_prototype_contract
+
+    linked_targets = copy.deepcopy(dict(raw.get("linked_targets") or {}))
+    linked_targets["prototype"] = normalize_ui_prototype_contract(
+        linked_targets.get("prototype")
+    )
     return {
         "schema": UI_DOCUMENT_SCHEMA,
         "version": UI_DOCUMENT_VERSION,
@@ -673,7 +692,7 @@ def normalize_ui_document(
         "sections": sections,
         "layout_grid_styles": layout_grid_styles,
         "delivery_profiles": profiles,
-        "linked_targets": copy.deepcopy(dict(raw.get("linked_targets") or {})),
+        "linked_targets": linked_targets,
     }
 
 
@@ -1235,6 +1254,25 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         if component_id and component_id not in component_id_set:
             errors.append(
                 f"missing_interaction_component:{interaction_id}:{component_id}"
+            )
+    from app.painter_ui_prototype_authoring import normalize_ui_prototype_contract
+
+    prototype = normalize_ui_prototype_contract(
+        document["linked_targets"].get("prototype")
+    )
+    for flow in prototype["flows"]:
+        if flow["artboard_id"] not in artboard_id_set:
+            errors.append(
+                f"missing_prototype_flow_artboard:{flow['id']}:"
+                f"{flow['artboard_id']}"
+            )
+        if (
+            flow["start_object_id"]
+            and flow["start_object_id"] not in object_by_id
+        ):
+            errors.append(
+                f"missing_prototype_flow_object:{flow['id']}:"
+                f"{flow['start_object_id']}"
             )
     from app.painter_ui_layout_diagnostics import diagnose_ui_layout
 

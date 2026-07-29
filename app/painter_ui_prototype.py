@@ -29,6 +29,8 @@ def prototype_initial_state(value: Mapping[str, Any]) -> dict[str, Any]:
             row["id"]: float(row["opacity"]) for row in document["objects"]
         },
         "material_scalars": {},
+        "variables": {},
+        "variable_modes": {},
         "events": [],
     }
 
@@ -51,6 +53,8 @@ def execute_ui_prototype_trigger(
     runtime["object_visibility"] = dict(runtime.get("object_visibility") or {})
     runtime["object_opacity"] = dict(runtime.get("object_opacity") or {})
     runtime["material_scalars"] = dict(runtime.get("material_scalars") or {})
+    runtime["variables"] = dict(runtime.get("variables") or {})
+    runtime["variable_modes"] = dict(runtime.get("variable_modes") or {})
     runtime["events"] = list(runtime.get("events") or [])
     matched = []
     for interaction in document["interactions"]:
@@ -84,6 +88,11 @@ def execute_ui_prototype_trigger(
                 ]
             elif runtime["overlay_artboard_ids"]:
                 runtime["overlay_artboard_ids"].pop()
+        elif action == "swap_overlay" and target_artboard:
+            if runtime["overlay_artboard_ids"]:
+                runtime["overlay_artboard_ids"][-1] = target_artboard
+            else:
+                runtime["overlay_artboard_ids"].append(target_artboard)
         elif action in {"change_state", "change_variant"} and target_object:
             runtime["object_states"][target_object] = str(
                 parameters.get("state")
@@ -105,6 +114,26 @@ def execute_ui_prototype_trigger(
             runtime["material_scalars"].setdefault(target_object, {})[
                 scalar
             ] = float(parameters.get("value", 0.0))
+        elif action == "set_variable":
+            variable_id = str(parameters.get("variable_id") or "")
+            if variable_id:
+                runtime["variables"][variable_id] = parameters.get("value")
+        elif action == "set_variable_mode":
+            collection_id = str(parameters.get("collection_id") or "")
+            if collection_id:
+                runtime["variable_modes"][collection_id] = str(
+                    parameters.get("mode_id") or ""
+                )
+        elif action in {"scroll_to", "conditional_branch"}:
+            runtime["events"].append(
+                {
+                    "action": action,
+                    "source_object_id": source_object_id,
+                    "target_object_id": target_object,
+                    "target_artboard_id": target_artboard,
+                    "parameters": parameters,
+                }
+            )
         elif action in {"play_animation", "play_sound"}:
             runtime["events"].append(
                 {
@@ -122,27 +151,13 @@ def execute_ui_prototype_trigger(
 def inspect_ui_prototype(value: Mapping[str, Any]) -> dict[str, Any]:
     document = normalize_ui_document(value)
     validation = validate_ui_document(document)
-    supported_triggers = {
-        "click",
-        "double_click",
-        "hover",
-        "press",
-        "focus",
-        "keyboard",
-    }
-    supported_actions = {
-        "navigate",
-        "back",
-        "open_overlay",
-        "close_overlay",
-        "change_state",
-        "change_variant",
-        "play_animation",
-        "play_sound",
-        "set_visibility",
-        "set_opacity",
-        "set_material_scalar",
-    }
+    from app.painter_ui_document import (
+        UI_INTERACTION_ACTIONS,
+        UI_INTERACTION_TRIGGERS,
+    )
+
+    supported_triggers = set(UI_INTERACTION_TRIGGERS)
+    supported_actions = set(UI_INTERACTION_ACTIONS)
     unsupported = [
         row["id"]
         for row in document["interactions"]

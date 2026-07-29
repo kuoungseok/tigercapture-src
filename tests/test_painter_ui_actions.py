@@ -415,7 +415,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
-    assert stored["ui_document"]["version"] == 21
+    assert stored["ui_document"]["version"] == 22
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id

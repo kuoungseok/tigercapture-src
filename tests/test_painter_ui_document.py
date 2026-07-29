@@ -173,7 +173,7 @@ def test_general_ui_document_page_crud_scopes_artboards_and_migrates_v18() -> No
     legacy["version"] = 18
     legacy["artboards"][0].pop("page_id")
     document = normalize_ui_document(legacy)
-    assert document["version"] == 21
+    assert document["version"] == 22
     assert document["active_page_id"] == "page-1"
     assert document["artboards"][0]["page_id"] == "page-1"
 
@@ -464,11 +464,11 @@ def test_ui_v1_migration_types_records_and_preserves_stable_ids() -> None:
         ],
     }
     document, report = migrate_ui_document(legacy)
-    assert document["version"] == UI_DOCUMENT_VERSION == 21
+    assert document["version"] == UI_DOCUMENT_VERSION == 22
     assert report == {
             "schema": "tigerstudio.painter.ui.migration.v1",
             "from_version": 1,
-            "to_version": 21,
+            "to_version": 22,
             "changed": True,
     }
     assert document["components"][0]["id"] == "ui-component-1"

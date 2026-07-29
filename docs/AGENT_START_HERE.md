@@ -190,6 +190,10 @@ Focused entry points:
   `app/painter_ui_library_store.py` as `.tsuilib`. The Libraries Assets tab and
   `paint.ui.library.*` Actions share its install/update/defer/rollback state.
   Installing a package must not silently mutate the active document.
+  Painter UI schema 22 adds Prototype Flow/Transition authoring through
+  `app/painter_ui_prototype_authoring.py`. The compact Prototype panel and
+  `paint.ui.prototype.flow.*` / `transition.set` Actions share these services;
+  Motion keyframes remain owned by Motion Designer.
   M2 Content Test is implemented in `app/painter_ui_stress_preview.py`.
   `paint.ui.layout.stress_preview` and the Inspector share one presentation
   entry point; only the canvas Overlay receives the ephemeral preview document.
