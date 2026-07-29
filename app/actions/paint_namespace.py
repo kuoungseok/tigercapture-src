@@ -552,6 +552,63 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a theme-specific token value would be removed",
     )
     registry.register_adapter_action(
+        "paint.ui.page.add",
+        "Add a stable Painter UI page with an initial artboard.",
+        "paint",
+        "paint_ui_page_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+            }
+        ),
+        undo_label="Add UI page",
+        dry_summary="a UI page and initial artboard would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.update",
+        "Rename or update a stable Painter UI page.",
+        "paint",
+        "paint_ui_page_update",
+        params_schema=schema_object(
+            {
+                "page_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("page_id", "changes"),
+        ),
+        required=("page_id", "changes"),
+        undo_label="Update UI page",
+        dry_summary="a UI page would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.activate",
+        "Switch the active Painter UI page and restore its canvas view.",
+        "paint",
+        "paint_ui_page_activate",
+        params_schema=schema_object(
+            {"page_id": {"type": "string"}},
+            required=("page_id",),
+        ),
+        required=("page_id",),
+        undo_label="Activate UI page",
+        dry_summary="the active UI page would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.remove",
+        "Remove a Painter UI page and its artboards while keeping one page.",
+        "paint",
+        "paint_ui_page_remove",
+        params_schema=schema_object(
+            {"page_id": {"type": "string"}},
+            required=("page_id",),
+        ),
+        required=("page_id",),
+        undo_label="Remove UI page",
+        dry_summary="a UI page and its owned content would be removed",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.add",
         "Add a general UI artboard to the active Painter document.",
         "paint",

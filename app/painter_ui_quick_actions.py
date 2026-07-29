@@ -244,12 +244,32 @@ def _dynamic_rows(document: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "enabled": bool(row.get("visible", True)),
             }
         )
+    active_page_id = str(document.get("active_page_id") or "")
+    for row in document.get("pages", []):
+        active = str(row["id"]) == active_page_id
+        rows.append(
+            {
+                "id": f"page_record.{row['id']}",
+                "kind": "page",
+                "label": str(row.get("name") or "Page"),
+                "detail": (
+                    f"{painter_text('Page')}"
+                    + (" / Active" if active else "")
+                ),
+                "keywords": "page canvas document screen",
+                "operation": {
+                    "type": "activate_page",
+                    "page_id": str(row["id"]),
+                },
+                "enabled": True,
+            }
+        )
     for row in document.get("artboards", []):
         active = str(row["id"]) == active_artboard_id
         rows.append(
             {
                 "id": f"page.{row['id']}",
-                "kind": "page",
+                "kind": "artboard",
                 "label": str(row.get("name") or "Artboard"),
                 "detail": (
                     f"{painter_text('Page')} · "

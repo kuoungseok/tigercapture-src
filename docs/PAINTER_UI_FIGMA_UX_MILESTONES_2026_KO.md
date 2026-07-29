@@ -1,8 +1,29 @@
 # Painter UI Figma UX Development Milestones
 
-Status: active roadmap; M0 shell, contextual inspector, and M1 ruler-guide lifecycle implemented
+Status: active roadmap; M0 shell and the M1 Page/navigation foundation implemented
 
 Date: 2026-07-29
+
+## 2026-07-29 M1 Page Checkpoint
+
+Completed in the Page/navigation slice:
+
+- UI document schema 19 adds stable-ID `pages[]`, `active_page_id`, and
+  per-artboard `page_id`; version 18 documents migrate into `Page 1`.
+- Page add, rename, activate, and delete use the canonical document mutation
+  service with one-step Undo, `.tspaint` persistence, and matching
+  `paint.ui.page.*` Actions.
+- Every Page owns at least one artboard and remembers its most recently active
+  artboard. Returning to a Page restores that artboard and its saved viewport.
+- The canvas renders only the active Page while the Navigator and Inspector
+  retain the complete document model.
+- The left Navigator exposes compact icon commands for Page add/delete and
+  inline Page rename without adding permanent canvas chrome.
+- Quick Actions search real Pages separately from Artboards.
+- Figma import preserves each CANVAS as a Tiger Studio Page instead of
+  flattening all imported frames into one Page.
+- Desktop and compact screenshot QA verifies two Pages, page-scoped artboards,
+  Auto-hide width, Page controls, and responsive canvas behavior.
 
 ## 2026-07-28 M0 Checkpoint
 
@@ -65,7 +86,7 @@ Not complete yet:
 
 - mode-specific Paint/3D floating-toolbar variants
 - prototype interaction authoring surface and on-canvas connection editing
-- M1 through M8 implementation
+- remaining M1 direct-manipulation polish and M2 through M8 implementation
 
 Related documents:
 

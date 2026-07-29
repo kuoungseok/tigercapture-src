@@ -2,6 +2,21 @@
 
 Status: canonical implementation backlog; P0-P10 local production foundation complete
 
+M1 Page checkpoint (2026-07-29):
+
+- Painter UI document schema is version 19.
+- Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
+  version 18 documents migrate into `Page 1`.
+- Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,
+  and `paint.ui.page.add/update/activate/remove` are implemented.
+- Canvas rendering is scoped to the active Page. Each Page remembers its last
+  active artboard, and existing per-artboard viewport persistence restores the
+  corresponding view.
+- Quick Actions distinguish Page activation from Artboard activation.
+- Figma CANVAS records import as real Tiger Studio Pages.
+- Reproducible desktop/compact QA lives under the disposable
+  `debugCapture/painter_ui_pages_m1` report path.
+
 P0-P2 completion checkpoint (2026-07-28):
 
 - Painter UI document schema is version 18.

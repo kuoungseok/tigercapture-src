@@ -149,6 +149,92 @@ def test_general_ui_document_switches_artboards_and_clears_foreign_selection() -
     assert phone_button["id"] in {row["id"] for row in document["objects"]}
 
 
+def test_general_ui_document_page_crud_scopes_artboards_and_migrates_v18() -> None:
+    import pytest
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        active_ui_page_document,
+        add_ui_artboard,
+        add_ui_object,
+        add_ui_page,
+        create_ui_document,
+        normalize_ui_document,
+        remove_ui_page,
+        set_active_ui_artboard,
+        set_active_ui_page,
+        update_ui_page,
+        validate_ui_document,
+    )
+
+    legacy = create_ui_document(390, 844, name="Phone")
+    legacy.pop("pages")
+    legacy.pop("active_page_id")
+    legacy["version"] = 18
+    legacy["artboards"][0].pop("page_id")
+    document = normalize_ui_document(legacy)
+    assert document["version"] == 19
+    assert document["active_page_id"] == "page-1"
+    assert document["artboards"][0]["page_id"] == "page-1"
+
+    document, phone_object = add_ui_object(
+        document,
+        kind="button",
+        name="Phone CTA",
+    )
+    document, page = add_ui_page(
+        document,
+        name="Settings",
+        width=1440,
+        height=900,
+    )
+    settings_id = page["id"]
+    assert document["active_page_id"] == settings_id
+    assert document["active_artboard_id"] == page["artboard_id"]
+    document, settings_object = add_ui_object(
+        document,
+        kind="text",
+        name="Settings title",
+    )
+    document, tablet = add_ui_artboard(
+        document,
+        name="Settings tablet",
+        width=834,
+        height=1194,
+    )
+    document = set_active_ui_artboard(document, page["artboard_id"])
+    document = set_active_ui_artboard(document, tablet["id"])
+    scoped = active_ui_page_document(document)
+    assert {row["id"] for row in scoped["artboards"]} == {
+        page["artboard_id"],
+        tablet["id"],
+    }
+    assert {row["id"] for row in scoped["objects"]} == {
+        settings_object["id"]
+    }
+
+    document, renamed = update_ui_page(
+        document,
+        settings_id,
+        {"name": "Account"},
+    )
+    assert renamed["name"] == "Account"
+    document = set_active_ui_page(document, "page-1")
+    assert document["active_artboard_id"] == "artboard-1"
+    document = set_active_ui_page(document, settings_id)
+    assert document["active_artboard_id"] == tablet["id"]
+    document = set_active_ui_page(document, "page-1")
+    scoped = active_ui_page_document(document)
+    assert {row["id"] for row in scoped["objects"]} == {
+        phone_object["id"]
+    }
+    document, removed = remove_ui_page(document, settings_id)
+    assert removed["removed_object_ids"] == [settings_object["id"]]
+    assert validate_ui_document(document)["page_count"] == 1
+    with pytest.raises(PainterUIDocumentError, match="at least one page"):
+        remove_ui_page(document, "page-1")
+
+
 def test_general_ui_document_multi_selection_modes_are_stable() -> None:
     from app.painter_ui_document import (
         add_ui_object,
@@ -378,11 +464,11 @@ def test_ui_v1_migration_types_records_and_preserves_stable_ids() -> None:
         ],
     }
     document, report = migrate_ui_document(legacy)
-    assert document["version"] == UI_DOCUMENT_VERSION == 18
+    assert document["version"] == UI_DOCUMENT_VERSION == 19
     assert report == {
         "schema": "tigerstudio.painter.ui.migration.v1",
         "from_version": 1,
-        "to_version": 18,
+        "to_version": 19,
         "changed": True,
     }
     assert document["components"][0]["id"] == "ui-component-1"

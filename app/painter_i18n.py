@@ -31,6 +31,8 @@ _LANGUAGES = ("en", "ko", "ja", "zh", "fr", "de")
 
 # English source, Korean, Japanese, Simplified Chinese, French, German.
 _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
+    ("New Page", "새 페이지", "新規ページ", "新建页面", "Nouvelle page", "Neue Seite"),
+    ("Delete Page", "페이지 삭제", "ページを削除", "删除页面", "Supprimer la page", "Seite löschen"),
     (
         "Duplicate to next artboard",
         "다음 아트보드로 복제",

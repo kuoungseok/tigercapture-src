@@ -882,6 +882,66 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Add UI artboard")
         return self._paint_ui_commit(dialog, "Add UI artboard", document)
 
+    def paint_ui_page_add(
+        self,
+        *,
+        name: str = "",
+        width: int = 1440,
+        height: int = 900,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_page
+
+        document, _row = add_ui_page(
+            dialog._painter_ui_document,
+            name=name,
+            width=width,
+            height=height,
+        )
+        dialog._push_undo_state("Add UI page")
+        return self._paint_ui_commit(dialog, "Add UI page", document)
+
+    def paint_ui_page_update(
+        self,
+        *,
+        page_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_page
+
+        document, _row = update_ui_page(
+            dialog._painter_ui_document,
+            page_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI page")
+        return self._paint_ui_commit(dialog, "Update UI page", document)
+
+    def paint_ui_page_activate(self, *, page_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import set_active_ui_page
+
+        document = set_active_ui_page(
+            dialog._painter_ui_document,
+            page_id,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Activate UI page")
+        return self._paint_ui_commit(dialog, "Activate UI page", document)
+
+    def paint_ui_page_remove(self, *, page_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_page
+
+        document, _result = remove_ui_page(
+            dialog._painter_ui_document,
+            page_id,
+        )
+        dialog._push_undo_state("Remove UI page")
+        return self._paint_ui_commit(dialog, "Remove UI page", document)
+
     def paint_ui_artboard_update(
         self,
         *,

@@ -80,6 +80,25 @@ def test_quick_action_search_combines_commands_and_document_assets() -> None:
     )["operation"]["type"] == "reveal_token"
 
 
+def test_quick_actions_search_real_pages_separately_from_artboards() -> None:
+    from app.painter_ui_document import add_ui_page, create_ui_document
+    from app.painter_ui_quick_actions import search_painter_ui_quick_actions
+
+    document, page = add_ui_page(
+        create_ui_document(1440, 900),
+        name="Account Settings",
+    )
+    result = _result(
+        search_painter_ui_quick_actions(document, "Account Settings"),
+        f"page_record.{page['id']}",
+    )
+    assert result["kind"] == "page"
+    assert result["operation"] == {
+        "type": "activate_page",
+        "page_id": page["id"],
+    }
+
+
 def test_quick_action_context_disables_invalid_selection_commands() -> None:
     from app.painter_ui_document import select_ui_objects
     from app.painter_ui_quick_actions import search_painter_ui_quick_actions

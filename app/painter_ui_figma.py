@@ -987,6 +987,7 @@ def import_figma_payload(
         file_key = str(payload.get("key") or "snapshot")
 
     artboards: list[dict[str, Any]] = []
+    imported_pages: list[dict[str, Any]] = []
     objects: list[dict[str, Any]] = []
     components: list[dict[str, Any]] = []
     interactions: list[dict[str, Any]] = []
@@ -996,10 +997,17 @@ def import_figma_payload(
     warnings: list[str] = []
     supported = 0
     skipped = 0
-    artboard_x = 0.0
     component_set_index = _figma_component_set_index(root)
 
     for page in pages:
+        page_id = _stable_id("page", page.get("id"))
+        imported_pages.append(
+            {
+                "id": page_id,
+                "name": str(page.get("name") or "Page"),
+            }
+        )
+        artboard_x = 0.0
         for frame in _top_level_frames(page):
             frame_object_start = len(objects)
             frame_box = _box(frame)
@@ -1008,6 +1016,7 @@ def import_figma_payload(
             artboards.append(
                 {
                     "id": frame_id,
+                    "page_id": page_id,
                     "name": str(frame.get("name") or page.get("name") or "Figma"),
                     "width": int(round(frame_box["width"])),
                     "height": int(round(frame_box["height"])),
@@ -1478,10 +1487,20 @@ def import_figma_payload(
                 )
 
     preferred_artboard_id = _preferred_artboard_id(artboards, objects)
+    preferred_page_id = next(
+        (
+            str(row["page_id"])
+            for row in artboards
+            if str(row["id"]) == preferred_artboard_id
+        ),
+        str(imported_pages[0]["id"]),
+    )
     document = normalize_ui_document(
         {
             "document_id": _stable_id("document", file_key),
+            "active_page_id": preferred_page_id,
             "active_artboard_id": preferred_artboard_id,
+            "pages": imported_pages,
             "artboards": artboards,
             "objects": objects,
             "sections": sections,
@@ -1547,6 +1566,7 @@ def import_figma_payload(
         "ok": not validation["errors"],
         "file_key": file_key,
         "name": str(payload.get("name") or ""),
+        "page_count": len(document["pages"]),
         "artboard_count": len(document["artboards"]),
         "object_count": len(document["objects"]),
         "component_count": len(document["components"]),
@@ -1561,6 +1581,7 @@ def import_figma_payload(
             )
         ),
         "active_artboard_id": document["active_artboard_id"],
+        "active_page_id": document["active_page_id"],
         "supported_node_count": supported,
         "blocked_node_count": skipped,
         "warnings": warnings + list(validation["warnings"]),

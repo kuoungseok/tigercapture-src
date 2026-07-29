@@ -65,7 +65,10 @@ class _NavigatorResizeHandle(QFrame):
 class PainterUINavigatorPanel(QFrame):
     """Left-side document navigator that reuses the canonical Layers page."""
 
-    artboard_selected = Signal(str)
+    page_selected = Signal(str)
+    page_add_requested = Signal()
+    page_remove_requested = Signal(str)
+    page_rename_requested = Signal(str, str)
     collapsed_changed = Signal(bool)
     width_changed = Signal(int)
     auto_hide_changed = Signal(bool)
@@ -177,9 +180,38 @@ class PainterUINavigatorPanel(QFrame):
         self.page_list.setIconSize(icon_size(13))
         self.page_list.setMaximumHeight(66)
         self.page_list.itemSelectionChanged.connect(
-            self._emit_artboard_selection
+            self._emit_page_selection
         )
+        self.page_list.itemChanged.connect(self._emit_page_rename)
         content_layout.addWidget(self.page_list)
+        page_actions = QFrame()
+        page_actions.setObjectName("PainterUIPageActions")
+        page_actions_layout = QHBoxLayout(page_actions)
+        page_actions_layout.setContentsMargins(3, 1, 3, 3)
+        page_actions_layout.setSpacing(2)
+        page_actions_layout.addStretch(1)
+        self.page_add_button = QPushButton("")
+        self.page_add_button.setObjectName("PainterUIPageAction")
+        self.page_add_button.setFixedSize(22, 20)
+        self.page_add_button.setIcon(
+            app_icon("plus", size=12, color="#B8C4D3")
+        )
+        self.page_add_button.setToolTip(painter_text("New Page"))
+        self.page_add_button.clicked.connect(self.page_add_requested)
+        page_actions_layout.addWidget(self.page_add_button)
+        self.page_remove_button = QPushButton("")
+        self.page_remove_button.setObjectName("PainterUIPageAction")
+        self.page_remove_button.setFixedSize(22, 20)
+        self.page_remove_button.setIcon(
+            app_icon("trash", size=12, color="#B8C4D3")
+        )
+        self.page_remove_button.setToolTip(painter_text("Delete Page"))
+        self.page_remove_button.clicked.connect(
+            self._request_current_page_removal
+        )
+        page_actions_layout.addWidget(self.page_remove_button)
+        content_layout.addWidget(page_actions)
+        self.page_actions = page_actions
 
         self.mode_tabs = QTabWidget()
         self.mode_tabs.setObjectName("PainterUINavigatorTabs")
@@ -219,6 +251,7 @@ class PainterUINavigatorPanel(QFrame):
             self.search_edit,
             pages_header,
             self.page_list,
+            self.page_actions,
             self.mode_tabs,
         )
         self.resize_handle = _NavigatorResizeHandle(self)
@@ -459,44 +492,61 @@ class PainterUINavigatorPanel(QFrame):
 
     def set_document(self, document: Mapping[str, Any] | None) -> None:
         value = dict(document) if isinstance(document, Mapping) else {}
-        artboards = [
+        pages = [
             dict(row)
-            for row in value.get("artboards", [])
+            for row in value.get("pages", [])
             if isinstance(row, Mapping)
         ]
-        active_id = str(value.get("active_artboard_id") or "")
+        active_id = str(value.get("active_page_id") or "")
         self._syncing = True
         try:
             self.page_list.clear()
-            for row in artboards:
-                artboard_id = str(row.get("id") or "")
-                label = str(row.get("name") or artboard_id or "Artboard")
+            for row in pages:
+                page_id = str(row.get("id") or "")
+                label = str(row.get("name") or page_id or "Page")
                 item = QListWidgetItem(
                     app_icon("ui-frame", size=12, color="#AAB6C5"),
                     label,
                 )
-                item.setData(Qt.ItemDataRole.UserRole, artboard_id)
-                item.setToolTip(
-                    f"{int(row.get('width') or 0)} x "
-                    f"{int(row.get('height') or 0)}"
+                item.setFlags(
+                    item.flags()
+                    | Qt.ItemFlag.ItemIsEditable
                 )
+                item.setData(Qt.ItemDataRole.UserRole, page_id)
                 self.page_list.addItem(item)
-                if artboard_id == active_id:
+                if page_id == active_id:
                     item.setSelected(True)
                     self.page_list.setCurrentItem(item)
+            self.page_remove_button.setEnabled(len(pages) > 1)
         finally:
             self._syncing = False
         self._apply_filter(self.search_edit.text())
 
-    def _emit_artboard_selection(self) -> None:
+    def _emit_page_selection(self) -> None:
         if self._syncing:
             return
         item = self.page_list.currentItem()
-        artboard_id = str(
+        page_id = str(
             item.data(Qt.ItemDataRole.UserRole) if item is not None else ""
         )
-        if artboard_id:
-            self.artboard_selected.emit(artboard_id)
+        if page_id:
+            self.page_selected.emit(page_id)
+
+    def _emit_page_rename(self, item: QListWidgetItem) -> None:
+        if self._syncing:
+            return
+        page_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        name = str(item.text() or "").strip()
+        if page_id and name:
+            self.page_rename_requested.emit(page_id, name)
+
+    def _request_current_page_removal(self) -> None:
+        item = self.page_list.currentItem()
+        page_id = str(
+            item.data(Qt.ItemDataRole.UserRole) if item is not None else ""
+        )
+        if page_id and self.page_list.count() > 1:
+            self.page_remove_requested.emit(page_id)
 
     def _apply_filter(self, text: str) -> None:
         query = str(text or "").strip().casefold()

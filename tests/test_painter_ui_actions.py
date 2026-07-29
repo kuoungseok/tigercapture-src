@@ -48,6 +48,10 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.theme.inspect",
         "paint.ui.token.theme.set",
         "paint.ui.token.theme.remove",
+        "paint.ui.page.add",
+        "paint.ui.page.update",
+        "paint.ui.page.activate",
+        "paint.ui.page.remove",
         "paint.ui.artboard.add",
         "paint.ui.artboard.activate",
         "paint.ui.artboard.update",
@@ -399,7 +403,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
-    assert stored["ui_document"]["version"] == 18
+    assert stored["ui_document"]["version"] == 19
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id
@@ -955,6 +959,99 @@ def test_painter_ui_overlay_preserves_active_artboard_aspect_ratio() -> None:
     assert desktop_viewport.width() > phone_viewport.width()
 
     overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_page_actions_scope_canvas_undo_and_round_trip(
+    tmp_path: Path,
+) -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
+    page_one_object = registry.execute(
+        "paint.ui.object.add",
+        {"kind": "button", "name": "Page one CTA"},
+    ).to_dict()["result"]["ui_design"]["selected_object_id"]
+    added = registry.execute(
+        "paint.ui.page.add",
+        {"name": "Settings", "width": 1440, "height": 900},
+    ).to_dict()
+    assert added["ok"]
+    page_two = added["result"]["ui_design"]["active_page_id"]
+    assert page_two != "page-1"
+    assert dialog._painter_ui_navigator.page_list.count() == 2
+    assert {
+        row["page_id"]
+        for row in dialog._painter_ui_overlay._document["artboards"]
+    } == {page_two}
+    page_two_object = registry.execute(
+        "paint.ui.object.add",
+        {"kind": "text", "name": "Settings title"},
+    ).to_dict()["result"]["ui_design"]["selected_object_id"]
+
+    activated = registry.execute(
+        "paint.ui.page.activate",
+        {"page_id": "page-1"},
+    ).to_dict()
+    assert activated["ok"]
+    assert activated["result"]["ui_design"]["active_page_id"] == "page-1"
+    assert {
+        row["id"] for row in dialog._painter_ui_overlay._document["objects"]
+    } == {page_one_object}
+    renamed = registry.execute(
+        "paint.ui.page.update",
+        {"page_id": "page-1", "changes": {"name": "Home"}},
+    ).to_dict()
+    assert renamed["ok"]
+    assert renamed["result"]["ui_design"]["document"]["pages"][0]["name"] == "Home"
+
+    removed = registry.execute(
+        "paint.ui.page.remove",
+        {"page_id": page_two},
+    ).to_dict()
+    assert removed["ok"]
+    assert removed["result"]["ui_design"]["validation"]["page_count"] == 1
+    dialog._undo()
+    assert {row["id"] for row in dialog._painter_ui_document["pages"]} == {
+        "page-1",
+        page_two,
+    }
+    assert page_two_object in {
+        row["id"] for row in dialog._painter_ui_document["objects"]
+    }
+
+    document_path = tmp_path / "pages.tspaint"
+    dialog.save_document_to_path(document_path)
+    restored = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(
+            64,
+            64,
+            "transparent",
+        ),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    restored.open_document_from_path(document_path)
+    assert {row["id"] for row in restored._painter_ui_document["pages"]} == {
+        "page-1",
+        page_two,
+    }
+    assert restored._painter_ui_document["active_page_id"] == "page-1"
+
+    dialog.close()
+    restored.close()
+    dialog.deleteLater()
+    restored.deleteLater()
     app.processEvents()
 
 

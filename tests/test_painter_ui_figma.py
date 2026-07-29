@@ -198,6 +198,48 @@ def test_figma_payload_imports_editable_layout_component_and_variables() -> None
     assert text["style"]["text_align"] == "center"
 
 
+def test_figma_import_preserves_canvas_pages_and_page_scoped_artboards() -> None:
+    from app.painter_ui_document import active_ui_page_document, set_active_ui_page
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    payload["document"]["children"].append(
+        {
+            "id": "10:1",
+            "type": "CANVAS",
+            "name": "Archive",
+            "children": [
+                {
+                    "id": "10:2",
+                    "type": "FRAME",
+                    "name": "Legacy Screen",
+                    "absoluteBoundingBox": {
+                        "x": 0,
+                        "y": 0,
+                        "width": 800,
+                        "height": 600,
+                    },
+                    "children": [],
+                }
+            ],
+        }
+    )
+    document, report = import_figma_payload(
+        payload,
+        source="AbCdEf123456",
+    )
+
+    assert report["page_count"] == 2
+    assert [row["name"] for row in document["pages"]] == [
+        "Screens",
+        "Archive",
+    ]
+    archive_page = document["pages"][1]
+    document = set_active_ui_page(document, archive_page["id"])
+    scoped = active_ui_page_document(document)
+    assert [row["name"] for row in scoped["artboards"]] == ["Legacy Screen"]
+
+
 def test_figma_component_set_imports_variants_and_instance_properties() -> None:
     from app.painter_ui_components import switch_ui_component_instance_variant
     from app.painter_ui_figma import import_figma_payload

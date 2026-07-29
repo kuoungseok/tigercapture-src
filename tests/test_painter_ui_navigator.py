@@ -23,13 +23,21 @@ def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
     layer_list.addItem(QListWidgetItem("Footer"))
     panel = PainterUINavigatorPanel(layers_page, layer_list)
     selected: list[str] = []
-    panel.artboard_selected.connect(selected.append)
+    added: list[bool] = []
+    removed: list[str] = []
+    renamed: list[tuple[str, str]] = []
+    panel.page_selected.connect(selected.append)
+    panel.page_add_requested.connect(lambda: added.append(True))
+    panel.page_remove_requested.connect(removed.append)
+    panel.page_rename_requested.connect(
+        lambda page_id, name: renamed.append((page_id, name))
+    )
     panel.set_document(
         {
-            "active_artboard_id": "desktop",
-            "artboards": [
-                {"id": "mobile", "name": "Mobile", "width": 390, "height": 844},
-                {"id": "desktop", "name": "Desktop", "width": 1440, "height": 900},
+            "active_page_id": "page-desktop",
+            "pages": [
+                {"id": "page-mobile", "name": "Mobile"},
+                {"id": "page-desktop", "name": "Desktop"},
             ],
         }
     )
@@ -38,7 +46,14 @@ def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
     assert panel.page_list.currentItem().text() == "Desktop"
     panel.page_list.setCurrentRow(0)
     app.processEvents()
-    assert selected == ["mobile"]
+    assert selected == ["page-mobile"]
+    panel.page_add_button.click()
+    assert added == [True]
+    panel.page_list.currentItem().setText("Phone")
+    app.processEvents()
+    assert renamed == [("page-mobile", "Phone")]
+    panel.page_remove_button.click()
+    assert removed == ["page-mobile"]
 
     panel.search_edit.setText("head")
     assert not layer_list.item(0).isHidden()

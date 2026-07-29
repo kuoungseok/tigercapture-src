@@ -89,6 +89,10 @@ Implemented:
 - Painter UI document schema version 18; schema 17 remains the typed Vector
   Network checkpoint and schema 18 marks explicit non-destructive Boolean
   groups
+- Painter UI document schema version 19 adds real stable-ID Pages, Page CRUD,
+  per-artboard Page ownership, page-scoped canvas rendering, last-active
+  artboard restoration, Quick Actions Page search, and Figma CANVAS-to-Page
+  preservation
 
 Still required by this contract:
 

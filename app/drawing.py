@@ -10588,8 +10588,17 @@ class PaintDialog(QDialog):
             self._paint_ui_inspector.layer_list,
             self._paint_ui_inspector.take_asset_pages(),
         )
-        self._painter_ui_navigator.artboard_selected.connect(
-            self._set_painter_ui_artboard
+        self._painter_ui_navigator.page_selected.connect(
+            self._set_painter_ui_page
+        )
+        self._painter_ui_navigator.page_add_requested.connect(
+            self._add_painter_ui_page
+        )
+        self._painter_ui_navigator.page_remove_requested.connect(
+            self._delete_painter_ui_page
+        )
+        self._painter_ui_navigator.page_rename_requested.connect(
+            self._rename_painter_ui_page
         )
         self._painter_ui_navigator.auto_hide_changed.connect(
             lambda auto_hide: self._save_painter_ui_panel_presentation(
@@ -13292,6 +13301,67 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 
+    def _set_painter_ui_page(self, page_id: str) -> None:
+        from app.painter_ui_document import set_active_ui_page
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        if str(current.get("active_page_id") or "") == str(page_id):
+            return
+        self._painter_ui_edit_scope_stack = []
+        self._push_undo_state("Switch UI page")
+        self._painter_ui_document = set_active_ui_page(current, page_id)
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_page(self) -> None:
+        from app.painter_ui_document import add_ui_page
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        self._painter_ui_edit_scope_stack = []
+        self._push_undo_state("Add UI page")
+        self._painter_ui_document, _page = add_ui_page(current)
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _rename_painter_ui_page(self, page_id: str, name: str) -> None:
+        from app.painter_ui_document import update_ui_page
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        existing = next(
+            (
+                row
+                for row in current.get("pages", [])
+                if row.get("id") == str(page_id)
+            ),
+            None,
+        )
+        value = str(name or "").strip()
+        if existing is None or not value or existing.get("name") == value:
+            return
+        self._push_undo_state("Rename UI page")
+        self._painter_ui_document, _page = update_ui_page(
+            current,
+            str(page_id),
+            {"name": value},
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _delete_painter_ui_page(self, page_id: str) -> None:
+        from app.painter_ui_document import remove_ui_page
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        if len(current.get("pages", [])) <= 1:
+            return
+        self._painter_ui_edit_scope_stack = []
+        self._push_undo_state("Delete UI page")
+        self._painter_ui_document, _result = remove_ui_page(
+            current,
+            str(page_id),
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
     def _update_painter_ui_artboard_position(
         self,
         artboard_id: str,
@@ -13596,10 +13666,21 @@ class PaintDialog(QDialog):
         from app.painter_ui_document import remove_ui_artboard
 
         document = getattr(self, "_painter_ui_document", None) or {}
-        if len(document.get("artboards", [])) <= 1:
-            return
         target = str(artboard_id or document.get("active_artboard_id") or "")
         if not target:
+            return
+        target_row = next(
+            (
+                row
+                for row in document.get("artboards", [])
+                if row.get("id") == target
+            ),
+            None,
+        )
+        if target_row is None or sum(
+            row.get("page_id") == target_row.get("page_id")
+            for row in document.get("artboards", [])
+        ) <= 1:
             return
         self._push_undo_state("Delete UI artboard")
         self._painter_ui_document, _result = remove_ui_artboard(
@@ -13937,6 +14018,8 @@ class PaintDialog(QDialog):
             self._set_painter_ui_artboard(
                 str(operation.get("artboard_id") or "")
             )
+        elif operation_type == "activate_page":
+            self._set_painter_ui_page(str(operation.get("page_id") or ""))
         elif operation_type == "instantiate_component":
             component_id = str(operation.get("component_id") or "")
             artboard_id = str(current.get("active_artboard_id") or "")
@@ -15949,6 +16032,9 @@ class PaintDialog(QDialog):
         preview_document, stress_report = (
             self._painter_ui_stress_preview_document()
         )
+        from app.painter_ui_document import active_ui_page_document
+
+        canvas_document = active_ui_page_document(preview_document)
         valid_artboard_ids = {
             str(row.get("id") or "")
             for row in preview_document.get("artboards", [])
@@ -15967,7 +16053,7 @@ class PaintDialog(QDialog):
             active_artboard_id
             != str(getattr(self, "_painter_ui_view_artboard_id", "") or "")
         )
-        overlay.set_document(preview_document)
+        overlay.set_document(canvas_document)
         if restore_view and active_artboard_id:
             self._painter_ui_view_artboard_id = active_artboard_id
             saved_view = (

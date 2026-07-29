@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 18
+UI_DOCUMENT_VERSION = 19
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -131,17 +131,27 @@ def create_ui_document(
     *,
     name: str = "Main",
 ) -> dict[str, Any]:
+    page_id = "page-1"
     artboard_id = "artboard-1"
     return {
         "schema": UI_DOCUMENT_SCHEMA,
         "version": UI_DOCUMENT_VERSION,
         "document_id": "ui-document-1",
         "revision": 0,
+        "active_page_id": page_id,
         "active_artboard_id": artboard_id,
         "selection": {"object_id": "", "object_ids": []},
+        "pages": [
+            {
+                "id": page_id,
+                "name": "Page 1",
+                "active_artboard_id": artboard_id,
+            }
+        ],
         "artboards": [
             {
                 "id": artboard_id,
+                "page_id": page_id,
                 "name": str(name or "Main"),
                 "width": max(1, int(width)),
                 "height": max(1, int(height)),
@@ -200,7 +210,19 @@ def create_ui_document(
     }
 
 
-def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
+def _normalize_page(row: Mapping[str, Any], index: int) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id") or f"page-{index + 1}"),
+        "name": str(row.get("name") or f"Page {index + 1}"),
+        "active_artboard_id": str(row.get("active_artboard_id") or ""),
+    }
+
+
+def _normalize_artboard(
+    row: Mapping[str, Any],
+    index: int,
+    default_page_id: str,
+) -> dict[str, Any]:
     width = _positive(row.get("width"), 1920.0)
     height = _positive(row.get("height"), 1080.0)
     from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
@@ -209,6 +231,7 @@ def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
     layout = normalize_ui_artboard_layout(row, width=width, height=height)
     return {
         "id": str(row.get("id") or f"artboard-{index + 1}"),
+        "page_id": str(row.get("page_id") or default_page_id),
         "name": str(row.get("name") or f"Artboard {index + 1}"),
         "width": int(round(width)),
         "height": int(round(height)),
@@ -439,6 +462,18 @@ def normalize_ui_document(
     fallback_height: int = 1080,
 ) -> dict[str, Any]:
     raw = copy.deepcopy(dict(value)) if isinstance(value, Mapping) else {}
+    raw_pages = [
+        row for row in raw.get("pages", []) if isinstance(row, Mapping)
+    ]
+    if not raw_pages:
+        raw_pages = [{"id": "page-1", "name": "Page 1"}]
+    pages = [
+        _normalize_page(row, index) for index, row in enumerate(raw_pages)
+    ]
+    active_page_id = str(raw.get("active_page_id") or pages[0]["id"])
+    page_ids = {row["id"] for row in pages}
+    if active_page_id not in page_ids:
+        active_page_id = pages[0]["id"]
     raw_artboards = [
         row for row in raw.get("artboards", []) if isinstance(row, Mapping)
     ]
@@ -448,11 +483,40 @@ def normalize_ui_document(
             fallback_height,
         )["artboards"]
     artboards = [
-        _normalize_artboard(row, index) for index, row in enumerate(raw_artboards)
+        _normalize_artboard(row, index, active_page_id)
+        for index, row in enumerate(raw_artboards)
     ]
+    for artboard in artboards:
+        if artboard["page_id"] not in page_ids:
+            artboard["page_id"] = active_page_id
+    for page in pages:
+        candidates = [
+            row for row in artboards if row["page_id"] == page["id"]
+        ]
+        remembered = str(page.get("active_artboard_id") or "")
+        if remembered not in {row["id"] for row in candidates}:
+            page["active_artboard_id"] = (
+                candidates[0]["id"] if candidates else ""
+            )
+    page_artboards = [
+        row for row in artboards if row["page_id"] == active_page_id
+    ]
+    if not page_artboards:
+        active_page_id = artboards[0]["page_id"]
+        page_artboards = [
+            row for row in artboards if row["page_id"] == active_page_id
+        ]
     active_artboard_id = str(raw.get("active_artboard_id") or artboards[0]["id"])
-    if active_artboard_id not in {row["id"] for row in artboards}:
-        active_artboard_id = artboards[0]["id"]
+    if active_artboard_id not in {row["id"] for row in page_artboards}:
+        active_page = next(
+            row for row in pages if row["id"] == active_page_id
+        )
+        active_artboard_id = str(
+            active_page.get("active_artboard_id") or page_artboards[0]["id"]
+        )
+    for page in pages:
+        if page["id"] == active_page_id:
+            page["active_artboard_id"] = active_artboard_id
     raw_objects = [
         row for row in raw.get("objects", []) if isinstance(row, Mapping)
     ]
@@ -533,11 +597,13 @@ def normalize_ui_document(
         "version": UI_DOCUMENT_VERSION,
         "document_id": str(raw.get("document_id") or "ui-document-1"),
         "revision": max(0, int(_number(raw.get("revision"), 0))),
+        "active_page_id": active_page_id,
         "active_artboard_id": active_artboard_id,
         "selection": {
             "object_id": selected_id,
             "object_ids": selected_ids,
         },
+        "pages": pages,
         "artboards": artboards,
         "objects": objects,
         "components": components,
@@ -600,6 +666,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     document = normalize_ui_document(value)
     errors: list[str] = []
     warnings: list[str] = []
+    page_ids = [row["id"] for row in document["pages"]]
     artboard_ids = [row["id"] for row in document["artboards"]]
     object_ids = [row["id"] for row in document["objects"]]
     component_ids = [row["id"] for row in document["components"]]
@@ -614,6 +681,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         for row in document["objects"]
         for override in row["responsive_overrides"]
     ]
+    if len(set(page_ids)) != len(page_ids):
+        errors.append("duplicate_page_id")
     if len(set(artboard_ids)) != len(artboard_ids):
         errors.append("duplicate_artboard_id")
     if len(set(object_ids)) != len(object_ids):
@@ -631,7 +700,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     if len(set(responsive_override_ids)) != len(responsive_override_ids):
         errors.append("duplicate_responsive_override_id")
     all_ids = (
-        artboard_ids
+        page_ids
+        + artboard_ids
         + object_ids
         + component_ids
         + token_ids
@@ -643,16 +713,36 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     if len(set(all_ids)) != len(all_ids):
         errors.append("duplicate_stable_id")
     object_by_id = {row["id"]: row for row in document["objects"]}
+    page_id_set = set(page_ids)
     artboard_id_set = set(artboard_ids)
     component_id_set = set(component_ids)
     component_by_id = {row["id"]: row for row in document["components"]}
     token_id_set = set(token_ids)
     layout_grid_style_id_set = set(layout_grid_style_ids)
     for artboard in document["artboards"]:
+        if artboard["page_id"] not in page_id_set:
+            errors.append(
+                f"missing_page:{artboard['id']}:{artboard['page_id']}"
+            )
         style_id = artboard.get("layout_grid_style_id")
         if style_id and style_id not in layout_grid_style_id_set:
             errors.append(
                 f"missing_layout_grid_style:{artboard['id']}:{style_id}"
+            )
+    artboard_by_id = {row["id"]: row for row in document["artboards"]}
+    for page in document["pages"]:
+        remembered = str(page.get("active_artboard_id") or "")
+        if not remembered:
+            errors.append(f"page_without_artboard:{page['id']}")
+            continue
+        artboard = artboard_by_id.get(remembered)
+        if artboard is None:
+            errors.append(
+                f"missing_page_active_artboard:{page['id']}:{remembered}"
+            )
+        elif artboard["page_id"] != page["id"]:
+            errors.append(
+                f"page_active_artboard_mismatch:{page['id']}:{remembered}"
             )
     focus_orders: dict[tuple[str, int], str] = {}
     for row in document["objects"]:
@@ -979,6 +1069,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "errors": sorted(set(errors)),
         "warnings": sorted(set(warnings)),
         "layout_diagnostics": layout_diagnostics,
+        "page_count": len(page_ids),
         "artboard_count": len(artboard_ids),
         "object_count": len(object_ids),
         "component_count": len(document["components"]),
@@ -995,6 +1086,7 @@ def inspect_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "schema": "tigerstudio.painter.ui.inspect.v1",
         "document": copy.deepcopy(document),
         "validation": validate_ui_document(document),
+        "active_page_id": document["active_page_id"],
         "active_artboard_id": document["active_artboard_id"],
         "selected_object_id": document["selection"]["object_id"],
         "selected_object_ids": list(document["selection"]["object_ids"]),
@@ -1112,6 +1204,184 @@ def _remove_dangling_records(
     }
 
 
+def active_ui_page_document(value: Mapping[str, Any]) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    page_id = document["active_page_id"]
+    artboards = [
+        row for row in document["artboards"] if row["page_id"] == page_id
+    ]
+    artboard_ids = {row["id"] for row in artboards}
+    document["artboards"] = artboards
+    document["objects"] = [
+        row
+        for row in document["objects"]
+        if row["artboard_id"] in artboard_ids
+    ]
+    return document
+
+
+def add_ui_page(
+    value: Mapping[str, Any],
+    *,
+    name: str = "",
+    width: int = 1440,
+    height: int = 900,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    page_id = _next_id("page", document["pages"])
+    page = _normalize_page(
+        {
+            "id": page_id,
+            "name": name or f"Page {len(document['pages']) + 1}",
+            "active_artboard_id": "",
+        },
+        len(document["pages"]),
+    )
+    artboard_id = _next_id("artboard", document["artboards"])
+    artboard = _normalize_artboard(
+        {
+            "id": artboard_id,
+            "page_id": page_id,
+            "name": "Desktop",
+            "width": width,
+            "height": height,
+            "x": 0.0,
+            "y": 0.0,
+        },
+        len(document["artboards"]),
+        page_id,
+    )
+    document["pages"].append(page)
+    document["artboards"].append(artboard)
+    page["active_artboard_id"] = artboard_id
+    document["active_page_id"] = page_id
+    document["active_artboard_id"] = artboard_id
+    document["selection"] = {"object_id": "", "object_ids": []}
+    return _revised(document), {
+        **copy.deepcopy(page),
+        "artboard_id": artboard_id,
+    }
+
+
+def update_ui_page(
+    value: Mapping[str, Any],
+    page_id: str,
+    changes: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    target = str(page_id or "")
+    for index, row in enumerate(document["pages"]):
+        if row["id"] != target:
+            continue
+        updated = _normalize_page(
+            {**row, **dict(changes), "id": target},
+            index,
+        )
+        document["pages"][index] = updated
+        return _revised(document), copy.deepcopy(updated)
+    raise PainterUIDocumentError(f"UI page not found: {target}")
+
+
+def set_active_ui_page(
+    value: Mapping[str, Any],
+    page_id: str,
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    target = str(page_id or "")
+    if target not in {row["id"] for row in document["pages"]}:
+        raise PainterUIDocumentError(f"UI page not found: {target}")
+    if document["active_page_id"] == target:
+        return document
+    page = next(row for row in document["pages"] if row["id"] == target)
+    artboard = next(
+        (
+            row
+            for row in document["artboards"]
+            if row["id"] == page.get("active_artboard_id")
+            and row["page_id"] == target
+        ),
+        None,
+    )
+    if artboard is None:
+        artboard = next(
+            (
+                row for row in document["artboards"] if row["page_id"] == target
+            ),
+            None,
+        )
+    if artboard is None:
+        raise PainterUIDocumentError(f"UI page has no artboard: {target}")
+    document["active_page_id"] = target
+    document["active_artboard_id"] = artboard["id"]
+    document["selection"] = {"object_id": "", "object_ids": []}
+    return _revised(document)
+
+
+def remove_ui_page(
+    value: Mapping[str, Any],
+    page_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    target = str(page_id or "")
+    if len(document["pages"]) <= 1:
+        raise PainterUIDocumentError("A UI document must keep at least one page")
+    if target not in {row["id"] for row in document["pages"]}:
+        raise PainterUIDocumentError(f"UI page not found: {target}")
+    removed_artboards = {
+        row["id"] for row in document["artboards"] if row["page_id"] == target
+    }
+    removed_objects = {
+        row["id"]
+        for row in document["objects"]
+        if row["artboard_id"] in removed_artboards
+    }
+    document["pages"] = [
+        row for row in document["pages"] if row["id"] != target
+    ]
+    document["artboards"] = [
+        row
+        for row in document["artboards"]
+        if row["id"] not in removed_artboards
+    ]
+    document["objects"] = [
+        row
+        for row in document["objects"]
+        if row["id"] not in removed_objects
+    ]
+    cleanup = _remove_dangling_records(
+        document,
+        removed_object_ids=removed_objects,
+        removed_artboard_ids=removed_artboards,
+    )
+    if document["active_page_id"] == target:
+        document["active_page_id"] = document["pages"][0]["id"]
+        active_page = document["pages"][0]
+        remembered_artboard = next(
+            (
+                row["id"]
+                for row in document["artboards"]
+                if row["id"] == active_page.get("active_artboard_id")
+                and row["page_id"] == document["active_page_id"]
+            ),
+            "",
+        )
+        document["active_artboard_id"] = (
+            remembered_artboard
+            or next(
+                row["id"]
+                for row in document["artboards"]
+                if row["page_id"] == document["active_page_id"]
+            )
+        )
+        document["selection"] = {"object_id": "", "object_ids": []}
+    return _revised(document), {
+        "page_id": target,
+        "removed_artboard_ids": sorted(removed_artboards),
+        "removed_object_ids": sorted(removed_objects),
+        **cleanup,
+    }
+
+
 def add_ui_artboard(
     value: Mapping[str, Any],
     *,
@@ -1119,27 +1389,49 @@ def add_ui_artboard(
     width: int = 1920,
     height: int = 1080,
     breakpoint: str = "custom",
+    page_id: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     document = normalize_ui_document(value)
+    target_page_id = str(page_id or document["active_page_id"])
+    if target_page_id not in {row["id"] for row in document["pages"]}:
+        raise PainterUIDocumentError(f"UI page not found: {target_page_id}")
     artboard_id = _next_id("artboard", document["artboards"])
-    right_edge = max(
-        float(item["x"]) + float(item["width"])
+    page_artboards = [
+        item
         for item in document["artboards"]
+        if item["page_id"] == target_page_id
+    ]
+    right_edge = max(
+        (
+            float(item["x"]) + float(item["width"])
+            for item in page_artboards
+        ),
+        default=-80.0,
     )
     row = _normalize_artboard(
         {
             "id": artboard_id,
+            "page_id": target_page_id,
             "name": name or f"Artboard {len(document['artboards']) + 1}",
             "width": width,
             "height": height,
             "breakpoint": breakpoint,
             "x": right_edge + 80.0,
-            "y": min(float(item["y"]) for item in document["artboards"]),
+            "y": min(
+                (float(item["y"]) for item in page_artboards),
+                default=0.0,
+            ),
         },
         len(document["artboards"]),
+        target_page_id,
     )
     document["artboards"].append(row)
+    document["active_page_id"] = target_page_id
     document["active_artboard_id"] = artboard_id
+    for page in document["pages"]:
+        if page["id"] == target_page_id:
+            page["active_artboard_id"] = artboard_id
+            break
     document["selection"]["object_id"] = ""
     document["selection"]["object_ids"] = []
     return _revised(document), copy.deepcopy(row)
@@ -1168,7 +1460,11 @@ def update_ui_artboard(
             if isinstance(grids, list) and grids:
                 normalized_changes["layout_grid"] = dict(grids[0])
         merged = {**row, **normalized_changes, "id": row["id"]}
-        updated_row = _normalize_artboard(merged, index)
+        updated_row = _normalize_artboard(
+            merged,
+            index,
+            document["active_page_id"],
+        )
         document["artboards"][index] = updated_row
         return _revised(document), copy.deepcopy(updated_row)
     raise PainterUIDocumentError(f"UI artboard not found: {artboard_id}")
@@ -1179,10 +1475,21 @@ def remove_ui_artboard(
     artboard_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     document = normalize_ui_document(value)
-    if len(document["artboards"]) <= 1:
-        raise PainterUIDocumentError("A UI document must keep at least one artboard")
     if artboard_id not in {row["id"] for row in document["artboards"]}:
         raise PainterUIDocumentError(f"UI artboard not found: {artboard_id}")
+    target_artboard = next(
+        row for row in document["artboards"] if row["id"] == artboard_id
+    )
+    if (
+        sum(
+            row["page_id"] == target_artboard["page_id"]
+            for row in document["artboards"]
+        )
+        <= 1
+    ):
+        raise PainterUIDocumentError(
+            "A UI page must keep at least one artboard"
+        )
     removed_objects = [
         row["id"] for row in document["objects"] if row["artboard_id"] == artboard_id
     ]
@@ -1198,7 +1505,23 @@ def remove_ui_artboard(
         removed_artboard_ids={artboard_id},
     )
     if document["active_artboard_id"] == artboard_id:
-        document["active_artboard_id"] = document["artboards"][0]["id"]
+        page_artboards = [
+            row
+            for row in document["artboards"]
+            if row["page_id"] == document["active_page_id"]
+        ]
+        if not page_artboards:
+            document["active_page_id"] = document["artboards"][0]["page_id"]
+            page_artboards = [
+                row
+                for row in document["artboards"]
+                if row["page_id"] == document["active_page_id"]
+            ]
+        document["active_artboard_id"] = page_artboards[0]["id"]
+        for page in document["pages"]:
+            if page["id"] == document["active_page_id"]:
+                page["active_artboard_id"] = page_artboards[0]["id"]
+                break
     if document["selection"]["object_id"] in removed_objects:
         document["selection"]["object_id"] = ""
     document["selection"]["object_ids"] = [
@@ -1223,7 +1546,15 @@ def set_active_ui_artboard(
         raise PainterUIDocumentError(f"UI artboard not found: {target}")
     if document["active_artboard_id"] == target:
         return document
+    target_row = next(
+        row for row in document["artboards"] if row["id"] == target
+    )
+    document["active_page_id"] = target_row["page_id"]
     document["active_artboard_id"] = target
+    for page in document["pages"]:
+        if page["id"] == target_row["page_id"]:
+            page["active_artboard_id"] = target
+            break
     selected = document["selection"]["object_id"]
     selected_row = next(
         (row for row in document["objects"] if row["id"] == selected),
@@ -2052,7 +2383,9 @@ __all__ = [
     "UI_INTERACTION_TRIGGERS",
     "UI_OBJECT_KINDS",
     "UI_TOKEN_KINDS",
+    "active_ui_page_document",
     "add_ui_artboard",
+    "add_ui_page",
     "add_ui_component",
     "add_ui_interaction",
     "add_ui_object",
@@ -2064,6 +2397,7 @@ __all__ = [
     "migrate_ui_document",
     "normalize_ui_document",
     "remove_ui_artboard",
+    "remove_ui_page",
     "remove_ui_component",
     "remove_ui_interaction",
     "remove_ui_object",
@@ -2072,7 +2406,9 @@ __all__ = [
     "select_ui_object",
     "select_ui_objects",
     "set_active_ui_artboard",
+    "set_active_ui_page",
     "update_ui_artboard",
+    "update_ui_page",
     "update_ui_component",
     "update_ui_interaction",
     "update_ui_object",

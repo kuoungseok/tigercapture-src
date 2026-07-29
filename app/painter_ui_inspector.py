@@ -2187,6 +2187,7 @@ class PainterUIInspector(QWidget):
         self.production_panel.set_document(self._document)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
+        active_page = self._document["active_page_id"]
         active = self._document["active_artboard_id"]
         active_rows = [
             row
@@ -2209,7 +2210,12 @@ class PainterUIInspector(QWidget):
         self._syncing = True
         try:
             self.artboard_combo.clear()
-            for artboard in self._document["artboards"]:
+            page_artboards = [
+                artboard
+                for artboard in self._document["artboards"]
+                if artboard["page_id"] == active_page
+            ]
+            for artboard in page_artboards:
                 self.artboard_combo.addItem(
                     f"{artboard['name']}  {artboard['width']} x {artboard['height']}",
                     artboard["id"],
@@ -2219,7 +2225,7 @@ class PainterUIInspector(QWidget):
                         self.artboard_combo.count() - 1
                     )
             self.delete_artboard_button.setEnabled(
-                len(self._document["artboards"]) > 1
+                len(page_artboards) > 1
             )
             self._sync_artboard_layout_fields()
             self.layer_list.clear()
