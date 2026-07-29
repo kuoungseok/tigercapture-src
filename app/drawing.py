@@ -8695,6 +8695,11 @@ class PaintDialog(QDialog):
             "Batch Rename",
             self._show_painter_ui_batch_rename,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Keyboard Shortcuts...",
+            self._show_painter_ui_shortcut_map,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -13232,6 +13237,12 @@ class PaintDialog(QDialog):
             layer_dock.setVisible(not ui_design)
         for shortcut in getattr(self, "_blockout_camera_shortcuts", []):
             shortcut.setEnabled(blockout)
+        # QShortcut remains active even when its menu or toolbar is hidden.
+        # Keep mode-exclusive commands from competing with UI Design keys.
+        for shortcut in getattr(self, "_paint_shortcuts", []):
+            shortcut.setEnabled(not ui_design and not blockout)
+        for shortcut in getattr(self, "_painter_tool_shortcuts", []):
+            shortcut.setEnabled(not ui_design)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
         if panel is not None:
             panel.hide()
@@ -14229,6 +14240,23 @@ class PaintDialog(QDialog):
         dialog.activateWindow()
         dialog.find_edit.setFocus()
 
+    def _show_painter_ui_shortcut_map(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_shortcut_map_dialog import (
+            PainterUIShortcutMapDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_shortcut_map_dialog", None)
+        if dialog is None:
+            dialog = PainterUIShortcutMapDialog(self)
+            self._painter_ui_shortcut_map_dialog = dialog
+        dialog.refresh()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        dialog.search_edit.setFocus()
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14334,6 +14362,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_find_replace()
         elif operation_type == "batch_rename":
             self._show_painter_ui_batch_rename()
+        elif operation_type == "shortcut_map":
+            self._show_painter_ui_shortcut_map()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

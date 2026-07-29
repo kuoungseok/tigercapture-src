@@ -791,6 +791,15 @@ Batch Rename:
 
 Shortcut:
 
+- Implemented as an on-demand searchable dialog opened from UI menu or Quick
+  Actions, not as a fixed Navigator or Inspector section.
+- The map distinguishes global, UI Design, Paint, and 3D Place scopes, marks
+  the active scope, and reports conflicts only when scopes can overlap.
+- Mode changes explicitly disable inactive `QShortcut` objects because hiding
+  or disabling a menu alone does not disable standalone shortcuts.
+- `paint.ui.shortcut.inspect` is the read-only automation equivalent and does
+  not change document revision, dirty state, save payload, or Undo.
+
 - 메뉴와 tooltip에 shortcut 표시
 - 검색 가능한 shortcut map
 - 충돌 경고

@@ -1373,6 +1373,23 @@ Implemented checkpoint (2026-07-29, Batch Rename slice):
   covered. `tools/qa_painter_ui_batch_rename.py` regenerates evidence under
   `debugCapture/painter_ui_designer/batch_rename`.
 
+Implemented checkpoint (2026-07-29, shortcut map slice):
+
+- UI > Keyboard Shortcuts and Quick Actions open a transient, searchable
+  Studio-themed dialog. It does not become another fixed Inspector panel.
+- `app/painter_ui_shortcut_map.py` owns the canonical UI Design, Paint, 3D
+  Place, and global catalog, search, active-mode status, and overlap-aware
+  conflict diagnostics. Identical keys in mutually exclusive modes are not
+  reported as false conflicts.
+- UI Design mode now disables Paint-only `QShortcut` objects explicitly;
+  hidden menus no longer leave Ctrl+D or Delete competing with UI commands.
+- `paint.ui.shortcut.inspect` exposes the same read-only report without
+  changing the document, dirty state, revision, or Undo history.
+- Korean and supported-language labels, friendly empty search results, focused
+  tests, and desktop/compact evidence are covered.
+  `tools/qa_painter_ui_shortcut_map.py` regenerates evidence under
+  `debugCapture/painter_ui_designer/shortcuts`.
+
 Exit criteria:
 
 - Pan, zoom, selection, and resize stay responsive under the release corpus.

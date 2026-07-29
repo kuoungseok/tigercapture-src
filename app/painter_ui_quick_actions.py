@@ -143,6 +143,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "requires": "selection",
     },
     {
+        "id": "document.shortcut_map",
+        "label": "Keyboard shortcuts",
+        "detail": "Search commands and diagnose overlapping key bindings.",
+        "keywords": "keyboard shortcut hotkey keymap conflict commands",
+        "operation": {"type": "shortcut_map"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

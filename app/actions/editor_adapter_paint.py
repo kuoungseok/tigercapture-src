@@ -2918,6 +2918,21 @@ class PaintAdapterMixin(
         state["batch_rename"] = report
         return state
 
+    def paint_ui_shortcut_inspect(
+        self,
+        *,
+        query: str = "",
+        conflicts_only: bool = False,
+        active_scope: str = "ui_design",
+    ) -> dict[str, Any]:
+        from app.painter_ui_shortcut_map import inspect_painter_shortcuts
+
+        return inspect_painter_shortcuts(
+            query=query,
+            conflicts_only=conflicts_only,
+            active_scope=active_scope,
+        )
+
     def paint_ui_selection_parent(
         self,
         *,
