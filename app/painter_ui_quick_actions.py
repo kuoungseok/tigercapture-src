@@ -171,6 +171,20 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "focus_audit"},
     },
     {
+        "id": "document.release_corpus",
+        "label": "UI release corpus",
+        "detail": "Verify editable exchange and delivery packages.",
+        "keywords": "release corpus round trip figma template handoff prototype review umg",
+        "operation": {"type": "release_corpus"},
+    },
+    {
+        "id": "document.release_corpus",
+        "label": "UI release corpus",
+        "detail": "Verify editable exchange and delivery packages.",
+        "keywords": "release corpus round trip figma template handoff prototype review umg",
+        "operation": {"type": "release_corpus"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

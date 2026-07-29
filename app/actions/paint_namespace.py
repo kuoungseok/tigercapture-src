@@ -1810,6 +1810,18 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter keyboard focus coverage would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.release_corpus.run",
+        "Run the Painter UI editable exchange and delivery round-trip corpus.",
+        "paint",
+        "paint_ui_release_corpus_run",
+        params_schema=schema_object(
+            {"output_dir": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI release packages would be verified",
+    )
+    registry.register_adapter_action(
         "paint.ui.recovery.inspect",
         "List crash-safe Painter recovery snapshots.",
         "paint",

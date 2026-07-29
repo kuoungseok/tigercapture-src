@@ -8807,6 +8807,11 @@ class PaintDialog(QDialog):
             "Keyboard Focus Audit...",
             self._show_painter_ui_focus_audit,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "UI Release Corpus...",
+            self._show_painter_ui_release_corpus,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14424,6 +14429,57 @@ class PaintDialog(QDialog):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _show_painter_ui_release_corpus(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_release_corpus_dialog import (
+            PainterUIReleaseCorpusDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_release_corpus_dialog", None)
+        if dialog is None:
+            dialog = PainterUIReleaseCorpusDialog(self)
+            dialog.run_requested.connect(self._run_painter_ui_release_corpus)
+            dialog.open_output_requested.connect(
+                self._open_painter_ui_release_corpus_output
+            )
+            self._painter_ui_release_corpus_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _run_painter_ui_release_corpus(self) -> None:
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QApplication
+
+        from app.painter_ui_release_corpus import (
+            run_painter_ui_release_corpus,
+        )
+
+        dialog = getattr(self, "_painter_ui_release_corpus_dialog", None)
+        if dialog is None:
+            return
+        dialog.set_running()
+        QApplication.processEvents()
+        output_dir = (
+            Path(__file__).resolve().parents[1]
+            / "debugCapture"
+            / "painter_ui_designer"
+            / "release_corpus"
+        )
+        dialog.set_report(run_painter_ui_release_corpus(output_dir))
+
+    def _open_painter_ui_release_corpus_output(self, path: str) -> None:
+        from pathlib import Path
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        target = Path(path).expanduser().resolve()
+        if target.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14537,6 +14593,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_locale_audit()
         elif operation_type == "focus_audit":
             self._show_painter_ui_focus_audit()
+        elif operation_type == "release_corpus":
+            self._show_painter_ui_release_corpus()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

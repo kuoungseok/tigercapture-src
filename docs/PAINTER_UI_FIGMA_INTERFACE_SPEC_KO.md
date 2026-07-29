@@ -837,6 +837,23 @@ Keyboard focus visibility:
 - `paint.ui.focus_audit.inspect` returns identical Tab-order, label, and focus
   ring coverage without changing selection, revision, dirty state, or Undo.
 
+UI release round-trip corpus:
+
+- `app/painter_ui_release_corpus.py` builds one deterministic, editable mobile
+  UI fixture with a component, token, interaction, review comment, and dev
+  handoff metadata.
+- The corpus verifies semantic round trips for native `.tspaint`, editable
+  Figma plugin exchange, `.tstemplate`, design handoff, interactive prototype,
+  offline review, and the provider-neutral Tiger UMG contract.
+- UI > UI Release Corpus and Quick Actions open a transient responsive report;
+  it never consumes permanent Navigator or Inspector space.
+- `paint.ui.release_corpus.run` invokes the same non-mutating service. Evidence
+  is regenerable and may live under `debugCapture`; product state never depends
+  on that directory.
+- Figma exchange does not claim native `.fig` compatibility. Tiger UMG coverage
+  at this gate is contract-only; Widget Blueprint compilation and a real Unreal
+  capture remain separate release gates.
+
 Crash-safe recovery:
 
 - Dirty Painter documents are snapshotted every 60 seconds through a

@@ -1400,7 +1400,7 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The checkpoint Registry evidence covers 254 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 255 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
@@ -1456,6 +1456,25 @@ Implemented checkpoint (2026-07-29, keyboard focus visibility slice):
   `debugCapture/painter_ui_designer/focus`.
 - The locale release corpus now includes the focus-audit command, and accessible
   names participate in runtime Painter localization.
+
+Implemented checkpoint (2026-07-29, release round-trip corpus slice):
+
+- `app/painter_ui_release_corpus.py` exercises one deterministic editable UI
+  fixture through seven delivery paths: `.tspaint`, Figma plugin exchange,
+  `.tstemplate`, design handoff, interactive prototype, offline review, and the
+  provider-neutral Tiger UMG contract.
+- The first six paths compare normalized document fingerprints after reload.
+  UMG validates the provider-neutral package exactly and records Unreal compile
+  and real capture as `not_run`.
+- UI > UI Release Corpus and searchable Quick Actions expose a transient,
+  responsive report. Desktop shows package, status, timing, and scope; compact
+  layout hides timing and scope without clipping the result.
+- `paint.ui.release_corpus.run` is non-mutating and returns the same report.
+  Regenerable evidence and desktop/compact screenshots are produced by
+  `tools/qa_painter_ui_release_corpus.py` under
+  `debugCapture/painter_ui_designer/release_corpus`.
+- All visible report copy participates in the six-language Painter localization
+  table. The report explicitly avoids native `.fig` and Unreal runtime claims.
 
 Exit criteria:
 

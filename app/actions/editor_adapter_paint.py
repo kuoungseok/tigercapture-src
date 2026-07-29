@@ -2952,6 +2952,29 @@ class PaintAdapterMixin(
 
         return inspect_painter_ui_focus(self._paint_dialog_owner())
 
+    def paint_ui_release_corpus_run(
+        self,
+        *,
+        output_dir: str = "",
+    ) -> dict[str, Any]:
+        from pathlib import Path
+
+        from app.painter_ui_release_corpus import (
+            run_painter_ui_release_corpus,
+        )
+
+        target = (
+            Path(output_dir).expanduser()
+            if str(output_dir).strip()
+            else (
+                Path(__file__).resolve().parents[2]
+                / "debugCapture"
+                / "painter_ui_designer"
+                / "release_corpus"
+            )
+        )
+        return run_painter_ui_release_corpus(target)
+
     def paint_ui_recovery_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         rows = dialog._painter_recovery_rows()
