@@ -116,17 +116,101 @@ def test_connected_unreal_engine_project_can_start_without_reopening(tmp_path) -
     class Owner:
         pass
 
+    class Settings:
+        def __init__(self):
+            self.values = {}
+
+        def value(self, key, default=None):
+            return self.values.get(key, default)
+
+        def setValue(self, key, value):
+            self.values[key] = value
+
+        def remove(self, key):
+            self.values.pop(key, None)
+
+        def sync(self):
+            pass
+
     owner = Owner()
+    settings = Settings()
     project = tmp_path / "Connected.uproject"
+    project.touch()
     setattr(owner, "_unreal_engine_project_path", str(project))
 
-    assert connected_unreal_engine_project_path(owner) == project
-    result = start_unreal_engine_link_with_project(owner, project)
+    assert connected_unreal_engine_project_path(owner, settings=settings) == project
+    result = start_unreal_engine_link_with_project(owner, project, settings=settings)
 
     assert result == {"status": "connected", "project_path": str(project)}
     assert getattr(owner, "_unreal_engine_project_path") == str(project)
     assert UNREAL_ENGINE_START_CONNECTED_LABEL == "Start with connected project"
     assert UNREAL_ENGINE_OPEN_PROJECT_LABEL == "Open UnrealEngine5 project"
+
+
+def test_unreal_engine_project_path_persists_across_owner_instances(tmp_path) -> None:
+    from app.video_editor_unreal_workflow import (
+        UNREAL_ENGINE_PROJECT_SETTINGS_KEY,
+        connected_unreal_engine_project_path,
+        start_unreal_engine_link_with_project,
+    )
+
+    class Settings:
+        def __init__(self):
+            self.values = {}
+
+        def value(self, key, default=None):
+            return self.values.get(key, default)
+
+        def setValue(self, key, value):
+            self.values[key] = value
+
+        def remove(self, key):
+            self.values.pop(key, None)
+
+        def sync(self):
+            pass
+
+    class Owner:
+        pass
+
+    settings = Settings()
+    project = tmp_path / "Performance.uproject"
+    project.touch()
+
+    start_unreal_engine_link_with_project(Owner(), project, settings=settings)
+    restored_owner = Owner()
+
+    assert settings.values[UNREAL_ENGINE_PROJECT_SETTINGS_KEY] == str(project)
+    assert connected_unreal_engine_project_path(restored_owner, settings=settings) == project
+    assert restored_owner._unreal_engine_project_path == str(project)
+
+
+def test_missing_remembered_unreal_engine_project_is_forgotten(tmp_path) -> None:
+    from app.video_editor_unreal_workflow import (
+        UNREAL_ENGINE_PROJECT_SETTINGS_KEY,
+        load_connected_unreal_engine_project,
+    )
+
+    class Settings:
+        def __init__(self, path):
+            self.values = {UNREAL_ENGINE_PROJECT_SETTINGS_KEY: str(path)}
+
+        def value(self, key, default=None):
+            return self.values.get(key, default)
+
+        def setValue(self, key, value):
+            self.values[key] = value
+
+        def remove(self, key):
+            self.values.pop(key, None)
+
+        def sync(self):
+            pass
+
+    settings = Settings(tmp_path / "Moved.uproject")
+
+    assert load_connected_unreal_engine_project(settings=settings) is None
+    assert UNREAL_ENGINE_PROJECT_SETTINGS_KEY not in settings.values
 
 
 def test_unreal_engine_link_start_mode_dialog_exposes_start_and_open(tmp_path) -> None:

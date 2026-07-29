@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
@@ -15,9 +15,49 @@ UNREAL_ENGINE_PROJECT_DIALOG_TITLE = "Open UnrealEngine5 project"
 UNREAL_ENGINE_PROJECT_FILTER = "Unreal Engine 5 Project (*.uproject);;All Files (*)"
 UNREAL_ENGINE_START_CONNECTED_LABEL = "Start with connected project"
 UNREAL_ENGINE_OPEN_PROJECT_LABEL = "Open UnrealEngine5 project"
+UNREAL_ENGINE_PROJECT_SETTINGS_KEY = "unreal_link/last_project_path"
 
 ProjectDialogGetter = Callable[[QWidget | None, str, str, str], tuple[str, str]]
 ConnectedProjectChoice = Literal["start", "open", "cancel"]
+
+
+def _unreal_link_settings() -> Any:
+    from PySide6.QtCore import QSettings
+
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def remember_connected_unreal_engine_project(
+    project_path: Path | str | None,
+    *,
+    settings: Any | None = None,
+) -> None:
+    store = settings or _unreal_link_settings()
+    if project_path is None:
+        store.remove(UNREAL_ENGINE_PROJECT_SETTINGS_KEY)
+    else:
+        store.setValue(
+            UNREAL_ENGINE_PROJECT_SETTINGS_KEY,
+            str(Path(project_path).expanduser().resolve()),
+        )
+    store.sync()
+
+
+def load_connected_unreal_engine_project(
+    *,
+    settings: Any | None = None,
+) -> Path | None:
+    store = settings or _unreal_link_settings()
+    value = store.value(UNREAL_ENGINE_PROJECT_SETTINGS_KEY, "")
+    text = str(value or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    if path.suffix.lower() == ".uproject" and path.is_file():
+        return path
+    store.remove(UNREAL_ENGINE_PROJECT_SETTINGS_KEY)
+    store.sync()
+    return None
 
 
 def select_unreal_engine_project_file(
@@ -39,13 +79,19 @@ def select_unreal_engine_project_file(
     return Path(text)
 
 
-def connected_unreal_engine_project_path(owner: object) -> Path | None:
+def connected_unreal_engine_project_path(
+    owner: object,
+    *,
+    settings: Any | None = None,
+) -> Path | None:
     text = str(getattr(owner, "_unreal_engine_project_path", "") or "").strip()
-    if not text:
-        return None
-    path = Path(text)
-    if path.suffix.lower() != ".uproject":
-        return None
+    if text:
+        path = Path(text)
+        if path.suffix.lower() == ".uproject":
+            return path
+    path = load_connected_unreal_engine_project(settings=settings)
+    if path is not None:
+        setattr(owner, "_unreal_engine_project_path", str(path))
     return path
 
 
@@ -73,8 +119,15 @@ def choose_unreal_engine_link_start_mode(
     return "cancel"
 
 
-def start_unreal_engine_link_with_project(owner: object, project_path: Path) -> dict[str, str]:
+def start_unreal_engine_link_with_project(
+    owner: object,
+    project_path: Path,
+    *,
+    settings: Any | None = None,
+) -> dict[str, str]:
+    project_path = Path(project_path).expanduser().resolve()
     setattr(owner, "_unreal_engine_project_path", str(project_path))
+    remember_connected_unreal_engine_project(project_path, settings=settings)
     return {
         "status": "connected",
         "project_path": str(project_path),
@@ -116,10 +169,13 @@ __all__ = [
     "UNREAL_ENGINE_OPEN_PROJECT_LABEL",
     "UNREAL_ENGINE_PROJECT_DIALOG_TITLE",
     "UNREAL_ENGINE_PROJECT_FILTER",
+    "UNREAL_ENGINE_PROJECT_SETTINGS_KEY",
     "UNREAL_ENGINE_START_CONNECTED_LABEL",
     "choose_unreal_engine_link_start_mode",
     "connected_unreal_engine_project_path",
+    "load_connected_unreal_engine_project",
     "open_unreal_engine_link",
+    "remember_connected_unreal_engine_project",
     "select_unreal_engine_project_file",
     "start_unreal_engine_link_with_project",
 ]
