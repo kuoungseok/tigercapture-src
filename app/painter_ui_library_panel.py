@@ -8,6 +8,7 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -22,6 +23,7 @@ from app.painter_ui_library_store import (
     compare_ui_library_update,
     default_ui_library_store_root,
     inspect_ui_library_store,
+    read_ui_library_package,
 )
 
 
@@ -31,6 +33,7 @@ class PainterUILibraryPanel(QWidget):
     update_apply_requested = Signal(str)
     update_defer_requested = Signal(str, int)
     rollback_requested = Signal(str)
+    component_insert_requested = Signal(str, str, int)
 
     def __init__(self, parent=None, *, store_root: str | Path | None = None) -> None:
         super().__init__(parent)
@@ -91,12 +94,28 @@ class PainterUILibraryPanel(QWidget):
         self.tree.setHeaderLabels(["Library", "Version", "State"])
         self.tree.setRootIsDecorated(True)
         self.tree.setIndentation(14)
+        self.tree.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        header = self.tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.currentItemChanged.connect(self._sync_selection)
+        self.tree.itemDoubleClicked.connect(self._insert_selected_component)
         layout.addWidget(self.tree, 1)
 
         self.summary_label = QLabel("No local libraries installed")
         self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
+
+        self.insert_component_button = QPushButton("Add to canvas")
+        self.insert_component_button.setIcon(app_icon("plus", size=11))
+        self.insert_component_button.clicked.connect(
+            self._insert_selected_component
+        )
+        self.insert_component_button.setEnabled(False)
+        layout.addWidget(self.insert_component_button)
 
         package_row = QHBoxLayout()
         self.export_button = QPushButton("Export")
@@ -148,6 +167,7 @@ class PainterUILibraryPanel(QWidget):
             rows.sort(key=lambda row: int(row["version"]), reverse=True)
             root = QTreeWidgetItem([rows[0]["name"], "", ""])
             root.setData(0, Qt.ItemDataRole.UserRole, library_id)
+            root.setData(3, Qt.ItemDataRole.UserRole, "library")
             self.tree.addTopLevelItem(root)
             for row in rows:
                 state = (
@@ -163,9 +183,46 @@ class PainterUILibraryPanel(QWidget):
                 item.setData(0, Qt.ItemDataRole.UserRole, library_id)
                 item.setData(1, Qt.ItemDataRole.UserRole, int(row["version"]))
                 item.setData(2, Qt.ItemDataRole.UserRole, dict(row))
+                item.setData(3, Qt.ItemDataRole.UserRole, "version")
                 root.addChild(item)
+                try:
+                    package = read_ui_library_package(row["installed_path"])
+                except (OSError, ValueError):
+                    package = {"payload": {}}
+                for component in package["payload"].get("components", []):
+                    component_item = QTreeWidgetItem(
+                        [str(component["name"]), "", "Component"]
+                    )
+                    component_item.setData(
+                        0,
+                        Qt.ItemDataRole.UserRole,
+                        library_id,
+                    )
+                    component_item.setData(
+                        1,
+                        Qt.ItemDataRole.UserRole,
+                        int(row["version"]),
+                    )
+                    component_item.setData(
+                        2,
+                        Qt.ItemDataRole.UserRole,
+                        {
+                            "library_id": library_id,
+                            "version": int(row["version"]),
+                            "component_id": str(component["id"]),
+                            "name": str(component["name"]),
+                            "active": bool(row["active"]),
+                        },
+                    )
+                    component_item.setData(
+                        3,
+                        Qt.ItemDataRole.UserRole,
+                        "component",
+                    )
+                    item.addChild(component_item)
                 if library_id == selected and row["active"]:
                     selected_item = item
+                item.setExpanded(bool(row["active"]))
             root.setExpanded(True)
         if selected_item is not None:
             self.tree.setCurrentItem(selected_item)
@@ -193,8 +250,21 @@ class PainterUILibraryPanel(QWidget):
             else None
         )
         report = report if isinstance(report, dict) else {}
+        item_kind = (
+            str(current.data(3, Qt.ItemDataRole.UserRole) or "")
+            if current is not None
+            else ""
+        )
+        self.insert_component_button.setEnabled(
+            item_kind == "component" and bool(report.get("active"))
+        )
         self.rollback_button.setEnabled(bool(library_id))
-        if report:
+        if item_kind == "component":
+            self.summary_label.setText(
+                f"{report.get('name', 'Component')}  |  "
+                f"{library_id} v{report.get('version', 0)}"
+            )
+        elif report:
             counts = report.get("counts") or {}
             self.summary_label.setText(
                 f"{report['name']} v{report['version']}  |  "
@@ -205,6 +275,21 @@ class PainterUILibraryPanel(QWidget):
         has_candidate = bool(self._candidate_report)
         self.accept_button.setEnabled(has_candidate)
         self.defer_button.setEnabled(has_candidate)
+
+    def _insert_selected_component(self, *_args) -> None:
+        item = self.tree.currentItem()
+        if item is None or str(
+            item.data(3, Qt.ItemDataRole.UserRole) or ""
+        ) != "component":
+            return
+        report = item.data(2, Qt.ItemDataRole.UserRole)
+        if not isinstance(report, dict) or not report.get("active"):
+            return
+        self.component_insert_requested.emit(
+            str(report["library_id"]),
+            str(report["component_id"]),
+            int(report["version"]),
+        )
 
     def _choose_export(self) -> None:
         name = str(self._document.get("name") or "Painter UI Library")

@@ -11,7 +11,9 @@ M1 Page checkpoint (2026-07-29):
   compact Assets library and `paint.ui.style.*` mutation contract.
 - M3 `.tsuilib` local packages and the compact Libraries Assets tab implement
   hash/license validation, version review, accept, defer, and rollback.
-  Cross-document insertion from installed packages remains pending.
+  Active package versions expose component definitions that can be inserted
+  into another document with namespaced dependencies, durable extracted
+  resources, one Undo, and `paint.ui.library.component.insert` parity.
 - M4 now has stable Flow starting points, expanded trigger/action enums,
   validated transitions, a selection-driven compact Prototype panel, and
   `paint.ui.prototype.flow.*` / `transition.set` Action parity.

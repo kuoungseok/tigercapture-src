@@ -116,6 +116,12 @@ Focused entry points:
   The Common Inspector exposes Auto/Horizontal/Vertical spacing, mixed `—`,
   explicit px gap, and Tidy Up. `paint.ui.selection.tidy` uses the same planner
   and rejects locked, cross-artboard, or cross-parent selections explicitly.
+  Installed `.tsuilib` packages are not display-only: active versions expand
+  into components in the compact Libraries Assets tree. Add to Canvas and
+  `paint.ui.library.component.insert` both use
+  `app/painter_ui_library_import.py` to namespace dependencies, restore hashed
+  resources into the durable local library store, reuse an imported definition,
+  and create one editable instance with one Undo step.
   Painter UI numeric fields share `app/painter_ui_numeric_input.py`: absolute
   and safe arithmetic input, leading relative operations, percentage scaling,
   and localized Reset all commit through the field's existing mutation/Undo

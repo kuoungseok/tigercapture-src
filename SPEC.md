@@ -7894,6 +7894,12 @@ AI Script Edit MVP integration:
   `paint.ui.library.update.*`, and `paint.ui.library.rollback` share one
   validated store. Accept/Defer/Rollback change local library state only;
   installation never silently alters the active `.tspaint` document.
+- Active `.tsuilib` versions expose their component definitions in the compact
+  Libraries Assets tree. Add to Canvas and
+  `paint.ui.library.component.insert` namespace imported component, object,
+  style, token, and variable IDs; extract hashed image/font resources into the
+  durable local library store; reuse a matching imported definition; and add
+  one editable instance through the existing component engine and Undo path.
 - Painter UI schema 22 adds stable prototype Flow starting points, expanded
   interaction triggers/actions, and normalized transitions. The
   selection-driven Prototype panel and

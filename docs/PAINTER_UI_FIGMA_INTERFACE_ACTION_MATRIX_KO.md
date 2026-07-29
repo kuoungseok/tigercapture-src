@@ -53,6 +53,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Boolean vector editing | Compatible multi-selection transient bar; Union/Subtract/Intersect/Exclude; editable operand release; Canvas/PNG/SVG parity | `paint.ui.vector.boolean.inspect/compose/set/release` |
 | Figma sections and comments | Sections tab and object-anchored Painter Review mapping | `paint.ui.section.inspect/create/update/remove`, `paint.ui.review.*` |
 | Components and Instances | Components library plus Inspector create/instance/Variant/switch/detach controls | `paint.ui.component.*` |
+| Installed library component | Libraries Assets tree > active version > component > Add to Canvas | `paint.ui.library.component.insert` |
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |
 | Tokens and themes | Token library, exact scoped-value suggestions, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.suggest`, `paint.ui.token.*`, `paint.ui.theme.*` |
 | Prototype interactions | Prototype authoring/preview and production panel | `paint.ui.interaction.*` |

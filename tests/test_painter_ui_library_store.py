@@ -84,6 +84,12 @@ def test_ui_library_package_round_trip_and_resource_hash(tmp_path: Path) -> None
     }
     assert len(package["payload"]["component_objects"]) == 2
     assert package["payload"]["resources"][0]["name"] == "icon.png"
+    assert package["payload"]["resources"][0]["bindings"] == [
+        {
+            "object_id": "ui-object-2",
+            "content_key": "source_path",
+        }
+    ]
 
 
 def test_ui_library_update_defer_apply_and_rollback(tmp_path: Path) -> None:
@@ -146,6 +152,70 @@ def test_ui_library_update_defer_apply_and_rollback(tmp_path: Path) -> None:
     )
 
 
+def test_installed_library_component_imports_dependencies_and_reuses_definition(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_document import create_ui_document, validate_ui_document
+    from app.painter_ui_library_import import insert_ui_library_component
+    from app.painter_ui_library_store import (
+        export_ui_library_package,
+        install_ui_library_package,
+        read_ui_library_package,
+    )
+
+    resource = tmp_path / "icon.png"
+    resource.write_bytes(b"durable-library-icon")
+    source = _library_document(resource)
+    exported = export_ui_library_package(
+        source,
+        tmp_path / "insertable.tsuilib",
+        library_id="insertable",
+        name="Insertable",
+    )
+    store = tmp_path / "store"
+    install_ui_library_package(exported["path"], store_root=store)
+    source_component_id = read_ui_library_package(exported["path"])[
+        "payload"
+    ]["components"][0]["id"]
+
+    document, first = insert_ui_library_component(
+        create_ui_document(800, 600),
+        library_id="insertable",
+        component_id=source_component_id,
+        store_root=store,
+        x=120,
+        y=80,
+    )
+    instance_root = next(
+        row
+        for row in document["objects"]
+        if row["id"] == document["selection"]["object_id"]
+    )
+    instance_image = next(
+        row
+        for row in document["objects"]
+        if row["parent_id"] == instance_root["id"]
+    )
+    assert validate_ui_document(document)["ok"] is True
+    assert instance_root["component_role"] == "instance"
+    assert (instance_root["x"], instance_root["y"]) == (120.0, 80.0)
+    assert Path(instance_image["content"]["source_path"]).is_file()
+    assert first["imported"]["components"] == 1
+    assert first["imported"]["tokens"] == 1
+
+    document, second = insert_ui_library_component(
+        document,
+        library_id="insertable",
+        component_id=source_component_id,
+        store_root=store,
+        x=240,
+        y=160,
+    )
+    assert second["imported"]["components"] == 0
+    assert len(document["components"]) == 1
+    assert validate_ui_document(document)["ok"] is True
+
+
 def test_ui_library_actions_export_install_and_inspect(tmp_path: Path) -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
@@ -182,6 +252,41 @@ def test_ui_library_actions_export_install_and_inspect(tmp_path: Path) -> None:
     ).to_dict()
     assert inspected["ok"] is True
     assert inspected["result"]["library_count"] == 1
+
+    resource = tmp_path / "action-icon.png"
+    resource.write_bytes(b"action-library-icon")
+    source_package = tmp_path / "source-components.tsuilib"
+    from app.painter_ui_library_store import export_ui_library_package
+
+    source_export = export_ui_library_package(
+        _library_document(resource),
+        source_package,
+        library_id="source-components",
+        name="Source Components",
+    )
+    installed_source = registry.execute(
+        "paint.ui.library.package.install",
+        {
+            "path": source_export["path"],
+            "store_root": str(tmp_path / "store"),
+        },
+    ).to_dict()
+    assert installed_source["ok"] is True
+    inserted = registry.execute(
+        "paint.ui.library.component.insert",
+        {
+            "library_id": "source-components",
+            "component_id": "ui-component-1",
+            "store_root": str(tmp_path / "store"),
+            "x": 96,
+            "y": 72,
+        },
+    ).to_dict()
+    assert inserted["ok"] is True
+    assert inserted["result"]["library_component"]["instance"][
+        "component_id"
+    ]
+    assert dialog._painter_ui_document["selection"]["object_id"]
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
@@ -199,7 +304,9 @@ def test_ui_library_panel_shows_versions_and_emits_review_choices(
     )
 
     store = tmp_path / "store"
-    document = create_ui_document()
+    resource = tmp_path / "panel-icon.png"
+    resource.write_bytes(b"panel-library-icon")
+    document = _library_document(resource)
     v1 = export_ui_library_package(
         document,
         tmp_path / "panel-v1.tsuilib",
@@ -219,6 +326,22 @@ def test_ui_library_panel_shows_versions_and_emits_review_choices(
     panel.set_document(document)
     assert panel.tree.topLevelItemCount() == 1
     assert panel.tree.topLevelItem(0).childCount() == 1
+    version_item = panel.tree.topLevelItem(0).child(0)
+    assert version_item.childCount() == 1
+    component_item = version_item.child(0)
+    inserted: list[tuple[str, str, int]] = []
+    panel.component_insert_requested.connect(
+        lambda library_id, component_id, version: inserted.append(
+            (library_id, component_id, version)
+        )
+    )
+    panel.tree.setCurrentItem(component_item)
+    panel.insert_component_button.click()
+    assert inserted == [("panel-kit", "ui-component-1", 1)]
+    panel.resize(280, 460)
+    panel.show()
+    app.processEvents()
+    assert panel.tree.horizontalScrollBar().maximum() == 0
 
     report = panel.set_update_candidate(v2["path"])
     assert report["update_available"] is True

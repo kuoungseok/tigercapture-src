@@ -268,6 +268,38 @@ class PaintAdapterMixin(
 
         return inspect_ui_library_store(store_root=store_root or None)
 
+    def paint_ui_library_component_insert(
+        self,
+        *,
+        library_id: str,
+        component_id: str,
+        version: int = 0,
+        artboard_id: str = "",
+        x: float = 64.0,
+        y: float = 64.0,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_library_import import insert_ui_library_component
+
+        document, report = insert_ui_library_component(
+            dialog._painter_ui_document,
+            library_id=library_id,
+            component_id=component_id,
+            version=version,
+            artboard_id=artboard_id,
+            x=x,
+            y=y,
+            store_root=store_root or None,
+        )
+        dialog._push_undo_state("Insert library component")
+        state = self._paint_ui_commit(
+            dialog,
+            "Insert library component",
+            document,
+        )
+        return {**state, "library_component": report}
+
     def paint_ui_library_update_inspect(
         self,
         *,

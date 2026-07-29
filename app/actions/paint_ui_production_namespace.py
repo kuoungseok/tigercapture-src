@@ -160,6 +160,22 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_library_store_inspect",
         {"store_root": {"type": "string"}},
     )
+    undo_action(
+        "paint.ui.library.component.insert",
+        "Insert an installed active library component into the current artboard",
+        "paint_ui_library_component_insert",
+        {
+            "library_id": {"type": "string"},
+            "component_id": {"type": "string"},
+            "version": {"type": "integer", "minimum": 0},
+            "artboard_id": {"type": "string"},
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "store_root": {"type": "string"},
+        },
+        required=("library_id", "component_id"),
+        undo_label="Insert library component",
+    )
     read_action(
         "paint.ui.library.update.inspect",
         "Review counts, hashes, and versions before accepting a library update",

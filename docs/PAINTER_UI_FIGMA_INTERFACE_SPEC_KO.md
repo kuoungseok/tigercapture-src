@@ -99,6 +99,10 @@ Implemented:
 - Schema 21 also adds stable-ID Color, Text, and Effect Styles with per-object
   links. Existing Layout Grid Styles appear in the same Assets library while
   retaining their established artboard service.
+- Active `.tsuilib` versions expand to reusable components in the Libraries
+  Assets surface. Add to Canvas and `paint.ui.library.component.insert` share
+  one import service that namespaces dependencies, restores durable resources,
+  creates an editable instance, and commits one Undo step.
 - Schema 22 adds stable prototype Flow starting points and transition metadata
   while keeping Motion keyframes outside Painter.
 

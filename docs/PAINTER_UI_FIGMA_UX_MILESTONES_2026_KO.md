@@ -926,15 +926,21 @@ Implemented checkpoint (2026-07-29):
   license metadata, and hashed image/font resources. Package and embedded
   resource hashes are validated before installation.
 - The compact `Libraries` Assets surface lists installed and active versions,
-  reviews candidate counts/hashes, and exposes Accept, Defer, and Rollback
-  without adding a fixed panel. Automation uses
+  expands active versions into reusable component definitions, reviews
+  candidate counts/hashes, and exposes Add to Canvas, Accept, Defer, and
+  Rollback without adding a fixed panel. Automation uses
   `paint.ui.library.package.export/install`,
-  `paint.ui.library.store.inspect`, `paint.ui.library.update.inspect/apply`,
+  `paint.ui.library.store.inspect`, `paint.ui.library.component.insert`,
+  `paint.ui.library.update.inspect/apply`,
   `paint.ui.library.update.defer`, and `paint.ui.library.rollback`.
-- `tools/qa_painter_ui_libraries.py` regenerates
-  `painter_ui_designer_m3_local_libraries.png`. Importing selected installed
-  definitions into another open document remains the next M3 slice; package
-  installation does not silently mutate the current document.
+- Cross-document insertion namespaces component/object/style/token/variable
+  IDs, extracts hashed resources into the durable local store, reuses an
+  already imported definition from the same package version, and creates one
+  editable instance with one Undo step. Package installation still does not
+  silently mutate the current document.
+- `tools/qa_painter_ui_library_component_insert.py` regenerates desktop and
+  compact evidence under
+  `debugCapture/painter_ui_designer/library_component_insert`.
 
 Exit criteria:
 

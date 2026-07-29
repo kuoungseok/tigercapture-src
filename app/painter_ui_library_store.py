@@ -95,24 +95,30 @@ def _component_object_ids(document: Mapping[str, Any]) -> set[str]:
 
 def _resource_candidates(document: Mapping[str, Any]) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
-    seen: set[str] = set()
     for obj in document["objects"]:
         content = dict(obj.get("content") or {})
         candidates = []
         if obj["kind"] == "image":
             candidates.append(
-                ("image", str(content.get("source_path") or content.get("path") or ""))
+                (
+                    "image",
+                    "source_path" if content.get("source_path") else "path",
+                    str(content.get("source_path") or content.get("path") or ""),
+                )
             )
-        candidates.append(("font", str(content.get("font_path") or "")))
-        for kind, raw_path in candidates:
+        candidates.append(("font", "font_path", str(content.get("font_path") or "")))
+        for kind, content_key, raw_path in candidates:
             if not raw_path:
                 continue
             path = Path(raw_path).expanduser().resolve()
-            key = f"{kind}:{path}"
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append({"kind": kind, "source_path": str(path)})
+            rows.append(
+                {
+                    "kind": kind,
+                    "source_path": str(path),
+                    "object_id": str(obj["id"]),
+                    "content_key": content_key,
+                }
+            )
     return rows
 
 
@@ -151,22 +157,34 @@ def export_ui_library_package(
         destination = destination.with_suffix(UI_LIBRARY_ARCHIVE_SUFFIX)
     destination.parent.mkdir(parents=True, exist_ok=True)
     resource_files: list[tuple[Path, str, dict[str, Any]]] = []
+    resources_by_key: dict[str, dict[str, Any]] = {}
     for candidate in _resource_candidates(normalized):
         source = Path(candidate["source_path"])
         if not source.is_file():
             continue
         sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
         archive_path = f"resources/{sha256}{source.suffix.lower()}"
-        record = {
-            "id": f"{candidate['kind']}-{sha256[:16]}",
-            "kind": candidate["kind"],
-            "name": source.name,
-            "archive_path": archive_path,
-            "sha256": sha256,
-            "size_bytes": source.stat().st_size,
-        }
-        payload["resources"].append(record)
-        resource_files.append((source, archive_path, record))
+        resource_key = f"{candidate['kind']}:{sha256}"
+        record = resources_by_key.get(resource_key)
+        if record is None:
+            record = {
+                "id": f"{candidate['kind']}-{sha256[:16]}",
+                "kind": candidate["kind"],
+                "name": source.name,
+                "archive_path": archive_path,
+                "sha256": sha256,
+                "size_bytes": source.stat().st_size,
+                "bindings": [],
+            }
+            resources_by_key[resource_key] = record
+            payload["resources"].append(record)
+            resource_files.append((source, archive_path, record))
+        record["bindings"].append(
+            {
+                "object_id": candidate["object_id"],
+                "content_key": candidate["content_key"],
+            }
+        )
     package_id = _safe_id(library_id)
     manifest = {
         "schema": UI_LIBRARY_PACKAGE_SCHEMA,

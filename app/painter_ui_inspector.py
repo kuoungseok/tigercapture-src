@@ -323,6 +323,7 @@ class PainterUIInspector(QWidget):
     library_update_apply_requested = Signal(str)
     library_update_defer_requested = Signal(str, int)
     library_rollback_requested = Signal(str)
+    library_component_insert_requested = Signal(str, str, int)
     token_binding_requested = Signal(str, str, str)
     token_import_requested = Signal(str)
     token_export_requested = Signal()
@@ -891,6 +892,9 @@ class PainterUIInspector(QWidget):
         )
         self.library_panel.rollback_requested.connect(
             self.library_rollback_requested
+        )
+        self.library_panel.component_insert_requested.connect(
+            self.library_component_insert_requested
         )
         add_inspector_tab(self.library_panel, "Libraries", "folder")
 
