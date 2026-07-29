@@ -624,6 +624,27 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_ppt_send",
         {"scope": ppt_scope},
     )
+    conversion_params = {"object_ids": string_array}
+    read_action(
+        "paint.ui.convert.inspect",
+        "Inspect selected UI objects for explicit Paint and Vector conversion",
+        "paint_ui_conversion_inspect",
+        conversion_params,
+    )
+    undo_action(
+        "paint.ui.convert.to_paint",
+        "Render selected UI objects into an editable Paint image layer",
+        "paint_ui_convert_to_paint",
+        conversion_params,
+        undo_label="Convert UI selection to Paint",
+    )
+    undo_action(
+        "paint.ui.convert.to_vector",
+        "Convert compatible selected UI shapes into editable Vector Networks",
+        "paint_ui_convert_to_vector",
+        conversion_params,
+        undo_label="Convert UI selection to Vector",
+    )
 
 
 __all__ = ["register_paint_ui_production_actions"]

@@ -60,6 +60,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | AI Prototype Build | Publish AI mode selector, review summary, Web/App/UMG readiness | `paint.ui.ai.prototype.plan/apply`, `paint.ui.advanced_delivery.inspect` |
 | Executable Web package | Publish > Deliver Web preflight/export, responsive desktop/mobile artifact | `paint.ui.web.preflight`, `paint.ui.web.package` |
 | Send to PPT Maker | Publish > Deliver active/all-artboard scope, editable native elements plus explicit per-object bake | `paint.ui.ppt.inspect`, `paint.ui.ppt.send` |
+| Paint / Vector conversion | UI menu, selection context menu, Quick Actions; durable Paint image layer or stable-ID Vector Network | `paint.ui.convert.inspect/to_paint/to_vector` |
 | Motion link | Inspector Animate/Preview and Motion Actor placement | `paint.ui.motion.*`, `paint.ui.motion_actor.*` |
 | Delivery/UMG | Production preflight/export and shared TigerStudioUMG flow | `paint.ui.delivery.*`, `paint.ui.handoff.export` |
 

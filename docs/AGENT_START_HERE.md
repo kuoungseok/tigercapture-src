@@ -230,9 +230,10 @@ Focused entry points:
   service; planning is non-mutating and apply is one Undo step. Static
   Web/App/UMG capability classification lives in
   `app/painter_ui_advanced_delivery.py` and is exposed by
-  `paint.ui.advanced_delivery.inspect`. Do not claim Web package, PPT transfer,
-  or Paint/Vector conversion until those remaining M8 adapters produce real
-  artifacts.
+  `paint.ui.advanced_delivery.inspect`. Executable Web, shared PPT Maker, and
+  Paint/Vector conversion now have focused adapters, real artifacts, Action
+  parity, and QA contracts documented below; keep capability-only inspection
+  distinct from those generated-artifact claims.
   Schema 16 added persistent Polygon/Star/Arc parameters through the shared
   `app/painter_ui_parametric_shapes.py` geometry contract. The grouped Shape
   flyout, contextual Inspector, `paint.ui.object.add/update`, canvas hit
@@ -434,3 +435,15 @@ shared `app.pptgen.schema.DeckSpec` and `PptGeneratorWindow`. Use
 schema. Preserve stable Painter IDs in PPT metadata, keep supported objects
 editable, and individually bake unsupported exact geometry with an explicit
 classification. Sending mutates the receiving PPT deck, not Painter history.
+
+## Painter UI Paint / Vector Conversion Boundary
+
+`app/painter_ui_mode_conversion.py` owns explicit cross-mode conversion. Use
+`paint.ui.convert.inspect/to_paint/to_vector`; do not add hidden conversion to
+selection, export, or mode switching. Convert to Paint renders the selected
+single-artboard hierarchy into a transparent, durable image layer while
+preserving the canonical UI source. Convert to Vector preserves stable object
+IDs and style while changing compatible shape geometry into an editable Vector
+Network. Text, images, components, and other semantic objects must be reported
+as blocked instead of silently outlined or flattened. Both mutations are one
+Painter Undo step and must survive `.tspaint` save/load.

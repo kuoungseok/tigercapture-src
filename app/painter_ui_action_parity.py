@@ -176,6 +176,7 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.advanced_delivery.",
             "paint.ui.web.",
             "paint.ui.ppt.",
+            "paint.ui.convert.",
         ),
         "required": (
             "paint.ui.delivery.preflight",
@@ -184,6 +185,8 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.web.package",
             "paint.ui.ppt.inspect",
             "paint.ui.ppt.send",
+            "paint.ui.convert.to_paint",
+            "paint.ui.convert.to_vector",
         ),
     },
     {

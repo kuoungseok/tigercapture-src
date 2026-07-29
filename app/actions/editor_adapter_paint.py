@@ -919,6 +919,47 @@ class PaintAdapterMixin(
             raise RuntimeError("Painter PPT bridge is unavailable")
         return dict(method(scope=scope) or {})
 
+    def paint_ui_conversion_inspect(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_mode_conversion import (
+            inspect_painter_ui_conversion,
+        )
+
+        return inspect_painter_ui_conversion(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+        )
+
+    def paint_ui_convert_to_paint(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        return dict(
+            dialog._convert_painter_ui_selection_to_paint(
+                object_ids=object_ids,
+            )
+            or {}
+        )
+
+    def paint_ui_convert_to_vector(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        return dict(
+            dialog._convert_painter_ui_selection_to_vector(
+                object_ids=object_ids,
+            )
+            or {}
+        )
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

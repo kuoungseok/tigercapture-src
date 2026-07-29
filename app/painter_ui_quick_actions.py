@@ -143,6 +143,22 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "requires": "selection",
     },
     {
+        "id": "selection.convert_to_paint",
+        "label": "Convert to Paint",
+        "detail": "Render the selection as an editable Paint image layer",
+        "keywords": "rasterize flatten paint brush image layer",
+        "operation": {"type": "convert_to_paint"},
+        "requires": "selection",
+    },
+    {
+        "id": "selection.convert_to_vector",
+        "label": "Convert to Vector",
+        "detail": "Turn compatible shapes into editable Vector Networks",
+        "keywords": "outline path nodes vector flatten shape",
+        "operation": {"type": "convert_to_vector"},
+        "requires": "vector_convertible",
+    },
+    {
         "id": "document.shortcut_map",
         "label": "Keyboard shortcuts",
         "detail": "Search commands and diagnose overlapping key bindings.",
@@ -284,6 +300,8 @@ def _enabled(requirement: str, context: Mapping[str, Any]) -> bool:
         )
     if requirement == "next_artboard":
         return bool(context.get("cross_artboard_duplicate_eligible"))
+    if requirement == "vector_convertible":
+        return bool(context.get("vector_conversion_available"))
     return True
 
 
@@ -451,6 +469,12 @@ def search_painter_ui_quick_actions(
     )
     context["next_artboard_name"] = str(
         cross_artboard["target_artboard_name"]
+    )
+    from app.painter_ui_mode_conversion import inspect_painter_ui_conversion
+
+    conversion = inspect_painter_ui_conversion(document)
+    context["vector_conversion_available"] = bool(
+        conversion["vector"]["available"]
     )
     candidates: list[dict[str, Any]] = []
     from app.painter_i18n import painter_text

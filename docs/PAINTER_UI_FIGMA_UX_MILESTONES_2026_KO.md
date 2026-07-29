@@ -1586,8 +1586,8 @@ Implemented checkpoint (2026-07-29, M8 AI Prototype Build slice):
 - `tools/qa_painter_ui_ai_prototype.py` regenerates Korean desktop/compact
   evidence and a machine-readable report under
   `debugCapture/painter_ui_designer/ai_prototype`.
-- Remaining M8 required work is Paint/Vector conversion. Those Actions remain
-  intentionally absent until their real artifacts and Undo contracts exist.
+- M8 required Paint/Vector conversion is implemented below with real artifacts,
+  stable IDs, Action parity, Undo, and `.tspaint` round-trip evidence.
 
 Implemented checkpoint (2026-07-29, M8 executable Web delivery slice):
 
@@ -1619,6 +1619,23 @@ Implemented checkpoint (2026-07-29, M8 Painter-to-PPT slice):
   the mutated document.
 - `tools/qa_painter_ui_ppt_bridge.py` captures the real PPT Maker with desktop
   and mobile slides and writes a real PPTX artifact for QA.
+
+Implemented checkpoint (2026-07-29, M8 Paint/Vector conversion slice):
+
+- `app/painter_ui_mode_conversion.py` provides explicit inspection and shared
+  conversion services. Mode switching and export never flatten UI implicitly.
+- Convert to Paint resolves layout/theme, renders the selected single-artboard
+  hierarchy into a cropped transparent PNG, adds it as a durable Paint image
+  layer, preserves the UI source, and creates one Undo step.
+- Convert to Vector preserves the stable source object ID and style while
+  replacing compatible shape geometry with editable Vector Network nodes.
+  Semantic text/image/component content and locked objects are reported as
+  blocked rather than silently degraded.
+- UI menu, context menu, Quick Actions, and automation share
+  `paint.ui.convert.inspect/to_paint/to_vector`.
+- `tools/qa_painter_ui_mode_conversion.py` captures the real vector-node and
+  Paint-layer results and proves `.tspaint` save/load with the converted image
+  embedded.
 
 Exit criteria:
 

@@ -8554,6 +8554,8 @@ class PaintDialog(QDialog):
         return button
 
     def _build_painter_menu_bar(self) -> QMenuBar:
+        from app.painter_i18n import painter_text
+
         menu_bar = QMenuBar(self)
         menu_bar.setObjectName("PaintMenuBar")
 
@@ -8774,6 +8776,20 @@ class PaintDialog(QDialog):
             ui_menu,
             "Delete Active Artboard",
             self._delete_active_painter_ui_artboard,
+        )
+        ui_menu.addSeparator()
+        self._painter_ui_convert_paint_action = self._add_painter_menu_action(
+            ui_menu,
+            painter_text("Convert to Paint"),
+            self._convert_painter_ui_selection_to_paint,
+        )
+        self._painter_ui_convert_vector_action = self._add_painter_menu_action(
+            ui_menu,
+            painter_text("Convert to Vector"),
+            self._convert_painter_ui_selection_to_vector,
+        )
+        ui_menu.aboutToShow.connect(
+            self._refresh_painter_ui_conversion_actions
         )
         ui_menu.addSeparator()
         self._add_painter_menu_action(
@@ -14678,6 +14694,10 @@ class PaintDialog(QDialog):
             self._show_painter_ui_find_replace()
         elif operation_type == "batch_rename":
             self._show_painter_ui_batch_rename()
+        elif operation_type == "convert_to_paint":
+            self._convert_painter_ui_selection_to_paint()
+        elif operation_type == "convert_to_vector":
+            self._convert_painter_ui_selection_to_vector()
         elif operation_type == "shortcut_map":
             self._show_painter_ui_shortcut_map()
         elif operation_type == "action_parity":
@@ -16115,6 +16135,140 @@ class PaintDialog(QDialog):
             f"Sent to PPT: {report['slide_count']} slides"
         )
         return {**report, "opened": True, "created": created}
+
+    def _inspect_painter_ui_conversion(
+        self,
+        object_ids: list[str] | None = None,
+    ) -> dict:
+        if isinstance(object_ids, bool):
+            object_ids = None
+        from app.painter_ui_mode_conversion import (
+            inspect_painter_ui_conversion,
+        )
+
+        return inspect_painter_ui_conversion(
+            self._painter_ui_document,
+            object_ids=object_ids,
+        )
+
+    def _refresh_painter_ui_conversion_actions(self) -> None:
+        report = self._inspect_painter_ui_conversion()
+        paint_action = getattr(
+            self,
+            "_painter_ui_convert_paint_action",
+            None,
+        )
+        if paint_action is not None:
+            paint_action.setEnabled(bool(report["paint"]["available"]))
+        vector_action = getattr(
+            self,
+            "_painter_ui_convert_vector_action",
+            None,
+        )
+        if vector_action is not None:
+            vector_action.setEnabled(bool(report["vector"]["available"]))
+
+    def _convert_painter_ui_selection_to_vector(
+        self,
+        object_ids: list[str] | None = None,
+    ) -> dict:
+        if isinstance(object_ids, bool):
+            object_ids = None
+        from app.painter_ui_mode_conversion import (
+            convert_painter_ui_to_vector,
+        )
+
+        document, report = convert_painter_ui_to_vector(
+            self._painter_ui_document,
+            object_ids=object_ids,
+        )
+        self._push_undo_state("Convert UI selection to Vector")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._tool_status_label.setText(
+            f"Converted {report['converted_count']} UI shapes to Vector"
+        )
+        return report
+
+    def _convert_painter_ui_selection_to_paint(
+        self,
+        object_ids: list[str] | None = None,
+    ) -> dict:
+        if isinstance(object_ids, bool):
+            object_ids = None
+        from app.painter_ui_mode_conversion import (
+            render_painter_ui_selection_to_paint,
+        )
+
+        image, report = render_painter_ui_selection_to_paint(
+            self._painter_ui_document,
+            object_ids=object_ids,
+        )
+        document = self._painter_ui_document
+        safe_document_id = self._safe_clipboard_image_stem(
+            str(document["document_id"])
+        )
+        asset_dir = (
+            self._painter_ui_conversion_asset_root()
+            / "painter_ui_conversions"
+            / safe_document_id
+            / str(document["revision"])
+        )
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        source_ids = "-".join(report["source_object_ids"])
+        safe_source = self._safe_clipboard_image_stem(source_ids)
+        asset_path = asset_dir / (
+            f"{safe_source}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
+        )
+        if not image.save(str(asset_path), "PNG"):
+            raise RuntimeError("Could not save converted Painter UI image layer")
+        bounds = report["source_bounds"]
+        artboard_size = report["artboard_size"]
+        artboard_width = max(1.0, float(artboard_size["width"]))
+        artboard_height = max(1.0, float(artboard_size["height"]))
+        sticker = Sticker(
+            png_path=str(asset_path.resolve()),
+            x_norm=max(0.0, min(1.0, float(bounds["x"]) / artboard_width)),
+            y_norm=max(0.0, min(1.0, float(bounds["y"]) / artboard_height)),
+            width_norm=max(
+                0.001,
+                min(1.0, float(bounds["width"]) / artboard_width),
+            ),
+            height_norm=max(
+                0.001,
+                min(1.0, float(bounds["height"]) / artboard_height),
+            ),
+            start_ms=self._time_ms,
+            end_ms=-1,
+            z_index=max(
+                (row.z_index for row in self._stickers),
+                default=0,
+            )
+            + 1,
+        )
+        self._push_undo_state("Convert UI selection to Paint")
+        self._stickers.append(sticker)
+        self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
+        self._spawn_sticker_item(sticker)
+        self._painter_document_dirty = True
+        self._update_inspector_counts()
+        self._set_canvas_workspace_mode("paint")
+        return {
+            **report,
+            "asset_path": str(asset_path.resolve()),
+            "paint_layer_id": self._selected_layer_id,
+        }
+
+    @staticmethod
+    def _painter_ui_conversion_asset_root() -> Path:
+        from PySide6.QtCore import QStandardPaths
+
+        return Path(
+            QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+        )
 
     def _open_painter_ui_artifact(self, path: str) -> None:
         from app.painter_ui_artifact import open_painter_ui_artifact
@@ -25867,6 +26021,13 @@ class PaintDialog(QDialog):
                 painter_text("Paste to replace")
             )
             scale_action = menu.addAction(painter_text("Scale selection..."))
+            conversion = self._inspect_painter_ui_conversion()
+            convert_paint_action = menu.addAction(
+                painter_text("Convert to Paint")
+            )
+            convert_vector_action = menu.addAction(
+                painter_text("Convert to Vector")
+            )
             copy_action.setEnabled(bool(selected))
             paste_in_place_action.setEnabled(has_clipboard)
             duplicate_next_action.setEnabled(
@@ -25884,6 +26045,12 @@ class PaintDialog(QDialog):
                 bool(selected_ids and has_clipboard)
             )
             scale_action.setEnabled(bool(selected_ids))
+            convert_paint_action.setEnabled(
+                bool(conversion["paint"]["available"])
+            )
+            convert_vector_action.setEnabled(
+                bool(conversion["vector"]["available"])
+            )
             copy_action.triggered.connect(
                 lambda _checked=False: self._copy_painter_ui_object_payload()
             )
@@ -25906,6 +26073,16 @@ class PaintDialog(QDialog):
             )
             scale_action.triggered.connect(
                 lambda _checked=False: self._scale_painter_ui_selection()
+            )
+            convert_paint_action.triggered.connect(
+                lambda _checked=False: (
+                    self._convert_painter_ui_selection_to_paint()
+                )
+            )
+            convert_vector_action.triggered.connect(
+                lambda _checked=False: (
+                    self._convert_painter_ui_selection_to_vector()
+                )
             )
             menu.addSeparator()
             parent_action = menu.addAction(painter_text("Select parent"))
@@ -25965,6 +26142,8 @@ class PaintDialog(QDialog):
                     "paste_properties": paste_properties_action,
                     "paste_replace": paste_replace_action,
                     "scale_selection": scale_action,
+                    "convert_to_paint": convert_paint_action,
+                    "convert_to_vector": convert_vector_action,
                     "select_parent": parent_action,
                     "deep_select": deep_action,
                     "enter_group": enter_scope_action,

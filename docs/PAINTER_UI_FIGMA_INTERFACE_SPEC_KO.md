@@ -1266,3 +1266,29 @@ overlay mode로 전환한다.
   sent from Painter. Regenerable QA copies under `debugCapture` are disposable.
 - `tools/qa_painter_ui_ppt_bridge.py` proves a two-slide editable deck inside
   the real shared PPT Maker and writes a real `.pptx` QA artifact.
+
+## 22. Explicit Paint / Vector Conversion
+
+- `app/painter_ui_mode_conversion.py` is the focused conversion service shared
+  by the UI and `paint.ui.convert.inspect/to_paint/to_vector`.
+- Conversion is explicit. Merely switching Paint/UI Design modes, exporting,
+  or selecting an object never flattens the canonical UI document.
+- Convert to Paint accepts one or more selected objects from one artboard,
+  includes their descendants, resolves layout and theme values, and renders a
+  tightly cropped transparent PNG. Painter adds it as an editable image layer
+  at the matching normalized artboard position and switches to Paint mode.
+- The source UI objects remain intact. The generated image lives under the
+  durable application-data root and is embedded by normal `.tspaint`
+  persistence. Undo removes the image layer and restores UI Design in one step.
+- Convert to Vector supports rectangle, ellipse, line, polygon, star, arc, and
+  existing path geometry. It retains the source stable object ID, style,
+  transform, hierarchy, constraints, and records `converted_from_kind`, while
+  replacing geometry with an editable Vector Network.
+- Text, image, button/component semantics, progress, Motion Actor, and locked
+  objects are explicitly blocked from Vector conversion. They are never
+  silently outlined or rasterized by the Vector command.
+- UI menu, selection context menu, Quick Actions, and Python Actions invoke the
+  same conversion methods. Both conversions are one revision/Undo mutation.
+- `tools/qa_painter_ui_mode_conversion.py` captures real Vector-node and Paint
+  layer results and proves a saved `.tspaint` round trip with its embedded
+  converted asset.
