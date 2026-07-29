@@ -815,6 +815,16 @@ UI / Action parity:
 - `paint.ui.action_parity.inspect` exposes the same live Registry audit without
   changing the document, revision, dirty state, or Undo.
 
+Locale and font release corpus:
+
+- Critical tabs, commands, statuses, and contextual labels are rendered in all
+  six supported languages with the active application fallback font.
+- Fixed controls fail on width overflow; long contextual descriptions declare
+  an explicit elide policy instead of silently clipping.
+- Missing glyphs and corrupt replacement text are release-blocking issues.
+- UI > Locale and Font Audit, Quick Actions, and
+  `paint.ui.locale_audit.inspect` share the same read-only report.
+
 ## 10. 기존 기능 재배치 표
 
 | 기존 기능 | 현재 위치 | 새 위치 |

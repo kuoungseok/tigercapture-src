@@ -2942,6 +2942,11 @@ class PaintAdapterMixin(
         actions = ActionRegistry(owner=None).list_actions()
         return inspect_painter_ui_action_parity(actions)
 
+    def paint_ui_locale_audit_inspect(self) -> dict[str, Any]:
+        from app.painter_ui_locale_audit import inspect_painter_ui_locales
+
+        return inspect_painter_ui_locales()
+
     def paint_ui_selection_parent(
         self,
         *,

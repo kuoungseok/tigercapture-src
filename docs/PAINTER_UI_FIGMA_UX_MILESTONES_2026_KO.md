@@ -1400,11 +1400,28 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The current Registry evidence covers 248 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 249 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
   `debugCapture/painter_ui_designer/action_parity`.
+
+Implemented checkpoint (2026-07-29, locale/font release corpus slice):
+
+- `app/painter_ui_locale_audit.py` renders critical UI tabs, commands, status
+  labels, and contextual copy in all six supported languages using the active
+  application fallback font.
+- The report separates fixed-control overflow, explicitly allowed elision,
+  missing glyphs, and corrupt replacement text. Only the first, missing glyph,
+  and corruption categories block release.
+- UI > Locale and Font Audit and Quick Actions open a transient read-only
+  report; `paint.ui.locale_audit.inspect` exposes identical evidence.
+- The initial release corpus covers 11 critical strings across six languages
+  with zero blocking issues. It is representative release evidence, not a
+  claim that every legacy Painter sentence has been visually audited.
+- Desktop and compact evidence regenerate with
+  `tools/qa_painter_ui_locale_audit.py` under
+  `debugCapture/painter_ui_designer/locale_audit`.
 
 Exit criteria:
 

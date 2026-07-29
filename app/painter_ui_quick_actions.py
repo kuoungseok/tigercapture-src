@@ -157,6 +157,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "action_parity"},
     },
     {
+        "id": "document.locale_audit",
+        "label": "Locale and font audit",
+        "detail": "Check critical UI copy for clipping and missing glyphs.",
+        "keywords": "locale language translation font glyph overflow clip",
+        "operation": {"type": "locale_audit"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

@@ -813,6 +813,14 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Inspect > Delivery / Export", "검사 > 전달 / 내보내기", "検査 > 配信 / 書き出し", "检查 > 交付 / 导出", "Inspecter > Livraison / Export", "Prüfen > Ausgabe / Export"),
     ("Inspect / Review Prototype", "검사 / 프로토타입 리뷰", "検査 / プロトタイプレビュー", "检查 / 原型审查", "Inspecter / Réviser le prototype", "Prüfen / Prototyp-Review"),
     ("File exchange / AI Design", "파일 교환 / AI 디자인", "ファイル交換 / AIデザイン", "文件交换 / AI 设计", "Échange de fichiers / Design IA", "Dateiaustausch / KI-Design"),
+    ("Locale and font audit", "언어와 폰트 검사", "言語とフォントの検査", "语言与字体检查", "Audit langue et police", "Sprach- und Schriftprüfung"),
+    ("Locale and Font Audit...", "언어와 폰트 검사...", "言語とフォントの検査...", "语言与字体检查...", "Audit langue et police...", "Sprach- und Schriftprüfung..."),
+    ("No locale report available.", "언어 검사 보고서가 없습니다.", "言語検査レポートはありません。", "没有语言检查报告。", "Aucun rapport de langue.", "Kein Sprachbericht verfügbar."),
+    ("Language", "언어", "言語", "语言", "Langue", "Sprache"),
+    ("Overflow", "넘침", "はみ出し", "溢出", "Débordement", "Überlauf"),
+    ("Elided", "줄임", "省略", "省略", "Abrégé", "Gekürzt"),
+    ("Glyphs", "글리프", "グリフ", "字形", "Glyphes", "Glyphen"),
+    ("{languages} languages · {entries} critical strings · {issues} issues · {font}", "{languages}개 언어 · 핵심 문구 {entries}개 · 문제 {issues}개 · {font}", "{languages}言語 · 重要文言{entries}件 · 問題{issues}件 · {font}", "{languages} 种语言 · {entries} 个关键文本 · {issues} 个问题 · {font}", "{languages} langues · {entries} textes · {issues} problèmes · {font}", "{languages} Sprachen · {entries} Texte · {issues} Probleme · {font}"),
 )
 
 _TABLE = {

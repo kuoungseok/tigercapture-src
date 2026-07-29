@@ -20,6 +20,8 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.batch_rename.",
             "paint.ui.shortcut.",
             "paint.ui.action_parity.",
+            "paint.ui.locale_audit.",
+            "paint.ui.locale_audit.",
             "paint.ui.selection.similar.",
         ),
         "required": (

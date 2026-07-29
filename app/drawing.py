@@ -8705,6 +8705,11 @@ class PaintDialog(QDialog):
             "UI / Action Parity...",
             self._show_painter_ui_action_parity,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Locale and Font Audit...",
+            self._show_painter_ui_locale_audit,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14285,6 +14290,23 @@ class PaintDialog(QDialog):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _show_painter_ui_locale_audit(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_locale_audit import inspect_painter_ui_locales
+        from app.painter_ui_locale_audit_dialog import (
+            PainterUILocaleAuditDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_locale_audit_dialog", None)
+        if dialog is None:
+            dialog = PainterUILocaleAuditDialog(self)
+            self._painter_ui_locale_audit_dialog = dialog
+        dialog.set_report(inspect_painter_ui_locales())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14394,6 +14416,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_shortcut_map()
         elif operation_type == "action_parity":
             self._show_painter_ui_action_parity()
+        elif operation_type == "locale_audit":
+            self._show_painter_ui_locale_audit()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":
