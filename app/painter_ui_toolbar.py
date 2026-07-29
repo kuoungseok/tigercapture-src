@@ -69,6 +69,14 @@ class PainterUIFloatingToolbar(QFrame):
         self.tool_buttons["select"] = select_button
         self._tool_group_for_kind["select"] = select_button
 
+        scale_button = self._tool_button("Scale (K)", "scale")
+        scale_button.clicked.connect(
+            lambda _checked=False: self._select_direct_tool("scale")
+        )
+        layout.addWidget(scale_button)
+        self.tool_buttons["scale"] = scale_button
+        self._tool_group_for_kind["scale"] = scale_button
+
         frame_button = self._tool_button("Frame", "ui-frame")
         frame_button.clicked.connect(
             lambda _checked=False: self.tool_requested.emit("frame")
@@ -415,6 +423,10 @@ class PainterUIFloatingToolbar(QFrame):
         return button
 
     def _select_group_tool(self, kind: str) -> None:
+        self.set_active_tool(kind)
+        self.tool_requested.emit(str(kind))
+
+    def _select_direct_tool(self, kind: str) -> None:
         self.set_active_tool(kind)
         self.tool_requested.emit(str(kind))
 

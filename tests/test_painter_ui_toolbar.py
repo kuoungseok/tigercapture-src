@@ -120,6 +120,22 @@ def test_floating_toolbar_exposes_dedicated_vector_pen_tool() -> None:
     toolbar.deleteLater()
 
 
+def test_floating_toolbar_exposes_dedicated_scale_tool() -> None:
+    _app()
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    toolbar = PainterUIFloatingToolbar()
+    emitted: list[str] = []
+    toolbar.tool_requested.connect(emitted.append)
+
+    toolbar.tool_buttons["scale"].click()
+
+    assert emitted == ["scale"]
+    assert toolbar.tool_buttons["scale"].isChecked()
+    assert not toolbar.tool_buttons["select"].isChecked()
+    toolbar.deleteLater()
+
+
 def test_floating_toolbar_group_flyouts_switch_tools() -> None:
     _app()
     from app.painter_ui_toolbar import PainterUIFloatingToolbar

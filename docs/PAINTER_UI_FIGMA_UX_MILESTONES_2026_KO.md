@@ -528,17 +528,23 @@ Implemented checkpoint (2026-07-29, resolved Smart Guide slice):
 
 Implemented checkpoint (2026-07-29, Figma-style Scale slice):
 
-- Scale is selection-local and appears in the canvas context menu only when an
-  object selection exists; it does not add another fixed Inspector section.
+- Scale is selection-local and appears both as a transient context command and
+  as a dedicated bottom-toolbar `Scale (K)` tool; it does not add another
+  fixed Inspector section.
 - One percentage input scales a selection around its common center. Automation
   may additionally choose separate X/Y factors and a center or corner pivot.
+- In the `K` tool, corner-handle drag is proportional by default; Alt switches
+  to center-origin scaling. Preview geometry stays local until release.
 - Geometry, typography, corner radii, stroke width, shadow/blur geometry, and
   9-slice margins scale together instead of changing only outer bounds.
 - Objects from different parent coordinate spaces are explicitly blocked
-  rather than moved with ambiguous local coordinates.
+  rather than displaying an inoperative common transform or moving with
+  ambiguous local coordinates.
 - UI and `paint.ui.object.scale` share
   `app/painter_ui_object_scale.py`, constraint-aware batch mutation, and one
   `Scale UI objects` Undo step.
+- `.tspaint` round-trip and desktop/900x650 zero-width Auto-hide evidence
+  regenerate through `tools/qa_painter_ui_scale_tool.py`.
 
 Implemented checkpoint (2026-07-29, Quick Actions slice):
 

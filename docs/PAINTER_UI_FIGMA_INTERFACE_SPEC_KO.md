@@ -66,6 +66,11 @@ Implemented:
 - resolved-geometry Smart Guides for edges, centers, text baselines, parent
   padding, and equal gaps, with canvas-only contextual labels
 - read-only UI/Action parity through `paint.ui.smart_guide.inspect`
+- dedicated bottom-toolbar Scale tool and `K` shortcut; corner-handle drag
+  proportionally scales geometry, typography, radii, strokes, effects, and
+  9-slice values through the same `paint.ui.object.scale` service
+- Scale stays canvas-local and preserves zero-width Auto-hide side panels;
+  mixed parent coordinate spaces are explicitly ineligible
 - Painter UI document schema version 18; schema 17 remains the typed Vector
   Network checkpoint and schema 18 marks explicit non-destructive Boolean
   groups

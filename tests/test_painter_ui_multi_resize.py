@@ -125,6 +125,34 @@ def test_multi_resize_is_disabled_for_locked_or_cross_artboard_selection() -> No
     app.processEvents()
 
 
+def test_multi_resize_is_disabled_across_parent_coordinate_spaces() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, update_ui_object
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, first, second = _multi_document()
+    document, group = add_ui_object(
+        document,
+        kind="frame",
+        name="Group",
+        x=0,
+        y=0,
+        width=400,
+        height=300,
+    )
+    document, _second = update_ui_object(
+        document,
+        second["id"],
+        {"parent_id": group["id"]},
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.set_document(document)
+
+    assert overlay._multi_transform_rows() == []
+    overlay.deleteLater()
+    app.processEvents()
+
+
 def test_batch_property_action_is_one_undoable_shared_mutation() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry

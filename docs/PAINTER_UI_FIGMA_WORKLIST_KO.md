@@ -262,9 +262,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   IDs, hierarchy, position, and z-order and share
   `paint.ui.object.properties.copy/paste` /
   `paint.ui.object.paste_replace` mutation contracts.
-- Selection-local Scale uses a transient percentage prompt rather than a fixed
-  panel. `paint.ui.object.scale` scales geometry and visual metrics through one
-  shared service and blocks mixed parent coordinate spaces.
+- Selection-local Scale uses a transient percentage prompt and a dedicated
+  bottom-toolbar `K` tool rather than a fixed panel. Corner drag is
+  proportional by default, commits one Undo step on release, persists through
+  `.tspaint`, and shares `paint.ui.object.scale` for geometry and visual
+  metrics. Mixed parent coordinate spaces do not expose a misleading common
+  transform.
 - Quick Actions is a transient `Ctrl+/` / bottom-toolbar overlay that searches
   commands, layers, pages, components, and variables without reserving
   workspace width. `paint.ui.quick_action.search` exposes the same ranked

@@ -9713,6 +9713,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.objects_changes_requested.connect(
             self._update_painter_ui_objects_batch
         )
+        self._painter_ui_overlay.objects_scale_requested.connect(
+            self._scale_painter_ui_objects_from_canvas
+        )
         self._painter_ui_overlay.objects_continuation_changes_requested.connect(
             self._update_painter_ui_objects_batch_without_undo
         )
@@ -13586,6 +13589,7 @@ class PaintDialog(QDialog):
     def _set_painter_ui_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
         selected = requested if requested in {
+            "scale",
             "frame",
             "rectangle",
             "ellipse",
@@ -15588,6 +15592,9 @@ class PaintDialog(QDialog):
         return {"ok": True, **report}
 
     def _handle_painter_ui_key_command(self, command: str, coarse: bool) -> None:
+        if command == "scale_tool":
+            self._set_painter_ui_tool("scale")
+            return
         current = getattr(self, "_painter_ui_document", None)
         selected = str(
             ((current or {}).get("selection") or {}).get("object_id") or ""
@@ -23929,6 +23936,38 @@ class PaintDialog(QDialog):
             origin="center",
             scale_visuals=True,
         )
+        if not report["object_ids"]:
+            return
+        self._push_undo_state("Scale UI objects")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _scale_painter_ui_objects_from_canvas(self, request: object) -> None:
+        from app.painter_ui_object_scale import scale_ui_objects
+
+        payload = dict(request) if isinstance(request, dict) else {}
+        object_ids = [
+            str(object_id)
+            for object_id in payload.get("object_ids", [])
+            if str(object_id)
+        ]
+        if not object_ids:
+            return
+        try:
+            document, report = scale_ui_objects(
+                getattr(self, "_painter_ui_document", None) or {},
+                object_ids,
+                scale_x=float(payload.get("scale_x", 1.0)),
+                scale_y=float(payload.get("scale_y", 1.0)),
+                origin=str(payload.get("origin") or "center"),
+                scale_visuals=bool(payload.get("scale_visuals", True)),
+            )
+        except (TypeError, ValueError) as exc:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(str(exc))
+            self._refresh_painter_ui_overlay()
+            return
         if not report["object_ids"]:
             return
         self._push_undo_state("Scale UI objects")

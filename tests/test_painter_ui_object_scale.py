@@ -160,3 +160,115 @@ def test_scale_action_uses_one_undoable_shared_mutation() -> None:
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_canvas_scale_tool_scales_geometry_visuals_and_saved_document(
+    tmp_path,
+) -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_document import add_ui_object
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    document, row = add_ui_object(
+        dialog._painter_ui_document,
+        kind="text",
+        x=100,
+        y=80,
+        width=120,
+        height=60,
+        style={"font_size": 20, "radius": 8, "stroke_width": 2},
+        content={"text": "Scale me"},
+    )
+    dialog._painter_ui_document = document
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._set_painter_ui_tool("scale")
+    overlay = dialog._painter_ui_overlay
+    overlay.resize(1000, 760)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+
+    selected = overlay._selected_row()
+    assert selected is not None
+    bounds = overlay._object_rect(selected)
+    handle = overlay._handle_rects(bounds)["se"].center().toPoint()
+    target = QPoint(handle.x() + 100, handle.y() + 50)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=handle)
+    assert overlay._interaction == "scale"
+    QTest.mouseMove(overlay, target)
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=target,
+    )
+    app.processEvents()
+
+    scaled = next(
+        item
+        for item in dialog._painter_ui_document["objects"]
+        if item["id"] == row["id"]
+    )
+    factor = scaled["width"] / row["width"]
+    assert factor > 1.0
+    assert scaled["height"] / row["height"] == pytest.approx(factor)
+    assert scaled["style"]["font_size"] == pytest.approx(20.0 * factor)
+    assert scaled["style"]["corner_radii"]["top_left"] == pytest.approx(
+        8.0 * factor
+    )
+    assert dialog._undo_labels[-1] == "Scale UI objects"
+    document_path = tmp_path / "canvas-scale.tspaint"
+    dialog.save_document_to_path(document_path)
+    from app.painter_document_io import load_painter_document
+
+    payload, _report = load_painter_document(document_path)
+    saved = next(
+        item
+        for item in payload["ui_document"]["objects"]
+        if item["id"] == row["id"]
+    )
+    assert saved["width"] == pytest.approx(scaled["width"])
+    assert saved["style"]["font_size"] == pytest.approx(
+        scaled["style"]["font_size"]
+    )
+    dialog._undo()
+    restored = next(
+        item
+        for item in dialog._painter_ui_document["objects"]
+        if item["id"] == row["id"]
+    )
+    assert restored["width"] == row["width"]
+    assert restored["style"]["font_size"] == row["style"]["font_size"]
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_k_shortcut_requests_scale_tool() -> None:
+    app = _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    commands: list[tuple[str, bool]] = []
+    overlay.key_command.connect(
+        lambda command, coarse: commands.append((command, coarse))
+    )
+    overlay.show()
+    overlay.setFocus()
+    QTest.keyClick(overlay, Qt.Key.Key_K)
+    app.processEvents()
+
+    assert commands == [("scale_tool", False)]
+    overlay.close()
+    overlay.deleteLater()

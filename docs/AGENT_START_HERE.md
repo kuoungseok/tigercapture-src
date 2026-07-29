@@ -100,6 +100,13 @@ Focused entry points:
   `paint.ui.property.batch_set` share one constraint-aware batch mutation and
   one-step Undo. Locked or cross-artboard selections intentionally expose no
   common resize handles.
+  The bottom floating toolbar also exposes a dedicated Figma-style `K` Scale
+  tool. Its corner drag is proportional by default, previews locally, then
+  commits geometry and visual metrics through
+  `app/painter_ui_object_scale.py` / `paint.ui.object.scale` as one Undo step.
+  Cross-parent selections expose no misleading common transform. Regenerate
+  desktop and compact Auto-hide evidence with
+  `tools/qa_painter_ui_scale_tool.py`.
   Multi-selection also exposes a context-only Common Inspector for
   Opacity/Fill/Stroke/Stroke Width/Radius/Visible/Locked. Shared values render
   normally, mixed values render as `—` or a partial check, and editing one

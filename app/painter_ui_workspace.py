@@ -63,6 +63,7 @@ class PainterUIDesignOverlay(QWidget):
     object_geometry_requested = Signal(str, float, float, float, float)
     object_changes_requested = Signal(str, object)
     objects_changes_requested = Signal(object)
+    objects_scale_requested = Signal(object)
     objects_continuation_changes_requested = Signal(object)
     objects_duplicate_requested = Signal(object)
     object_create_requested = Signal(str, float, float, float, float)
@@ -497,7 +498,11 @@ class PainterUIDesignOverlay(QWidget):
 
     def set_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
-        self._tool = requested if requested in _CREATE_TOOLS else "select"
+        self._tool = (
+            requested
+            if requested in _CREATE_TOOLS or requested == "scale"
+            else "select"
+        )
         self._cancel_interaction()
         self.setCursor(
             Qt.CursorShape.CrossCursor
@@ -1323,10 +1328,13 @@ class PainterUIDesignOverlay(QWidget):
     def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
         original = QRectF(self._original_rect)
         center_based = bool(modifiers & Qt.KeyboardModifier.AltModifier)
-        force_ratio = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        force_ratio = (
+            self._tool == "scale"
+            or bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        )
         row = (
             None
-            if self._interaction == "resize_multi"
+            if self._interaction in {"resize_multi", "scale_multi"}
             else next(
                 (
                     item
@@ -1484,7 +1492,13 @@ class PainterUIDesignOverlay(QWidget):
         if (
             len(rows) < 2
             or any(bool(row["locked"]) for row in rows)
-            or len({str(row["artboard_id"]) for row in rows}) != 1
+            or len(
+                {
+                    (str(row["artboard_id"]), str(row["parent_id"]))
+                    for row in rows
+                }
+            )
+            != 1
         ):
             return []
         return rows
@@ -1499,6 +1513,32 @@ class PainterUIDesignOverlay(QWidget):
             rect = self._object_rect(row)
             bounds = rect if bounds.isNull() else bounds.united(rect)
         return bounds
+
+    @staticmethod
+    def _geometry_bounds(
+        rows: list[Mapping[str, Any]],
+    ) -> QRectF:
+        bounds = QRectF()
+        for row in rows:
+            rect = QRectF(
+                float(row["x"]),
+                float(row["y"]),
+                float(row["width"]),
+                float(row["height"]),
+            )
+            bounds = rect if bounds.isNull() else bounds.united(rect)
+        return bounds
+
+    def _sync_preview_geometry(self, row: Mapping[str, Any]) -> None:
+        geometry = self._resolved_geometry.setdefault(str(row["id"]), {})
+        geometry.update(
+            {
+                "x": float(row["x"]),
+                "y": float(row["y"]),
+                "width": float(row["width"]),
+                "height": float(row["height"]),
+            }
+        )
 
     def set_measurements_visible(self, visible: bool) -> None:
         visible = bool(visible)
@@ -2466,7 +2506,11 @@ class PainterUIDesignOverlay(QWidget):
                 if self._handle_rects(multi_bounds)[name].contains(
                     event.position()
                 ):
-                    self._interaction = "resize_multi"
+                    self._interaction = (
+                        "scale_multi"
+                        if self._tool == "scale"
+                        else "resize_multi"
+                    )
                     self._active_object_id = str(
                         self._document["selection"]["object_id"]
                         or multi_rows[0]["id"]
@@ -2562,10 +2606,22 @@ class PainterUIDesignOverlay(QWidget):
                 return
             for name in _HANDLE_NAMES:
                 if self._handle_rects(selected_rect)[name].contains(local_position):
-                    self._interaction = "resize"
+                    self._interaction = (
+                        "scale"
+                        if self._tool == "scale"
+                        else "resize"
+                    )
                     self._active_object_id = selected_row["id"]
                     self._active_handle = name
                     self._original_rect = QRectF(selected_rect)
+                    self._resize_original_geometries = {
+                        str(selected_row["id"]): (
+                            float(selected_row["x"]),
+                            float(selected_row["y"]),
+                            float(selected_row["width"]),
+                            float(selected_row["height"]),
+                        )
+                    }
                     event.accept()
                     return
 
@@ -2869,7 +2925,7 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
-        if self._interaction == "resize":
+        if self._interaction in {"resize", "scale"}:
             row = next(
                 row
                 for row in self._document["objects"]
@@ -2898,10 +2954,12 @@ class PainterUIDesignOverlay(QWidget):
                     1.0,
                     self._snap(rect.height() / max(0.0001, scale)),
                 )
+                if self._interaction == "scale":
+                    self._sync_preview_geometry(row)
                 self.update()
             event.accept()
             return
-        if self._interaction == "resize_multi":
+        if self._interaction in {"resize_multi", "scale_multi"}:
             rect = self._resize_rect(
                 QPointF(event.position()),
                 event.modifiers(),
@@ -2946,6 +3004,8 @@ class PainterUIDesignOverlay(QWidget):
                     )
                     row["width"] = max(1.0, self._snap(width * scale_x))
                     row["height"] = max(1.0, self._snap(height * scale_y))
+                    if self._interaction == "scale_multi":
+                        self._sync_preview_geometry(row)
                 self.update()
             event.accept()
             return
@@ -3161,6 +3221,51 @@ class PainterUIDesignOverlay(QWidget):
                 float(artboard["x"]),
                 float(artboard["y"]),
             )
+        elif interaction in {"scale", "scale_multi"}:
+            rows_by_id = {
+                str(row["id"]): row for row in self._document["objects"]
+            }
+            target_ids = list(self._resize_original_geometries)
+            current_bounds = self._geometry_bounds(
+                [
+                    rows_by_id[target_id]
+                    for target_id in target_ids
+                    if target_id in rows_by_id
+                ]
+            )
+            original_bounds = self._geometry_bounds(
+                [
+                    {
+                        "x": geometry[0],
+                        "y": geometry[1],
+                        "width": geometry[2],
+                        "height": geometry[3],
+                    }
+                    for geometry in self._resize_original_geometries.values()
+                ]
+            )
+            if target_ids and not current_bounds.isNull():
+                self.objects_scale_requested.emit(
+                    {
+                        "object_ids": target_ids,
+                        "scale_x": float(current_bounds.width())
+                        / max(0.0001, float(original_bounds.width())),
+                        "scale_y": float(current_bounds.height())
+                        / max(0.0001, float(original_bounds.height())),
+                        "origin": (
+                            "center"
+                            if event.modifiers()
+                            & Qt.KeyboardModifier.AltModifier
+                            else {
+                                "nw": "bottom_right",
+                                "ne": "bottom_left",
+                                "sw": "top_right",
+                                "se": "top_left",
+                            }[self._active_handle]
+                        ),
+                        "scale_visuals": True,
+                    }
+                )
         elif interaction == "resize_multi":
             self.objects_changes_requested.emit(
                 {
@@ -3411,6 +3516,14 @@ class PainterUIDesignOverlay(QWidget):
             return
         if key == Qt.Key.Key_Escape and self._edit_scope_id:
             self.edit_scope_exit_requested.emit()
+            event.accept()
+            return
+        if (
+            key == Qt.Key.Key_K
+            and not event.isAutoRepeat()
+            and not event.modifiers()
+        ):
+            self.key_command.emit("scale_tool", False)
             event.accept()
             return
         if (
