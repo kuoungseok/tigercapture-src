@@ -54,6 +54,9 @@ Implemented:
 - Canvas drag highlights valid Frame/Group containers and commits geometry,
   parent, recaptured constraints, and deterministic z-order in one Undo;
   Layers drag distinguishes before/inside/after with line or area previews
+- Smart resize snaps a single object to peer width/height and displays
+  localized equal-width/equal-height labels; read-only inspection uses
+  `paint.ui.smart_guide.inspect` with `operation=resize`
 - typed stable-ID Vector Network content with node/segment selection,
   straight/Bezier conversion, handle editing, segment split, node join/remove,
   and open/closed path editing

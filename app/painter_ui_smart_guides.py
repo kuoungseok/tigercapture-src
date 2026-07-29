@@ -266,4 +266,103 @@ def plan_ui_move_guides(
     }
 
 
-__all__ = ["plan_ui_move_guides"]
+def plan_ui_resize_guides(
+    document: Mapping[str, Any],
+    *,
+    object_id: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    excluded_object_ids: Sequence[str] = (),
+    tolerance: float = 6.0,
+    geometry: Mapping[str, Mapping[str, float]] | None = None,
+) -> dict[str, Any]:
+    """Snap resize dimensions to visible peers on the same artboard."""
+    by_id = {str(row["id"]): row for row in document.get("objects", [])}
+    moving = by_id.get(str(object_id))
+    report = {
+        "schema": "tigerstudio.painter.ui.smart_guides.v1",
+        "operation": "resize",
+        "eligible": moving is not None,
+        "reason": "" if moving is not None else "missing_object",
+        "object_id": str(object_id),
+        "x": float(x),
+        "y": float(y),
+        "width": float(width),
+        "height": float(height),
+        "guides": [],
+    }
+    if moving is None:
+        return report
+    resolved = (
+        {str(key): dict(value) for key, value in geometry.items()}
+        if geometry is not None
+        else resolve_ui_constraints(document, resolved_ui_geometry(document))
+    )
+    excluded = {str(value) for value in excluded_object_ids}
+    excluded.add(str(object_id))
+    others = [
+        row
+        for row in document.get("objects", [])
+        if (
+            str(row["id"]) not in excluded
+            and bool(row.get("visible", True))
+            and str(row["artboard_id"]) == str(moving["artboard_id"])
+            and str(row["id"]) in resolved
+        )
+    ]
+    width_matches = [
+        (
+            abs(float(resolved[row["id"]]["width"]) - float(width)),
+            row,
+            float(resolved[row["id"]]["width"]),
+        )
+        for row in others
+        if abs(float(resolved[row["id"]]["width"]) - float(width))
+        <= float(tolerance)
+    ]
+    height_matches = [
+        (
+            abs(float(resolved[row["id"]]["height"]) - float(height)),
+            row,
+            float(resolved[row["id"]]["height"]),
+        )
+        for row in others
+        if abs(float(resolved[row["id"]]["height"]) - float(height))
+        <= float(tolerance)
+    ]
+    if width_matches:
+        _delta, row, target = min(
+            width_matches,
+            key=lambda item: (item[0], int(item[1]["z_index"]), item[1]["id"]),
+        )
+        report["width"] = target
+        report["guides"].append(
+            {
+                "axis": "horizontal",
+                "kind": "equal_width",
+                "value": target,
+                "position": float(x) + target,
+                "target_object_id": str(row["id"]),
+            }
+        )
+    if height_matches:
+        _delta, row, target = min(
+            height_matches,
+            key=lambda item: (item[0], int(item[1]["z_index"]), item[1]["id"]),
+        )
+        report["height"] = target
+        report["guides"].append(
+            {
+                "axis": "vertical",
+                "kind": "equal_height",
+                "value": target,
+                "position": float(y) + target,
+                "target_object_id": str(row["id"]),
+            }
+        )
+    return report
+
+
+__all__ = ["plan_ui_move_guides", "plan_ui_resize_guides"]

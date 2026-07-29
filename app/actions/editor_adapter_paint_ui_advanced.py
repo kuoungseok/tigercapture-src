@@ -112,12 +112,33 @@ class PaintUIAdvancedAdapterMixin:
         object_id: str,
         x: float,
         y: float,
+        width: float | None = None,
+        height: float | None = None,
+        operation: str = "move",
         excluded_object_ids: list[str] | None = None,
         tolerance: float = 6.0,
     ) -> dict[str, Any]:
-        from app.painter_ui_smart_guides import plan_ui_move_guides
+        from app.painter_ui_smart_guides import (
+            plan_ui_move_guides,
+            plan_ui_resize_guides,
+        )
 
         dialog = self._paint_dialog_owner()
+        if str(operation).strip().casefold() == "resize":
+            if width is None or height is None:
+                raise ValueError(
+                    "Smart resize guide inspection requires width and height"
+                )
+            return plan_ui_resize_guides(
+                dialog._painter_ui_document,
+                object_id=object_id,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                excluded_object_ids=excluded_object_ids or [],
+                tolerance=tolerance,
+            )
         return plan_ui_move_guides(
             dialog._painter_ui_document,
             object_id=object_id,

@@ -442,6 +442,18 @@ Implemented checkpoint (2026-07-29, hierarchy drop preview slice):
   rendering, resulting parent ID, order, zero-width panels, and evidence under
   `debugCapture/painter_ui_reparent_preview_m1`.
 
+Implemented checkpoint (2026-07-29, equal-size Smart Guide slice):
+
+- Single-object resize compares resolved visible peers on the active artboard
+  and snaps width and height independently within the zoom-adjusted tolerance.
+- The canvas keeps resize geometry live and displays localized Equal Width /
+  Equal Height labels with exact pixel values and magenta guide axes.
+- `paint.ui.smart_guide.inspect` accepts `operation=resize`, width, and height
+  while remaining read-only; move inspection remains backward compatible.
+- `tools/qa_painter_ui_equal_size_guides.py` verifies desktop/compact labels,
+  resulting `180 x 120` document geometry, and zero-width side panels under
+  `debugCapture/painter_ui_equal_size_guides_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

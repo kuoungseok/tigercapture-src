@@ -1353,6 +1353,58 @@ class PainterUIDesignOverlay(QWidget):
                 self._guide_y = position
         return float(report["x"]), float(report["y"])
 
+    def _smart_snap_resize_rect(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> QRectF:
+        self._guide_x = None
+        self._guide_y = None
+        self._smart_guide_plan = {}
+        if not self._snap_enabled:
+            return rect
+        from app.painter_ui_smart_guides import plan_ui_resize_guides
+
+        viewport, scale = self._artboard_viewport()
+        x = (rect.x() - viewport.x()) / max(0.0001, scale)
+        y = (rect.y() - viewport.y()) / max(0.0001, scale)
+        width = rect.width() / max(0.0001, scale)
+        height = rect.height() / max(0.0001, scale)
+        report = plan_ui_resize_guides(
+            self._effective_document,
+            object_id=str(row["id"]),
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            excluded_object_ids=[str(row["id"])],
+            tolerance=6.0 / max(0.0001, scale),
+            geometry=self._resolved_geometry,
+        )
+        if any(
+            guide["kind"] == "equal_width" for guide in report["guides"]
+        ):
+            target_width = float(report["width"])
+            if "w" in self._active_handle:
+                x += width - target_width
+            width = target_width
+            self._guide_x = viewport.left() + (x + width) * scale
+        if any(
+            guide["kind"] == "equal_height" for guide in report["guides"]
+        ):
+            target_height = float(report["height"])
+            if "n" in self._active_handle:
+                y += height - target_height
+            height = target_height
+            self._guide_y = viewport.top() + (y + height) * scale
+        self._smart_guide_plan = report
+        return QRectF(
+            viewport.x() + x * scale,
+            viewport.y() + y * scale,
+            width * scale,
+            height * scale,
+        )
+
     def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
         original = QRectF(self._original_rect)
         center_based = bool(modifiers & Qt.KeyboardModifier.AltModifier)
@@ -2444,16 +2496,18 @@ class PainterUIDesignOverlay(QWidget):
                     QPointF(viewport.right(), self._guide_y),
                 )
             label_names = {
-                "baseline": "Baseline",
-                "padding": "Padding",
-                "equal_gap": "Equal gap",
+                "baseline": painter_text("Baseline"),
+                "padding": painter_text("Padding"),
+                "equal_gap": painter_text("Equal gap"),
+                "equal_width": painter_text("Equal width"),
+                "equal_height": painter_text("Equal height"),
             }
             for guide in self._smart_guide_plan.get("guides", []):
                 kind = str(guide.get("kind") or "")
                 if kind not in label_names:
                     continue
                 label = label_names[kind]
-                if kind == "equal_gap":
+                if kind in {"equal_gap", "equal_width", "equal_height"}:
                     label += f" {float(guide.get('value') or 0.0):g}px"
                 metrics = painter.fontMetrics()
                 label_rect = QRectF(
@@ -3162,6 +3216,8 @@ class PainterUIDesignOverlay(QWidget):
                 row.get("constraints"),
             )
             rect = self._resize_rect(point, event.modifiers())
+            if self._interaction == "resize":
+                rect = self._smart_snap_resize_rect(row, rect)
             if rect.width() >= 8.0 and rect.height() >= 8.0:
                 viewport, scale = self._artboard_viewport()
                 row["x"] = self._snap(
@@ -3178,8 +3234,7 @@ class PainterUIDesignOverlay(QWidget):
                     1.0,
                     self._snap(rect.height() / max(0.0001, scale)),
                 )
-                if self._interaction == "scale":
-                    self._sync_preview_geometry(row)
+                self._sync_preview_geometry(row)
                 self.update()
             event.accept()
             return

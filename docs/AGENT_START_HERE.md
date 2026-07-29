@@ -161,6 +161,10 @@ Focused entry points:
   `PainterUILayerList._hierarchy_drop_plan`. Keep live document,
   effective-document, and resolved geometry synchronized during drag, or the
   object will visually remain at its old position until release.
+  Equal-size resize guides use `plan_ui_resize_guides` and the existing
+  `paint.ui.smart_guide.inspect` action with `operation=resize`. Keep this
+  inspection read-only and update resolved geometry during drag so labels and
+  the selection outline match the committed width/height.
   As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
   main/cross alignment, gap, four-edge padding, and child Flow/Absolute
   controls. The implementation lives in

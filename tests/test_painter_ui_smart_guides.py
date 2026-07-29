@@ -133,6 +133,45 @@ def test_smart_guides_snap_equal_horizontal_gap() -> None:
     assert report["x"] == 150.0
 
 
+def test_smart_resize_guides_snap_equal_width_and_height() -> None:
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_smart_guides import plan_ui_resize_guides
+
+    document = create_ui_document(800, 600)
+    document, target = add_ui_object(
+        document,
+        kind="rectangle",
+        x=380,
+        y=100,
+        width=180,
+        height=120,
+    )
+    document, moving = add_ui_object(
+        document,
+        kind="rectangle",
+        x=100,
+        y=100,
+        width=160,
+        height=100,
+    )
+    report = plan_ui_resize_guides(
+        document,
+        object_id=moving["id"],
+        x=100,
+        y=100,
+        width=177,
+        height=124,
+        tolerance=5,
+    )
+
+    assert report["width"] == target["width"]
+    assert report["height"] == target["height"]
+    assert {row["kind"] for row in report["guides"]} == {
+        "equal_width",
+        "equal_height",
+    }
+
+
 def test_smart_guide_action_is_read_only() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
@@ -157,6 +196,48 @@ def test_smart_guide_action_is_read_only() -> None:
         {"object_id": moving["id"], "x": 102, "y": 102},
     ).to_dict()
     assert result["ok"] is True
+    assert dialog._painter_ui_document == before
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_smart_resize_guide_action_is_read_only() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600)
+    document, _target = add_ui_object(
+        document, kind="rectangle", x=400, y=100, width=180, height=120
+    )
+    document, moving = add_ui_object(
+        document, kind="rectangle", x=100, y=100, width=150, height=100
+    )
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._painter_ui_document = copy.deepcopy(document)
+    before = copy.deepcopy(dialog._painter_ui_document)
+    result = ActionRegistry(owner=dialog).execute(
+        "paint.ui.smart_guide.inspect",
+        {
+            "object_id": moving["id"],
+            "operation": "resize",
+            "x": 100,
+            "y": 100,
+            "width": 178,
+            "height": 119,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["width"] == 180
+    assert result["result"]["height"] == 120
     assert dialog._painter_ui_document == before
     dialog.close()
     dialog.deleteLater()
