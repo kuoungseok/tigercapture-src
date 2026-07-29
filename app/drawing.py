@@ -8684,6 +8684,12 @@ class PaintDialog(QDialog):
             self._delete_active_painter_ui_artboard,
         )
         ui_menu.addSeparator()
+        self._add_painter_menu_action(
+            ui_menu,
+            "Find / Replace",
+            self._show_painter_ui_find_replace,
+            "Ctrl+F",
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14156,6 +14162,44 @@ class PaintDialog(QDialog):
             getattr(self, "_painter_ui_document", {}) or {}
         )
 
+    def _show_painter_ui_find_replace(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_find_replace_dialog import (
+            PainterUIFindReplaceDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_find_replace_dialog", None)
+        if dialog is None:
+            dialog = PainterUIFindReplaceDialog(self)
+            dialog.apply_requested.connect(
+                self._apply_painter_ui_find_replace
+            )
+            self._painter_ui_find_replace_dialog = dialog
+        dialog.set_document(
+            getattr(self, "_painter_ui_document", {}) or {}
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        dialog.find_edit.setFocus()
+
+    def _apply_painter_ui_find_replace(self, payload: object) -> None:
+        from app.painter_ui_find_replace import apply_ui_find_replace
+
+        parameters = dict(payload) if isinstance(payload, dict) else {}
+        current = getattr(self, "_painter_ui_document", {}) or {}
+        updated, report = apply_ui_find_replace(current, **parameters)
+        if not int(report.get("applied_count") or 0):
+            return
+        self._push_undo_state("Find / Replace")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        dialog = getattr(self, "_painter_ui_find_replace_dialog", None)
+        if dialog is not None:
+            dialog.show_applied(updated, report["applied_count"])
+
     def _delete_painter_ui_selection(self) -> None:
         from app.painter_ui_document import remove_ui_object
 
@@ -14241,6 +14285,8 @@ class PaintDialog(QDialog):
             self._select_similar_painter_ui_objects(
                 criterion=str(operation.get("criterion") or "kind")
             )
+        elif operation_type == "find_replace":
+            self._show_painter_ui_find_replace()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

@@ -128,6 +128,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "requires": "selection",
     },
     {
+        "id": "document.find_replace",
+        "label": "Find / Replace",
+        "detail": "Preview text and linked references before changing the document.",
+        "keywords": "find replace text component style variable font asset",
+        "operation": {"type": "find_replace"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

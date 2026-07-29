@@ -756,7 +756,15 @@ Find/Replace:
 - Variable
 - Component
 - Asset
-- 변경 preview와 선택 적용
+- `UI > Find / Replace`와 Quick Actions에서만 여는 비고정 대화상자다.
+- 변경 preview와 선택 적용을 제공하며, 유효하지 않은 참조는 이유와 함께
+  차단한다.
+- Component Instance 참조의 일반 문자열 교체는 허용하지 않고 전용
+  Instance Swap으로 안내한다.
+- UI와 `paint.ui.find_replace.inspect/apply` Action은 동일한
+  `app/painter_ui_find_replace.py` 서비스를 사용한다.
+- 적용은 선택한 유효 match만 한 번의 document revision과 Undo 단계로
+  저장한다. 미리보기는 문서, dirty state, Undo를 변경하지 않는다.
 
 Select Similar:
 

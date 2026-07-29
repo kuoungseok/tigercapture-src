@@ -1339,6 +1339,24 @@ Implemented checkpoint (2026-07-29, Select Similar slice):
   `tools/qa_painter_ui_select_similar.py` under
   `debugCapture/painter_ui_designer/select_similar`.
 
+Implemented checkpoint (2026-07-29, Find/Replace slice):
+
+- UI > Find / Replace and Quick Actions open a transient, modeless dialog;
+  no fixed Navigator, canvas, or Inspector space is reserved.
+- `app/painter_ui_find_replace.py` owns deterministic preview and selective
+  apply for text, font, style, variable, component, and asset categories.
+  Stable match IDs let UI users or AI apply only reviewed rows.
+- Style and variable references resolve exact IDs or unique names. Missing or
+  ambiguous targets are blocked with a reason. Component instance references
+  remain blocked here and direct users to the existing Instance Swap contract.
+- UI, `paint.ui.find_replace.inspect`, and `paint.ui.find_replace.apply` share
+  the service. Preview is read-only; a successful selective apply creates one
+  document revision, dirty transition, and Undo step.
+- Korean and supported-language labels, friendly empty states, desktop and
+  compact Studio-theme screenshots, and a machine-readable QA report are
+  covered. Evidence regenerates via `tools/qa_painter_ui_find_replace.py`
+  under `debugCapture/painter_ui_designer/find_replace`.
+
 Exit criteria:
 
 - Pan, zoom, selection, and resize stay responsive under the release corpus.

@@ -1670,6 +1670,52 @@ def register_paint_actions(registry: Any) -> None:
         changed=False,
         dry_summary="matching Painter UI objects would be selected",
     )
+    find_replace_params = schema_object(
+        {
+            "find": {"type": "string", "minLength": 1},
+            "replacement": {"type": "string"},
+            "categories": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "text",
+                        "component",
+                        "style",
+                        "variable",
+                        "font",
+                        "asset",
+                    ],
+                },
+            },
+            "case_sensitive": {"type": "boolean"},
+            "whole_value": {"type": "boolean"},
+            "selected_match_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        required=["find"],
+    )
+    registry.register_adapter_action(
+        "paint.ui.find_replace.inspect",
+        "Preview UI text and reference replacements without changing the document.",
+        "paint",
+        "paint_ui_find_replace_inspect",
+        params_schema=find_replace_params,
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI replacements would be previewed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.find_replace.apply",
+        "Apply selected valid UI text and reference replacements as one undo step.",
+        "paint",
+        "paint_ui_find_replace_apply",
+        params_schema=find_replace_params,
+        undo_label="Find / Replace",
+        dry_summary="selected Painter UI replacements would be applied",
+    )
     registry.register_adapter_action(
         "paint.ui.selection.parent",
         "Select the immediate parent of a Painter UI object without changing the document.",

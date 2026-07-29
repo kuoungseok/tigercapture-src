@@ -2784,6 +2784,63 @@ class PaintAdapterMixin(
         state["select_similar"] = report
         return state
 
+    def paint_ui_find_replace_inspect(
+        self,
+        *,
+        find: str,
+        replacement: str = "",
+        categories: list[str] | None = None,
+        case_sensitive: bool = False,
+        whole_value: bool = False,
+        selected_match_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        del selected_match_ids
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_find_replace import inspect_ui_find_replace
+
+        return inspect_ui_find_replace(
+            dialog._painter_ui_document,
+            find=find,
+            replacement=replacement,
+            categories=categories,
+            case_sensitive=case_sensitive,
+            whole_value=whole_value,
+        )
+
+    def paint_ui_find_replace_apply(
+        self,
+        *,
+        find: str,
+        replacement: str = "",
+        categories: list[str] | None = None,
+        case_sensitive: bool = False,
+        whole_value: bool = False,
+        selected_match_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_find_replace import apply_ui_find_replace
+
+        document, report = apply_ui_find_replace(
+            dialog._painter_ui_document,
+            find=find,
+            replacement=replacement,
+            categories=categories,
+            case_sensitive=case_sensitive,
+            whole_value=whole_value,
+            selected_match_ids=selected_match_ids,
+        )
+        if int(report.get("applied_count") or 0):
+            dialog._push_undo_state("Find / Replace")
+            state = self._paint_ui_commit(
+                dialog,
+                "Find / Replace",
+                document,
+            )
+        else:
+            state = dialog.painter_action_state()
+        state["find_replace"] = report
+        return state
+
     def paint_ui_selection_parent(
         self,
         *,
