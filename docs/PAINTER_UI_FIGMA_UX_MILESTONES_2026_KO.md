@@ -1400,7 +1400,7 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The checkpoint Registry evidence covers 256 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 257 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
@@ -1492,6 +1492,24 @@ Implemented checkpoint (2026-07-29, document-scale performance budget slice):
   `debugCapture/painter_ui_designer/performance_budget`.
 - The scale contract explicitly records `wall_clock_claim: not_measured`.
   Runtime render timing is a separate QA gate and is not inferred from counts.
+
+Implemented checkpoint (2026-07-29, measured runtime performance slice):
+
+- `app/painter_ui_runtime_performance.py` measures real normalization,
+  responsive-resolution, layout-diagnostic, and Quick Actions calls against a
+  deterministic 1,000-object document.
+- One warmup is excluded. Three measured samples report median, minimum,
+  maximum, and raw `time.perf_counter` values with explicit warning and block
+  limits.
+- UI > Runtime Performance and Quick Actions open a transient responsive
+  report. `paint.ui.runtime_performance.run` exposes the same non-mutating
+  benchmark with bounded parameters.
+- The 2026-07-29 local QA run covered 4/4 paths: normalize 39.0 ms, responsive
+  resolve 6.5 ms, layout diagnostics 219.4 ms, and Quick Actions 124.2 ms.
+  These values describe this machine only.
+- Korean desktop/compact evidence and the machine-readable environment report
+  regenerate through `tools/qa_painter_ui_runtime_performance.py` under
+  `debugCapture/painter_ui_designer/runtime_performance`.
 
 Exit criteria:
 

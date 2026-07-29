@@ -185,6 +185,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "performance_budget"},
     },
     {
+        "id": "document.runtime_performance",
+        "label": "Runtime performance",
+        "detail": "Measure core Painter UI paths on this machine.",
+        "keywords": "runtime benchmark timing normalize layout diagnostics quick actions",
+        "operation": {"type": "runtime_performance"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

@@ -8817,6 +8817,11 @@ class PaintDialog(QDialog):
             "Performance Budget...",
             self._show_painter_ui_performance_budget,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Runtime Performance...",
+            self._show_painter_ui_runtime_performance,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14518,6 +14523,38 @@ class PaintDialog(QDialog):
             )
         )
 
+    def _show_painter_ui_runtime_performance(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_runtime_performance_dialog import (
+            PainterUIRuntimePerformanceDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_runtime_performance_dialog", None)
+        if dialog is None:
+            dialog = PainterUIRuntimePerformanceDialog(self)
+            dialog.run_requested.connect(
+                self._run_painter_ui_runtime_performance
+            )
+            self._painter_ui_runtime_performance_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _run_painter_ui_runtime_performance(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        from app.painter_ui_runtime_performance import (
+            run_painter_ui_runtime_performance,
+        )
+
+        dialog = getattr(self, "_painter_ui_runtime_performance_dialog", None)
+        if dialog is None:
+            return
+        dialog.set_running()
+        QApplication.processEvents()
+        dialog.set_report(run_painter_ui_runtime_performance())
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14635,6 +14672,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_release_corpus()
         elif operation_type == "performance_budget":
             self._show_painter_ui_performance_budget()
+        elif operation_type == "runtime_performance":
+            self._show_painter_ui_runtime_performance()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

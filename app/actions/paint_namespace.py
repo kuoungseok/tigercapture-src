@@ -1832,6 +1832,29 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter UI document performance budgets would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.runtime_performance.run",
+        "Measure core Painter UI document paths on the local machine.",
+        "paint",
+        "paint_ui_runtime_performance_run",
+        params_schema=schema_object(
+            {
+                "object_count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5000,
+                },
+                "iterations": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9,
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI runtime paths would be benchmarked locally",
+    )
+    registry.register_adapter_action(
         "paint.ui.recovery.inspect",
         "List crash-safe Painter recovery snapshots.",
         "paint",

@@ -2985,6 +2985,21 @@ class PaintAdapterMixin(
             getattr(dialog, "_painter_ui_document", None)
         )
 
+    def paint_ui_runtime_performance_run(
+        self,
+        *,
+        object_count: int = 1000,
+        iterations: int = 3,
+    ) -> dict[str, Any]:
+        from app.painter_ui_runtime_performance import (
+            run_painter_ui_runtime_performance,
+        )
+
+        return run_painter_ui_runtime_performance(
+            object_count=object_count,
+            iterations=iterations,
+        )
+
     def paint_ui_recovery_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         rows = dialog._painter_recovery_rows()

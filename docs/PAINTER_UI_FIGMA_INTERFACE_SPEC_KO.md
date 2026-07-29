@@ -869,6 +869,19 @@ Document-scale performance budgets:
 - This contract measures document scale only. It does not claim wall-clock
   render performance; actual frame timing remains separate runtime QA.
 
+Measured runtime performance:
+
+- `app/painter_ui_runtime_performance.py` measures real calls for document
+  normalization, responsive resolution, layout diagnostics, and Quick Actions
+  search against a deterministic 1,000-object document.
+- Each case runs one warmup and reports the median, minimum, maximum, and raw
+  samples from `time.perf_counter`, plus explicit warning and block limits.
+- UI > Runtime Performance and Quick Actions open an on-demand report.
+  `paint.ui.runtime_performance.run` exposes the same non-mutating benchmark
+  with bounded object-count and iteration parameters.
+- Results are a local-machine QA claim only. They are not a universal hardware,
+  FPS, canvas-renderer, GPU, or remote-desktop performance claim.
+
 Crash-safe recovery:
 
 - Dirty Painter documents are snapshotted every 60 seconds through a
