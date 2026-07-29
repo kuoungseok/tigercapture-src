@@ -257,3 +257,41 @@ def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
     panel.close()
     panel.deleteLater()
     app.processEvents()
+
+
+def test_inline_preview_runs_scoped_delay_interaction() -> None:
+    app = _app()
+    from PySide6.QtTest import QTest
+
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    object_id = registry.execute(
+        "paint.ui.object.add",
+        {"kind": "button", "name": "Delayed"},
+    ).to_dict()["result"]["ui_design"]["selected_object_id"]
+    registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "source_object_id": object_id,
+            "trigger": "delay",
+            "action": "play_sound",
+            "parameters": {"delay_ms": 5, "uri": "ready.wav"},
+        },
+    )
+
+    dialog._set_painter_ui_prototype_preview(True)
+    QTest.qWait(100)
+
+    assert dialog._painter_ui_prototype_state["events"][-1]["action"] == "play_sound"
+    assert len(dialog._painter_ui_prototype_state["events"]) == 1
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()

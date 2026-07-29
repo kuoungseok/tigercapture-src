@@ -1018,8 +1018,10 @@ Implemented checkpoint (2026-07-29):
   artboard, variable count, and latest event without adding a timeline.
   Preview suppresses artboard labels, grids, rulers, measurements, sections,
   selections, and edit handles so the canvas reads as the delivered UI.
-  Delay scheduling and actual sound/Motion playback remain explicit follow-up
-  work rather than being silently claimed.
+  Per-interaction delay timers are scoped to the current artboard and overlays;
+  Reset or navigation invalidates stale timers before scheduling the new scope.
+  Actual sound/Motion playback remains explicit follow-up work rather than
+  being silently claimed.
 
 Exit criteria:
 

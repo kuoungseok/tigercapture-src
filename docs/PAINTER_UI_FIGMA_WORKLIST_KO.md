@@ -20,7 +20,8 @@ M1 Page checkpoint (2026-07-29):
   runtime without adding a fixed timeline.
 - M4 inline Preview starts at the active Flow, keeps document data unchanged,
   routes pointer/keyboard triggers on the canvas, and exposes compact runtime
-  state plus Reset. Authoring chrome is hidden only while Preview is active.
+  state plus Reset. Authoring chrome is hidden only while Preview is active,
+  and delay interactions are timer-scoped to the current artboard/overlays.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

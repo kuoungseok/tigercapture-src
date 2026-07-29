@@ -8,7 +8,12 @@ from app.painter_ui_document import (
     add_ui_object,
     create_ui_document,
 )
-from app.painter_ui_prototype import export_ui_prototype
+from app.painter_ui_prototype import (
+    execute_ui_prototype_trigger,
+    export_ui_prototype,
+    prototype_delay_schedule,
+    prototype_initial_state,
+)
 from app.painter_ui_prototype_authoring import set_ui_prototype_transition
 from app.painter_ui_prototype_authoring import add_ui_prototype_flow
 
@@ -60,8 +65,6 @@ def test_html_export_includes_extended_runtime_and_transition(
 
 
 def test_initial_state_uses_active_flow_artboard() -> None:
-    from app.painter_ui_prototype import prototype_initial_state
-
     document = create_ui_document(390, 844)
     document, second = add_ui_artboard(
         document,
@@ -76,3 +79,41 @@ def test_initial_state_uses_active_flow_artboard() -> None:
     )
 
     assert prototype_initial_state(document)["artboard_id"] == second["id"]
+
+
+def test_delay_schedule_is_scoped_and_executes_one_interaction() -> None:
+    document = create_ui_document(390, 844)
+    artboard_id = document["active_artboard_id"]
+    document, source = add_ui_object(
+        document,
+        kind="button",
+        name="Delayed",
+        artboard_id=artboard_id,
+    )
+    document, first = add_ui_interaction(
+        document,
+        source_object_id=source["id"],
+        trigger="delay",
+        action="play_sound",
+        parameters={"delay_ms": 120, "asset_id": "one"},
+    )
+    document, _second = add_ui_interaction(
+        document,
+        source_object_id=source["id"],
+        trigger="delay",
+        action="play_sound",
+        parameters={"delay_ms": 240, "asset_id": "two"},
+    )
+    state = prototype_initial_state(document)
+
+    schedule = prototype_delay_schedule(document, state)
+    assert [row["delay_ms"] for row in schedule] == [120, 240]
+    runtime = execute_ui_prototype_trigger(
+        document,
+        state,
+        source_object_id=source["id"],
+        trigger="delay",
+        interaction_id=first["id"],
+    )
+    assert runtime["matched_interaction_ids"] == [first["id"]]
+    assert len(runtime["events"]) == 1

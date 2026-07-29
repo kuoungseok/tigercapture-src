@@ -61,6 +61,7 @@ def execute_ui_prototype_trigger(
     source_object_id: str,
     trigger: str,
     key: str = "",
+    interaction_id: str = "",
 ) -> dict[str, Any]:
     document = normalize_ui_document(value)
     runtime = dict(state or prototype_initial_state(document))
@@ -78,6 +79,8 @@ def execute_ui_prototype_trigger(
     matched = []
     for interaction in document["interactions"]:
         if not interaction["enabled"]:
+            continue
+        if interaction_id and interaction["id"] != str(interaction_id):
             continue
         if interaction["source_object_id"] != str(source_object_id):
             continue
@@ -165,6 +168,46 @@ def execute_ui_prototype_trigger(
         matched.append(interaction["id"])
     runtime["matched_interaction_ids"] = matched
     return runtime
+
+
+def prototype_delay_schedule(
+    value: Mapping[str, Any],
+    state: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    document = normalize_ui_document(value)
+    runtime = dict(state or prototype_initial_state(document))
+    visible_artboards = {
+        str(runtime.get("artboard_id") or ""),
+        *(str(row) for row in runtime.get("overlay_artboard_ids") or []),
+    }
+    visible_artboards.discard("")
+    object_artboards = {
+        str(row["id"]): str(row["artboard_id"])
+        for row in document["objects"]
+    }
+    visibility = dict(runtime.get("object_visibility") or {})
+    rows = []
+    for interaction in document["interactions"]:
+        source_id = str(interaction["source_object_id"])
+        if (
+            not interaction["enabled"]
+            or interaction["trigger"] != "delay"
+            or object_artboards.get(source_id) not in visible_artboards
+            or not bool(visibility.get(source_id, True))
+        ):
+            continue
+        parameters = dict(interaction.get("parameters") or {})
+        rows.append(
+            {
+                "interaction_id": str(interaction["id"]),
+                "source_object_id": source_id,
+                "delay_ms": max(
+                    0,
+                    min(600000, int(parameters.get("delay_ms") or 0)),
+                ),
+            }
+        )
+    return rows
 
 
 def inspect_ui_prototype(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -384,5 +427,6 @@ __all__ = [
     "execute_ui_prototype_trigger",
     "export_ui_prototype",
     "inspect_ui_prototype",
+    "prototype_delay_schedule",
     "prototype_initial_state",
 ]

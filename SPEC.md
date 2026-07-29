@@ -7919,8 +7919,9 @@ AI Script Edit MVP integration:
   triggers without mutating the document, and reports the current artboard,
   variables, and latest runtime event. While Play is active the canvas hides
   edit-only labels, grids, rulers, measurements, sections, selections, and
-  handles. Delay scheduling and real sound/Motion playback are not yet claimed
-  by this inline debugger.
+  handles. Delay interactions run from per-interaction timers scoped to the
+  current artboard and overlays; Reset or navigation invalidates stale timers.
+  Real sound/Motion playback is not yet claimed by this inline debugger.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

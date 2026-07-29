@@ -8197,6 +8197,8 @@ class PaintDialog(QDialog):
         self._painter_ui_document = create_ui_document(*self._canvas_document_size)
         self._painter_ui_prototype_preview_enabled = False
         self._painter_ui_prototype_state: dict = {}
+        self._painter_ui_prototype_delay_generation = 0
+        self._painter_ui_prototype_delay_scope: tuple = ()
         self._painter_ui_artboard_viewports: dict[str, dict[str, float]] = {}
         self._painter_ui_view_artboard_id = ""
         self._painter_ui_motion_compositions: dict[str, object] = {}
@@ -16011,6 +16013,8 @@ class PaintDialog(QDialog):
         if enabled:
             self._reset_painter_ui_prototype_preview()
             return
+        self._painter_ui_prototype_delay_generation += 1
+        self._painter_ui_prototype_delay_scope = ()
         self._painter_ui_prototype_state = {}
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is not None:
@@ -16026,6 +16030,7 @@ class PaintDialog(QDialog):
         self._painter_ui_prototype_state = prototype_initial_state(
             self._painter_ui_document
         )
+        self._schedule_painter_ui_prototype_delays(force=True)
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is not None:
             overlay.set_prototype_preview(
@@ -16044,6 +16049,7 @@ class PaintDialog(QDialog):
         source_object_id: str,
         trigger: str,
         key: str,
+        interaction_id: str = "",
     ) -> None:
         if not self._painter_ui_prototype_preview_enabled:
             return
@@ -16055,6 +16061,7 @@ class PaintDialog(QDialog):
             source_object_id=str(source_object_id),
             trigger=str(trigger),
             key=str(key),
+            interaction_id=str(interaction_id),
         )
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is not None:
@@ -16067,6 +16074,61 @@ class PaintDialog(QDialog):
                 self._painter_ui_prototype_state,
                 enabled=True,
             )
+        self._schedule_painter_ui_prototype_delays()
+
+    def _schedule_painter_ui_prototype_delays(
+        self,
+        *,
+        force: bool = False,
+    ) -> None:
+        if not self._painter_ui_prototype_preview_enabled:
+            return
+        from app.painter_ui_prototype import prototype_delay_schedule
+
+        state = self._painter_ui_prototype_state
+        scope = (
+            str(state.get("artboard_id") or ""),
+            tuple(str(row) for row in state.get("overlay_artboard_ids") or []),
+        )
+        if not force and scope == self._painter_ui_prototype_delay_scope:
+            return
+        self._painter_ui_prototype_delay_scope = scope
+        self._painter_ui_prototype_delay_generation += 1
+        generation = self._painter_ui_prototype_delay_generation
+        for row in prototype_delay_schedule(
+            self._painter_ui_document,
+            state,
+        ):
+            QTimer.singleShot(
+                int(row["delay_ms"]),
+                lambda source_id=row["source_object_id"],
+                interaction_id=row["interaction_id"],
+                expected_generation=generation: (
+                    self._run_painter_ui_prototype_delay(
+                        source_id,
+                        interaction_id,
+                        expected_generation,
+                    )
+                ),
+            )
+
+    def _run_painter_ui_prototype_delay(
+        self,
+        source_object_id: str,
+        interaction_id: str,
+        generation: int,
+    ) -> None:
+        if (
+            not self._painter_ui_prototype_preview_enabled
+            or generation != self._painter_ui_prototype_delay_generation
+        ):
+            return
+        self._execute_painter_ui_prototype_trigger(
+            source_object_id,
+            "delay",
+            "",
+            interaction_id,
+        )
 
     def _bind_painter_ui_token(
         self,
