@@ -1497,15 +1497,21 @@ Implemented checkpoint (2026-07-29, measured runtime performance slice):
 
 - `app/painter_ui_runtime_performance.py` measures real normalization,
   responsive-resolution, layout-diagnostic, and Quick Actions calls against a
-  deterministic 1,000-object document.
+  deterministic 1,000-object document. The same run exercises real overlay
+  pan/zoom, selection refresh, and viewport resize interaction paths.
 - One warmup is excluded. Three measured samples report median, minimum,
   maximum, and raw `time.perf_counter` values with explicit warning and block
   limits.
+- `PainterUIDesignOverlay` keeps resolved geometry across selection-only
+  refreshes, while a selection-free document fingerprint invalidates that
+  cache for any render-affecting content change. Object, mask-target, parent,
+  and Boolean-operand indexes remove the previous repeated full-list scans.
 - UI > Runtime Performance and Quick Actions open a transient responsive
   report. `paint.ui.runtime_performance.run` exposes the same non-mutating
   benchmark with bounded parameters.
-- The 2026-07-29 local QA run covered 4/4 paths: normalize 39.0 ms, responsive
-  resolve 6.5 ms, layout diagnostics 219.4 ms, and Quick Actions 124.2 ms.
+- The 2026-07-29 local QA run covered 7/7 paths: normalize 40.6 ms, responsive
+  resolve 6.8 ms, layout diagnostics 232.4 ms, Quick Actions 123.9 ms,
+  pan/zoom 37.0 ms, selection refresh 87.8 ms, and viewport resize 39.9 ms.
   These values describe this machine only.
 - Korean desktop/compact evidence and the machine-readable environment report
   regenerate through `tools/qa_painter_ui_runtime_performance.py` under

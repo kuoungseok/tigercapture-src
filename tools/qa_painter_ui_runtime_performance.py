@@ -50,7 +50,7 @@ def main() -> int:
         results[label] = {
             "ok": bool(
                 saved
-                and dialog.tree.topLevelItemCount() == 4
+                and dialog.tree.topLevelItemCount() == 7
                 and dialog.tree.isColumnHidden(2) is compact
                 and dialog.tree.isColumnHidden(3) is compact
             ),

@@ -1,6 +1,7 @@
 """Measured runtime performance gate for core Painter UI document paths."""
 from __future__ import annotations
 
+import copy
 import platform
 import statistics
 import sys
@@ -16,6 +17,12 @@ _CASES: tuple[tuple[str, str, float, float], ...] = (
     ("responsive", "Resolve responsive layout", 35.0, 90.0),
     ("layout_diagnostics", "Diagnose layout", 350.0, 750.0),
     ("quick_actions", "Search Quick Actions", 250.0, 550.0),
+)
+
+_INTERACTION_CASES: tuple[tuple[str, str, float, float], ...] = (
+    ("pan_zoom", "Pan and zoom canvas", 150.0, 350.0),
+    ("selection_refresh", "Refresh selection", 220.0, 500.0),
+    ("viewport_resize", "Resize viewport", 180.0, 400.0),
 )
 
 
@@ -116,6 +123,94 @@ def run_painter_ui_runtime_performance(
                 **measurement,
             }
         )
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QApplication
+
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    app = QApplication.instance()
+    if app is None:
+        raise RuntimeError(
+            "Painter UI interaction benchmark requires QApplication"
+        )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1000, 700)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+    selected_documents: list[dict[str, Any]] = []
+    for index in range(2):
+        selected = copy.deepcopy(document)
+        object_id = f"ui-object-{index + 1}"
+        selected["selection"] = {
+            "object_id": object_id,
+            "object_ids": [object_id],
+        }
+        selected_documents.append(selected)
+
+    def pan_zoom() -> None:
+        overlay.set_view_state(
+            {"zoom_percent": 100.0, "offset_x": 0.0, "offset_y": 0.0},
+            emit=False,
+        )
+        for index in range(8):
+            overlay.set_zoom_percent(
+                90.0 + float(index * 5),
+                anchor=QPointF(500.0, 350.0),
+            )
+            overlay.pan_view(dx=3.0, dy=-2.0)
+        app.processEvents()
+
+    selection_index = 0
+
+    def selection_refresh() -> None:
+        nonlocal selection_index
+        overlay.set_document(selected_documents[selection_index % 2])
+        selection_index += 1
+        app.processEvents()
+
+    resize_index = 0
+
+    def viewport_resize() -> None:
+        nonlocal resize_index
+        for index in range(8):
+            if (resize_index + index) % 2:
+                overlay.resize(920, 640)
+            else:
+                overlay.resize(1000, 700)
+        resize_index += 1
+        app.processEvents()
+
+    interaction_callbacks: dict[str, Callable[[], Any]] = {
+        "pan_zoom": pan_zoom,
+        "selection_refresh": selection_refresh,
+        "viewport_resize": viewport_resize,
+    }
+    try:
+        for case_id, label, warning_ms, block_ms in _INTERACTION_CASES:
+            measurement = _measure(
+                interaction_callbacks[case_id],
+                iterations=repeat,
+            )
+            status = classify_runtime_measurement(
+                measurement["median_ms"],
+                warning_ms,
+                block_ms,
+            )
+            cases.append(
+                {
+                    "id": case_id,
+                    "label": label,
+                    "status": status,
+                    "warning_ms": warning_ms,
+                    "block_ms": block_ms,
+                    **measurement,
+                }
+            )
+    finally:
+        overlay.close()
+        overlay.deleteLater()
+        app.processEvents()
     warning_count = sum(row["status"] == "warning" for row in cases)
     blocked_count = sum(row["status"] == "blocked" for row in cases)
     status = (

@@ -21,6 +21,7 @@ def test_runtime_measurement_classifier_has_warning_and_block_gates() -> None:
 
 
 def test_runtime_performance_runs_real_core_paths() -> None:
+    _app()
     from app.painter_ui_runtime_performance import (
         SCHEMA,
         run_painter_ui_runtime_performance,
@@ -38,6 +39,9 @@ def test_runtime_performance_runs_real_core_paths() -> None:
         "responsive",
         "layout_diagnostics",
         "quick_actions",
+        "pan_zoom",
+        "selection_refresh",
+        "viewport_resize",
     }
     assert all(len(row["samples_ms"]) == 1 for row in report["cases"])
     assert report["measurement_policy"]["clock"] == "time.perf_counter"
@@ -67,7 +71,7 @@ def test_runtime_performance_dialog_empty_and_compact_states() -> None:
             iterations=1,
         )
     )
-    assert dialog.tree.topLevelItemCount() == 4
+    assert dialog.tree.topLevelItemCount() == 7
     dialog.resize(420, 500)
     dialog.show()
     _app().processEvents()
@@ -86,6 +90,7 @@ def test_runtime_performance_dialog_empty_and_compact_states() -> None:
 
 
 def test_runtime_performance_action_and_quick_action() -> None:
+    _app()
     from app.actions.registry import ActionRegistry
     from app.painter_ui_document import create_ui_document
     from app.painter_ui_quick_actions import search_painter_ui_quick_actions
@@ -102,7 +107,7 @@ def test_runtime_performance_action_and_quick_action() -> None:
     ).to_dict()
     assert result["ok"] is True
     assert result["changed"] is False
-    assert result["result"]["case_count"] == 4
+    assert result["result"]["case_count"] == 7
 
     quick = search_painter_ui_quick_actions(
         create_ui_document(390, 844),
@@ -114,3 +119,99 @@ def test_runtime_performance_action_and_quick_action() -> None:
         if item["id"] == "document.runtime_performance"
     )
     assert row["operation"] == {"type": "runtime_performance"}
+
+
+def test_workspace_reuses_resolved_layout_for_selection_only_changes() -> None:
+    _app()
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+    )
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, row = add_ui_object(
+        create_ui_document(390, 844),
+        kind="rectangle",
+        x=40,
+        y=60,
+        width=120,
+        height=80,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.set_document(document)
+    resolved = overlay._resolved_geometry
+
+    overlay.set_document(select_ui_object(document, row["id"]))
+
+    assert overlay._resolved_geometry is resolved
+    assert overlay._effective_document["selection"]["object_id"] == row["id"]
+
+
+def test_workspace_render_cache_rebuilds_for_same_revision_content() -> None:
+    _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    first, _first_row = add_ui_object(
+        create_ui_document(800, 600),
+        kind="rectangle",
+        x=100,
+        y=100,
+        width=200,
+        height=120,
+    )
+    second, second_row = add_ui_object(
+        create_ui_document(800, 600),
+        kind="rectangle",
+        x=300,
+        y=200,
+        width=120,
+        height=80,
+    )
+    assert first["document_id"] == second["document_id"]
+    assert first["revision"] == second["revision"]
+
+    overlay = PainterUIDesignOverlay()
+    overlay.set_document(first)
+    resolved = overlay._resolved_geometry
+    overlay.set_document(second)
+
+    assert overlay._resolved_geometry is not resolved
+    assert overlay._resolved_geometry[second_row["id"]]["x"] == 300.0
+
+
+def test_workspace_render_cache_indexes_mask_targets() -> None:
+    _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_masks import create_ui_mask
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, mask_row = add_ui_object(
+        create_ui_document(390, 844),
+        kind="ellipse",
+        x=20,
+        y=20,
+        width=100,
+        height=100,
+    )
+    document, target_row = add_ui_object(
+        document,
+        kind="rectangle",
+        x=20,
+        y=20,
+        width=160,
+        height=100,
+    )
+    document, _mask = create_ui_mask(
+        document,
+        mask_row["id"],
+        target_ids=[target_row["id"]],
+    )
+
+    overlay = PainterUIDesignOverlay()
+    overlay.set_document(document)
+    source = overlay._mask_source_for_target(target_row["id"])
+
+    assert source is not None
+    assert source[0]["id"] == mask_row["id"]

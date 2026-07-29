@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import math
 from typing import Any, Mapping
 
@@ -58,6 +60,18 @@ _CREATE_TOOLS = {
 _HANDLE_NAMES = ("nw", "ne", "sw", "se")
 
 
+def _document_render_fingerprint(document: Mapping[str, Any]) -> str:
+    payload = dict(document)
+    payload.pop("selection", None)
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class PainterUIDesignOverlay(QWidget):
     object_selected = Signal(str)
     object_selection_requested = Signal(str, str)
@@ -92,6 +106,13 @@ class PainterUIDesignOverlay(QWidget):
         super().__init__(parent)
         self._document = normalize_ui_document(None)
         self._effective_document = self._document
+        self._document_render_signature: tuple[Any, ...] | None = None
+        self._effective_objects_by_id: dict[str, dict[str, Any]] = {}
+        self._mask_source_by_target: dict[
+            str,
+            tuple[dict[str, Any], dict[str, Any]],
+        ] = {}
+        self._boolean_operand_id_cache: set[str] = set()
         self._tool = "select"
         self._interaction = ""
         self._active_object_id = ""
@@ -161,14 +182,35 @@ class PainterUIDesignOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
-        self._document = normalize_ui_document(value)
-        from app.painter_ui_themes import resolve_ui_theme_document
-
-        self._effective_document = resolve_ui_theme_document(self._document)
-        self._resolved_geometry = resolve_ui_constraints(
-            self._effective_document,
-            resolved_ui_geometry(self._effective_document),
+        document = normalize_ui_document(value)
+        signature = (
+            str(document.get("document_id") or ""),
+            int(document.get("revision") or 0),
+            str(document.get("active_page_id") or ""),
+            str(document.get("active_artboard_id") or ""),
+            len(document.get("objects") or []),
+            len(document.get("artboards") or []),
+            _document_render_fingerprint(document),
         )
+        reuse_resolved = (
+            signature == self._document_render_signature
+            and bool(self._effective_objects_by_id)
+        )
+        self._document = document
+        if reuse_resolved:
+            self._effective_document["selection"] = copy.deepcopy(
+                document["selection"]
+            )
+        else:
+            from app.painter_ui_themes import resolve_ui_theme_document
+
+            self._effective_document = resolve_ui_theme_document(document)
+            self._resolved_geometry = resolve_ui_constraints(
+                self._effective_document,
+                resolved_ui_geometry(self._effective_document),
+            )
+            self._document_render_signature = signature
+            self._rebuild_document_indexes()
         if self._edit_scope_id not in {
             row["id"] for row in self._document["objects"]
         }:
@@ -200,6 +242,28 @@ class PainterUIDesignOverlay(QWidget):
         else:
             self._position_text_editor()
         self.update()
+
+    def _rebuild_document_indexes(self) -> None:
+        objects = list(self._effective_document.get("objects") or [])
+        self._effective_objects_by_id = {
+            str(row["id"]): row for row in objects
+        }
+        self._mask_source_by_target = {}
+        for row in objects:
+            mask = row.get("mask")
+            if not isinstance(mask, dict) or not mask.get("enabled"):
+                continue
+            normalized_mask = dict(mask)
+            for target_id in mask.get("target_ids", []):
+                key = str(target_id or "")
+                if key and key not in self._mask_source_by_target:
+                    self._mask_source_by_target[key] = (
+                        row,
+                        normalized_mask,
+                    )
+        from app.painter_ui_boolean_geometry import boolean_operand_ids
+
+        self._boolean_operand_id_cache = boolean_operand_ids(objects)
 
     def begin_text_edit(
         self,
@@ -2041,7 +2105,7 @@ class PainterUIDesignOverlay(QWidget):
         painter.restore()
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
-        boolean_operands = self._boolean_operand_ids()
+        boolean_operands = self._boolean_operand_id_cache
         preview_artboards: set[str] | None = None
         preview_visibility: Mapping[str, Any] = {}
         if self._prototype_preview_enabled:
@@ -2085,15 +2149,12 @@ class PainterUIDesignOverlay(QWidget):
         self,
         row: Mapping[str, Any],
     ) -> list[dict[str, Any]]:
-        objects = {
-            item["id"]: item for item in self._effective_document["objects"]
-        }
         result: list[dict[str, Any]] = []
         seen: set[str] = set()
         parent_id = str(row.get("parent_id") or "")
         while parent_id and parent_id not in seen:
             seen.add(parent_id)
-            parent = objects.get(parent_id)
+            parent = self._effective_objects_by_id.get(parent_id)
             if parent is None:
                 break
             if parent["kind"] == "frame" and bool(
@@ -2191,17 +2252,7 @@ class PainterUIDesignOverlay(QWidget):
         self,
         target_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]] | None:
-        for row in self._effective_document["objects"]:
-            mask = row.get("mask")
-            if (
-                isinstance(mask, Mapping)
-                and mask.get("enabled")
-                and str(target_id) in {
-                    str(item) for item in mask.get("target_ids", [])
-                }
-            ):
-                return row, dict(mask)
-        return None
+        return self._mask_source_by_target.get(str(target_id))
 
     def _apply_object_mask(
         self,
