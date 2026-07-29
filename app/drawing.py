@@ -8700,6 +8700,11 @@ class PaintDialog(QDialog):
             "Keyboard Shortcuts...",
             self._show_painter_ui_shortcut_map,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "UI / Action Parity...",
+            self._show_painter_ui_action_parity,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14257,6 +14262,29 @@ class PaintDialog(QDialog):
         dialog.activateWindow()
         dialog.search_edit.setFocus()
 
+    def _show_painter_ui_action_parity(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.actions.registry import ActionRegistry
+        from app.painter_ui_action_parity import (
+            inspect_painter_ui_action_parity,
+        )
+        from app.painter_ui_action_parity_dialog import (
+            PainterUIActionParityDialog,
+        )
+
+        report = inspect_painter_ui_action_parity(
+            ActionRegistry(owner=None).list_actions()
+        )
+        dialog = getattr(self, "_painter_ui_action_parity_dialog", None)
+        if dialog is None:
+            dialog = PainterUIActionParityDialog(self)
+            self._painter_ui_action_parity_dialog = dialog
+        dialog.set_report(report)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14364,6 +14392,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_batch_rename()
         elif operation_type == "shortcut_map":
             self._show_painter_ui_shortcut_map()
+        elif operation_type == "action_parity":
+            self._show_painter_ui_action_parity()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

@@ -1780,6 +1780,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter shortcut assignments would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.action_parity.inspect",
+        "Audit live Painter UI Action coverage and orphan candidates.",
+        "paint",
+        "paint_ui_action_parity_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI and Action parity would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.selection.parent",
         "Select the immediate parent of a Painter UI object without changing the document.",
         "paint",

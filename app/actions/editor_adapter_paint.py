@@ -2933,6 +2933,15 @@ class PaintAdapterMixin(
             active_scope=active_scope,
         )
 
+    def paint_ui_action_parity_inspect(self) -> dict[str, Any]:
+        from app.actions.registry import ActionRegistry
+        from app.painter_ui_action_parity import (
+            inspect_painter_ui_action_parity,
+        )
+
+        actions = ActionRegistry(owner=None).list_actions()
+        return inspect_painter_ui_action_parity(actions)
+
     def paint_ui_selection_parent(
         self,
         *,

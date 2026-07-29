@@ -1390,6 +1390,22 @@ Implemented checkpoint (2026-07-29, shortcut map slice):
   `tools/qa_painter_ui_shortcut_map.py` regenerates evidence under
   `debugCapture/painter_ui_designer/shortcuts`.
 
+Implemented checkpoint (2026-07-29, UI/Action parity slice):
+
+- `app/painter_ui_action_parity.py` audits the live Registry instead of a
+  copied Action count. It maps every `paint.ui.*` Action to one of 15 declared
+  contextual UI families, verifies each family's required vertical actions,
+  and reports unclassified orphan candidates separately.
+- Low-level automation Actions are covered by their owning contextual surface;
+  the audit does not encourage 248 permanent buttons or another fixed panel.
+- UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
+  `paint.ui.action_parity.inspect` returns the same report.
+- The current Registry evidence covers 248 Painter UI Actions, 15/15 surfaces,
+  zero missing required Actions, and zero orphan candidates.
+- Korean and supported-language labels plus desktop/compact evidence regenerate
+  through `tools/qa_painter_ui_action_parity.py` under
+  `debugCapture/painter_ui_designer/action_parity`.
+
 Exit criteria:
 
 - Pan, zoom, selection, and resize stay responsive under the release corpus.

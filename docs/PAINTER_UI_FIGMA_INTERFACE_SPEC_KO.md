@@ -804,6 +804,17 @@ Shortcut:
 - 검색 가능한 shortcut map
 - 충돌 경고
 
+UI / Action parity:
+
+- `app/painter_ui_action_parity.py` maps every live `paint.ui.*` Action to a
+  declared contextual UI family and reports missing required Actions and
+  unclassified orphan candidates separately.
+- Low-level automation commands share their owning contextual surface; they do
+  not require one visible button per Action.
+- UI > UI / Action Parity and Quick Actions open a transient read-only report.
+- `paint.ui.action_parity.inspect` exposes the same live Registry audit without
+  changing the document, revision, dirty state, or Undo.
+
 ## 10. 기존 기능 재배치 표
 
 | 기존 기능 | 현재 위치 | 새 위치 |

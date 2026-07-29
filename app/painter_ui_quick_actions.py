@@ -150,6 +150,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "shortcut_map"},
     },
     {
+        "id": "document.action_parity",
+        "label": "UI / Action parity",
+        "detail": "Audit Action coverage and orphan automation commands.",
+        "keywords": "ui action parity audit orphan automation coverage",
+        "operation": {"type": "action_parity"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",
