@@ -10569,6 +10569,21 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.token_remove_requested.connect(
             self._remove_painter_ui_token
         )
+        self._paint_ui_inspector.style_add_requested.connect(
+            self._add_painter_ui_style
+        )
+        self._paint_ui_inspector.style_update_requested.connect(
+            self._update_painter_ui_style
+        )
+        self._paint_ui_inspector.style_remove_requested.connect(
+            self._remove_painter_ui_style
+        )
+        self._paint_ui_inspector.style_apply_requested.connect(
+            self._apply_painter_ui_style
+        )
+        self._paint_ui_inspector.style_unlink_requested.connect(
+            self._unlink_painter_ui_style
+        )
         self._paint_ui_inspector.token_binding_requested.connect(
             self._bind_painter_ui_token
         )
@@ -15654,6 +15669,109 @@ class PaintDialog(QDialog):
             detach_references=bool(detach_references),
         )
         self._push_undo_state("Remove UI token")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_style(self, values: object) -> None:
+        from app.painter_ui_styles import add_ui_style
+
+        if not isinstance(values, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _style = add_ui_style(
+            current,
+            name=str(values.get("name") or ""),
+            kind=str(values.get("kind") or "color"),
+            properties=values.get("properties"),
+            token_bindings=values.get("token_bindings"),
+            description=str(values.get("description") or ""),
+        )
+        self._push_undo_state("Add UI style")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_style(
+        self,
+        style_id: str,
+        changes: object,
+    ) -> None:
+        from app.painter_ui_styles import update_ui_style
+
+        if not isinstance(changes, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _style = update_ui_style(
+            current,
+            str(style_id),
+            changes,
+        )
+        self._push_undo_state("Update UI style")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_style(
+        self,
+        style_id: str,
+        detach_references: bool,
+    ) -> None:
+        from app.painter_ui_styles import remove_ui_style
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = remove_ui_style(
+            current,
+            str(style_id),
+            detach_references=bool(detach_references),
+        )
+        self._push_undo_state("Remove UI style")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _apply_painter_ui_style(
+        self,
+        style_id: str,
+        target_id: str,
+    ) -> None:
+        from app.painter_ui_styles import apply_ui_style
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _target = apply_ui_style(
+            current,
+            target_id=str(target_id),
+            style_id=str(style_id),
+        )
+        self._push_undo_state("Apply UI style")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _unlink_painter_ui_style(
+        self,
+        kind: str,
+        target_id: str,
+    ) -> None:
+        from app.painter_ui_styles import unlink_ui_style
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = unlink_ui_style(
+            current,
+            target_id=str(target_id),
+            kind=str(kind),
+        )
+        self._push_undo_state("Detach UI style")
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

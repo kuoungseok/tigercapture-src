@@ -40,7 +40,7 @@ def test_variable_collections_migrate_legacy_theme_tokens_and_artboards() -> Non
             ],
         }
     )
-    assert document["version"] == 20
+    assert document["version"] == 21
     assert document["variable_collections"][0]["id"] == LEGACY_THEME_COLLECTION_ID
     assert (
         document["artboards"][0]["variable_modes"][LEGACY_THEME_COLLECTION_ID]

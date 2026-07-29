@@ -176,12 +176,16 @@ Focused entry points:
   `paint.ui.property.inspect/reset`. Layout warnings are selection-local and
   include recovery guidance; do not replace them with a second validation
   model or a canvas-only reset path.
-  Painter UI schema 20 adds stable-ID Variable Collections and Modes through
+  Painter UI schema 21 adds stable-ID Variable Collections and Modes through
   `app/painter_ui_variables.py`. Existing Light/Dark/High Contrast values
   migrate into the canonical Theme collection without changing token IDs.
   The compact Assets surface and `paint.ui.variable.collection.*` /
   `paint.ui.variable.mode.*` Actions share these services; do not add a
   parallel theme-only variable model.
+  Schema 21 also adds named Color/Text/Effect Styles through
+  `app/painter_ui_styles.py`. The Styles Assets panel and
+  `paint.ui.style.*` Actions use that service. Existing Layout Grid Styles are
+  adapted into the same report/UI and must not be reimplemented.
   M2 Content Test is implemented in `app/painter_ui_stress_preview.py`.
   `paint.ui.layout.stress_preview` and the Inspector share one presentation
   entry point; only the canvas Overlay receives the ephemeral preview document.

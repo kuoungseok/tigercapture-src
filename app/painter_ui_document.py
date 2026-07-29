@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 20
+UI_DOCUMENT_VERSION = 21
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -206,6 +206,7 @@ def create_ui_document(
         ],
         "objects": [],
         "components": [],
+        "styles": [],
         "variable_collections": default_ui_variable_collections(),
         "tokens": [],
         "interactions": [],
@@ -285,6 +286,7 @@ def _normalize_object(
     from app.painter_ui_masks import normalize_ui_mask
     from app.painter_ui_remote_components import normalize_remote_component
     from app.painter_ui_text_ranges import normalize_ui_text_ranges
+    from app.painter_ui_styles import normalize_ui_style_ids
 
     normalized_style = normalize_ui_advanced_style(style)
     normalized_content = (
@@ -360,6 +362,7 @@ def _normalize_object(
             row.get("component_scope_source_object_id") or ""
         ),
         "variant": str(row.get("variant") or ""),
+        "style_ids": normalize_ui_style_ids(row.get("style_ids")),
         "token_bindings": (
             {
                 str(key): str(token_id or "")
@@ -573,6 +576,13 @@ def normalize_ui_document(
         prefix="ui-component",
         normalizer=_normalize_component,
     )
+    from app.painter_ui_styles import normalize_ui_named_style
+
+    styles = _normalize_typed_rows(
+        raw.get("styles"),
+        prefix="ui-style",
+        normalizer=normalize_ui_named_style,
+    )
     from app.painter_ui_variables import normalize_ui_variable_collections
 
     variable_collections = normalize_ui_variable_collections(
@@ -656,6 +666,7 @@ def normalize_ui_document(
         "artboards": artboards,
         "objects": objects,
         "components": components,
+        "styles": styles,
         "variable_collections": variable_collections,
         "tokens": tokens,
         "interactions": interactions,
@@ -720,6 +731,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     artboard_ids = [row["id"] for row in document["artboards"]]
     object_ids = [row["id"] for row in document["objects"]]
     component_ids = [row["id"] for row in document["components"]]
+    style_ids = [row["id"] for row in document["styles"]]
     variable_collection_ids = [
         row["id"] for row in document["variable_collections"]
     ]
@@ -747,6 +759,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         errors.append("duplicate_object_id")
     if len(set(component_ids)) != len(component_ids):
         errors.append("duplicate_component_id")
+    if len(set(style_ids)) != len(style_ids):
+        errors.append("duplicate_style_id")
     if len(set(variable_collection_ids)) != len(variable_collection_ids):
         errors.append("duplicate_variable_collection_id")
     if len(set(variable_mode_ids)) != len(variable_mode_ids):
@@ -766,6 +780,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         + artboard_ids
         + object_ids
         + component_ids
+        + style_ids
         + variable_collection_ids
         + variable_mode_ids
         + token_ids
@@ -781,6 +796,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     artboard_id_set = set(artboard_ids)
     component_id_set = set(component_ids)
     component_by_id = {row["id"]: row for row in document["components"]}
+    style_by_id = {row["id"]: row for row in document["styles"]}
     token_id_set = set(token_ids)
     token_by_id = {row["id"]: row for row in document["tokens"]}
     variable_collection_by_id = {
@@ -997,6 +1013,17 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                     f"token_scope_mismatch:{row['id']}:{property_name}:"
                     f"{token_id}"
                 )
+        for style_kind, style_id in row["style_ids"].items():
+            named_style = style_by_id.get(style_id)
+            if named_style is None:
+                errors.append(
+                    f"missing_named_style:{row['id']}:{style_kind}:{style_id}"
+                )
+            elif named_style["kind"] != style_kind:
+                errors.append(
+                    f"named_style_kind_mismatch:{row['id']}:{style_kind}:"
+                    f"{style_id}"
+                )
         if row["opacity"] <= 0.0:
             warnings.append(f"fully_transparent:{row['id']}")
         if not row["visible"]:
@@ -1163,6 +1190,18 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                 errors.append(
                     f"token_alias_type_mismatch:{row['id']}:{alias_id}"
                 )
+    for row in document["styles"]:
+        for path, token_id in row["token_bindings"].items():
+            if token_id not in token_id_set:
+                errors.append(
+                    f"missing_named_style_token:{row['id']}:{path}:{token_id}"
+                )
+            token = token_by_id.get(token_id)
+            if token is not None and token["scope"] and path not in token["scope"]:
+                errors.append(
+                    f"named_style_token_scope_mismatch:{row['id']}:{path}:"
+                    f"{token_id}"
+                )
     _append_cycle_errors(
         document["tokens"],
         reference_key="alias_token_id",
@@ -1212,6 +1251,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "artboard_count": len(artboard_ids),
         "object_count": len(object_ids),
         "component_count": len(document["components"]),
+        "style_count": len(style_ids) + len(layout_grid_style_ids),
         "variable_collection_count": len(variable_collection_ids),
         "variable_mode_count": len(variable_mode_ids),
         "token_count": len(document["tokens"]),
@@ -2447,7 +2487,12 @@ def remove_ui_token(
         for row in document["tokens"]
         if row["alias_token_id"] == token_id
     ]
-    if (object_refs or alias_refs) and not detach_references:
+    style_refs = [
+        row["id"]
+        for row in document["styles"]
+        if token_id in row["token_bindings"].values()
+    ]
+    if (object_refs or alias_refs or style_refs) and not detach_references:
         raise PainterUIDocumentError(f"UI token is referenced: {token_id}")
     document["tokens"] = [
         row for row in document["tokens"] if row["id"] != token_id
@@ -2462,10 +2507,17 @@ def remove_ui_token(
         for row in document["tokens"]:
             if row["alias_token_id"] == token_id:
                 row["alias_token_id"] = ""
+        for row in document["styles"]:
+            row["token_bindings"] = {
+                key: value
+                for key, value in row["token_bindings"].items()
+                if value != token_id
+            }
     return _revised(document), {
         "token_id": token_id,
         "detached_object_ids": object_refs,
         "detached_alias_token_ids": alias_refs,
+        "detached_style_ids": style_refs,
     }
 
 

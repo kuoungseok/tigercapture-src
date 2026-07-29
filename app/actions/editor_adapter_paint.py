@@ -2931,6 +2931,113 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Remove UI token")
         return self._paint_ui_commit(dialog, "Remove UI token", document)
 
+    def paint_ui_style_library_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import inspect_ui_style_library
+
+        return inspect_ui_style_library(dialog._painter_ui_document)
+
+    def paint_ui_style_add(
+        self,
+        *,
+        name: str,
+        kind: str,
+        properties: dict[str, Any] | None = None,
+        token_bindings: dict[str, str] | None = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import add_ui_style
+
+        document, row = add_ui_style(
+            dialog._painter_ui_document,
+            name=name,
+            kind=kind,
+            properties=properties,
+            token_bindings=token_bindings,
+            description=description,
+        )
+        dialog._push_undo_state("Add UI style")
+        result = self._paint_ui_commit(dialog, "Add UI style", document)
+        result["style"] = row
+        return result
+
+    def paint_ui_style_update(
+        self,
+        *,
+        style_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import update_ui_style
+
+        document, row = update_ui_style(
+            dialog._painter_ui_document,
+            style_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI style")
+        result = self._paint_ui_commit(dialog, "Update UI style", document)
+        result["style"] = row
+        return result
+
+    def paint_ui_style_remove(
+        self,
+        *,
+        style_id: str,
+        detach_references: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import remove_ui_style
+
+        document, removed = remove_ui_style(
+            dialog._painter_ui_document,
+            style_id,
+            detach_references=detach_references,
+        )
+        dialog._push_undo_state("Remove UI style")
+        result = self._paint_ui_commit(dialog, "Remove UI style", document)
+        result["removed"] = removed
+        return result
+
+    def paint_ui_style_apply(
+        self,
+        *,
+        style_id: str,
+        target_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import apply_ui_style
+
+        document, target = apply_ui_style(
+            dialog._painter_ui_document,
+            target_id=target_id,
+            style_id=style_id,
+        )
+        dialog._push_undo_state("Apply UI style")
+        result = self._paint_ui_commit(dialog, "Apply UI style", document)
+        result["target"] = target
+        return result
+
+    def paint_ui_style_unlink(
+        self,
+        *,
+        kind: str,
+        target_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_styles import unlink_ui_style
+
+        document, detached = unlink_ui_style(
+            dialog._painter_ui_document,
+            target_id=target_id,
+            kind=kind,
+        )
+        dialog._push_undo_state("Detach UI style")
+        result = self._paint_ui_commit(dialog, "Detach UI style", document)
+        result["detached"] = detached
+        return result
+
     def paint_ui_variable_collection_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_variables import inspect_ui_variable_collections

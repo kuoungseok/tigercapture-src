@@ -10,7 +10,7 @@ Completed in the Page/navigation slice:
 
 - UI document schema 19 adds stable-ID `pages[]`, `active_page_id`, and
   per-artboard `page_id`; version 18 documents migrate into `Page 1`.
-- UI document schema 20 adds stable-ID Variable Collections/Modes and
+- UI document schema 21 adds stable-ID Variable Collections/Modes and
   per-artboard active mode selection while preserving schema 19 Pages.
 - Page add, rename, activate, and delete use the canonical document mutation
   service with one-step Undo, `.tspaint` persistence, and matching
@@ -895,7 +895,7 @@ Implemented checkpoint (2026-07-29):
   combination report to automation. Reproducible visual evidence is generated
   by `tools/qa_painter_ui_component_playground.py` as
   `painter_ui_designer_m3_component_playground.png`.
-- UI schema 20 now persists stable-ID Variable Collections, stable-ID Modes,
+- UI schema 21 now persists stable-ID Variable Collections, stable-ID Modes,
   per-artboard active mode maps, explicit color/number/string/boolean variable
   types, mode values, aliases, and optional binding scopes. Schema 19
   Light/Dark/High Contrast tokens migrate without changing token IDs.
@@ -910,6 +910,17 @@ Implemented checkpoint (2026-07-29):
   remains backward compatible with v1 and legacy arrays.
 - `tools/qa_painter_ui_variable_collections.py` regenerates compact-panel
   evidence as `painter_ui_designer_m3_variable_collections.png`.
+- UI schema 21 now persists stable-ID Color, Text, and Effect Styles and
+  per-object `style_ids`. The existing Layout Grid Style service is presented
+  in the same compact `Styles` Assets library rather than duplicated.
+- Creating from the current selection, applying, updating linked targets,
+  detaching while preserving materialized values, referenced-delete blocking,
+  token scope validation, usage counts, Undo, and automation all share
+  `app/painter_ui_styles.py`.
+- `paint.ui.style.library.inspect` and
+  `paint.ui.style.add/update/remove/apply/unlink` provide Action parity.
+  `tools/qa_painter_ui_styles.py` regenerates
+  `painter_ui_designer_m3_named_styles.png`.
 
 Exit criteria:
 

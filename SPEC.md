@@ -7864,7 +7864,7 @@ AI Script Edit MVP integration:
   report to AI automation.
 - Painter UI Design includes a dedicated `Tokens` library tab for Color,
   Typography, Spacing, Radius, Border, Shadow, Opacity, Icon, and Image tokens.
-  UI schema 20 adds stable-ID Variable Collections and Modes above those
+  UI schema 21 adds stable-ID Variable Collections and Modes above those
   semantic token kinds. Variables preserve explicit color, number, string, or
   boolean types; artboards select modes independently for Theme, Density,
   Locale, Platform, Brand, or custom collections. Existing Light/Dark/High
@@ -7879,6 +7879,13 @@ AI Script Edit MVP integration:
   collection/mode records and accepts v1 or legacy token arrays on import.
   Conflict handling remains explicit `update`, `skip`, or `regenerate`;
   regenerated aliases are remapped as one graph.
+- Painter UI schema 21 also adds stable-ID named Color, Text, and Effect
+  Styles. Objects link them through `style_ids`; linked updates propagate while
+  detach preserves materialized values. The compact `Styles` Assets tab
+  combines these records with existing artboard Layout Grid Styles, reports
+  usage, validates token references/scopes, and shares one Undoable mutation
+  service with `paint.ui.style.library.inspect` and
+  `paint.ui.style.add/update/remove/apply/unlink`.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

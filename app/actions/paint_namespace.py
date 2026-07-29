@@ -13,6 +13,7 @@ from app.painter_ui_document import (
     UI_TOKEN_KINDS,
 )
 from app.painter_ui_object_scale import UI_SCALE_ORIGINS
+from app.painter_ui_styles import UI_STYLE_KINDS
 from app.painter_ui_variables import (
     UI_VARIABLE_COLLECTION_KINDS,
     UI_VARIABLE_TYPES,
@@ -2129,6 +2130,99 @@ def register_paint_actions(registry: Any) -> None:
         required=("token_id",),
         undo_label="Remove UI token",
         dry_summary="a UI token would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.library.inspect",
+        "Inspect named Color, Text, Effect, and Layout Grid styles with usage.",
+        "paint",
+        "paint_ui_style_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the shared UI style library would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.add",
+        "Create a stable named UI style from explicit properties.",
+        "paint",
+        "paint_ui_style_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": list(UI_STYLE_KINDS)},
+                "properties": any_object,
+                "token_bindings": any_object,
+                "description": {"type": "string"},
+            },
+            required=("name", "kind"),
+        ),
+        required=("name", "kind"),
+        undo_label="Add UI style",
+        dry_summary="a stable named UI style would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.update",
+        "Update a named style and propagate it to linked targets.",
+        "paint",
+        "paint_ui_style_update",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("style_id", "changes"),
+        ),
+        required=("style_id", "changes"),
+        undo_label="Update UI style",
+        dry_summary="a named UI style and linked targets would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.remove",
+        "Remove a named style, blocking referenced deletion unless detached.",
+        "paint",
+        "paint_ui_style_remove",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("style_id",),
+        ),
+        required=("style_id",),
+        undo_label="Remove UI style",
+        dry_summary="a named UI style would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.apply",
+        "Apply and link a named style to a UI object or artboard.",
+        "paint",
+        "paint_ui_style_apply",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "target_id": {"type": "string"},
+            },
+            required=("style_id", "target_id"),
+        ),
+        required=("style_id", "target_id"),
+        undo_label="Apply UI style",
+        dry_summary="a named UI style would be linked to a target",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.unlink",
+        "Detach a style link while preserving materialized target values.",
+        "paint",
+        "paint_ui_style_unlink",
+        params_schema=schema_object(
+            {
+                "kind": {"type": "string", "enum": list(UI_STYLE_KINDS)},
+                "target_id": {"type": "string"},
+            },
+            required=("kind", "target_id"),
+        ),
+        required=("kind", "target_id"),
+        undo_label="Detach UI style",
+        dry_summary="a named UI style link would be detached",
     )
     registry.register_adapter_action(
         "paint.ui.variable.collection.inspect",

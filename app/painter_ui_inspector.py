@@ -312,6 +312,11 @@ class PainterUIInspector(QWidget):
     token_add_requested = Signal(object)
     token_update_requested = Signal(str, object)
     token_remove_requested = Signal(str, bool)
+    style_add_requested = Signal(object)
+    style_update_requested = Signal(str, object)
+    style_remove_requested = Signal(str, bool)
+    style_apply_requested = Signal(str, str)
+    style_unlink_requested = Signal(str, str)
     token_binding_requested = Signal(str, str, str)
     token_import_requested = Signal(str)
     token_export_requested = Signal()
@@ -833,6 +838,26 @@ class PainterUIInspector(QWidget):
             self.component_update_requested
         )
         add_inspector_tab(self.component_library, "Components", "grid")
+
+        from app.painter_ui_style_library import PainterUIStyleLibrary
+
+        self.style_library = PainterUIStyleLibrary()
+        self.style_library.style_add_requested.connect(
+            self.style_add_requested
+        )
+        self.style_library.style_update_requested.connect(
+            self.style_update_requested
+        )
+        self.style_library.style_remove_requested.connect(
+            self.style_remove_requested
+        )
+        self.style_library.style_apply_requested.connect(
+            self.style_apply_requested
+        )
+        self.style_library.style_unlink_requested.connect(
+            self.style_unlink_requested
+        )
+        add_inspector_tab(self.style_library, "Styles", "palette")
 
         from app.painter_ui_token_library import PainterUITokenLibrary
 
@@ -2267,6 +2292,7 @@ class PainterUIInspector(QWidget):
         for label, widget in (
             ("Sections", getattr(self, "sections_page", None)),
             ("Components", getattr(self, "component_library", None)),
+            ("Styles", getattr(self, "style_library", None)),
             ("Tokens", getattr(self, "token_library", None)),
         ):
             if widget is None:
@@ -2281,6 +2307,7 @@ class PainterUIInspector(QWidget):
         self._document = normalize_ui_document(value)
         self._sync_token_suggestions()
         self.component_library.set_document(self._document)
+        self.style_library.set_document(self._document)
         self.token_library.set_document(self._document)
         self.production_panel.set_document(self._document)
         selected = self._document["selection"]["object_id"]
