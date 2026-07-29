@@ -229,6 +229,9 @@ def apply_ui_co_design(
 
 def audit_ui_design(value: Mapping[str, Any]) -> dict[str, Any]:
     document = normalize_ui_document(value)
+    from app.painter_ui_accessibility_audit import audit_ui_accessibility
+
+    accessibility_audit = audit_ui_accessibility(document)
     issues: list[dict[str, Any]] = []
     focus_by_artboard: dict[str, dict[int, str]] = {}
     total_image_bytes = 0
@@ -344,6 +347,7 @@ def audit_ui_design(value: Mapping[str, Any]) -> dict[str, Any]:
         "available_template_ids": [
             row["id"] for row in list_ui_templates()
         ],
+        "accessibility": accessibility_audit,
     }
 
 

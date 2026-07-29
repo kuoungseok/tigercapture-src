@@ -188,6 +188,12 @@ class PainterUIProductionPanel(QWidget):
         ai_layout.addWidget(self.ai_summary)
         ai_layout.addWidget(apply_plan)
         ai_layout.addWidget(audit)
+        from app.painter_ui_accessibility_panel import (
+            PainterUIAccessibilityPanel,
+        )
+
+        self.accessibility_panel = PainterUIAccessibilityPanel()
+        ai_layout.addWidget(self.accessibility_panel)
         ai_layout.addStretch(1)
         tabs.addTab(ai, "AI")
 
@@ -229,6 +235,13 @@ class PainterUIProductionPanel(QWidget):
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(str(text))
+
+    def set_audit_report(self, report: Mapping[str, Any] | None) -> None:
+        payload = report if isinstance(report, Mapping) else {}
+        accessibility = payload.get("accessibility")
+        self.accessibility_panel.set_report(
+            accessibility if isinstance(accessibility, Mapping) else None
+        )
 
     def set_artifact(self, path: str) -> None:
         self._artifact_path = str(path or "")

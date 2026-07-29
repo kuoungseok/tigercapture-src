@@ -896,6 +896,13 @@ overlay mode로 전환한다.
 - Select Similar
 - Batch Rename
 - shortcut map
+- Product QA uses one read-only Action/UI audit report. Accessibility checks
+  cover names, explicit focus conflicts, unavailable focus targets, 44 px
+  touch targets, resolved solid-color text contrast, and reading order.
+  Unsupported contrast inputs are counted as unknown rather than inferred.
+- QA results are contextual compact content inside Publish, not another fixed
+  side panel. Rule labels follow the active Painter language and retain stable
+  object IDs plus remediation detail.
 - desktop/compact/minimized screenshot QA
 
 ## 14. 완료 기준

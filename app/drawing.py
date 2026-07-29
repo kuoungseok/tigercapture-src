@@ -15642,7 +15642,15 @@ class PaintDialog(QDialog):
         from app.painter_ui_ai_design import audit_ui_design
 
         report = audit_ui_design(self._painter_ui_document)
-        counts = report["severity_counts"]
+        accessibility = report.get("accessibility") or {}
+        counts = accessibility.get("severity_counts") or report["severity_counts"]
+        panel = getattr(
+            getattr(self, "_paint_ui_inspector", None),
+            "production_panel",
+            None,
+        )
+        if panel is not None:
+            panel.set_audit_report(report)
         self._painter_ui_production_status(
             f"QA: {counts['error']} errors, {counts['warning']} warnings"
         )
