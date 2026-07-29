@@ -1220,3 +1220,26 @@ overlay mode로 전환한다.
   document never depends on the `.tsuilib` archive remaining mounted or on
   `debugCapture`.
 - UI and `paint.ui.library.asset.insert` use the same mutation and one Undo.
+
+## 20. Executable Web Delivery Contract
+
+- `app/painter_ui_web_delivery.py` owns Web preflight and package generation.
+  It reuses the canonical Painter prototype runtime instead of creating a
+  second interaction model.
+- `paint.ui.web.preflight` is read-only. It reports every object as DOM/CSS,
+  SVG, CSS effect, raster asset, Canvas actor, or blocked, and includes
+  prototype validation errors and unsupported interactions.
+- `paint.ui.web.package` writes `index.html`, `web.css`, `web-runtime.js`,
+  `design_document.json`, `web_preflight.json`, and a SHA-256 manifest.
+  Packaging does not mutate the Painter document or create Undo history.
+- Design-token and active theme values are resolved before HTML rendering.
+  The serialized design document keeps the canonical token references.
+- When one page contains explicit desktop, tablet, and mobile breakpoint
+  artboards, the runtime selects the matching artboard before user navigation.
+  It then fits the active artboard without upscaling it. Once the user starts
+  an interaction, prototype navigation owns the active artboard.
+- The package is an executable local artifact. Hosting, deployment, analytics,
+  authentication, and backend services are explicitly outside this claim.
+- `tools/qa_painter_ui_web_delivery.py` opens the generated package in Qt
+  WebEngine and captures real desktop and 390 px compact evidence under
+  disposable `debugCapture/painter_ui_designer/web_delivery`.

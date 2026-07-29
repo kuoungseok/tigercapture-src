@@ -32,6 +32,8 @@ class PainterUIProductionPanel(QWidget):
     review_checkpoint_requested = Signal(str)
     review_export_requested = Signal(str)
     prototype_export_requested = Signal(str)
+    web_preflight_requested = Signal()
+    web_package_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
     figma_document_imported = Signal(object, str, object)
     figma_export_requested = Signal(str)
@@ -124,6 +126,14 @@ class PainterUIProductionPanel(QWidget):
         export_prototype.clicked.connect(
             lambda: self._choose_directory(self.prototype_export_requested)
         )
+        self.web_preflight_button = QPushButton(painter_text("Web Preflight"))
+        self.web_preflight_button.clicked.connect(self.web_preflight_requested)
+        self.web_package_button = QPushButton(
+            painter_text("Export Web Package")
+        )
+        self.web_package_button.clicked.connect(
+            lambda: self._choose_directory(self.web_package_requested)
+        )
         self.asset_png = QCheckBox("PNG")
         self.asset_png.setChecked(True)
         self.asset_webp = QCheckBox("WebP")
@@ -133,6 +143,10 @@ class PainterUIProductionPanel(QWidget):
         export_assets = QPushButton("Export Production Assets")
         export_assets.clicked.connect(self._choose_asset_directory)
         deliver_layout.addWidget(export_prototype)
+        web_row = QHBoxLayout()
+        web_row.addWidget(self.web_preflight_button)
+        web_row.addWidget(self.web_package_button)
+        deliver_layout.addLayout(web_row)
         deliver_layout.addWidget(density_label)
         format_row = QHBoxLayout()
         for control in (self.asset_png, self.asset_webp, self.asset_svg):

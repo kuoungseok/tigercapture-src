@@ -595,6 +595,19 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_advanced_delivery_inspect",
         {},
     )
+    read_action(
+        "paint.ui.web.preflight",
+        "Validate responsive Web renderers and prototype behavior",
+        "paint_ui_web_preflight",
+        {},
+    )
+    read_action(
+        "paint.ui.web.package",
+        "Generate an executable responsive Painter UI Web package",
+        "paint_ui_web_package",
+        {"output_dir": {"type": "string"}},
+        required=("output_dir",),
+    )
 
 
 __all__ = ["register_paint_ui_production_actions"]

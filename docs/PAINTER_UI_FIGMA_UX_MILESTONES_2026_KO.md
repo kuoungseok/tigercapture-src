@@ -1586,9 +1586,25 @@ Implemented checkpoint (2026-07-29, M8 AI Prototype Build slice):
 - `tools/qa_painter_ui_ai_prototype.py` regenerates Korean desktop/compact
   evidence and a machine-readable report under
   `debugCapture/painter_ui_designer/ai_prototype`.
-- Remaining M8 required work is executable Web package generation,
-  Painter-to-PPT transfer, and Paint/Vector conversion. Those Actions remain
-  intentionally absent until their real artifacts and Undo contracts exist.
+- Remaining M8 required work is Painter-to-PPT transfer and Paint/Vector
+  conversion. Those Actions remain intentionally absent until their real
+  artifacts and Undo contracts exist.
+
+Implemented checkpoint (2026-07-29, M8 executable Web delivery slice):
+
+- `app/painter_ui_web_delivery.py` adds a real responsive package rather than a
+  capability-only claim. It reuses the existing prototype runtime and writes
+  HTML, resolved CSS, responsive runtime, canonical design JSON, preflight, and
+  a hashed manifest.
+- Desktop/tablet/mobile breakpoint artboards are selected by viewport until
+  the first user interaction; prototype navigation then remains authoritative.
+- Token-bound colors and typography are resolved for rendering without
+  replacing the canonical token references in the Painter document.
+- UI and automation share `paint.ui.web.preflight/package`. Both are
+  non-mutating, so exporting does not create an Undo entry or revision change.
+- `tools/qa_painter_ui_web_delivery.py` loads the artifact in Qt WebEngine and
+  proves nonblank desktop and 390 px compact output. Hosting remains explicitly
+  out of scope.
 
 Exit criteria:
 

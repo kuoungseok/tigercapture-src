@@ -414,3 +414,14 @@ Review/catalog/PPT evidence must use real TigerCapture UI screenshots and real
 rendered proof outputs. Generated monitor frames, mockups, and debug captures
 can be used only when clearly labeled as design/reference or regenerated proof,
 not as fake editor evidence.
+
+## Painter UI Web Delivery Boundary
+
+`app/painter_ui_web_delivery.py` is the focused owner for executable Web
+preflight and packaging. Use `paint.ui.web.preflight/package`; do not add a
+second interaction runtime or export-only document model. The package resolves
+active theme/token values for rendering, preserves the canonical design JSON,
+selects explicit desktop/tablet/mobile breakpoint artboards before interaction,
+and records SHA-256 artifacts. Its claim is local executable Web output only:
+hosting and backend services are not included. Regenerate browser evidence with
+`tools/qa_painter_ui_web_delivery.py`; its output belongs in `debugCapture`.

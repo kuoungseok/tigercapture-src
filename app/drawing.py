@@ -10690,6 +10690,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.prototype_export_requested.connect(
             self._export_painter_ui_prototype
         )
+        self._paint_ui_inspector.web_preflight_requested.connect(
+            self._preflight_painter_ui_web
+        )
+        self._paint_ui_inspector.web_package_requested.connect(
+            self._package_painter_ui_web
+        )
         self._paint_ui_inspector.assets_export_requested.connect(
             self._export_painter_ui_assets
         )
@@ -16012,6 +16018,35 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.production_panel.set_artifact(
             report["entrypoint"]
         )
+
+    def _preflight_painter_ui_web(self) -> None:
+        from app.painter_ui_web_delivery import preflight_ui_web
+
+        report = preflight_ui_web(self._painter_ui_document)
+        self._painter_ui_production_status(
+            "Web preflight ready."
+            if report["ok"]
+            else f"Web blocked: {len(report['blockers'])} issues"
+        )
+
+    def _package_painter_ui_web(self, output_dir: str) -> None:
+        from app.painter_ui_web_delivery import package_ui_web
+
+        report = package_ui_web(
+            self._painter_ui_document,
+            output_dir,
+        )
+        if report["ok"]:
+            self._paint_ui_inspector.production_panel.set_artifact(
+                report["entrypoint"]
+            )
+            self._painter_ui_production_status(
+                f"Web package: {report['entrypoint']}"
+            )
+        else:
+            self._painter_ui_production_status(
+                f"Web package blocked: {len(report['preflight']['blockers'])} issues"
+            )
 
     def _open_painter_ui_artifact(self, path: str) -> None:
         from app.painter_ui_artifact import open_painter_ui_artifact

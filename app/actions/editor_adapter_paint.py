@@ -880,6 +880,21 @@ class PaintAdapterMixin(
 
         return inspect_advanced_ui_delivery(dialog._painter_ui_document)
 
+    def paint_ui_web_preflight(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_web_delivery import preflight_ui_web
+
+        return preflight_ui_web(dialog._painter_ui_document)
+
+    def paint_ui_web_package(self, *, output_dir: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_web_delivery import package_ui_web
+
+        return package_ui_web(
+            dialog._painter_ui_document,
+            output_dir,
+        )
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

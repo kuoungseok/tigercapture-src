@@ -537,6 +537,8 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Select at least one category.", "카테고리를 하나 이상 선택하세요.", "カテゴリを 1 つ以上選択してください。", "请至少选择一个类别。", "Sélectionnez au moins une catégorie.", "Mindestens eine Kategorie auswählen."),
     ("No matches found.", "일치하는 항목이 없습니다.", "一致する項目がありません。", "未找到匹配项。", "Aucune correspondance.", "Keine Treffer gefunden."),
     ("Blocked", "차단됨", "ブロック", "已阻止", "Bloqué", "Blockiert"),
+    ("Web Preflight", "웹 사전 검사", "Web プリフライト", "Web 预检", "Prévol Web", "Web-Vorprüfung"),
+    ("Export Web Package", "웹 패키지 내보내기", "Web パッケージを書き出す", "导出 Web 包", "Exporter le package Web", "Web-Paket exportieren"),
     ("{count} matches · {valid} can be applied", "{count}개 일치 · {valid}개 적용 가능", "{count} 件一致 · {valid} 件適用可能", "{count} 个匹配 · {valid} 个可应用", "{count} correspondances · {valid} applicables", "{count} Treffer · {valid} anwendbar"),
     ("{count} matches applied.", "{count}개 항목을 적용했습니다.", "{count} 件を適用しました。", "已应用 {count} 个匹配项。", "{count} correspondances appliquées.", "{count} Treffer angewendet."),
     ("Batch Rename", "일괄 이름 변경", "一括名前変更", "批量重命名", "Renommer par lot", "Stapelweise umbenennen"),

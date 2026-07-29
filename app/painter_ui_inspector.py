@@ -282,6 +282,8 @@ class PainterUIInspector(QWidget):
     review_checkpoint_requested = Signal(str)
     review_export_requested = Signal(str)
     prototype_export_requested = Signal(str)
+    web_preflight_requested = Signal()
+    web_package_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
     figma_document_imported = Signal(object, str, object)
     figma_export_requested = Signal(str)
@@ -1048,6 +1050,8 @@ class PainterUIInspector(QWidget):
             (self.production_panel.review_checkpoint_requested, self.review_checkpoint_requested),
             (self.production_panel.review_export_requested, self.review_export_requested),
             (self.production_panel.prototype_export_requested, self.prototype_export_requested),
+            (self.production_panel.web_preflight_requested, self.web_preflight_requested),
+            (self.production_panel.web_package_requested, self.web_package_requested),
             (self.production_panel.assets_export_requested, self.assets_export_requested),
             (self.production_panel.figma_document_imported, self.figma_document_imported),
             (self.production_panel.figma_export_requested, self.figma_export_requested),
