@@ -174,7 +174,7 @@ class MotionCraftAdapterMixin:
         composition_id: str,
         layer_id: str,
     ) -> dict[str, Any]:
-        _composition, _layer, effect = self._motion_craft_effect(composition_id, layer_id)
+        composition, _layer, effect = self._motion_craft_effect(composition_id, layer_id)
         issues: list[str] = []
         texture = effect.metadata.get("texture")
         if isinstance(texture, Mapping):
@@ -185,9 +185,28 @@ class MotionCraftAdapterMixin:
                 issues.append("craft_texture_not_durable")
         if not bool(effect.metadata.get("seed_locked", True)):
             issues.append("craft_seed_unlocked")
+        from app.motion_designer.glass_gpu_renderer import (
+            MotionGlassGpuRenderer,
+        )
+        from app.motion_designer.render_graph import build_render_graph
+
+        gpu_eligible, gpu_reason = MotionGlassGpuRenderer.can_draw(
+            build_render_graph(
+                composition,
+                0.0,
+                include_vector_gpu=True,
+                render_quality="preview",
+            )
+        )
         return {
             "ok": not issues,
             "issues": issues,
+            "preview_backend": (
+                "motion_style_gpu"
+                if gpu_eligible
+                else "qt_painter_fallback"
+            ),
+            "preview_gpu_reason": gpu_reason,
             "umg_disposition": "deterministic_bake",
             "umg_reason": "effect_requires_bake:craft_style",
         }

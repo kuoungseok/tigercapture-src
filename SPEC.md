@@ -6621,20 +6621,31 @@ AI Script Edit MVP integration:
   the preceding framebuffer without flattening the Glass effect on CPU. The
   FBO pair is reused per viewport size and the GPU working surface is bounded
   to a 960-pixel long edge to avoid unnecessary high-DPI preview cost.
-  Eligibility rejects adjustment/precomp, mattes, card shadows, motion blur,
-  non-normal blends, effect groups, and additional effects on a Glass layer;
-  those graphs keep the accurate shared raster fallback with an explicit
-  reason. This is a Glass-effect GPU path, not a claim that the complete Motion
-  graph is GPU-native.
+  The compositor now also owns deterministic Craft and Painterly shader passes,
+  bounded multi-sample motion blur, alpha/luma track mattes including inverted
+  modes, and normal/multiply/screen/add/overlay compositing for supported
+  non-Glass stages. Glass layers still require normal blend semantics.
+  A bounded nine-tap card-shadow shader preserves the existing depth,
+  azimuth/elevation, strength, softness, and receiver-alpha rules for one
+  active receiving card. Multiple receiving depths remain an explicit raster
+  fallback. Eligibility otherwise rejects adjustment/precomp, effect groups,
+  unsupported or stacked effects, external Craft textures, projected
+  Painterly textures, and Painterly material overrides; those graphs keep the
+  accurate shared raster fallback with an explicit reason. Source-layer
+  rasterization and texture upload remain measurable CPU preparation work, so
+  this is not a claim that the complete Motion graph is GPU-native.
   The formal 15.36-second product probe recorded 450 swaps at 29.29 fps,
   one loop, `motion_glass_gpu`, and GL error 0. Its same-time CPU reference
   measured mean RGB absolute error 4.51/255 and p95 8/255 against automatic
   limits of 12 and 36. The final 60.36-second sustained probe recorded 1,601
   swaps at 26.52 fps, four loops, and GL error 0; its same-time reference also
   passed at mean 3.84/255 and p95 10/255. M22 Dynamic Glass v1 is therefore
-  complete. Deterministic Final Export continues to use the shared
-  full-frame/tiled renderer instead of treating the preview shader
-  approximation as pixel-identical export.
+  complete. Eligible deterministic Final Export now creates a reusable
+  `QOffscreenSurface` OpenGL context and full-resolution FBO and runs the same
+  compositor shader contract before readback. PNG/FFmpeg delivery necessarily
+  reads the completed FBO back to CPU memory. Unsupported and tiled graphs
+  continue to use the shared raster renderer, and backend diagnostics disclose
+  the fallback reason.
 - M23 Mixed Media Craft Workspace v1 is implemented around the provider-neutral
   `tigerstudio.motion.collage.v1` contract. A collage board binds existing
   Motion layers to stable item IDs, deterministic layout seed and z-order,
@@ -6815,8 +6826,10 @@ AI Script Edit MVP integration:
   contact sheet and verifies temporal stability, alpha preservation, and
   nontrivial pixel differences. Painterly processing uses a 480 px bounded
   working surface and restores the original alpha and output dimensions. The
-  current 960x540 warm Painted diagnostic is about 28.1 ms/frame; this is a CPU
-  diagnostic and not a claim that the effect has a dedicated GPU backend.
+  historical 960x540 warm Painted diagnostic was about 28.1 ms/frame on the
+  CPU path. Eligible Painterly Preview and Final Export now use the common
+  `motion_style_gpu` shader; projected textures and per-material overrides
+  remain explicit raster fallbacks.
   The Painterly Inspector exposes editable line/paper color swatches and
   projected-texture blend/opacity controls. Preview and export share the same
   deterministic effect path and are covered by pixel-identical parity tests;

@@ -20,6 +20,10 @@ _VERTEX_SHADER = """
 #version 120
 attribute vec2 a_position;
 attribute vec4 a_color;
+attribute vec4 a_repeat_linear;
+attribute vec2 a_repeat_translate;
+attribute vec4 a_instance_color;
+attribute float a_instance_opacity;
 uniform vec4 u_layer_linear;
 uniform vec2 u_layer_translate;
 uniform vec4 u_repeat_linear;
@@ -30,11 +34,20 @@ uniform vec2 u_widget_size;
 uniform vec4 u_target;
 uniform float u_opacity;
 uniform vec4 u_instance_color;
+uniform int u_use_instancing;
 varying vec4 v_color;
 void main() {
+    vec4 repeat_linear = u_use_instancing == 1
+        ? a_repeat_linear : u_repeat_linear;
+    vec2 repeat_translate = u_use_instancing == 1
+        ? a_repeat_translate : u_repeat_translate;
+    vec4 instance_color = u_use_instancing == 1
+        ? a_instance_color : u_instance_color;
+    float instance_opacity = u_use_instancing == 1
+        ? a_instance_opacity : 1.0;
     vec2 repeated = vec2(
-        u_repeat_linear.x * a_position.x + u_repeat_linear.z * a_position.y + u_repeat_translate.x,
-        u_repeat_linear.y * a_position.x + u_repeat_linear.w * a_position.y + u_repeat_translate.y
+        repeat_linear.x * a_position.x + repeat_linear.z * a_position.y + repeat_translate.x,
+        repeat_linear.y * a_position.x + repeat_linear.w * a_position.y + repeat_translate.y
     );
     vec2 local = repeated - u_anchor;
     vec2 composition = vec2(
@@ -44,7 +57,7 @@ void main() {
     vec2 screen = u_target.xy + composition / u_composition_size * u_target.zw;
     vec2 ndc = vec2(screen.x / u_widget_size.x * 2.0 - 1.0, 1.0 - screen.y / u_widget_size.y * 2.0);
     gl_Position = vec4(ndc, 0.0, 1.0);
-    v_color = a_color * u_instance_color * u_opacity;
+    v_color = a_color * instance_color * u_opacity * instance_opacity;
 }
 """
 
@@ -62,6 +75,7 @@ class MotionVectorGpuRenderer:
         self._parent = parent
         self._program: QOpenGLShaderProgram | None = None
         self._buffers: OrderedDict[str, tuple[int, int, int]] = OrderedDict()
+        self._instance_vbo = 0
         self._capacity = max(1, int(cache_capacity))
         self.cache_hits = 0
         self.cache_misses = 0
@@ -99,11 +113,22 @@ class MotionVectorGpuRenderer:
         fragment_ok = program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, _FRAGMENT_SHADER)
         program.bindAttributeLocation("a_position", 0)
         program.bindAttributeLocation("a_color", 1)
+        program.bindAttributeLocation("a_repeat_linear", 2)
+        program.bindAttributeLocation("a_repeat_translate", 3)
+        program.bindAttributeLocation("a_instance_color", 4)
+        program.bindAttributeLocation("a_instance_opacity", 5)
         if not vertex_ok or not fragment_ok or not program.link():
             self.last_diagnostics = {
                 "backend": "qt_painter_fallback",
                 "reason": "vector_shader_compile_failed",
                 "shader_log": program.log(),
+            }
+            return False
+        self._instance_vbo = int(GL.glGenBuffers(1))
+        if not self._instance_vbo:
+            self.last_diagnostics = {
+                "backend": "qt_painter_fallback",
+                "reason": "instance_vbo_create_failed",
             }
             return False
         self._program = program
@@ -150,6 +175,8 @@ class MotionVectorGpuRenderer:
             GL.glUniform2f(location, value.x(), value.y())
         elif isinstance(value, QVector4D):
             GL.glUniform4f(location, value.x(), value.y(), value.z(), value.w())
+        elif isinstance(value, int):
+            GL.glUniform1i(location, value)
         else:
             GL.glUniform1f(location, float(value))
 
@@ -188,6 +215,8 @@ class MotionVectorGpuRenderer:
         )
         vertex_count = 0
         draw_count = 0
+        instance_count = 0
+        instanced_draw_count = 0
         for node in graph.nodes:
             packet = node.vector_gpu_packet
             if packet is None:
@@ -211,15 +240,81 @@ class MotionVectorGpuRenderer:
             else:
                 GL.glBlendFunc(GL.GL_ONE, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glBindVertexArray(vao)
-            for instance in packet.instances:
-                ra, rb, rc, rd, rtx, rty = instance.matrix
-                self._set_uniform("u_repeat_linear", QVector4D(ra, rb, rc, rd))
-                self._set_uniform("u_repeat_translate", QVector2D(rtx, rty))
-                self._set_uniform("u_opacity", float(node.opacity * instance.opacity))
-                self._set_uniform("u_instance_color", QVector4D(*instance.color))
-                GL.glDrawArrays(GL.GL_TRIANGLES, 0, count)
+            instances = tuple(packet.instances)
+            can_instance = (
+                len(instances) > 1
+                and callable(getattr(GL, "glDrawArraysInstanced", None))
+                and callable(getattr(GL, "glVertexAttribDivisor", None))
+            )
+            if can_instance:
+                values = np.asarray([
+                    (
+                        *instance.matrix,
+                        *instance.color,
+                        float(instance.opacity),
+                    )
+                    for instance in instances
+                ], dtype=np.float32)
+                stride = 11 * 4
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self._instance_vbo)
+                GL.glBufferData(
+                    GL.GL_ARRAY_BUFFER,
+                    int(values.nbytes),
+                    values,
+                    GL.GL_STREAM_DRAW,
+                )
+                for location in range(2, 6):
+                    GL.glEnableVertexAttribArray(location)
+                    GL.glVertexAttribDivisor(location, 1)
+                GL.glVertexAttribPointer(
+                    2, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(0),
+                )
+                GL.glVertexAttribPointer(
+                    3, 2, GL.GL_FLOAT, False, stride, ctypes.c_void_p(4 * 4),
+                )
+                GL.glVertexAttribPointer(
+                    4, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(6 * 4),
+                )
+                GL.glVertexAttribPointer(
+                    5, 1, GL.GL_FLOAT, False, stride, ctypes.c_void_p(10 * 4),
+                )
+                self._set_uniform("u_use_instancing", 1)
+                self._set_uniform("u_opacity", float(node.opacity))
+                GL.glDrawArraysInstanced(
+                    GL.GL_TRIANGLES,
+                    0,
+                    count,
+                    len(instances),
+                )
+                for location in range(2, 6):
+                    GL.glVertexAttribDivisor(location, 0)
+                    GL.glDisableVertexAttribArray(location)
+                GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
                 draw_count += 1
-                vertex_count += count
+                instanced_draw_count += 1
+                instance_count += len(instances)
+                vertex_count += count * len(instances)
+            else:
+                self._set_uniform("u_use_instancing", 0)
+                for instance in instances:
+                    ra, rb, rc, rd, rtx, rty = instance.matrix
+                    self._set_uniform(
+                        "u_repeat_linear", QVector4D(ra, rb, rc, rd),
+                    )
+                    self._set_uniform(
+                        "u_repeat_translate", QVector2D(rtx, rty),
+                    )
+                    self._set_uniform(
+                        "u_opacity",
+                        float(node.opacity * instance.opacity),
+                    )
+                    self._set_uniform(
+                        "u_instance_color", QVector4D(*instance.color),
+                    )
+                    GL.glDrawArrays(GL.GL_TRIANGLES, 0, count)
+                    draw_count += 1
+                    instance_count += 1
+                    vertex_count += count
             GL.glBindVertexArray(0)
         self._program.release()
         gl_error = int(GL.glGetError())
@@ -227,6 +322,9 @@ class MotionVectorGpuRenderer:
             "backend": "motion_vector_gpu",
             "reason": "",
             "draw_count": draw_count,
+            "instance_count": instance_count,
+            "instanced_draw_count": instanced_draw_count,
+            "hardware_instancing": bool(instanced_draw_count),
             "vertex_count": vertex_count,
             "gpu_mesh_cache_hits": self.cache_hits,
             "gpu_mesh_cache_misses": self.cache_misses,
@@ -248,7 +346,10 @@ class MotionVectorGpuRenderer:
             for vao, vbo, _count in self._buffers.values():
                 GL.glDeleteBuffers(1, [vbo])
                 GL.glDeleteVertexArrays(1, [vao])
+            if self._instance_vbo:
+                GL.glDeleteBuffers(1, [self._instance_vbo])
         self._buffers.clear()
+        self._instance_vbo = 0
         if self._program is not None:
             self._program.removeAllShaders()
             self._program = None

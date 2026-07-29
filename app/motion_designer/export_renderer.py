@@ -9,6 +9,7 @@ from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from .cache import MotionFrameCache
+from .gpu_export_renderer import MotionGpuExportRenderer
 from .render_graph import build_render_graph, paint_render_graph
 from .schema import MotionComposition
 from .source_frame import transparent_image
@@ -29,6 +30,10 @@ class MotionExportRenderer:
             load_application_ui_fonts()
         self.cache = MotionFrameCache(cache_capacity)
         self.last_tiled_report: dict[str, object] = {}
+        self._gpu = MotionGpuExportRenderer()
+        self.last_render_report: dict[str, object] = {
+            "backend": "not_rendered",
+        }
 
     def render_frame(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,
                      height: int | None = None, use_cache: bool = True) -> QImage:
@@ -66,17 +71,46 @@ class MotionExportRenderer:
             if use_cache:
                 self.cache.put(key, image.copy())
             return image
+        graph = build_render_graph(
+            composition,
+            time_ms,
+            render_quality="export",
+            output_size=(output_width, output_height),
+        )
+        try:
+            gpu_image = self._gpu.render(
+                graph,
+                width=output_width,
+                height=output_height,
+            )
+        except Exception as exc:
+            gpu_image = None
+            self._gpu.last_diagnostics = {
+                "backend": "qt_painter_fallback",
+                "reason": (
+                    f"offscreen_gpu_exception:"
+                    f"{type(exc).__name__}:{exc}"
+                ),
+            }
+        if gpu_image is not None:
+            image = gpu_image
+            self.last_render_report = dict(self._gpu.last_diagnostics)
+            if use_cache:
+                self.cache.put(key, image.copy())
+            return image
         image = transparent_image(output_width, output_height)
         painter = QPainter(image)
         paint_render_graph(
             painter,
-            build_render_graph(
-                composition, time_ms, render_quality="export",
-                output_size=(output_width, output_height),
-            ),
+            graph,
             QRectF(0, 0, output_width, output_height),
         )
         painter.end()
+        self.last_render_report = {
+            **self._gpu.last_diagnostics,
+            "backend": "qt_painter_export",
+            "gpu_fallback": True,
+        }
         if use_cache:
             self.cache.put(key, image.copy())
         return image

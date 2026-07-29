@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import traceback
 
 import numpy as np
 from PySide6.QtCore import QRectF, QTimer, Qt
@@ -123,7 +124,10 @@ class MotionPreviewWidget(QOpenGLWidget):
                         widget_height=max(1, int(round(self.height() * ratio))),
                         target=physical_target,
                     ):
-                        self._last_gpu_backend = "glass"
+                        self._last_gpu_backend = str(
+                            self._glass_gpu.last_diagnostics.get("backend")
+                            or "motion_style_gpu"
+                        )
                         return
                     if self._vector_gpu.draw(
                         context.functions(), graph,
@@ -153,6 +157,7 @@ class MotionPreviewWidget(QOpenGLWidget):
                     self._glass_gpu.last_diagnostics = {
                         "backend": "qt_painter_fallback",
                         "reason": f"preview_gpu_exception:{type(exc).__name__}:{exc}",
+                        "traceback": traceback.format_exc(),
                     }
         self._last_gpu_backend = "painter"
         painter = QPainter(self)
@@ -291,7 +296,11 @@ class MotionPreviewWidget(QOpenGLWidget):
         context = self.context()
         if self._last_gpu_backend == "typography":
             backend_diagnostics = self._typography_gpu.last_diagnostics
-        elif self._last_gpu_backend == "glass":
+        elif self._last_gpu_backend in {
+            "glass",
+            "motion_glass_gpu",
+            "motion_style_gpu",
+        }:
             backend_diagnostics = self._glass_gpu.last_diagnostics
         elif self._last_gpu_backend == "puppet":
             backend_diagnostics = self._puppet_gpu.last_diagnostics
@@ -316,6 +325,12 @@ class MotionPreviewWidget(QOpenGLWidget):
                 "typography_gpu_reason": typography_reason,
                 "puppet_gpu_reason": puppet_reason,
             }
+            shader_log = self._glass_gpu.last_diagnostics.get("shader_log")
+            if shader_log:
+                backend_diagnostics["glass_shader_log"] = shader_log
+            gpu_traceback = self._glass_gpu.last_diagnostics.get("traceback")
+            if gpu_traceback:
+                backend_diagnostics["gpu_traceback"] = gpu_traceback
         return {
             "presenter": "QOpenGLWidget",
             "context_valid": bool(context and context.isValid()),

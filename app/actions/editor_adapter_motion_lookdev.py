@@ -216,7 +216,7 @@ class MotionLookdevAdapterMixin:
         composition_id: str,
         layer_id: str,
     ) -> dict[str, Any]:
-        _composition, _layer, effect = self._motion_lookdev_effect(
+        composition, _layer, effect = self._motion_lookdev_effect(
             composition_id,
             layer_id,
         )
@@ -233,10 +233,29 @@ class MotionLookdevAdapterMixin:
         overrides = effect.metadata.get("material_overrides")
         if isinstance(overrides, Mapping) and overrides:
             issues.append("material_id_pass_unavailable")
+        from app.motion_designer.glass_gpu_renderer import (
+            MotionGlassGpuRenderer,
+        )
+        from app.motion_designer.render_graph import build_render_graph
+
+        gpu_eligible, gpu_reason = MotionGlassGpuRenderer.can_draw(
+            build_render_graph(
+                composition,
+                0.0,
+                include_vector_gpu=True,
+                render_quality="preview",
+            )
+        )
         return {
             "ok": not issues,
             "issues": issues,
             "renderer": "provider_neutral_post_render",
+            "preview_backend": (
+                "motion_style_gpu"
+                if gpu_eligible
+                else "qt_painter_fallback"
+            ),
+            "preview_gpu_reason": gpu_reason,
             "temporal_stability": "locked",
             "umg_disposition": "deterministic_bake",
             "umg_reason": "effect_requires_bake:painterly_look",
