@@ -50,7 +50,7 @@ from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 
 ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
-DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
+DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/Performance/Performance.uproject")
 OWNER_ANIMATION_PANEL_WIDTH = 200
 OWNER_ANIMATION_PREVIEW_BACKEND = "uasset_inspector_gpu_bone_palette"
 OWNER_POSE_CLIP_DURATION_THRESHOLD_MS = 250.0
