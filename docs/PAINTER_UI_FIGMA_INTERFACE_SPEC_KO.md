@@ -825,6 +825,18 @@ Locale and font release corpus:
 - UI > Locale and Font Audit, Quick Actions, and
   `paint.ui.locale_audit.inspect` share the same read-only report.
 
+Keyboard focus visibility:
+
+- UI Design buttons, tool buttons, inputs, checks, sliders, tabs, lists, and
+  trees use a high-contrast blue focus ring that remains distinct from hover
+  and selected states.
+- Icon-only controls require a tooltip or accessible name. Internal spin-box
+  line edits and scrollbars are not counted as standalone commands.
+- UI > Keyboard Focus Audit and Quick Actions open a transient runtime report
+  of the currently visible control tree. No permanent Inspector area is used.
+- `paint.ui.focus_audit.inspect` returns identical Tab-order, label, and focus
+  ring coverage without changing selection, revision, dirty state, or Undo.
+
 Crash-safe recovery:
 
 - Dirty Painter documents are snapshotted every 60 seconds through a

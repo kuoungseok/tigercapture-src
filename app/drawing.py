@@ -665,7 +665,77 @@ QWidget#PainterUIInspector QComboBox:focus,
 QWidget#PainterUIInspector QLineEdit:focus,
 QWidget#PainterUIInspector QSpinBox:focus,
 QWidget#PainterUIInspector QDoubleSpinBox:focus {
-    border-color: #7594ba;
+    border: 2px solid #8fc7ff;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QPushButton:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QToolButton:focus {
+    border: 2px solid #8fc7ff;
+    background-color: #26384d;
+    color: #ffffff;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QComboBox:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QLineEdit:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QSpinBox:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QDoubleSpinBox:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QListWidget:focus,
+QDialog[canvasWorkspaceMode="ui_design"] QTreeWidget:focus {
+    border: 2px solid #8fc7ff;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QCheckBox:focus {
+    color: #ffffff;
+    background-color: #26384d;
+    border: 1px solid #8fc7ff;
+    border-radius: 3px;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QTabBar::tab:focus {
+    color: #ffffff;
+    border-bottom: 2px solid #8fc7ff;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QSlider:focus::handle:horizontal,
+QDialog[canvasWorkspaceMode="ui_design"] QSlider:focus::handle:vertical {
+    border: 2px solid #d8efff;
+    background-color: #7db8f2;
+}
+
+QPushButton#PainterUIFloatingToolButton:focus,
+QToolButton#PainterUIFloatingToolButton:focus,
+QPushButton#PainterUIVectorContextButton:focus,
+QPushButton#PainterUIZoomFitButton:focus,
+QPushButton#PainterUIBreadcrumbItem:focus,
+QPushButton#PainterUIPanelCollapse:focus,
+QPushButton#PainterUITemplateBrowse:focus,
+QPushButton#PainterUITemplateQuick:focus,
+QPushButton#PainterUISectionHeader:focus,
+QPushButton#PaintCanvasModeButton:focus,
+QPushButton#PaintBlockoutModeButton:focus,
+QWidget#PainterUIInspector QPushButton:focus,
+QWidget#PaintToolOptionsHost QPushButton:focus,
+QFrame#PaintToolRail QPushButton:focus {
+    border: 2px solid #8fc7ff;
+    background-color: #26384d;
+    color: #ffffff;
+}
+
+QWidget#PainterUIInspector QCheckBox:focus {
+    color: #ffffff;
+    background-color: #26384d;
+    border: 1px solid #8fc7ff;
+    border-radius: 3px;
+}
+
+QTabWidget#PainterUIInspectorTabs QTabBar::tab:focus {
+    color: #ffffff;
+    border-bottom: 2px solid #8fc7ff;
+}
+
+QWidget#PainterUIInspector QListWidget:focus,
+QWidget#PainterUIInspector QTreeWidget:focus {
+    border: 2px solid #8fc7ff;
 }
 
 QWidget#PainterUIInspector QComboBox:disabled,
@@ -8732,6 +8802,11 @@ class PaintDialog(QDialog):
             "Locale and Font Audit...",
             self._show_painter_ui_locale_audit,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Keyboard Focus Audit...",
+            self._show_painter_ui_focus_audit,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -11189,6 +11264,8 @@ class PaintDialog(QDialog):
         self._status_zoom_spin.setSuffix("%")
         self._status_zoom_spin.setValue(100)
         self._status_zoom_spin.setFixedWidth(58)
+        self._status_zoom_spin.setAccessibleName("Canvas zoom")
+        self._status_zoom_spin.setToolTip("Canvas zoom percentage")
         self._status_zoom_spin.valueChanged.connect(self._set_zoom_percent)
         status_layout.addWidget(self._status_zoom_spin)
         self._status_rotation_spin = QSpinBox()
@@ -14329,6 +14406,24 @@ class PaintDialog(QDialog):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _show_painter_ui_focus_audit(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_focus_audit import inspect_painter_ui_focus
+        from app.painter_ui_focus_audit_dialog import (
+            PainterUIFocusAuditDialog,
+        )
+
+        report = inspect_painter_ui_focus(self)
+        dialog = getattr(self, "_painter_ui_focus_audit_dialog", None)
+        if dialog is None:
+            dialog = PainterUIFocusAuditDialog(self)
+            self._painter_ui_focus_audit_dialog = dialog
+        dialog.set_report(report)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14440,6 +14535,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_action_parity()
         elif operation_type == "locale_audit":
             self._show_painter_ui_locale_audit()
+        elif operation_type == "focus_audit":
+            self._show_painter_ui_focus_audit()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

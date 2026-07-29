@@ -1800,6 +1800,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter locale and font fallback would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.focus_audit.inspect",
+        "Audit visible Painter UI controls for keyboard focus coverage.",
+        "paint",
+        "paint_ui_focus_audit_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter keyboard focus coverage would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.recovery.inspect",
         "List crash-safe Painter recovery snapshots.",
         "paint",

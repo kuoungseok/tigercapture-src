@@ -164,6 +164,13 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "locale_audit"},
     },
     {
+        "id": "document.focus_audit",
+        "label": "Keyboard focus audit",
+        "detail": "Check visible controls for Tab access, labels, and focus rings.",
+        "keywords": "keyboard focus tab accessibility ring navigation audit",
+        "operation": {"type": "focus_audit"},
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

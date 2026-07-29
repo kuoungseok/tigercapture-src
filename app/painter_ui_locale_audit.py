@@ -32,6 +32,11 @@ DEFAULT_CORPUS: tuple[dict[str, Any], ...] = (
         "text": "UI / Action parity",
         "width": 190,
     },
+    {
+        "id": "menu.focus_audit",
+        "text": "Keyboard focus audit",
+        "width": 190,
+    },
     {"id": "status.covered", "text": "Covered", "width": 92},
     {
         "id": "family.design_system",

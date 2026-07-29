@@ -1400,7 +1400,7 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The checkpoint Registry evidence covers 253 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 254 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
@@ -1439,6 +1439,23 @@ Implemented checkpoint (2026-07-29, crash-safe recovery slice):
 - `paint.ui.recovery.inspect/create/restore/discard` provide Action parity;
   discard is explicitly destructive. Korean and all supported-language recovery
   labels are included in Painter i18n.
+
+Implemented checkpoint (2026-07-29, keyboard focus visibility slice):
+
+- UI Design now applies a high-contrast focus ring to buttons, tool buttons,
+  inputs, checkboxes, sliders, tabs, lists, and trees. ID-specific selectors
+  override the previous hover/checked styling so icon controls show a real ring.
+- `app/painter_ui_focus_audit.py` inspects the visible runtime widget tree for
+  Tab reachability, accessible text, and focus-ring coverage while excluding
+  internal spin-box editors and scrollbars from command counts.
+- UI > Keyboard Focus Audit and Quick Actions open a transient responsive
+  report. `paint.ui.focus_audit.inspect` exposes the same read-only evidence.
+- The desktop release surface covers 30/30 visible controls with zero issues;
+  the compact surface covers 24/24 with zero issues. Actual focused-control and
+  report screenshots regenerate through `tools/qa_painter_ui_focus.py` under
+  `debugCapture/painter_ui_designer/focus`.
+- The locale release corpus now includes the focus-audit command, and accessible
+  names participate in runtime Painter localization.
 
 Exit criteria:
 

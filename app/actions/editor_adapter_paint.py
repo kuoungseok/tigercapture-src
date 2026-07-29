@@ -2947,6 +2947,11 @@ class PaintAdapterMixin(
 
         return inspect_painter_ui_locales()
 
+    def paint_ui_focus_audit_inspect(self) -> dict[str, Any]:
+        from app.painter_ui_focus_audit import inspect_painter_ui_focus
+
+        return inspect_painter_ui_focus(self._paint_dialog_owner())
+
     def paint_ui_recovery_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         rows = dialog._painter_recovery_rows()

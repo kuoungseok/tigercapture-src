@@ -830,6 +830,17 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Recovered", "복구됨", "復旧済み", "已恢复", "Récupéré", "Wiederhergestellt"),
     ("{count} recovery snapshots", "복구 스냅샷 {count}개", "復旧スナップショット {count} 件", "{count} 个恢复快照", "{count} instantanés de récupération", "{count} Wiederherstellungs-Snapshots"),
     ("No recovery snapshots are available.", "사용 가능한 복구 스냅샷이 없습니다.", "利用可能な復旧スナップショットはありません。", "没有可用的恢复快照。", "Aucun instantané de récupération disponible.", "Keine Wiederherstellungs-Snapshots verfügbar."),
+    ("Keyboard Focus Audit...", "키보드 포커스 검사...", "キーボードフォーカス監査...", "键盘焦点检查...", "Audit du focus clavier...", "Tastaturfokus prüfen..."),
+    ("Keyboard focus audit", "키보드 포커스 검사", "キーボードフォーカス監査", "键盘焦点检查", "Audit du focus clavier", "Tastaturfokus-Prüfung"),
+    ("No keyboard focus report available.", "키보드 포커스 검사 결과가 없습니다.", "キーボードフォーカスの監査結果はありません。", "没有键盘焦点检查报告。", "Aucun rapport de focus clavier.", "Kein Tastaturfokus-Bericht verfügbar."),
+    ("Control", "컨트롤", "コントロール", "控件", "Contrôle", "Steuerelement"),
+    ("Type", "유형", "種類", "类型", "Type", "Typ"),
+    ("Tab", "탭", "Tab", "Tab", "Tab", "Tab"),
+    ("Focus ring", "포커스 링", "フォーカスリング", "焦点环", "Anneau de focus", "Fokusring"),
+    ("Yes", "예", "はい", "是", "Oui", "Ja"),
+    ("No", "아니요", "いいえ", "否", "Non", "Nein"),
+    ("{controls} controls · {tab} keyboard · {rings} focus rings · {issues} issues", "컨트롤 {controls}개 · 키보드 {tab}개 · 포커스 링 {rings}개 · 문제 {issues}개", "コントロール {controls} · キーボード {tab} · フォーカスリング {rings} · 問題 {issues}", "{controls} 个控件 · {tab} 个键盘可达 · {rings} 个焦点环 · {issues} 个问题", "{controls} contrôles · {tab} clavier · {rings} anneaux · {issues} problèmes", "{controls} Steuerelemente · {tab} Tastatur · {rings} Fokusringe · {issues} Probleme"),
+    ("Canvas zoom", "캔버스 확대/축소", "キャンバスズーム", "画布缩放", "Zoom du canevas", "Canvas-Zoom"),
 )
 
 _TABLE = {
@@ -1025,6 +1036,14 @@ class PainterWidgetLocalizer(QObject):
             if obj.placeholderText() != value:
                 obj.setPlaceholderText(value)
         if isinstance(obj, QWidget):
+            if obj.accessibleName():
+                value = self._translated_property(
+                    obj,
+                    "accessible_name",
+                    obj.accessibleName(),
+                )
+                if obj.accessibleName() != value:
+                    obj.setAccessibleName(value)
             if obj.windowTitle():
                 value = self._translated_property(
                     obj, "window_title", obj.windowTitle()
