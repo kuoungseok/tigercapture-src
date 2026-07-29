@@ -54,6 +54,14 @@ def register_paint_ui_advanced_actions(registry: Any) -> None:
     )
     _register(
         registry,
+        "paint.ui.dev.measurement.inspect",
+        "Inspect nearest UI selection distances without changing the document.",
+        "paint_ui_dev_measurement_inspect",
+        {"object_ids": _ID_LIST},
+        mutating=False,
+    )
+    _register(
+        registry,
         "paint.ui.mask.inspect",
         "Inspect a Painter UI object mask and ordered targets.",
         "paint_ui_mask_inspect",

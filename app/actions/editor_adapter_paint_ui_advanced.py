@@ -36,6 +36,21 @@ class PaintUIAdvancedAdapterMixin:
         )
         return {**result, "duplicate": report}
 
+    def paint_ui_dev_measurement_inspect(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from app.painter_ui_measurements import (
+            inspect_ui_selection_measurements,
+        )
+
+        dialog = self._paint_dialog_owner()
+        return inspect_ui_selection_measurements(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+        )
+
     def paint_ui_mask_inspect(self, *, object_id: str) -> dict[str, Any]:
         from app.painter_ui_masks import inspect_ui_mask
 

@@ -56,6 +56,9 @@ Implemented:
   Exclude, with non-destructive group release
 - shared Boolean geometry for Canvas, PNG, and editable SVG output
 - UI/Action parity through `paint.ui.vector.boolean.compose/set/release`
+- Alt-held canvas distance measurements to the nearest overlapping objects or
+  artboard edges, with no persistent panel or document mutation
+- read-only UI/Action parity through `paint.ui.dev.measurement.inspect`
 - Painter UI document schema version 18; schema 17 remains the typed Vector
   Network checkpoint and schema 18 marks explicit non-destructive Boolean
   groups

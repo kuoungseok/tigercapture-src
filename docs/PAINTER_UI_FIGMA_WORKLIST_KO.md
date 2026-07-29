@@ -275,6 +275,10 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   stable references, turns copied component definitions into linked instances,
   reports focus-order conflict resets, and shares
   `paint.ui.object.duplicate_to_artboard` with the UI mutation.
+- Alt-held selection measurements are canvas-only and transient. The same
+  resolved Auto Layout/Constraint geometry is available without mutation
+  through `paint.ui.dev.measurement.inspect`; nearest overlapping objects are
+  preferred and artboard edges are the directional fallback.
 
 ## P2. 인스펙터 확장
 

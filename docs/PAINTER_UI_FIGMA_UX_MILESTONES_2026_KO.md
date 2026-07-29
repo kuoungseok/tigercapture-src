@@ -485,6 +485,20 @@ Implemented checkpoint (2026-07-29, cross-artboard duplication slice):
 - Desktop and 900x650 proof plus a machine-readable report regenerate through
   `tools/qa_painter_ui_cross_artboard.py`.
 
+Implemented checkpoint (2026-07-29, transient measurement slice):
+
+- Holding Alt draws four temporary dimension lines from the current selection
+  without opening or pinning either side panel.
+- Left/right/top/bottom choose the nearest same-artboard visible object whose
+  perpendicular span overlaps the selection; the artboard edge is the explicit
+  fallback.
+- Measurements use resolved Auto Layout, responsive, and Constraint geometry,
+  remain read-only, and disappear on Alt release or focus loss.
+- UI and `paint.ui.dev.measurement.inspect` share
+  `app/painter_ui_measurements.py`.
+- Desktop and 900x650 proof plus a machine-readable report regenerate through
+  `tools/qa_painter_ui_measurements.py`.
+
 Implemented checkpoint (2026-07-29, Figma-style Scale slice):
 
 - Scale is selection-local and appears in the canvas context menu only when an

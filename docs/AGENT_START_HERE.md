@@ -199,6 +199,10 @@ Focused entry points:
   Context menus, Quick Actions, and `paint.ui.object.duplicate_to_artboard`
   must use it so object trees, Boolean/Mask dependencies, component links,
   interactions, focus-order conflict reporting, and one-step Undo stay aligned.
+  `app/painter_ui_measurements.py` owns selection distance inspection. The
+  canvas Alt overlay and read-only `paint.ui.dev.measurement.inspect` Action
+  must share its resolved geometry and must never reserve panel width or
+  mutate the Painter document.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

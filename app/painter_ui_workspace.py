@@ -115,6 +115,7 @@ class PainterUIDesignOverlay(QWidget):
         self._marquee_mode = "replace"
         self._guide_x: float | None = None
         self._guide_y: float | None = None
+        self._measurements_visible = False
         self._active_artboard_drag_id = ""
         self._artboard_drag_origin = QPointF()
         self._rulers_visible = True
@@ -1473,6 +1474,88 @@ class PainterUIDesignOverlay(QWidget):
             bounds = rect if bounds.isNull() else bounds.united(rect)
         return bounds
 
+    def set_measurements_visible(self, visible: bool) -> None:
+        visible = bool(visible)
+        if visible == self._measurements_visible:
+            return
+        self._measurements_visible = visible
+        self.update()
+
+    def measurement_report(self) -> dict[str, Any]:
+        from app.painter_ui_measurements import (
+            inspect_ui_selection_measurements,
+        )
+
+        return inspect_ui_selection_measurements(self._effective_document)
+
+    def _paint_measurements(self, painter: QPainter) -> None:
+        if not self._measurements_visible:
+            return
+        report = self.measurement_report()
+        if not report["eligible"]:
+            return
+        artboard = next(
+            row
+            for row in self._document["artboards"]
+            if row["id"] == report["artboard_id"]
+        )
+        viewport, scale = self._artboard_viewport(artboard)
+
+        def point(value) -> QPointF:
+            return QPointF(
+                viewport.left() + float(value[0]) * scale,
+                viewport.top() + float(value[1]) * scale,
+            )
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        line_color = QColor("#F06C76")
+        painter.setPen(QPen(line_color, 1.25))
+        font = QFont(painter.font())
+        font.setPixelSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        for distance in report["distances"]:
+            start = point(distance["start"])
+            end = point(distance["end"])
+            painter.drawLine(start, end)
+            if distance["axis"] == "horizontal":
+                painter.drawLine(
+                    start + QPointF(0.0, -4.0),
+                    start + QPointF(0.0, 4.0),
+                )
+                painter.drawLine(
+                    end + QPointF(0.0, -4.0),
+                    end + QPointF(0.0, 4.0),
+                )
+            else:
+                painter.drawLine(
+                    start + QPointF(-4.0, 0.0),
+                    start + QPointF(4.0, 0.0),
+                )
+                painter.drawLine(
+                    end + QPointF(-4.0, 0.0),
+                    end + QPointF(4.0, 0.0),
+                )
+            label = f"{float(distance['value']):g} px"
+            metrics = painter.fontMetrics()
+            width = metrics.horizontalAdvance(label) + 12
+            height = metrics.height() + 6
+            center = (start + end) * 0.5
+            label_rect = QRectF(
+                center.x() - width * 0.5,
+                center.y() - height * 0.5,
+                width,
+                height,
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#B83F4A"))
+            painter.drawRoundedRect(label_rect, 4.0, 4.0)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+            painter.setPen(QPen(line_color, 1.25))
+        painter.restore()
+
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
         boolean_operands = self._boolean_operand_ids()
         return sorted(
@@ -2153,6 +2236,7 @@ class PainterUIDesignOverlay(QWidget):
                     QPointF(viewport.left(), self._guide_y),
                     QPointF(viewport.right(), self._guide_y),
                 )
+        self._paint_measurements(painter)
         self._paint_rulers(painter)
 
     def _cancel_interaction(self) -> None:
@@ -2505,6 +2589,9 @@ class PainterUIDesignOverlay(QWidget):
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
+        self.set_measurements_visible(
+            bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        )
         if self._interaction == "ruler_origin":
             self._ruler_origin_preview = QPointF(event.position())
             self.update()
@@ -3165,6 +3252,10 @@ class PainterUIDesignOverlay(QWidget):
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
+        if key == Qt.Key.Key_Alt and not event.isAutoRepeat():
+            self.set_measurements_visible(True)
+            event.accept()
+            return
         if key == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space_pan_active = True
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -3234,6 +3325,10 @@ class PainterUIDesignOverlay(QWidget):
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Alt and not event.isAutoRepeat():
+            self.set_measurements_visible(False)
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
             self._space_pan_active = False
             if self._interaction != "pan":
@@ -3245,6 +3340,10 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event) -> None:
+        self.set_measurements_visible(False)
+        super().focusOutEvent(event)
 
 
 __all__ = ["PainterUIDesignOverlay"]
