@@ -7952,6 +7952,11 @@ AI Script Edit MVP integration:
   Page and Component Set imports namespace stable IDs and remap references;
   Theme preserves matching target token IDs so existing bindings update.
   Repeated insertion, JSON round trip, validation, and one-step Undo are tested.
+- Installed Painter UI libraries expose Component, Style, Token, Image, and
+  Font through shared `paint.ui.library.asset.search/insert`. Components and
+  images add editable objects; styles, tokens, and fonts require compatible
+  selection context. Imported definitions reuse source-linked stable IDs,
+  resources extract durably, and every mutation validates and creates one Undo.
 - Painter UI production authoring extends that gallery with validated
   `.tstemplate` import/export/install, user templates, recent items, favorites,
   explicit license/dependency/hash manifests, and version-update inspection.

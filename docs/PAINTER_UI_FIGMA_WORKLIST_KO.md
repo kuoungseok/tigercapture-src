@@ -38,6 +38,11 @@ M1 Page checkpoint (2026-07-29):
   Page, Component Set, and Theme modes. Page/Component modes namespace stable
   references; Theme preserves matching target token IDs; every insert is one
   validated Undoable mutation.
+- M5 installed library Assets now list/search Component, Style, Token, Image,
+  and Font records through `paint.ui.library.asset.search`. UI and
+  `paint.ui.library.asset.insert` share Add-to-canvas versus
+  Apply-to-selection behavior, durable extraction, source-link reuse, and one
+  Undo.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

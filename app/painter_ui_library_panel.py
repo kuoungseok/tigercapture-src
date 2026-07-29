@@ -19,11 +19,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.icons import app_icon
+from app.painter_ui_library_assets import search_ui_library_assets
 from app.painter_ui_library_store import (
     compare_ui_library_update,
     default_ui_library_store_root,
     inspect_ui_library_store,
-    read_ui_library_package,
 )
 
 
@@ -34,6 +34,7 @@ class PainterUILibraryPanel(QWidget):
     update_defer_requested = Signal(str, int)
     rollback_requested = Signal(str)
     component_insert_requested = Signal(str, str, int)
+    asset_insert_requested = Signal(str, str, str, int)
 
     def __init__(self, parent=None, *, store_root: str | Path | None = None) -> None:
         super().__init__(parent)
@@ -102,17 +103,17 @@ class PainterUILibraryPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.tree.currentItemChanged.connect(self._sync_selection)
-        self.tree.itemDoubleClicked.connect(self._insert_selected_component)
+        self.tree.itemDoubleClicked.connect(self._insert_selected_asset)
         layout.addWidget(self.tree, 1)
 
         self.summary_label = QLabel("No local libraries installed")
         self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
 
-        self.insert_component_button = QPushButton("Add to canvas")
+        self.insert_component_button = QPushButton("Insert asset")
         self.insert_component_button.setIcon(app_icon("plus", size=11))
         self.insert_component_button.clicked.connect(
-            self._insert_selected_component
+            self._insert_selected_asset
         )
         self.insert_component_button.setEnabled(False)
         layout.addWidget(self.insert_component_button)
@@ -158,10 +159,23 @@ class PainterUILibraryPanel(QWidget):
         query = self.search_edit.text().strip().casefold()
         self.tree.clear()
         grouped: dict[str, list[dict[str, Any]]] = {}
+        asset_cache: dict[tuple[str, int], list[dict[str, Any]]] = {}
         for row in report["packages"]:
-            if query and query not in str(row["name"]).casefold():
+            library_id = str(row["id"])
+            assets = (
+                search_ui_library_assets(
+                    query=query,
+                    library_id=library_id,
+                    store_root=self._store_root,
+                )["assets"]
+                if row["active"]
+                else []
+            )
+            asset_cache[(library_id, int(row["version"]))] = assets
+            package_matches = query in str(row["name"]).casefold()
+            if query and not package_matches and not assets:
                 continue
-            grouped.setdefault(str(row["id"]), []).append(row)
+            grouped.setdefault(library_id, []).append(row)
         selected_item = None
         for library_id, rows in sorted(grouped.items()):
             rows.sort(key=lambda row: int(row["version"]), reverse=True)
@@ -185,41 +199,46 @@ class PainterUILibraryPanel(QWidget):
                 item.setData(2, Qt.ItemDataRole.UserRole, dict(row))
                 item.setData(3, Qt.ItemDataRole.UserRole, "version")
                 root.addChild(item)
-                try:
-                    package = read_ui_library_package(row["installed_path"])
-                except (OSError, ValueError):
-                    package = {"payload": {}}
-                for component in package["payload"].get("components", []):
-                    component_item = QTreeWidgetItem(
-                        [str(component["name"]), "", "Component"]
+                assets = asset_cache.get(
+                    (library_id, int(row["version"])),
+                    [],
+                )
+                for asset in assets:
+                    asset_item = QTreeWidgetItem(
+                        [
+                            str(asset["name"]),
+                            "",
+                            str(asset["kind"]).title(),
+                        ]
                     )
-                    component_item.setData(
+                    asset_item.setData(
                         0,
                         Qt.ItemDataRole.UserRole,
                         library_id,
                     )
-                    component_item.setData(
+                    asset_item.setData(
                         1,
                         Qt.ItemDataRole.UserRole,
                         int(row["version"]),
                     )
-                    component_item.setData(
+                    asset_item.setData(
                         2,
                         Qt.ItemDataRole.UserRole,
                         {
                             "library_id": library_id,
                             "version": int(row["version"]),
-                            "component_id": str(component["id"]),
-                            "name": str(component["name"]),
+                            "asset_id": str(asset["asset_id"]),
+                            "name": str(asset["name"]),
+                            "kind": str(asset["kind"]),
                             "active": bool(row["active"]),
                         },
                     )
-                    component_item.setData(
+                    asset_item.setData(
                         3,
                         Qt.ItemDataRole.UserRole,
-                        "component",
+                        str(asset["kind"]),
                     )
-                    item.addChild(component_item)
+                    item.addChild(asset_item)
                 if library_id == selected and row["active"]:
                     selected_item = item
                 item.setExpanded(bool(row["active"]))
@@ -256,12 +275,19 @@ class PainterUILibraryPanel(QWidget):
             else ""
         )
         self.insert_component_button.setEnabled(
-            item_kind == "component" and bool(report.get("active"))
+            item_kind in {"component", "style", "token", "image", "font"}
+            and bool(report.get("active"))
+        )
+        self.insert_component_button.setText(
+            "Add to canvas"
+            if item_kind in {"component", "image"}
+            else "Apply to selection"
         )
         self.rollback_button.setEnabled(bool(library_id))
-        if item_kind == "component":
+        if item_kind in {"component", "style", "token", "image", "font"}:
             self.summary_label.setText(
-                f"{report.get('name', 'Component')}  |  "
+                f"{report.get('name', 'Asset')}  |  "
+                f"{item_kind.title()}  |  "
                 f"{library_id} v{report.get('version', 0)}"
             )
         elif report:
@@ -276,20 +302,37 @@ class PainterUILibraryPanel(QWidget):
         self.accept_button.setEnabled(has_candidate)
         self.defer_button.setEnabled(has_candidate)
 
-    def _insert_selected_component(self, *_args) -> None:
+    def _insert_selected_asset(self, *_args) -> None:
         item = self.tree.currentItem()
-        if item is None or str(
-            item.data(3, Qt.ItemDataRole.UserRole) or ""
-        ) != "component":
+        item_kind = (
+            str(item.data(3, Qt.ItemDataRole.UserRole) or "")
+            if item is not None
+            else ""
+        )
+        if item is None or item_kind not in {
+            "component",
+            "style",
+            "token",
+            "image",
+            "font",
+        }:
             return
         report = item.data(2, Qt.ItemDataRole.UserRole)
         if not isinstance(report, dict) or not report.get("active"):
             return
-        self.component_insert_requested.emit(
+        asset_id = str(report["asset_id"])
+        self.asset_insert_requested.emit(
             str(report["library_id"]),
-            str(report["component_id"]),
+            asset_id,
+            item_kind,
             int(report["version"]),
         )
+        if item_kind == "component":
+            self.component_insert_requested.emit(
+                str(report["library_id"]),
+                asset_id,
+                int(report["version"]),
+            )
 
     def _choose_export(self) -> None:
         name = str(self._document.get("name") or "Painter UI Library")

@@ -1005,3 +1005,20 @@ overlay mode로 전환한다.
   variable modes. It may not silently replace the whole document.
 - All insertion modes validate before commit and create one Undo entry. Preview
   remains read-only and never shares this mutation path.
+
+## 19. Installed Library Asset Contract
+
+- The Libraries Assets tree and `paint.ui.library.asset.search` index only
+  active package versions and expose Component, Style, Token, Image, and Font
+  as explicit kinds.
+- Component and Image are canvas insertions. Style and Token require a selected
+  UI object; Font additionally requires a text object. Incompatible context is
+  blocked with a reason rather than creating a disconnected asset.
+- Style/Token imports include required variable collections and modes. Source
+  records map to target stable IDs through
+  `linked_targets.library_assets`, so repeated application reuses imported
+  definitions.
+- Image/Font bytes are extracted to the durable library resource store. The
+  document never depends on the `.tsuilib` archive remaining mounted or on
+  `debugCapture`.
+- UI and `paint.ui.library.asset.insert` use the same mutation and one Undo.

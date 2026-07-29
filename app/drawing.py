@@ -10641,8 +10641,8 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.library_rollback_requested.connect(
             self._rollback_painter_ui_library
         )
-        self._paint_ui_inspector.library_component_insert_requested.connect(
-            self._insert_painter_ui_library_component
+        self._paint_ui_inspector.library_asset_insert_requested.connect(
+            self._insert_painter_ui_library_asset
         )
         self._paint_ui_inspector.token_binding_requested.connect(
             self._bind_painter_ui_token
@@ -15927,6 +15927,30 @@ class PaintDialog(QDialog):
             version=int(version),
         )
         self._push_undo_state("Insert library component")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _insert_painter_ui_library_asset(
+        self,
+        library_id: str,
+        asset_id: str,
+        kind: str,
+        version: int,
+    ) -> None:
+        from app.painter_ui_library_assets import insert_ui_library_asset
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _report = insert_ui_library_asset(
+            current,
+            library_id=str(library_id),
+            asset_id=str(asset_id),
+            kind=str(kind),
+            version=int(version),
+        )
+        self._push_undo_state("Insert library asset")
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

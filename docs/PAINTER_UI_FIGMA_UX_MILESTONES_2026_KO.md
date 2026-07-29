@@ -1103,6 +1103,18 @@ Implemented checkpoint (2026-07-29, shared search/preview slice):
   stable IDs while updating values/modes so existing bindings change rather
   than becoming disconnected copies. Every mode validates before commit and
   lands as one Undo.
+- Active `.tsuilib` packages now expose Component, Style, Token, Image, and
+  Font rows through one `paint.ui.library.asset.search` service shared by the
+  Libraries Assets tab. Search matches library and asset names and returns
+  explicit kind/license/version metadata.
+- `paint.ui.library.asset.insert` and the Assets button share contextual
+  behavior: Component/Image add editable canvas objects; Style/Token/Font apply
+  only to a compatible selection. Durable resources extract into the library
+  store, imported design-system IDs are reused through
+  `linked_targets.library_assets`, and each mutation is one Undo.
+- Library asset panel evidence regenerates through
+  `tools/qa_painter_ui_library_assets.py` under
+  `debugCapture/painter_ui_designer/library_assets`.
 
 Exit criteria:
 

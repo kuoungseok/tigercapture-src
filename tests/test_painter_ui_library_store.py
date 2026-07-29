@@ -13,7 +13,7 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
-def _library_document(resource_path: Path):
+def _library_document(resource_path: Path, font_path: Path | None = None):
     from app.painter_ui_document import (
         add_ui_component,
         add_ui_object,
@@ -35,6 +35,14 @@ def _library_document(resource_path: Path):
         parent_id=root["id"],
         content={"source_path": str(resource_path)},
     )
+    if font_path is not None:
+        document, _text = add_ui_object(
+            document,
+            kind="text",
+            name="Button Label",
+            parent_id=root["id"],
+            content={"text": "Continue", "font_path": str(font_path)},
+        )
     document, _component = add_ui_component(
         document,
         name="Primary Button",
@@ -216,6 +224,124 @@ def test_installed_library_component_imports_dependencies_and_reuses_definition(
     assert validate_ui_document(document)["ok"] is True
 
 
+def test_library_asset_search_and_contextual_insert(tmp_path: Path) -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+        validate_ui_document,
+    )
+    from app.painter_ui_library_assets import (
+        insert_ui_library_asset,
+        search_ui_library_assets,
+    )
+    from app.painter_ui_library_store import (
+        export_ui_library_package,
+        install_ui_library_package,
+    )
+
+    resource = tmp_path / "asset-icon.png"
+    resource.write_bytes(b"library-asset-image")
+    exported = export_ui_library_package(
+        _library_document(resource),
+        tmp_path / "assets.tsuilib",
+        library_id="asset-kit",
+        name="Asset Kit",
+    )
+    store = tmp_path / "store"
+    install_ui_library_package(exported["path"], store_root=store)
+    search = search_ui_library_assets(store_root=store)
+    assert search["count"] == 4
+    assert {row["kind"] for row in search["assets"]} == {
+        "component",
+        "style",
+        "token",
+        "image",
+    }
+    assert search_ui_library_assets(
+        query="brand",
+        store_root=store,
+    )["count"] == 2
+
+    document, target = add_ui_object(
+        create_ui_document(800, 600),
+        kind="rectangle",
+        name="Target",
+    )
+    document = select_ui_object(document, target["id"])
+    style = next(row for row in search["assets"] if row["kind"] == "style")
+    document, style_report = insert_ui_library_asset(
+        document,
+        library_id="asset-kit",
+        asset_id=style["asset_id"],
+        kind="style",
+        store_root=store,
+    )
+    selected = next(row for row in document["objects"] if row["id"] == target["id"])
+    assert selected["style_ids"]["color"] == style_report["target_id"]
+
+    token = next(row for row in search["assets"] if row["kind"] == "token")
+    document, token_report = insert_ui_library_asset(
+        document,
+        library_id="asset-kit",
+        asset_id=token["asset_id"],
+        kind="token",
+        property_path="style.fill",
+        store_root=store,
+    )
+    selected = next(row for row in document["objects"] if row["id"] == target["id"])
+    assert selected["token_bindings"]["style.fill"] == token_report["target_id"]
+
+    image = next(row for row in search["assets"] if row["kind"] == "image")
+    document, image_report = insert_ui_library_asset(
+        document,
+        library_id="asset-kit",
+        asset_id=image["asset_id"],
+        kind="image",
+        x=120,
+        y=80,
+        store_root=store,
+    )
+    image_object = next(
+        row for row in document["objects"]
+        if row["id"] == image_report["target_id"]
+    )
+    assert (image_object["x"], image_object["y"]) == (120.0, 80.0)
+    assert Path(image_object["content"]["source_path"]).is_file()
+    assert validate_ui_document(document)["ok"] is True
+
+    font = tmp_path / "studio-font.ttf"
+    font.write_bytes(b"regenerable-font-resource")
+    font_export = export_ui_library_package(
+        _library_document(resource, font),
+        tmp_path / "font-assets.tsuilib",
+        library_id="font-kit",
+        name="Font Kit",
+    )
+    install_ui_library_package(font_export["path"], store_root=store)
+    font_asset = search_ui_library_assets(
+        kind="font",
+        library_id="font-kit",
+        store_root=store,
+    )["assets"][0]
+    document, text = add_ui_object(
+        document,
+        kind="text",
+        name="Text Target",
+        content={"text": "Headline"},
+    )
+    document = select_ui_object(document, text["id"])
+    document, _font_report = insert_ui_library_asset(
+        document,
+        library_id="font-kit",
+        asset_id=font_asset["asset_id"],
+        kind="font",
+        store_root=store,
+    )
+    text_row = next(row for row in document["objects"] if row["id"] == text["id"])
+    assert Path(text_row["content"]["font_path"]).is_file()
+
+
 def test_ui_library_actions_export_install_and_inspect(tmp_path: Path) -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
@@ -272,6 +398,38 @@ def test_ui_library_actions_export_install_and_inspect(tmp_path: Path) -> None:
         },
     ).to_dict()
     assert installed_source["ok"] is True
+    assets = registry.execute(
+        "paint.ui.library.asset.search",
+        {
+            "library_id": "source-components",
+            "store_root": str(tmp_path / "store"),
+        },
+    ).to_dict()
+    assert assets["ok"] is True
+    assert {row["kind"] for row in assets["result"]["assets"]} == {
+        "component",
+        "style",
+        "token",
+        "image",
+    }
+    image = next(
+        row for row in assets["result"]["assets"]
+        if row["kind"] == "image"
+    )
+    object_count = len(dialog._painter_ui_document["objects"])
+    inserted_image = registry.execute(
+        "paint.ui.library.asset.insert",
+        {
+            "library_id": "source-components",
+            "asset_id": image["asset_id"],
+            "kind": "image",
+            "store_root": str(tmp_path / "store"),
+        },
+    ).to_dict()
+    assert inserted_image["ok"] is True
+    assert len(dialog._painter_ui_document["objects"]) == object_count + 1
+    dialog._undo()
+    assert len(dialog._painter_ui_document["objects"]) == object_count
     inserted = registry.execute(
         "paint.ui.library.component.insert",
         {
@@ -327,8 +485,12 @@ def test_ui_library_panel_shows_versions_and_emits_review_choices(
     assert panel.tree.topLevelItemCount() == 1
     assert panel.tree.topLevelItem(0).childCount() == 1
     version_item = panel.tree.topLevelItem(0).child(0)
-    assert version_item.childCount() == 1
-    component_item = version_item.child(0)
+    assert version_item.childCount() == 4
+    component_item = next(
+        version_item.child(index)
+        for index in range(version_item.childCount())
+        if version_item.child(index).data(3, 256) == "component"
+    )
     inserted: list[tuple[str, str, int]] = []
     panel.component_insert_requested.connect(
         lambda library_id, component_id, version: inserted.append(
@@ -338,6 +500,26 @@ def test_ui_library_panel_shows_versions_and_emits_review_choices(
     panel.tree.setCurrentItem(component_item)
     panel.insert_component_button.click()
     assert inserted == [("panel-kit", "ui-component-1", 1)]
+    style_item = next(
+        version_item.child(index)
+        for index in range(version_item.childCount())
+        if version_item.child(index).data(3, 256) == "style"
+    )
+    applied: list[tuple[str, str, str, int]] = []
+    panel.asset_insert_requested.connect(
+        lambda library_id, asset_id, kind, version: applied.append(
+            (library_id, asset_id, kind, version)
+        )
+    )
+    panel.tree.setCurrentItem(style_item)
+    assert panel.insert_component_button.text() == "Apply to selection"
+    panel.insert_component_button.click()
+    assert applied == [("panel-kit", "ui-style-1", "style", 1)]
+    panel.search_edit.setText("Brand")
+    app.processEvents()
+    assert panel.tree.topLevelItemCount() == 1
+    assert panel.tree.topLevelItem(0).child(0).childCount() == 2
+    panel.search_edit.clear()
     panel.resize(280, 460)
     panel.show()
     app.processEvents()

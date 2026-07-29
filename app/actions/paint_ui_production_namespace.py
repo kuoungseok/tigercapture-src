@@ -206,6 +206,40 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_library_store_inspect",
         {"store_root": {"type": "string"}},
     )
+    read_action(
+        "paint.ui.library.asset.search",
+        "Search active UI libraries for components, styles, tokens, images, and fonts",
+        "paint_ui_library_asset_search",
+        {
+            "query": {"type": "string"},
+            "kind": {
+                "type": "string",
+                "enum": ["", "component", "style", "token", "image", "font"],
+            },
+            "library_id": {"type": "string"},
+            "store_root": {"type": "string"},
+        },
+    )
+    undo_action(
+        "paint.ui.library.asset.insert",
+        "Insert or apply a compatible active UI library asset",
+        "paint_ui_library_asset_insert",
+        {
+            "library_id": {"type": "string"},
+            "asset_id": {"type": "string"},
+            "kind": {
+                "type": "string",
+                "enum": ["component", "style", "token", "image", "font"],
+            },
+            "version": {"type": "integer", "minimum": 0},
+            "property_path": {"type": "string"},
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "store_root": {"type": "string"},
+        },
+        required=("library_id", "asset_id", "kind"),
+        undo_label="Insert UI library asset",
+    )
     undo_action(
         "paint.ui.library.component.insert",
         "Insert an installed active library component into the current artboard",
