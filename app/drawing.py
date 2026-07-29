@@ -10491,6 +10491,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.dev_annotation_add_requested.connect(
             self._add_painter_ui_dev_annotation
         )
+        self._paint_ui_inspector.dev_annotation_update_requested.connect(
+            self._update_painter_ui_dev_annotation
+        )
+        self._paint_ui_inspector.dev_annotation_remove_requested.connect(
+            self._remove_painter_ui_dev_annotation
+        )
         self._paint_ui_inspector.dev_revision_compare_requested.connect(
             self._compare_painter_ui_dev_revision
         )
@@ -15309,6 +15315,7 @@ class PaintDialog(QDialog):
         target_type: str,
         target_id: str,
         text: str,
+        kind: str,
     ) -> None:
         from app.painter_ui_dev_handoff import add_ui_dev_annotation
 
@@ -15317,8 +15324,41 @@ class PaintDialog(QDialog):
             target_type=target_type,
             target_id=target_id,
             text=text,
+            kind=kind,
         )
         self._push_undo_state("Add UI developer annotation")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_dev_annotation(
+        self,
+        annotation_id: str,
+        changes: Mapping[str, Any],
+    ) -> None:
+        from app.painter_ui_dev_handoff import update_ui_dev_annotation
+
+        document, _annotation = update_ui_dev_annotation(
+            self._painter_ui_document,
+            annotation_id,
+            changes,
+        )
+        self._push_undo_state("Update UI developer annotation")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_dev_annotation(
+        self,
+        annotation_id: str,
+    ) -> None:
+        from app.painter_ui_dev_handoff import remove_ui_dev_annotation
+
+        document = remove_ui_dev_annotation(
+            self._painter_ui_document,
+            annotation_id,
+        )
+        self._push_undo_state("Remove UI developer annotation")
         self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

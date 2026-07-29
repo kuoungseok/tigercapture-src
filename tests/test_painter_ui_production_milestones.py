@@ -117,6 +117,7 @@ def test_review_comments_checkpoints_diff_and_offline_package(
     package = export_ui_review_package(document, tmp_path / "review")
     assert Path(package["entrypoint"]).is_file()
     assert (tmp_path / "review" / "inspection.json").is_file()
+    assert (tmp_path / "review" / "dev_handoff.json").is_file()
 
 
 def test_prototype_runtime_and_self_contained_export(tmp_path: Path) -> None:

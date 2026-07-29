@@ -288,6 +288,12 @@ def developer_inspect_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     document = normalize_ui_document(value)
     validation = validate_ui_document(document)
     from app.painter_ui_delivery import preflight_ui_delivery
+    from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+
+    dev_handoff = inspect_ui_dev_handoff(
+        document,
+        object_ids=[row["id"] for row in document["objects"]],
+    )
 
     return {
         "schema": "tigerstudio.painter.ui.developer_inspect.v1",
@@ -320,6 +326,7 @@ def developer_inspect_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
             )
         },
         "review": inspect_ui_review(document),
+        "dev_handoff": dev_handoff,
     }
 
 
@@ -331,10 +338,12 @@ def export_ui_review_package(
     root = Path(output_dir).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     inspect_report = developer_inspect_ui_document(document)
+    dev_handoff = inspect_report["dev_handoff"]
     review = inspect_ui_review(document)
     files = {
         "design_document.json": document,
         "inspection.json": inspect_report,
+        "dev_handoff.json": dev_handoff,
         "review.json": review,
     }
     artifacts = []

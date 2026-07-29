@@ -10,7 +10,7 @@ from app.painter_ui_motion_bridge import resolved_ui_geometry
 
 
 DEV_HANDOFF_SCHEMA = "tigerstudio.painter.ui.dev_handoff.v1"
-DEV_INSPECT_SCHEMA = "tigerstudio.painter.ui.dev.inspect.v1"
+DEV_INSPECT_SCHEMA = "tigerstudio.painter.ui.dev.inspect.v2"
 _TARGET_KINDS = ("section", "artboard", "component", "object")
 
 
@@ -432,6 +432,23 @@ def inspect_ui_dev_handoff(
         for row in contract["annotations"]
         if row["target_id"] in selected_ids
     ]
+    measurement_overlays = []
+    for annotation in annotations:
+        if annotation.get("kind") != "measurement":
+            continue
+        target_id = str(annotation.get("target_id") or "")
+        measurement_overlays.append(
+            {
+                "annotation_id": annotation["id"],
+                "target_type": annotation["target_type"],
+                "target_id": target_id,
+                "text": annotation["text"],
+                "measurement": inspect_ui_selection_measurements(
+                    document,
+                    object_ids=[target_id],
+                ),
+            }
+        )
     validation = validate_ui_document(document)
     return {
         "schema": DEV_INSPECT_SCHEMA,
@@ -444,6 +461,7 @@ def inspect_ui_dev_handoff(
             object_ids=list(selected_ids),
         ),
         "annotations": annotations,
+        "measurement_overlays": measurement_overlays,
         "validation": validation,
     }
 

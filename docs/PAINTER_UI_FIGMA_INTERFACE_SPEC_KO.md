@@ -676,6 +676,10 @@ Implemented Inspect/Dev contract (2026-07-29):
   property, and state table in Inspect. `Open Playground` reuses the existing
   preview-only `build_ui_component_playground` path and stable component ID;
   Inspect does not duplicate component state or mutate the canonical document.
+- Dev annotations are typed as `Note` or `Measurement` and share one CRUD
+  service across UI and Actions. Measurement annotations export deterministic
+  stable-ID overlays through `dev_handoff.json` and the embedded developer
+  inspection report; normal design editing does not render those overlays.
 
 코드 스니펫은 실제 adapter가 생성한 경우에만 표시한다. Painter가 지원하지
 않는 CSS/iOS/Android/UMG 코드를 임의로 만들어 보여주지 않는다.

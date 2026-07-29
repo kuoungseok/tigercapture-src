@@ -1227,10 +1227,26 @@ Implemented checkpoint (2026-07-29, Inspect component playground entry):
   themed code viewer without card compression.
 - Verification: 394 Painter UI tests and 20 architecture/i18n guards pass.
 
+Implemented checkpoint (2026-07-29, pinned annotation completion):
+
+- The Dev surface now supports `Note` and `Measurement` annotations with Add,
+  Update, and Delete controls. Compact widths use a two-row editor so the text
+  field remains usable.
+- UI mutations reuse `add_ui_dev_annotation`,
+  `update_ui_dev_annotation`, and `remove_ui_dev_annotation`, matching the
+  existing Actions. Each UI mutation creates exactly one Undo entry, marks the
+  document dirty, and survives normal document persistence.
+- `tigerstudio.painter.ui.dev.inspect.v2` adds deterministic
+  `measurement_overlays`. Each measurement annotation exports its stable
+  annotation/target IDs, text, and calculated object bounds/spacing report.
+- Offline review packages now include `dev_handoff.json`; `inspection.json`
+  embeds the same Dev report, so handoff annotations are no longer silently
+  omitted from export.
+- Verification: 396 Painter UI tests and 20 architecture/i18n guards pass.
+
 Remaining M6 scope:
 
 - native iOS and Android adapters; current UI reports them as unavailable;
-- annotation edit/remove controls and exported pinned measurement overlays;
 - real runtime opening of validated artifacts from the desktop shell.
 
 Exit criteria:

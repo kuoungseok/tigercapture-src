@@ -369,7 +369,9 @@ class PainterUIInspector(QWidget):
     prototype_preview_reset_requested = Signal()
     stress_preview_requested = Signal(str, str)
     dev_ready_set_requested = Signal(str, str, bool, str)
-    dev_annotation_add_requested = Signal(str, str, str)
+    dev_annotation_add_requested = Signal(str, str, str, str)
+    dev_annotation_update_requested = Signal(str, object)
+    dev_annotation_remove_requested = Signal(str)
     dev_revision_compare_requested = Signal()
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
@@ -1064,6 +1066,12 @@ class PainterUIInspector(QWidget):
         )
         self.dev_panel.annotation_add_requested.connect(
             self.dev_annotation_add_requested
+        )
+        self.dev_panel.annotation_update_requested.connect(
+            self.dev_annotation_update_requested
+        )
+        self.dev_panel.annotation_remove_requested.connect(
+            self.dev_annotation_remove_requested
         )
         self.dev_panel.revision_compare_requested.connect(
             self.dev_revision_compare_requested

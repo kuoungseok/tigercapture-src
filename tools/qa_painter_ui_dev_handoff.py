@@ -76,6 +76,7 @@ def _document_and_report() -> tuple[dict, dict]:
         target_type="object",
         target_id=row["id"],
         text="Export icon assets at @2x and @3x.",
+        kind="measurement",
     )
     document, component = convert_ui_object_to_component(
         document,

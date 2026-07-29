@@ -65,6 +65,10 @@ _DEV_EXTRA_TRANSLATIONS = {
         "Component": "\ucef4\ud3ec\ub10c\ud2b8",
         "Open Playground": "\ud50c\ub808\uc774\uadf8\ub77c\uc6b4\ub4dc \uc5f4\uae30",
         "States": "\uc0c1\ud0dc",
+        "Note": "\uba54\ubaa8",
+        "Measurement": "\uce21\uc815",
+        "Update": "\uc218\uc815",
+        "Delete": "\uc0ad\uc81c",
     },
     "ja": {
         "Variables": "\u5909\u6570",
@@ -74,6 +78,10 @@ _DEV_EXTRA_TRANSLATIONS = {
         "Component": "\u30b3\u30f3\u30dd\u30fc\u30cd\u30f3\u30c8",
         "Open Playground": "\u30d7\u30ec\u30a4\u30b0\u30e9\u30a6\u30f3\u30c9\u3092\u958b\u304f",
         "States": "\u72b6\u614b",
+        "Note": "\u30e1\u30e2",
+        "Measurement": "\u8a08\u6e2c",
+        "Update": "\u66f4\u65b0",
+        "Delete": "\u524a\u9664",
     },
     "zh": {
         "Variables": "\u53d8\u91cf",
@@ -83,6 +91,10 @@ _DEV_EXTRA_TRANSLATIONS = {
         "Component": "\u7ec4\u4ef6",
         "Open Playground": "\u6253\u5f00\u8bd5\u9a8c\u573a",
         "States": "\u72b6\u6001",
+        "Note": "\u5907\u6ce8",
+        "Measurement": "\u6d4b\u91cf",
+        "Update": "\u66f4\u65b0",
+        "Delete": "\u5220\u9664",
     },
 }
 
@@ -100,7 +112,9 @@ def _text(source: str) -> str:
 
 class PainterUIDevPanel(QWidget):
     ready_set_requested = Signal(str, str, bool, str)
-    annotation_add_requested = Signal(str, str, str)
+    annotation_add_requested = Signal(str, str, str, str)
+    annotation_update_requested = Signal(str, object)
+    annotation_remove_requested = Signal(str)
     revision_compare_requested = Signal()
     component_playground_requested = Signal(str)
 
@@ -216,16 +230,35 @@ class PainterUIDevPanel(QWidget):
         annotation_title.setObjectName("PaintSectionTitle")
         layout.addWidget(annotation_title)
         annotation_row = QHBoxLayout()
+        self.annotation_kind = QComboBox()
+        self.annotation_kind.addItem(_text("Note"), "note")
+        self.annotation_kind.addItem(_text("Measurement"), "measurement")
         self.annotation_edit = QLineEdit()
         self.annotation_edit.setPlaceholderText(_text("Add developer note"))
         self.annotation_button = QPushButton(_text("Add"))
         self.annotation_button.clicked.connect(self._emit_annotation)
+        self.annotation_update_button = QPushButton(_text("Update"))
+        self.annotation_update_button.clicked.connect(
+            self._emit_annotation_update
+        )
+        self.annotation_remove_button = QPushButton(_text("Delete"))
+        self.annotation_remove_button.clicked.connect(
+            self._emit_annotation_remove
+        )
+        annotation_row.addWidget(self.annotation_kind)
         annotation_row.addWidget(self.annotation_edit, 1)
-        annotation_row.addWidget(self.annotation_button)
         layout.addLayout(annotation_row)
         self.annotation_list = QListWidget()
         self.annotation_list.setMaximumHeight(96)
+        self.annotation_list.currentItemChanged.connect(
+            self._load_annotation
+        )
         layout.addWidget(self.annotation_list)
+        annotation_actions = QHBoxLayout()
+        annotation_actions.addWidget(self.annotation_button)
+        annotation_actions.addWidget(self.annotation_update_button)
+        annotation_actions.addWidget(self.annotation_remove_button)
+        layout.addLayout(annotation_actions)
 
         self.compare_button = QPushButton(_text("Compare revision"))
         self.compare_button.clicked.connect(self.revision_compare_requested)
@@ -290,8 +323,52 @@ class PainterUIDevPanel(QWidget):
         text = self.annotation_edit.text().strip()
         if row is None or not text:
             return
-        self.annotation_add_requested.emit("object", str(row.get("id") or ""), text)
+        self.annotation_add_requested.emit(
+            "object",
+            str(row.get("id") or ""),
+            text,
+            str(self.annotation_kind.currentData() or "note"),
+        )
         self.annotation_edit.clear()
+
+    def _selected_annotation(self) -> Mapping[str, Any] | None:
+        item = self.annotation_list.currentItem()
+        value = item.data(256) if item is not None else None
+        return value if isinstance(value, Mapping) else None
+
+    def _load_annotation(self, current, _previous=None) -> None:
+        value = current.data(256) if current is not None else None
+        annotation = value if isinstance(value, Mapping) else {}
+        selected = bool(annotation)
+        self.annotation_update_button.setEnabled(selected)
+        self.annotation_remove_button.setEnabled(selected)
+        if not selected:
+            return
+        self.annotation_edit.setText(str(annotation.get("text") or ""))
+        index = self.annotation_kind.findData(
+            str(annotation.get("kind") or "note")
+        )
+        self.annotation_kind.setCurrentIndex(max(0, index))
+
+    def _emit_annotation_update(self) -> None:
+        annotation = self._selected_annotation()
+        text = self.annotation_edit.text().strip()
+        if annotation is None or not text:
+            return
+        self.annotation_update_requested.emit(
+            str(annotation.get("id") or ""),
+            {
+                "text": text,
+                "kind": str(self.annotation_kind.currentData() or "note"),
+            },
+        )
+
+    def _emit_annotation_remove(self) -> None:
+        annotation = self._selected_annotation()
+        if annotation is not None:
+            self.annotation_remove_requested.emit(
+                str(annotation.get("id") or "")
+            )
 
     def set_report(self, report: Mapping[str, Any] | None) -> None:
         self._report = dict(report or {})
@@ -305,6 +382,7 @@ class PainterUIDevPanel(QWidget):
             self.ready_button,
             self.annotation_edit,
             self.annotation_button,
+            self.annotation_kind,
         ):
             control.setEnabled(enabled)
         self.delivery_list.clear()
@@ -312,6 +390,8 @@ class PainterUIDevPanel(QWidget):
         self.component_list.clear()
         self.snippet_combo.clear()
         self.annotation_list.clear()
+        self.annotation_update_button.setEnabled(False)
+        self.annotation_remove_button.setEnabled(False)
         if not objects:
             self.summary.setText(
                 _text("Select a UI object to inspect developer values.")
@@ -404,8 +484,12 @@ class PainterUIDevPanel(QWidget):
             self.snippet_combo.addItem(label, dict(snippet))
         self._show_snippet()
         for annotation in self._report.get("annotations") or []:
-            item = QListWidgetItem(str(annotation.get("text") or ""))
+            kind = str(annotation.get("kind") or "note").title()
+            item = QListWidgetItem(
+                f"{kind}  \u00b7  {annotation.get('text') or ''}"
+            )
             item.setToolTip(str(annotation.get("id") or ""))
+            item.setData(256, dict(annotation))
             self.annotation_list.addItem(item)
 
     def _set_component_visible(self, visible: bool) -> None:
