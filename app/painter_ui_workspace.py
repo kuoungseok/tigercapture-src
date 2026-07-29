@@ -204,10 +204,17 @@ class PainterUIDesignOverlay(QWidget):
         else:
             from app.painter_ui_themes import resolve_ui_theme_document
 
-            self._effective_document = resolve_ui_theme_document(document)
+            self._effective_document = resolve_ui_theme_document(
+                document,
+                normalize=False,
+            )
             self._resolved_geometry = resolve_ui_constraints(
                 self._effective_document,
-                resolved_ui_geometry(self._effective_document),
+                resolved_ui_geometry(
+                    self._effective_document,
+                    normalize=False,
+                    resolve_responsive=False,
+                ),
             )
             self._document_render_signature = signature
             self._rebuild_document_indexes()

@@ -1498,7 +1498,7 @@ Implemented checkpoint (2026-07-29, measured runtime performance slice):
 - `app/painter_ui_runtime_performance.py` measures real normalization,
   responsive-resolution, layout-diagnostic, and Quick Actions calls against a
   deterministic 1,000-object document. The same run exercises real overlay
-  pan/zoom, selection refresh, and viewport resize interaction paths.
+  initial display, pan/zoom, selection refresh, and viewport resize paths.
 - One warmup is excluded. Three measured samples report median, minimum,
   maximum, and raw `time.perf_counter` values with explicit warning and block
   limits.
@@ -1506,13 +1506,17 @@ Implemented checkpoint (2026-07-29, measured runtime performance slice):
   refreshes, while a selection-free document fingerprint invalidates that
   cache for any render-affecting content change. Object, mask-target, parent,
   and Boolean-operand indexes remove the previous repeated full-list scans.
+- Component, responsive, theme, and geometry resolvers retain defensive
+  normalization by default. The canvas explicitly marks its normalized and
+  already-responsive path so first display no longer normalizes the same
+  1,000-object document four times.
 - UI > Runtime Performance and Quick Actions open a transient responsive
   report. `paint.ui.runtime_performance.run` exposes the same non-mutating
   benchmark with bounded parameters.
-- The 2026-07-29 local QA run covered 7/7 paths: normalize 40.6 ms, responsive
-  resolve 6.8 ms, layout diagnostics 232.4 ms, Quick Actions 123.9 ms,
-  pan/zoom 37.0 ms, selection refresh 87.8 ms, and viewport resize 39.9 ms.
-  These values describe this machine only.
+- The 2026-07-29 local QA run covered 8/8 paths: normalize 39.5 ms, responsive
+  resolve 6.5 ms, layout diagnostics 179.8 ms, Quick Actions 125.8 ms, initial
+  canvas display 261.1 ms, pan/zoom 41.3 ms, selection refresh 88.9 ms, and
+  viewport resize 38.3 ms. These values describe this machine only.
 - Korean desktop/compact evidence and the machine-readable environment report
   regenerate through `tools/qa_painter_ui_runtime_performance.py` under
   `debugCapture/painter_ui_designer/runtime_performance`.

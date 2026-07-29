@@ -48,12 +48,18 @@ def _padding(value: Any) -> tuple[float, float, float, float]:
     return amount, amount, amount, amount
 
 
-def resolved_ui_geometry(value: Mapping[str, Any]) -> dict[str, dict[str, float]]:
+def resolved_ui_geometry(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+    resolve_responsive: bool = True,
+) -> dict[str, dict[str, float]]:
     """Resolve current absolute geometry, including basic auto-layout parents."""
-    document = normalize_ui_document(value)
+    document = normalize_ui_document(value) if normalize else dict(value)
     from app.painter_ui_responsive import resolve_ui_responsive_document
 
-    document = resolve_ui_responsive_document(document)
+    if resolve_responsive:
+        document = resolve_ui_responsive_document(document)
     objects = {row["id"]: row for row in document["objects"]}
     geometry = {
         row["id"]: {

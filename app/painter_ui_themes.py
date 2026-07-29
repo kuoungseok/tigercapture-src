@@ -137,12 +137,19 @@ def resolve_ui_theme_object(
     return resolved
 
 
-def resolve_ui_theme_document(value: Mapping[str, Any]) -> dict[str, Any]:
+def resolve_ui_theme_document(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
     from app.painter_ui_components import resolve_ui_component_document
     from app.painter_ui_document import normalize_ui_document
     from app.painter_ui_responsive import resolve_ui_responsive_document
 
-    document = resolve_ui_component_document(normalize_ui_document(value))
+    document = resolve_ui_component_document(
+        normalize_ui_document(value) if normalize else value,
+        normalize=False,
+    )
     document = resolve_ui_responsive_document(document)
     tokens = {row["id"]: row for row in document["tokens"]}
     artboard_themes = {

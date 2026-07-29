@@ -39,6 +39,7 @@ def test_runtime_performance_runs_real_core_paths() -> None:
         "responsive",
         "layout_diagnostics",
         "quick_actions",
+        "canvas_initial_load",
         "pan_zoom",
         "selection_refresh",
         "viewport_resize",
@@ -71,7 +72,7 @@ def test_runtime_performance_dialog_empty_and_compact_states() -> None:
             iterations=1,
         )
     )
-    assert dialog.tree.topLevelItemCount() == 7
+    assert dialog.tree.topLevelItemCount() == 8
     dialog.resize(420, 500)
     dialog.show()
     _app().processEvents()
@@ -107,7 +108,7 @@ def test_runtime_performance_action_and_quick_action() -> None:
     ).to_dict()
     assert result["ok"] is True
     assert result["changed"] is False
-    assert result["result"]["case_count"] == 7
+    assert result["result"]["case_count"] == 8
 
     quick = search_painter_ui_quick_actions(
         create_ui_document(390, 844),

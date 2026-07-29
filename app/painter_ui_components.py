@@ -1387,10 +1387,18 @@ def reset_all_ui_component_instance_overrides(
     )
 
 
-def resolve_ui_component_document(value: Mapping[str, Any]) -> dict[str, Any]:
+def resolve_ui_component_document(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
-    document = normalize_ui_document(value)
+    document = (
+        normalize_ui_document(value)
+        if normalize
+        else copy.deepcopy(dict(value))
+    )
     components = {row["id"]: row for row in document["components"]}
     objects = {row["id"]: row for row in document["objects"]}
     instance_roots = []

@@ -874,8 +874,8 @@ Measured runtime performance:
 - `app/painter_ui_runtime_performance.py` measures real calls for document
   normalization, responsive resolution, layout diagnostics, and Quick Actions
   search against a deterministic 1,000-object document. It also drives the
-  real `PainterUIDesignOverlay` through pan/zoom, selection refresh, and
-  viewport resize paths.
+  real `PainterUIDesignOverlay` through initial document display, pan/zoom,
+  selection refresh, and viewport resize paths.
 - Each case runs one warmup and reports the median, minimum, maximum, and raw
   samples from `time.perf_counter`, plus explicit warning and block limits.
 - The overlay reuses resolved theme, responsive, constraint, and geometry data
@@ -886,6 +886,10 @@ Measured runtime performance:
 - Effective objects, mask targets, parent lookup, and Boolean operands are
   indexed once per render revision. Paint and hit-test paths must not rescan the
   complete object list for each visible object.
+- The already-normalized canvas path skips duplicate component, responsive,
+  theme, and geometry normalization passes. Public resolver defaults remain
+  defensive for untrusted callers; only the explicit retained canvas path uses
+  the no-renormalize contract.
 - UI > Runtime Performance and Quick Actions open an on-demand report.
   `paint.ui.runtime_performance.run` exposes the same non-mutating benchmark
   with bounded object-count and iteration parameters.

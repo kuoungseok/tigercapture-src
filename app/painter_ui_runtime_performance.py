@@ -20,6 +20,7 @@ _CASES: tuple[tuple[str, str, float, float], ...] = (
 )
 
 _INTERACTION_CASES: tuple[tuple[str, str, float, float], ...] = (
+    ("canvas_initial_load", "Open canvas document", 400.0, 900.0),
     ("pan_zoom", "Pan and zoom canvas", 150.0, 350.0),
     ("selection_refresh", "Refresh selection", 220.0, 500.0),
     ("viewport_resize", "Resize viewport", 180.0, 400.0),
@@ -133,6 +134,17 @@ def run_painter_ui_runtime_performance(
         raise RuntimeError(
             "Painter UI interaction benchmark requires QApplication"
         )
+
+    def canvas_initial_load() -> None:
+        candidate = PainterUIDesignOverlay()
+        candidate.resize(1000, 700)
+        candidate.set_document(document)
+        candidate.show()
+        app.processEvents()
+        candidate.close()
+        candidate.deleteLater()
+        app.processEvents()
+
     overlay = PainterUIDesignOverlay()
     overlay.resize(1000, 700)
     overlay.set_document(document)
@@ -182,6 +194,7 @@ def run_painter_ui_runtime_performance(
         app.processEvents()
 
     interaction_callbacks: dict[str, Callable[[], Any]] = {
+        "canvas_initial_load": canvas_initial_load,
         "pan_zoom": pan_zoom,
         "selection_refresh": selection_refresh,
         "viewport_resize": viewport_resize,

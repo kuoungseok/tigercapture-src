@@ -880,6 +880,7 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Resolve responsive layout", "반응형 레이아웃 계산", "レスポンシブレイアウト解決", "解析响应式布局", "Résoudre la mise en page adaptative", "Responsives Layout auflösen"),
     ("Diagnose layout", "레이아웃 진단", "レイアウト診断", "诊断布局", "Diagnostiquer la mise en page", "Layout diagnostizieren"),
     ("Search Quick Actions", "빠른 실행 검색", "クイックアクション検索", "搜索快速操作", "Rechercher les actions rapides", "Schnellaktionen durchsuchen"),
+    ("Open canvas document", "캔버스 문서 열기", "キャンバス文書を開く", "打开画布文档", "Ouvrir le document de canevas", "Canvas-Dokument öffnen"),
     ("Pan and zoom canvas", "캔버스 팬·줌", "キャンバスのパン・ズーム", "画布平移与缩放", "Panoramique et zoom du canevas", "Canvas verschieben und zoomen"),
     ("Refresh selection", "선택 갱신", "選択を更新", "刷新选择", "Actualiser la sélection", "Auswahl aktualisieren"),
     ("Resize viewport", "뷰포트 크기 조절", "ビューポートのサイズ変更", "调整视口大小", "Redimensionner la vue", "Viewport skalieren"),
