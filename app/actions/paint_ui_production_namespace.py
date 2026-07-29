@@ -59,6 +59,32 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         {"store_root": {"type": "string"}},
     )
     read_action(
+        "paint.ui.template.search",
+        "Search Painter UI templates with the same filters as the gallery",
+        "paint_ui_template_search",
+        {
+            "query": {"type": "string"},
+            "category": {"type": "string"},
+            "difficulty": {"type": "string"},
+            "platform": {"type": "string"},
+            "view": {
+                "type": "string",
+                "enum": ["all", "favorites", "recent", "installed"],
+            },
+            "store_root": {"type": "string"},
+        },
+    )
+    read_action(
+        "paint.ui.template.preview",
+        "Inspect editable contents, license, and delivery preflight for a template",
+        "paint_ui_template_preview",
+        {
+            "template_id": {"type": "string"},
+            "store_root": {"type": "string"},
+        },
+        required=("template_id",),
+    )
+    read_action(
         "paint.ui.template.package.export",
         "Export the active editable UI document as a licensed .tstemplate package",
         "paint_ui_template_package_export",

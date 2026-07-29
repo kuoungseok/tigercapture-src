@@ -21,6 +21,8 @@ from app.painter_ui_templates import (
 
 TEMPLATE_ARCHIVE_SCHEMA = "tigerstudio.painter.ui.template_archive.v1"
 TEMPLATE_STORE_SCHEMA = "tigerstudio.painter.ui.template_store.v1"
+TEMPLATE_SEARCH_SCHEMA = "tigerstudio.painter.ui.template_search.v1"
+TEMPLATE_PREVIEW_SCHEMA = "tigerstudio.painter.ui.template_preview.v1"
 
 
 def default_template_store_root() -> Path:
@@ -288,6 +290,179 @@ def inspect_ui_template_store(
         "favorites": state["favorites"],
         "recent": state["recent"],
         "template_count": len(built_in) + len(installed),
+    }
+
+
+def _template_platforms(row: Mapping[str, Any]) -> list[str]:
+    platforms: set[str] = set()
+    for preset in row.get("artboard_presets") or []:
+        width = float(preset.get("width") or 0.0)
+        height = float(preset.get("height") or 0.0)
+        if height > width and width <= 600:
+            platforms.add("mobile")
+        elif width >= 1000:
+            platforms.add("desktop")
+        else:
+            platforms.add("tablet")
+    category = str(row.get("category") or "").casefold()
+    if "broadcast" in category or "presentation" in category:
+        platforms.add("screen")
+    if "game" in category:
+        platforms.add("game")
+    return sorted(platforms)
+
+
+def search_ui_templates(
+    *,
+    query: str = "",
+    category: str = "",
+    difficulty: str = "",
+    platform: str = "",
+    view: str = "all",
+    store_root: str | Path | None = None,
+) -> dict[str, Any]:
+    store = inspect_ui_template_store(store_root=store_root)
+    installed_latest: dict[str, dict[str, Any]] = {}
+    for row in store["installed"]:
+        key = str(row["id"])
+        if key not in installed_latest or int(row["version"]) > int(
+            installed_latest[key]["version"]
+        ):
+            installed_latest[key] = dict(row)
+    rows = [dict(row) for row in store["built_in"]]
+    rows.extend(installed_latest.values())
+    favorites = set(store["favorites"])
+    recent = {key: index for index, key in enumerate(store["recent"])}
+    query_key = str(query or "").strip().casefold()
+    category_key = str(category or "").strip().casefold()
+    difficulty_key = str(difficulty or "").strip().casefold()
+    platform_key = str(platform or "").strip().casefold()
+    view_key = str(view or "all").strip().casefold()
+    if view_key not in {"all", "favorites", "recent", "installed"}:
+        raise ValueError(f"Unsupported template view: {view}")
+    matches = []
+    for row in rows:
+        template_id = str(row["id"])
+        row["favorite"] = template_id in favorites
+        row["recent"] = template_id in recent
+        row["platforms"] = _template_platforms(row)
+        row.setdefault("difficulty", "Custom")
+        row.setdefault("tags", [])
+        row.setdefault("description", "")
+        row.setdefault("features", ["Complete editable document"])
+        row.setdefault("artboard_presets", [])
+        if view_key == "favorites" and not row["favorite"]:
+            continue
+        if view_key == "recent" and not row["recent"]:
+            continue
+        if view_key == "installed" and not row.get("installed"):
+            continue
+        if category_key and str(row.get("category") or "").casefold() != category_key:
+            continue
+        if difficulty_key and str(row["difficulty"]).casefold() != difficulty_key:
+            continue
+        if platform_key and platform_key not in row["platforms"]:
+            continue
+        haystack = " ".join(
+            [
+                str(row.get("name") or ""),
+                str(row.get("category") or ""),
+                str(row.get("description") or ""),
+                *[str(tag) for tag in row["tags"]],
+            ]
+        ).casefold()
+        if query_key and query_key not in haystack:
+            continue
+        matches.append(row)
+    if view_key == "recent":
+        matches.sort(key=lambda row: recent.get(str(row["id"]), 10_000))
+    else:
+        matches.sort(
+            key=lambda row: (
+                str(row.get("category") or "").casefold(),
+                str(row.get("name") or "").casefold(),
+            )
+        )
+    return {
+        "schema": TEMPLATE_SEARCH_SCHEMA,
+        "query": query_key,
+        "filters": {
+            "category": category,
+            "difficulty": difficulty,
+            "platform": platform,
+            "view": view_key,
+        },
+        "count": len(matches),
+        "templates": matches,
+        "facets": {
+            "categories": sorted(
+                {str(row.get("category") or "") for row in rows}
+            ),
+            "difficulties": sorted(
+                {str(row.get("difficulty") or "Custom") for row in rows}
+            ),
+            "platforms": sorted(
+                {
+                    item
+                    for row in rows
+                    for item in _template_platforms(row)
+                }
+            ),
+        },
+    }
+
+
+def preview_ui_template(
+    template_id: str,
+    *,
+    store_root: str | Path | None = None,
+) -> dict[str, Any]:
+    key = str(template_id or "").strip()
+    search = search_ui_templates(store_root=store_root)
+    manifest = next(
+        (dict(row) for row in search["templates"] if str(row["id"]) == key),
+        None,
+    )
+    if manifest is None:
+        raise ValueError(f"Painter UI template not found: {key}")
+    try:
+        document, _report = instantiate_ui_template(key)
+    except ValueError:
+        selected = next(
+            row
+            for row in inspect_ui_template_store(
+                store_root=store_root
+            )["installed"]
+            if str(row["id"]) == key
+            and int(row["version"]) == int(manifest["version"])
+        )
+        document = read_ui_template_package(selected["installed_path"])[
+            "document"
+        ]
+    return {
+        "schema": TEMPLATE_PREVIEW_SCHEMA,
+        "template": manifest,
+        "document": {
+            "page_count": len(document["pages"]),
+            "artboard_count": len(document["artboards"]),
+            "object_count": len(document["objects"]),
+            "component_count": len(document["components"]),
+            "token_count": len(document["tokens"]),
+            "interaction_count": len(document["interactions"]),
+            "themes": sorted(
+                {
+                    str(mode.get("name") or "")
+                    for collection in document["variable_collections"]
+                    for mode in collection.get("modes") or []
+                    if str(mode.get("name") or "")
+                }
+            ),
+        },
+        "compatibility": {
+            "web": "inspect_on_insert",
+            "app": "inspect_on_insert",
+            "umg": "inspect_on_insert",
+        },
     }
 
 

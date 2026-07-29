@@ -78,6 +78,14 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     gallery.search_edit.clear()
     gallery.category_combo.setCurrentText("Mobile")
     assert gallery.items.count() == 2
+    gallery.category_combo.setCurrentIndex(0)
+    gallery.platform_combo.setCurrentText("Mobile")
+    assert gallery.items.count() >= 2
+    assert all(
+        "mobile"
+        in gallery.items.item(index).data(257)["platforms"]
+        for index in range(gallery.items.count())
+    )
 
     library = PainterUITemplateLibrary()
     applied: list[str] = []
@@ -114,6 +122,40 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     app.processEvents()
 
 
+def test_template_search_and_preview_share_gallery_contract(tmp_path) -> None:
+    from app.painter_ui_template_store import (
+        preview_ui_template,
+        search_ui_templates,
+        set_ui_template_favorite,
+    )
+
+    report = search_ui_templates(
+        query="tactical",
+        platform="desktop",
+        store_root=tmp_path,
+    )
+    assert report["schema"] == "tigerstudio.painter.ui.template_search.v1"
+    assert report["count"] == 1
+    assert report["templates"][0]["id"] == "game_hud"
+    assert "desktop" in report["templates"][0]["platforms"]
+    assert {"mobile", "desktop"} <= set(report["facets"]["platforms"])
+
+    set_ui_template_favorite("game_hud", True, store_root=tmp_path)
+    favorites = search_ui_templates(
+        view="favorites",
+        store_root=tmp_path,
+    )
+    assert [row["id"] for row in favorites["templates"]] == ["game_hud"]
+
+    preview = preview_ui_template("game_hud", store_root=tmp_path)
+    assert preview["schema"] == "tigerstudio.painter.ui.template_preview.v1"
+    assert preview["document"]["artboard_count"] >= 1
+    assert preview["document"]["component_count"] >= 1
+    assert preview["document"]["interaction_count"] >= 1
+    assert preview["compatibility"]["web"] == "inspect_on_insert"
+    assert search_ui_templates(store_root=tmp_path)["templates"][0]["recent"] is False
+
+
 def test_template_actions_inspect_apply_and_undo() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
@@ -133,6 +175,18 @@ def test_template_actions_inspect_apply_and_undo() -> None:
     assert inspected["ok"] is True
     assert inspected["changed"] is False
     assert inspected["result"]["template_count"] >= 12
+    searched = registry.execute(
+        "paint.ui.template.search",
+        {"query": "tactical", "platform": "desktop"},
+    ).to_dict()
+    assert searched["ok"] is True
+    assert searched["result"]["templates"][0]["id"] == "game_hud"
+    previewed = registry.execute(
+        "paint.ui.template.preview",
+        {"template_id": "game_hud"},
+    ).to_dict()
+    assert previewed["ok"] is True
+    assert previewed["result"]["document"]["component_count"] >= 1
 
     before = dialog._painter_ui_document["document_id"]
     applied = registry.execute(

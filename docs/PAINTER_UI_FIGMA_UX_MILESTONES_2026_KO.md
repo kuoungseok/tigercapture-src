@@ -1076,6 +1076,27 @@ Required Actions:
 - `paint.ui.template.update.inspect/apply`
 - `paint.ui.library.asset.search/insert`
 
+Implemented checkpoint (2026-07-29, shared search/preview slice):
+
+- The full gallery and automation now share
+  `app.painter_ui_template_store.search_ui_templates`; query, category,
+  complexity, platform, and All/Favorites/Recent/Installed views cannot drift
+  into separate UI-only filtering rules.
+- `paint.ui.template.search` returns matching editable manifests plus category,
+  difficulty, and inferred platform facets. `paint.ui.template.preview`
+  reports pages, screens, objects, components, tokens, interactions, themes,
+  source, and license without mutating the active document or recent history.
+- Gallery search owns the first compact row and filters own the second, so a
+  small window never collapses the query field. Selection details use an
+  explicit Tiger Studio dark surface and retain readable contrast outside the
+  main Painter parent window.
+- Desktop and compact evidence regenerates through
+  `tools/qa_painter_ui_template_search.py` under
+  `debugCapture/painter_ui_designer/template_search`.
+- `paint.ui.template.insert` with Page, Component Set, and Theme merge modes
+  remains the next M5 mutation slice; it must remap all stable references and
+  land as one Undo rather than reusing replace-document behavior.
+
 Exit criteria:
 
 - A user can produce a coherent responsive app flow without rebuilding common

@@ -112,6 +112,40 @@ class PaintAdapterMixin(
 
         return inspect_ui_template_store(store_root=store_root or None)
 
+    def paint_ui_template_search(
+        self,
+        *,
+        query: str = "",
+        category: str = "",
+        difficulty: str = "",
+        platform: str = "",
+        view: str = "all",
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_template_store import search_ui_templates
+
+        return search_ui_templates(
+            query=query,
+            category=category,
+            difficulty=difficulty,
+            platform=platform,
+            view=view,
+            store_root=store_root or None,
+        )
+
+    def paint_ui_template_preview(
+        self,
+        *,
+        template_id: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_template_store import preview_ui_template
+
+        return preview_ui_template(
+            template_id,
+            store_root=store_root or None,
+        )
+
     def paint_ui_template_package_export(
         self,
         *,

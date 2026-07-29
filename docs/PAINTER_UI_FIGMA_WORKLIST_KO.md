@@ -30,6 +30,11 @@ M1 Page checkpoint (2026-07-29):
   radius; text/image replacement, kind changes, and blend modes remain
   explicit fallback behavior. Browser QA records real mid-transition
   animations and zero runtime errors.
+- M5 template discovery now uses one search/preview service for Gallery and
+  `paint.ui.template.search/preview`. Query, category, complexity, platform,
+  favorites, recent, and installed views share the same facets and manifests;
+  Preview is read-only and reports editable document contents plus source and
+  license. Page/Component Set/Theme insertion remains the next mutation slice.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

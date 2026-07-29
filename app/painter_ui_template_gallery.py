@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,8 +25,9 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 from app.painter_ui_template_store import (
-    inspect_ui_template_store,
     instantiate_stored_ui_template,
+    preview_ui_template,
+    search_ui_templates,
     set_ui_template_favorite,
 )
 from app.painter_ui_themes import resolve_ui_theme_document
@@ -34,28 +36,8 @@ from app.painter_ui_themes import resolve_ui_theme_document
 TEMPLATE_THUMBNAIL_SIZE = QSize(240, 150)
 
 
-def _gallery_templates() -> list[dict[str, Any]]:
-    store = inspect_ui_template_store()
-    installed_latest: dict[str, dict[str, Any]] = {}
-    for row in store["installed"]:
-        key = str(row["id"])
-        if key not in installed_latest or int(row["version"]) > int(
-            installed_latest[key]["version"]
-        ):
-            installed_latest[key] = row
-    rows = [dict(row) for row in store["built_in"]]
-    rows.extend(installed_latest.values())
-    favorite_ids = set(store["favorites"])
-    recent_ids = set(store["recent"])
-    for row in rows:
-        row["favorite"] = row["id"] in favorite_ids
-        row["recent"] = row["id"] in recent_ids
-        row.setdefault("artboard_presets", [])
-        row.setdefault("features", ["Complete editable document"])
-        row.setdefault("difficulty", "Custom")
-        row.setdefault("tags", [])
-        row.setdefault("description", "")
-    return rows
+def _gallery_templates(**filters: str) -> list[dict[str, Any]]:
+    return list(search_ui_templates(**filters)["templates"])
 
 
 def ui_template_thumbnail(template_id: str) -> QPixmap:
@@ -128,9 +110,42 @@ def ui_template_thumbnail(template_id: str) -> QPixmap:
 class PainterUITemplateGalleryDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setObjectName("PainterUITemplateGallery")
         self.setWindowTitle("Painter UI Template Gallery")
         self.resize(1120, 720)
         self.selected_template_id = ""
+        self.setStyleSheet(
+            """
+            QDialog#PainterUITemplateGallery {
+                background: #101318;
+                color: #DCE6F7;
+            }
+            QDialog#PainterUITemplateGallery QLabel {
+                background: transparent;
+                color: #C7D0DD;
+            }
+            QDialog#PainterUITemplateGallery QLabel#PaintSectionTitle {
+                color: #EDF3FB;
+            }
+            QDialog#PainterUITemplateGallery QLabel#PaintMuted {
+                color: #8F9BAD;
+            }
+            QDialog#PainterUITemplateGallery QListWidget {
+                background: #151A21;
+                color: #DCE6F7;
+                border: 1px solid #303844;
+                outline: none;
+            }
+            QDialog#PainterUITemplateGallery QListWidget::item {
+                color: #DCE6F7;
+                padding: 5px;
+            }
+            QDialog#PainterUITemplateGallery QListWidget::item:selected {
+                background: #294C70;
+                color: #FFFFFF;
+            }
+            """
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -138,17 +153,39 @@ class PainterUITemplateGalleryDialog(QDialog):
         title.setObjectName("PaintSectionTitle")
         root.addWidget(title)
 
-        filters = QHBoxLayout()
+        filters = QGridLayout()
+        filters.setContentsMargins(0, 0, 0, 0)
+        filters.setHorizontalSpacing(6)
+        filters.setVerticalSpacing(5)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search templates, categories, or tags")
+        self.view_combo = QComboBox()
+        self.view_combo.addItem("All", "all")
+        self.view_combo.addItem("Favorites", "favorites")
+        self.view_combo.addItem("Recent", "recent")
+        self.view_combo.addItem("Installed", "installed")
         self.category_combo = QComboBox()
         self.category_combo.addItem("All categories", "")
-        for category in sorted(
-            {row["category"] for row in _gallery_templates()}
-        ):
+        facets = search_ui_templates()["facets"]
+        for category in facets["categories"]:
             self.category_combo.addItem(category, category)
-        filters.addWidget(self.search_edit, 1)
-        filters.addWidget(self.category_combo)
+        self.difficulty_combo = QComboBox()
+        self.difficulty_combo.addItem("Any complexity", "")
+        for difficulty in facets["difficulties"]:
+            self.difficulty_combo.addItem(difficulty, difficulty)
+        self.platform_combo = QComboBox()
+        self.platform_combo.addItem("Any platform", "")
+        for platform in facets["platforms"]:
+            self.platform_combo.addItem(platform.title(), platform)
+        filters.addWidget(self.search_edit, 0, 0, 1, 4)
+        filters.addWidget(self.view_combo, 1, 0)
+        filters.addWidget(self.category_combo, 1, 1)
+        filters.addWidget(self.difficulty_combo, 1, 2)
+        filters.addWidget(self.platform_combo, 1, 3)
+        filters.setColumnStretch(0, 1)
+        filters.setColumnStretch(1, 1)
+        filters.setColumnStretch(2, 1)
+        filters.setColumnStretch(3, 1)
         root.addLayout(filters)
 
         content = QHBoxLayout()
@@ -175,10 +212,13 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.detail_meta = QLabel("")
         self.detail_meta.setObjectName("PaintMuted")
         self.detail_description = QLabel("")
+        self.detail_description.setObjectName("PaintMeta")
         self.detail_description.setWordWrap(True)
         self.detail_features = QLabel("")
+        self.detail_features.setObjectName("PaintMeta")
         self.detail_features.setWordWrap(True)
         self.detail_license = QLabel("")
+        self.detail_license.setObjectName("PaintMeta")
         self.detail_license.setWordWrap(True)
         self.favorite_button = QPushButton("Add to Favorites")
         self.favorite_button.clicked.connect(self._toggle_favorite)
@@ -204,30 +244,23 @@ class PainterUITemplateGalleryDialog(QDialog):
         root.addWidget(buttons)
 
         self.search_edit.textChanged.connect(self._populate)
+        self.view_combo.currentIndexChanged.connect(self._populate)
         self.category_combo.currentIndexChanged.connect(self._populate)
+        self.difficulty_combo.currentIndexChanged.connect(self._populate)
+        self.platform_combo.currentIndexChanged.connect(self._populate)
         self.items.itemSelectionChanged.connect(self._selection_changed)
         self._populate()
 
     def _populate(self, *_args) -> None:
         selected = self.selected_template_id
         self.items.clear()
-        query = self.search_edit.text().strip().casefold()
-        category = str(self.category_combo.currentData() or "").casefold()
-        rows = []
-        for row in _gallery_templates():
-            if category and str(row["category"]).casefold() != category:
-                continue
-            haystack = " ".join(
-                [
-                    str(row["name"]),
-                    str(row["category"]),
-                    str(row["description"]),
-                    *[str(tag) for tag in row["tags"]],
-                ]
-            ).casefold()
-            if query and query not in haystack:
-                continue
-            rows.append(row)
+        rows = _gallery_templates(
+            query=self.search_edit.text(),
+            view=str(self.view_combo.currentData() or "all"),
+            category=str(self.category_combo.currentData() or ""),
+            difficulty=str(self.difficulty_combo.currentData() or ""),
+            platform=str(self.platform_combo.currentData() or ""),
+        )
         for row in rows:
             item = QListWidgetItem(
                 QIcon(ui_template_thumbnail(str(row["id"]))),
@@ -268,7 +301,8 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.detail_title.setText(str(row["name"]))
         self.detail_meta.setText(
             f"{row['category']}  |  {row['difficulty']}  |  "
-            f"{len(row['artboard_presets'])} screens"
+            f"{len(row['artboard_presets'])} screens  |  "
+            f"{', '.join(row['platforms'])}"
         )
         self.detail_description.setText(str(row["description"]))
         self.detail_features.setText(
@@ -282,6 +316,18 @@ class PainterUITemplateGalleryDialog(QDialog):
             f"<b>Source and license</b><br>{row['source']}<br>"
             f"{license_row['name']}<br>"
             f"Commercial use: {'Yes' if license_row['commercial_use'] else 'No'}"
+        )
+        preview = preview_ui_template(str(row["id"]))
+        document = preview["document"]
+        self.detail_features.setText(
+            self.detail_features.text()
+            + "<br><br><b>Editable document</b><br>"
+            + (
+                f"{document['page_count']} pages, "
+                f"{document['artboard_count']} screens, "
+                f"{document['component_count']} components, "
+                f"{document['interaction_count']} interactions"
+            )
         )
         self.favorite_button.setText(
             "Remove from Favorites"

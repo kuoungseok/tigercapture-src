@@ -978,3 +978,18 @@ overlay mode로 전환한다.
 - The inspection result is `supported` when all matched changes interpolate,
   `partial` when matched pairs include fallbacks, and `fallback` when no stable
   pair exists.
+
+## 18. Template Discovery Contract
+
+- The visual Gallery and `paint.ui.template.search` use one catalog service.
+  Search text, category, complexity, platform, favorites, recent, and installed
+  filters may not be reimplemented as private widget state.
+- Platform facets are derived deterministically from artboard presets and
+  product category metadata. Search results preserve source, license,
+  dependencies, and stable template ID.
+- `paint.ui.template.preview` is read-only. It reports editable page, artboard,
+  object, component, token, interaction, and theme counts without marking the
+  template recent or changing the Painter document.
+- Compact layout gives search a full row and filter controls a separate row.
+  The Gallery is transient and may use more vertical space rather than
+  shrinking the main Painter canvas.
