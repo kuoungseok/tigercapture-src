@@ -74,6 +74,21 @@ def register_paint_ui_advanced_actions(registry: Any) -> None:
     )
     _register(
         registry,
+        "paint.ui.smart_guide.inspect",
+        "Plan resolved edge, center, baseline, padding, and equal-gap guides.",
+        "paint_ui_smart_guide_inspect",
+        {
+            "object_id": _ID,
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "excluded_object_ids": _ID_LIST,
+            "tolerance": {"type": "number", "minimum": 0.0},
+        },
+        required=("object_id", "x", "y"),
+        mutating=False,
+    )
+    _register(
+        registry,
         "paint.ui.mask.inspect",
         "Inspect a Painter UI object mask and ordered targets.",
         "paint_ui_mask_inspect",

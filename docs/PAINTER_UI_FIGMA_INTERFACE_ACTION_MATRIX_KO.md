@@ -24,6 +24,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Same-artboard duplicate | Ctrl+D or Alt-drag copies selected roots, descendants, Boolean/Mask dependencies, nested stable IDs, and owned interactions; Alt-drag copy plus movement is one Undo step | `paint.ui.object.duplicate` |
 | Multi-selection editing | Common bounds, proportional resize, mixed-value Common properties, partial state checks, one-step Undo | `paint.ui.property.batch_set` |
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
+| Resolved Smart Guides | Move-time edge/center, text baseline, parent padding, and equal-gap snap labels computed from responsive/Auto Layout/Constraint geometry | `paint.ui.smart_guide.inspect` |
 | Object property clipboard | Context-menu Copy/Paste Properties and Paste to Replace; stable IDs, hierarchy, position, and z-order preserved | `paint.ui.object.properties.copy/paste`, `paint.ui.object.paste_replace` |
 | Cross-artboard duplicate | Context-menu and Quick Actions command copies selected roots, descendants, Boolean/Mask dependencies, component-instance links, and owned interactions to the next or named artboard; conflicting focus order is reset explicitly | `paint.ui.object.duplicate_to_artboard` |
 | Transient distance measurement | Hold Alt to draw nearest left/right/top/bottom gaps from the current selection to overlapping objects or artboard bounds; no panel width is reserved | `paint.ui.dev.measurement.inspect` |

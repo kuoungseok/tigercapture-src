@@ -63,6 +63,9 @@ Implemented:
   its drag commit share one Undo step and keep only copied roots selected
 - Ctrl+D, Alt-drag, and `paint.ui.object.duplicate` share the same stable-ID
   duplication service
+- resolved-geometry Smart Guides for edges, centers, text baselines, parent
+  padding, and equal gaps, with canvas-only contextual labels
+- read-only UI/Action parity through `paint.ui.smart_guide.inspect`
 - Painter UI document schema version 18; schema 17 remains the typed Vector
   Network checkpoint and schema 18 marks explicit non-destructive Boolean
   groups

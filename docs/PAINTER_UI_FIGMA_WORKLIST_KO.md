@@ -285,6 +285,11 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   reporting share `app/painter_ui_duplicate.py` with
   `paint.ui.object.duplicate`. Alt-drag movement continues the initial
   duplicate mutation so one Undo removes both the copy and its move.
+- Move-time Smart Guides use resolved responsive, Constraint, and Auto Layout
+  geometry rather than stale source `x/y`. Edge/center snapping is extended
+  with text baseline, parent padding, and two-sided equal-gap candidates.
+  Context labels remain canvas-only, and `paint.ui.smart_guide.inspect`
+  exposes the same non-mutating plan.
 
 ## P2. 인스펙터 확장
 

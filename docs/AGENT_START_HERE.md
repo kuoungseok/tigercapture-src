@@ -208,6 +208,10 @@ Focused entry points:
   interactions, component links, focus-order reporting, root selection, and
   the single copy-plus-drag Undo unit aligned with
   `paint.ui.object.duplicate`.
+  `app/painter_ui_smart_guides.py` owns resolved move-time edge/center,
+  baseline, padding, and equal-gap plans. The canvas and read-only
+  `paint.ui.smart_guide.inspect` Action must share it; labels remain transient
+  canvas feedback and must not become another fixed Inspector section.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

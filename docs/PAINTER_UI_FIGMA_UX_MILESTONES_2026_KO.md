@@ -514,6 +514,18 @@ Implemented checkpoint (2026-07-29, Alt-drag duplicate slice):
 - Desktop and 900x650 proof plus a machine-readable report regenerate through
   `tools/qa_painter_ui_alt_duplicate.py`; both side panels remain Auto-hide.
 
+Implemented checkpoint (2026-07-29, resolved Smart Guide slice):
+
+- Move snapping now reads resolved responsive, Constraint, and Auto Layout
+  geometry instead of raw object coordinates.
+- Existing edge and center candidates are joined by text baseline, parent
+  padding, and two-sided equal-gap candidates with explicit canvas labels.
+- The transient label and guide lines do not open or pin either side panel.
+- UI and read-only `paint.ui.smart_guide.inspect` share
+  `app/painter_ui_smart_guides.py`.
+- Desktop and 900x650 proof plus a machine-readable report regenerate through
+  `tools/qa_painter_ui_smart_guides.py`.
+
 Implemented checkpoint (2026-07-29, Figma-style Scale slice):
 
 - Scale is selection-local and appears in the canvas context menu only when an

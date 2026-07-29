@@ -73,6 +73,27 @@ class PaintUIAdvancedAdapterMixin:
             object_ids=object_ids,
         )
 
+    def paint_ui_smart_guide_inspect(
+        self,
+        *,
+        object_id: str,
+        x: float,
+        y: float,
+        excluded_object_ids: list[str] | None = None,
+        tolerance: float = 6.0,
+    ) -> dict[str, Any]:
+        from app.painter_ui_smart_guides import plan_ui_move_guides
+
+        dialog = self._paint_dialog_owner()
+        return plan_ui_move_guides(
+            dialog._painter_ui_document,
+            object_id=object_id,
+            x=x,
+            y=y,
+            excluded_object_ids=excluded_object_ids or [],
+            tolerance=tolerance,
+        )
+
     def paint_ui_mask_inspect(self, *, object_id: str) -> dict[str, Any]:
         from app.painter_ui_masks import inspect_ui_mask
 

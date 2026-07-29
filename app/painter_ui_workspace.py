@@ -120,6 +120,7 @@ class PainterUIDesignOverlay(QWidget):
         self._marquee_mode = "replace"
         self._guide_x: float | None = None
         self._guide_y: float | None = None
+        self._smart_guide_plan: dict[str, Any] = {}
         self._measurements_visible = False
         self._active_artboard_drag_id = ""
         self._artboard_drag_origin = QPointF()
@@ -1291,54 +1292,33 @@ class PainterUIDesignOverlay(QWidget):
     ) -> tuple[float, float]:
         self._guide_x = None
         self._guide_y = None
+        self._smart_guide_plan = {}
         if not self._snap_enabled:
             return x, y
-        _viewport, scale = self._artboard_viewport()
-        tolerance = 6.0 / max(0.0001, scale)
-        width = float(row["width"])
-        height = float(row["height"])
-        moving_x = (x, x + width * 0.5, x + width)
-        moving_y = (y, y + height * 0.5, y + height)
-        excluded = set(self._move_original_positions)
-        candidates_x: list[float] = []
-        candidates_y: list[float] = []
-        for other in self._document["objects"]:
-            if (
-                other["id"] in excluded
-                or other["artboard_id"] != row["artboard_id"]
-                or not other["visible"]
-            ):
-                continue
-            ox = float(other["x"])
-            oy = float(other["y"])
-            ow = float(other["width"])
-            oh = float(other["height"])
-            candidates_x.extend((ox, ox + ow * 0.5, ox + ow))
-            candidates_y.extend((oy, oy + oh * 0.5, oy + oh))
-        best_x: tuple[float, float] | None = None
-        best_y: tuple[float, float] | None = None
-        for candidate in candidates_x:
-            for anchor in moving_x:
-                delta = candidate - anchor
-                if abs(delta) <= tolerance and (
-                    best_x is None or abs(delta) < abs(best_x[0])
-                ):
-                    best_x = (delta, candidate)
-        for candidate in candidates_y:
-            for anchor in moving_y:
-                delta = candidate - anchor
-                if abs(delta) <= tolerance and (
-                    best_y is None or abs(delta) < abs(best_y[0])
-                ):
-                    best_y = (delta, candidate)
+        from app.painter_ui_smart_guides import plan_ui_move_guides
+
         viewport, scale = self._artboard_viewport()
-        if best_x is not None:
-            x += best_x[0]
-            self._guide_x = viewport.left() + best_x[1] * scale
-        if best_y is not None:
-            y += best_y[0]
-            self._guide_y = viewport.top() + best_y[1] * scale
-        return x, y
+        report = plan_ui_move_guides(
+            self._effective_document,
+            object_id=str(row["id"]),
+            x=float(x),
+            y=float(y),
+            excluded_object_ids=list(self._move_original_positions),
+            tolerance=6.0 / max(0.0001, scale),
+            geometry=self._resolved_geometry,
+        )
+        self._smart_guide_plan = report
+        for guide in report["guides"]:
+            position = (
+                viewport.left() + float(guide["position"]) * scale
+                if guide["axis"] == "horizontal"
+                else viewport.top() + float(guide["position"]) * scale
+            )
+            if guide["axis"] == "horizontal":
+                self._guide_x = position
+            else:
+                self._guide_y = position
+        return float(report["x"]), float(report["y"])
 
     def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
         original = QRectF(self._original_rect)
@@ -2282,6 +2262,43 @@ class PainterUIDesignOverlay(QWidget):
                     QPointF(viewport.left(), self._guide_y),
                     QPointF(viewport.right(), self._guide_y),
                 )
+            label_names = {
+                "baseline": "Baseline",
+                "padding": "Padding",
+                "equal_gap": "Equal gap",
+            }
+            for guide in self._smart_guide_plan.get("guides", []):
+                kind = str(guide.get("kind") or "")
+                if kind not in label_names:
+                    continue
+                label = label_names[kind]
+                if kind == "equal_gap":
+                    label += f" {float(guide.get('value') or 0.0):g}px"
+                metrics = painter.fontMetrics()
+                label_rect = QRectF(
+                    (
+                        self._guide_x + 7.0
+                        if guide["axis"] == "horizontal"
+                        else viewport.left() + 7.0
+                    ),
+                    (
+                        viewport.top() + 7.0
+                        if guide["axis"] == "horizontal"
+                        else self._guide_y + 7.0
+                    ),
+                    metrics.horizontalAdvance(label) + 12.0,
+                    metrics.height() + 6.0,
+                )
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#B83679"))
+                painter.drawRoundedRect(label_rect, 4.0, 4.0)
+                painter.setPen(QColor("#FFFFFF"))
+                painter.drawText(
+                    label_rect,
+                    Qt.AlignmentFlag.AlignCenter,
+                    label,
+                )
+                painter.setPen(QPen(QColor("#FF4FA3"), 1.0))
         self._paint_measurements(painter)
         self._paint_rulers(painter)
 
@@ -2292,6 +2309,7 @@ class PainterUIDesignOverlay(QWidget):
         self._preview_rect = QRectF()
         self._guide_x = None
         self._guide_y = None
+        self._smart_guide_plan = {}
         self._ruler_guide_preview = None
         self._ruler_origin_preview = None
         self._active_guide_position = 0.0
