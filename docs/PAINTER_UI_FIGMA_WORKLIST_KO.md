@@ -34,7 +34,10 @@ M1 Page checkpoint (2026-07-29):
   `paint.ui.template.search/preview`. Query, category, complexity, platform,
   favorites, recent, and installed views share the same facets and manifests;
   Preview is read-only and reports editable document contents plus source and
-  license. Page/Component Set/Theme insertion remains the next mutation slice.
+  license. Gallery and `paint.ui.template.insert` also share New Document,
+  Page, Component Set, and Theme modes. Page/Component modes namespace stable
+  references; Theme preserves matching target token IDs; every insert is one
+  validated Undoable mutation.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

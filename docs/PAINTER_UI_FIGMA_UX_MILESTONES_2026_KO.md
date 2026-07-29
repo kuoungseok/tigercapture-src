@@ -1093,9 +1093,16 @@ Implemented checkpoint (2026-07-29, shared search/preview slice):
 - Desktop and compact evidence regenerates through
   `tools/qa_painter_ui_template_search.py` under
   `debugCapture/painter_ui_designer/template_search`.
-- `paint.ui.template.insert` with Page, Component Set, and Theme merge modes
-  remains the next M5 mutation slice; it must remap all stable references and
-  land as one Undo rather than reusing replace-document behavior.
+- Gallery use mode and `paint.ui.template.insert` share New Document, Insert
+  Pages, Insert Component Set, and Apply Theme. Page insertion namespaces Page,
+  Artboard, object, component, style, variable/mode, token, interaction,
+  section, and grid-style IDs and remaps their references. Repeated insertion
+  remains valid and moves imported artboards beside existing work.
+- Component Set imports Definition subtrees and their design-system
+  dependencies into the active artboard. Theme preserves matching target token
+  stable IDs while updating values/modes so existing bindings change rather
+  than becoming disconnected copies. Every mode validates before commit and
+  lands as one Undo.
 
 Exit criteria:
 

@@ -114,6 +114,7 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.setWindowTitle("Painter UI Template Gallery")
         self.resize(1120, 720)
         self.selected_template_id = ""
+        self.selected_insert_mode = "new_document"
         self.setStyleSheet(
             """
             QDialog#PainterUITemplateGallery {
@@ -222,11 +223,17 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.detail_license.setWordWrap(True)
         self.favorite_button = QPushButton("Add to Favorites")
         self.favorite_button.clicked.connect(self._toggle_favorite)
+        self.insert_mode_combo = QComboBox()
+        self.insert_mode_combo.addItem("New document", "new_document")
+        self.insert_mode_combo.addItem("Insert pages", "page")
+        self.insert_mode_combo.addItem("Insert component set", "component_set")
+        self.insert_mode_combo.addItem("Apply theme", "theme")
         detail_layout.addWidget(self.detail_title)
         detail_layout.addWidget(self.detail_meta)
         detail_layout.addWidget(self.detail_description)
         detail_layout.addWidget(self.detail_features)
         detail_layout.addWidget(self.detail_license)
+        detail_layout.addWidget(self.insert_mode_combo)
         detail_layout.addWidget(self.favorite_button)
         detail_layout.addStretch(1)
         content.addWidget(details)
@@ -238,7 +245,8 @@ class PainterUITemplateGalleryDialog(QDialog):
         )
         use_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if use_button is not None:
-            use_button.setText("Use Template")
+            use_button.setObjectName("PainterUITemplateUseButton")
+            use_button.setText("Create Document")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -248,8 +256,29 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.category_combo.currentIndexChanged.connect(self._populate)
         self.difficulty_combo.currentIndexChanged.connect(self._populate)
         self.platform_combo.currentIndexChanged.connect(self._populate)
+        self.insert_mode_combo.currentIndexChanged.connect(
+            self._insert_mode_changed
+        )
         self.items.itemSelectionChanged.connect(self._selection_changed)
         self._populate()
+
+    def _insert_mode_changed(self, *_args) -> None:
+        self.selected_insert_mode = str(
+            self.insert_mode_combo.currentData() or "new_document"
+        )
+        button = self.findChild(
+            QPushButton,
+            "PainterUITemplateUseButton",
+        )
+        if button is not None:
+            button.setText(
+                {
+                    "new_document": "Create Document",
+                    "page": "Insert Pages",
+                    "component_set": "Insert Components",
+                    "theme": "Apply Theme",
+                }[self.selected_insert_mode]
+            )
 
     def _populate(self, *_args) -> None:
         selected = self.selected_template_id
@@ -349,6 +378,7 @@ class PainterUITemplateGalleryDialog(QDialog):
 
 class PainterUITemplateLibrary(QWidget):
     template_apply_requested = Signal(str)
+    template_insert_requested = Signal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -386,13 +416,22 @@ class PainterUITemplateLibrary(QWidget):
         dialog = PainterUITemplateGalleryDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             if dialog.selected_template_id:
-                self.template_apply_requested.emit(dialog.selected_template_id)
+                if dialog.selected_insert_mode == "new_document":
+                    self.template_apply_requested.emit(
+                        dialog.selected_template_id
+                    )
+                else:
+                    self.template_insert_requested.emit(
+                        dialog.selected_template_id,
+                        dialog.selected_insert_mode,
+                    )
 
 
 class PainterUITemplateStrip(QFrame):
     """Compact icon-first template access below the Painter menu bar."""
 
     template_apply_requested = Signal(str)
+    template_insert_requested = Signal(str, str)
 
     def __init__(self, parent=None, *, quick_count: int = 5) -> None:
         super().__init__(parent)
@@ -445,7 +484,13 @@ class PainterUITemplateStrip(QFrame):
             dialog.exec() == QDialog.DialogCode.Accepted
             and dialog.selected_template_id
         ):
-            self.template_apply_requested.emit(dialog.selected_template_id)
+            if dialog.selected_insert_mode == "new_document":
+                self.template_apply_requested.emit(dialog.selected_template_id)
+            else:
+                self.template_insert_requested.emit(
+                    dialog.selected_template_id,
+                    dialog.selected_insert_mode,
+                )
 
 
 __all__ = [

@@ -58,6 +58,8 @@ def test_every_builtin_template_is_a_valid_complete_editable_document() -> None:
 
 def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     app = _app()
+    from PySide6.QtWidgets import QPushButton
+
     from app.painter_ui_template_gallery import (
         PainterUITemplateGalleryDialog,
         PainterUITemplateLibrary,
@@ -85,6 +87,17 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
         "mobile"
         in gallery.items.item(index).data(257)["platforms"]
         for index in range(gallery.items.count())
+    )
+    gallery.insert_mode_combo.setCurrentIndex(
+        gallery.insert_mode_combo.findData("component_set")
+    )
+    assert gallery.selected_insert_mode == "component_set"
+    assert (
+        gallery.findChild(
+            QPushButton,
+            "PainterUITemplateUseButton",
+        ).text()
+        == "Insert Components"
     )
 
     library = PainterUITemplateLibrary()
@@ -156,6 +169,63 @@ def test_template_search_and_preview_share_gallery_contract(tmp_path) -> None:
     assert search_ui_templates(store_root=tmp_path)["templates"][0]["recent"] is False
 
 
+def test_template_insert_modes_remap_ids_and_round_trip() -> None:
+    import json
+
+    from app.painter_ui_document import (
+        create_ui_document,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+    from app.painter_ui_template_insert import insert_ui_template
+    from app.painter_ui_templates import instantiate_ui_template
+
+    source, _report = instantiate_ui_template("saas_dashboard")
+    base = create_ui_document(390, 844)
+    pages, first = insert_ui_template(
+        base,
+        source,
+        template_id="saas_dashboard",
+        mode="page",
+    )
+    pages, second = insert_ui_template(
+        pages,
+        source,
+        template_id="saas_dashboard",
+        mode="page",
+    )
+    assert first["inserted_pages"] == second["inserted_pages"] == 1
+    assert len(pages["pages"]) == 3
+    assert len({row["id"] for row in pages["objects"]}) == len(
+        pages["objects"]
+    )
+    assert validate_ui_document(pages)["ok"] is True
+    restored = normalize_ui_document(json.loads(json.dumps(pages)))
+    assert len(restored["artboards"]) == len(pages["artboards"])
+    assert restored["interactions"] == pages["interactions"]
+
+    components, report = insert_ui_template(
+        base,
+        source,
+        template_id="saas_dashboard",
+        mode="component_set",
+    )
+    assert report["inserted_components"] == 1
+    assert len(components["components"]) == 1
+    assert components["objects"][0]["artboard_id"] == base["active_artboard_id"]
+
+    themed, _report = insert_ui_template(
+        source,
+        instantiate_ui_template("game_hud")[0],
+        template_id="game_hud",
+        mode="theme",
+    )
+    assert [row["id"] for row in themed["tokens"]] == [
+        row["id"] for row in source["tokens"]
+    ]
+    assert validate_ui_document(themed)["ok"] is True
+
+
 def test_template_actions_inspect_apply_and_undo() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
@@ -187,6 +257,17 @@ def test_template_actions_inspect_apply_and_undo() -> None:
     ).to_dict()
     assert previewed["ok"] is True
     assert previewed["result"]["document"]["component_count"] >= 1
+
+    initial_page_count = len(dialog._painter_ui_document["pages"])
+    inserted = registry.execute(
+        "paint.ui.template.insert",
+        {"template_id": "saas_dashboard", "mode": "page"},
+    ).to_dict()
+    assert inserted["ok"] is True
+    assert inserted["result"]["template_insert"]["mode"] == "page"
+    assert len(dialog._painter_ui_document["pages"]) == initial_page_count + 1
+    dialog._undo()
+    assert len(dialog._painter_ui_document["pages"]) == initial_page_count
 
     before = dialog._painter_ui_document["document_id"]
     applied = registry.execute(

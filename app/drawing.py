@@ -9122,6 +9122,9 @@ class PaintDialog(QDialog):
         self._painter_ui_template_strip.template_apply_requested.connect(
             self._apply_painter_ui_template
         )
+        self._painter_ui_template_strip.template_insert_requested.connect(
+            self._insert_painter_ui_template
+        )
         self._painter_ui_template_strip.hide()
         root.addWidget(self._painter_ui_template_strip)
 
@@ -15214,6 +15217,26 @@ class PaintDialog(QDialog):
 
         document, _report = instantiate_stored_ui_template(str(template_id))
         self._push_undo_state("Apply UI template")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _insert_painter_ui_template(
+        self,
+        template_id: str,
+        mode: str,
+    ) -> None:
+        from app.painter_ui_template_insert import insert_ui_template
+        from app.painter_ui_template_store import instantiate_stored_ui_template
+
+        source, _report = instantiate_stored_ui_template(str(template_id))
+        document, _insert_report = insert_ui_template(
+            self._painter_ui_document,
+            source,
+            template_id=str(template_id),
+            mode=str(mode),
+        )
+        self._push_undo_state("Insert UI template")
         self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

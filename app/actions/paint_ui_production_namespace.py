@@ -84,6 +84,26 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         },
         required=("template_id",),
     )
+    undo_action(
+        "paint.ui.template.insert",
+        "Insert a template as a new document, pages, component set, or theme",
+        "paint_ui_template_insert",
+        {
+            "template_id": {"type": "string"},
+            "mode": {
+                "type": "string",
+                "enum": [
+                    "new_document",
+                    "page",
+                    "component_set",
+                    "theme",
+                ],
+            },
+            "store_root": {"type": "string"},
+        },
+        required=("template_id",),
+        undo_label="Insert UI template",
+    )
     read_action(
         "paint.ui.template.package.export",
         "Export the active editable UI document as a licensed .tstemplate package",

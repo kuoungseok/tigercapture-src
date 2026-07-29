@@ -993,3 +993,15 @@ overlay mode로 전환한다.
 - Compact layout gives search a full row and filter controls a separate row.
   The Gallery is transient and may use more vertical space rather than
   shrinking the main Painter canvas.
+- Gallery insertion and `paint.ui.template.insert` expose exactly four modes:
+  `new_document`, `page`, `component_set`, and `theme`.
+- Page insertion remaps every imported stable reference, including variable
+  mode IDs and component source-object IDs. Repeated insertion may not collide
+  with an earlier import.
+- Component Set imports editable Definition subtrees and required styles,
+  variables, and tokens into the current document.
+- Theme matches collection/mode and token semantics by name and kind, preserves
+  existing target token IDs where possible, and updates the active artboard's
+  variable modes. It may not silently replace the whole document.
+- All insertion modes validate before commit and create one Undo entry. Preview
+  remains read-only and never shares this mutation path.

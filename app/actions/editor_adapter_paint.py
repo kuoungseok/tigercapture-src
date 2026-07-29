@@ -146,6 +146,31 @@ class PaintAdapterMixin(
             store_root=store_root or None,
         )
 
+    def paint_ui_template_insert(
+        self,
+        *,
+        template_id: str,
+        mode: str = "new_document",
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_template_insert import insert_ui_template
+        from app.painter_ui_template_store import instantiate_stored_ui_template
+
+        source, _source_report = instantiate_stored_ui_template(
+            template_id,
+            store_root=store_root or None,
+        )
+        document, report = insert_ui_template(
+            dialog._painter_ui_document,
+            source,
+            template_id=template_id,
+            mode=mode,
+        )
+        dialog._push_undo_state("Insert UI template")
+        self._paint_ui_commit(dialog, "Insert UI template", document)
+        return {**dialog.painter_action_state(), "template_insert": report}
+
     def paint_ui_template_package_export(
         self,
         *,

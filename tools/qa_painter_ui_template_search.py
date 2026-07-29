@@ -16,7 +16,10 @@ from PySide6.QtWidgets import QApplication
 
 from app.drawing import _PAINT_DIALOG_QSS
 from app.painter_ui_template_gallery import PainterUITemplateGalleryDialog
+from app.painter_ui_template_insert import insert_ui_template
 from app.painter_ui_template_store import search_ui_templates
+from app.painter_ui_templates import instantiate_ui_template
+from app.painter_ui_document import create_ui_document
 
 
 def main() -> int:
@@ -33,6 +36,9 @@ def main() -> int:
     dialog = PainterUITemplateGalleryDialog()
     dialog.search_edit.setText("dashboard")
     dialog.platform_combo.setCurrentText("Desktop")
+    dialog.insert_mode_combo.setCurrentIndex(
+        dialog.insert_mode_combo.findData("page")
+    )
     dialog.show()
     app.processEvents()
 
@@ -44,7 +50,20 @@ def main() -> int:
     app.processEvents()
     dialog.grab().save(str(root / "template_search_compact.png"))
 
-    report = search_ui_templates(query="dashboard", platform="desktop")
+    source, _source_report = instantiate_ui_template("saas_dashboard")
+    _document, insert_report = insert_ui_template(
+        create_ui_document(390, 844),
+        source,
+        template_id="saas_dashboard",
+        mode="page",
+    )
+    report = {
+        "search": search_ui_templates(
+            query="dashboard",
+            platform="desktop",
+        ),
+        "insert": insert_report,
+    }
     (root / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2),
         encoding="utf-8",
