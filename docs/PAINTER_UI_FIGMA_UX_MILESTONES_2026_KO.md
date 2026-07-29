@@ -1008,12 +1008,18 @@ Implemented checkpoint (2026-07-29):
   without occupying permanent panel space.
 - Self-contained HTML Preview mirrors the expanded trigger/action surface,
   including overlay swap, component state/variant, variables and modes,
-  scroll, delayed/mouse/drag/gamepad triggers, and transition timing. Smart
-  Animate currently uses a browser transform/fade approximation. The authoring
-  report now matches component/scope stable references across source and target
-  artboards and exposes `partial`, `fallback`, or `blocked` with concrete
-  reasons in the compact connection list and Action result. Property-level
-  interpolation remains open M4 work.
+  scroll, delayed/mouse/drag/gamepad triggers, and transition timing.
+  Smart Animate matches component descendants by canonical source-object ID
+  and interpolates position, size, rotation, opacity, solid fill/stroke, and
+  corner radius in HTML Preview. Text/image content replacement, object-kind
+  changes, and blend-mode changes remain explicit discrete/crossfade fallback
+  properties rather than silently claiming interpolation. The authoring report
+  exposes `supported`, `partial`, or `fallback` with per-pair properties and
+  concrete reasons in the compact connection list and Action result.
+- `tools/qa_painter_ui_smart_animate.py` regenerates the browser runtime proof
+  under `debugCapture/painter_ui_designer/smart_animate_runtime`. The current
+  Playwright run observes two active property animations mid-transition, zero
+  active animations after settling, and no page errors.
 - Ordered interactions can be moved earlier or later from the compact
   Prototype list with icon controls. UI and automation share
   `paint.ui.prototype.connection.reorder`, so execution order, Undo, save, and

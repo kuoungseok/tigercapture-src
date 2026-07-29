@@ -86,6 +86,97 @@ def test_prototype_flow_and_transition_round_trip() -> None:
     assert document["interactions"][0]["id"] == second_interaction["id"]
 
 
+def test_smart_animate_matches_component_source_objects_and_properties() -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import (
+        add_ui_artboard,
+        add_ui_interaction,
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_prototype_authoring import (
+        inspect_ui_smart_animate,
+        set_ui_prototype_transition,
+    )
+
+    document = create_ui_document(390, 844)
+    source_artboard = document["active_artboard_id"]
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+        x=24,
+        y=32,
+        width=180,
+        height=96,
+    )
+    document, _label = add_ui_object(
+        document,
+        kind="text",
+        name="Label",
+        parent_id=root["id"],
+        x=16,
+        y=16,
+        width=120,
+        height=32,
+        content={"text": "Continue"},
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, target_artboard = add_ui_artboard(
+        document,
+        name="Details",
+        width=390,
+        height=844,
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        artboard_id=target_artboard["id"],
+        x=72,
+        y=96,
+    )
+    document, _updated = update_ui_object(
+        document,
+        instance["root_object_id"],
+        {"width": 240, "height": 128, "opacity": 0.72},
+    )
+    document, interaction = add_ui_interaction(
+        document,
+        source_object_id=root["id"],
+        trigger="click",
+        action="navigate",
+        target_artboard_id=target_artboard["id"],
+    )
+    document, interaction = set_ui_prototype_transition(
+        document,
+        interaction["id"],
+        {
+            "kind": "smart_animate",
+            "duration_ms": 320,
+            "easing": "ease_in_out",
+        },
+    )
+
+    report = inspect_ui_smart_animate(document, interaction)
+    assert report["status"] == "supported"
+    assert len(report["matched_pairs"]) == 2
+    assert report["fallback_reasons"] == []
+    root_pair = next(
+        row
+        for row in report["matched_pairs"]
+        if row["source_object_id"] == root["id"]
+    )
+    assert root_pair["match_key"].endswith(f":{root['id']}")
+    assert root_pair["properties"] == ["transform", "opacity"]
+
+
 def test_prototype_authoring_actions_share_document_and_undo() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry

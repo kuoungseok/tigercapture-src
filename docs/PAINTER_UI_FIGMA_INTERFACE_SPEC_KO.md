@@ -962,3 +962,19 @@ overlay mode로 전환한다.
   drag pans, wheel pans vertically, Shift+wheel pans horizontally, and
   Ctrl+wheel zooms around the pointer. `paint.ui.view.focus/pan/zoom/fit`
   invoke the same overlay view service without changing document history.
+
+## 17. Smart Animate Property Contract
+
+- Smart Animate matching uses stable scope IDs or a Component Definition's
+  canonical source-object IDs. Component children may not collapse onto one
+  component-level match key.
+- HTML Preview interpolates geometry/rotation, opacity, first visible solid
+  fill, first visible solid stroke, and corner radius.
+- Text and image content replacement use crossfade fallback; object-kind and
+  blend-mode changes are discrete fallback. Unsupported behavior is listed in
+  `fallback_properties` and never silently omitted.
+- Internal easing names are translated to valid Web Animations easing values
+  before playback. A malformed easing must not cancel the whole transition.
+- The inspection result is `supported` when all matched changes interpolate,
+  `partial` when matched pairs include fallbacks, and `fallback` when no stable
+  pair exists.

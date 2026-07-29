@@ -24,6 +24,12 @@ M1 Page checkpoint (2026-07-29):
   routes pointer/keyboard triggers on the canvas, and exposes compact runtime
   state plus Reset. Authoring chrome is hidden only while Preview is active,
   and delay interactions are timer-scoped to the current artboard/overlays.
+- M4 Smart Animate now matches component descendants by canonical source-object
+  ID and reports the exact supported and fallback properties for each pair.
+  HTML Preview interpolates transform, opacity, solid fill/stroke, and corner
+  radius; text/image replacement, kind changes, and blend modes remain
+  explicit fallback behavior. Browser QA records real mid-transition
+  animations and zero runtime errors.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

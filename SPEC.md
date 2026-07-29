@@ -7914,9 +7914,12 @@ AI Script Edit MVP integration:
   Self-contained HTML Preview mirrors expanded overlay, state/variant,
   variable/mode, scroll, delayed/mouse/drag/gamepad, and transition behavior.
   Smart Animate inspection matches component/scope stable references across
-  source and target artboards and reports `partial`, `fallback`, or `blocked`
-  with explicit reasons; browser output currently uses a transform/fade
-  approximation rather than claiming complete property interpolation.
+  source and target artboards using canonical component source-object IDs.
+  It reports `supported`, `partial`, or `fallback` with per-pair properties
+  and explicit reasons. HTML Preview interpolates geometry/rotation, opacity,
+  solid fill/stroke, and corner radius. Text/image replacement, object-kind
+  changes, and blend modes remain explicit crossfade/discrete fallbacks.
+  Internal easing names are mapped to valid Web Animations easing values.
   Multiple interactions preserve document order and can be moved earlier or
   later through the Prototype icon controls or
   `paint.ui.prototype.connection.reorder`.

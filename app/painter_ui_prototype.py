@@ -282,12 +282,18 @@ def export_ui_prototype(
 ) -> dict[str, Any]:
     document = normalize_ui_document(value)
     inspection = inspect_ui_prototype(document)
+    from app.painter_ui_prototype_authoring import inspect_ui_smart_animate
+
     root = Path(output_dir).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     data_json = json.dumps(
         {
             "document": document,
             "initial_state": prototype_initial_state(document),
+            "smart_animate": {
+                row["id"]: inspect_ui_smart_animate(document, row)
+                for row in document["interactions"]
+            },
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -333,9 +339,13 @@ const data=JSON.parse(document.getElementById("tiger-data").textContent);
 let state=data.initial_state;
 const rows=data.document.interactions.filter(x=>x.enabled);
 const byId=id=>document.getElementById(id);
+const objectRows=Object.fromEntries(data.document.objects.map(x=>[x.id,x]));
 function transitionFor(row){
  const t=(row.parameters||{}).transition||{};
- return {kind:t.kind||"instant",duration:Number(t.duration_ms||0),easing:t.easing||"ease"};
+ const easing={linear:"linear",ease_in:"ease-in",ease_out:"ease-out",
+  ease_in_out:"ease-in-out",spring:"cubic-bezier(.2,.9,.25,1.15)"};
+ return {kind:t.kind||"instant",duration:Number(t.duration_ms||0),
+  easing:easing[t.easing]||"ease"};
 }
 function animateTarget(id,transition){
  const el=byId("artboard-"+id);if(!el||transition.kind==="instant"||transition.duration<=0)return;
@@ -343,6 +353,36 @@ function animateTarget(id,transition){
  if(["move_in","slide","smart_animate"].includes(transition.kind))start={opacity:.2,transform:"translateX(28px)"};
  else if(["move_out","push"].includes(transition.kind))start={opacity:.2,transform:"translateX(-28px)"};
  el.animate([start,end],{duration:transition.duration,easing:transition.easing,fill:"both"});
+}
+function captureSmart(row){
+ const report=(data.smart_animate||{})[row.id]||{};
+ return (report.matched_pairs||[]).map(pair=>{
+  const source=byId(pair.source_object_id);if(!source)return null;
+  const rect=source.getBoundingClientRect(),style=getComputedStyle(source);
+  return {pair,rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+   style:{opacity:style.opacity,backgroundColor:style.backgroundColor,
+    borderColor:style.borderColor,borderWidth:style.borderWidth,
+    borderRadius:style.borderRadius}};
+ }).filter(Boolean);
+}
+function animateSmart(row,captured,transition){
+ captured.forEach(item=>{
+  const target=byId(item.pair.target_object_id);if(!target)return;
+  const rect=target.getBoundingClientRect(),targetRow=objectRows[item.pair.target_object_id]||{};
+  const sourceRow=objectRows[item.pair.source_object_id]||{};
+  const sx=rect.width?item.rect.width/rect.width:1,sy=rect.height?item.rect.height/rect.height:1;
+  const dx=item.rect.x-rect.x,dy=item.rect.y-rect.y;
+  const rotation=Number(sourceRow.rotation||0)-Number(targetRow.rotation||0);
+  const properties=item.pair.properties||[];
+  const start={transformOrigin:"top left",
+   transform:`translate(${dx}px,${dy}px) scale(${sx},${sy}) rotate(${rotation}deg)`};
+  const end={transformOrigin:"top left",transform:"translate(0,0) scale(1,1) rotate(0deg)"};
+  if(properties.includes("opacity")){start.opacity=item.style.opacity;end.opacity=getComputedStyle(target).opacity}
+  if(properties.includes("fill")){start.backgroundColor=item.style.backgroundColor;end.backgroundColor=getComputedStyle(target).backgroundColor}
+  if(properties.includes("stroke")){start.borderColor=item.style.borderColor;start.borderWidth=item.style.borderWidth;end.borderColor=getComputedStyle(target).borderColor;end.borderWidth=getComputedStyle(target).borderWidth}
+  if(properties.includes("corner_radius")){start.borderRadius=item.style.borderRadius;end.borderRadius=getComputedStyle(target).borderRadius}
+  target.animate([start,end],{duration:transition.duration,easing:transition.easing});
+ });
 }
 function render(){
  document.querySelectorAll(".artboard").forEach(el=>{
@@ -362,8 +402,9 @@ function render(){
 }
 function fire(id,trigger,key=""){
  rows.filter(x=>x.source_object_id===id&&x.trigger===trigger).forEach(x=>{
-  const p=x.parameters||{};if(p.key&&p.key.toLowerCase()!==key.toLowerCase())return;
+ const p=x.parameters||{};if(p.key&&p.key.toLowerCase()!==key.toLowerCase())return;
   const transition=transitionFor(x);
+  const smart=transition.kind==="smart_animate"?captureSmart(x):[];
   if(x.action==="navigate"&&x.target_artboard_id){state.history.push(state.artboard_id);state.artboard_id=x.target_artboard_id}
   else if(x.action==="back"&&state.history.length)state.artboard_id=state.history.pop();
   else if(x.action==="open_overlay"&&x.target_artboard_id&&!state.overlay_artboard_ids.includes(x.target_artboard_id))state.overlay_artboard_ids.push(x.target_artboard_id);
@@ -379,7 +420,8 @@ function fire(id,trigger,key=""){
   else if(x.action==="play_sound"&&p.uri)new Audio(p.uri).play();
   else if(x.action==="play_animation"&&x.target_object_id){const el=document.getElementById(x.target_object_id);if(el)el.animate([{opacity:.4,transform:"scale(.98)"},{opacity:1,transform:"scale(1)"}],{duration:Number(p.duration_ms||250)})}
   render();
-  if(x.target_artboard_id)animateTarget(x.target_artboard_id,transition);
+  if(transition.kind==="smart_animate"&&smart.length)animateSmart(x,smart,transition);
+  else if(x.target_artboard_id)animateTarget(x.target_artboard_id,transition);
  });
 }
 document.querySelectorAll(".ui-object").forEach(el=>{

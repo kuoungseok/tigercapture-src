@@ -272,12 +272,86 @@ def _smart_animate_match_key(row: Mapping[str, Any]) -> str:
     if scope_id and source_id:
         return f"scope:{scope_id}:{source_id}"
     component_id = str(row.get("component_id") or "")
+    component_source_id = str(
+        row.get("component_source_object_id") or ""
+    )
     if component_id and str(row.get("component_role") or "") in {
         "definition",
         "instance",
     }:
-        return f"component:{component_id}"
+        if component_source_id:
+            return f"component:{component_id}:{component_source_id}"
     return ""
+
+
+def _first_solid_color(
+    style: Mapping[str, Any],
+    key: str,
+) -> str:
+    for row in style.get(key) or []:
+        if (
+            isinstance(row, Mapping)
+            and row.get("visible", True)
+            and str(row.get("type") or "solid") == "solid"
+        ):
+            return str(row.get("color") or "")
+    return ""
+
+
+def _smart_animate_properties(
+    source: Mapping[str, Any],
+    target: Mapping[str, Any],
+) -> tuple[list[str], list[str]]:
+    animated = []
+    fallback = []
+    if any(
+        float(source.get(key) or 0.0) != float(target.get(key) or 0.0)
+        for key in ("x", "y", "width", "height", "rotation")
+    ):
+        animated.append("transform")
+    if float(source.get("opacity") or 0.0) != float(
+        target.get("opacity") or 0.0
+    ):
+        animated.append("opacity")
+    source_style = dict(source.get("style") or {})
+    target_style = dict(target.get("style") or {})
+    if _first_solid_color(source_style, "fills") != _first_solid_color(
+        target_style,
+        "fills",
+    ):
+        animated.append("fill")
+    if _first_solid_color(source_style, "strokes") != _first_solid_color(
+        target_style,
+        "strokes",
+    ):
+        animated.append("stroke")
+    if dict(source_style.get("corner_radii") or {}) != dict(
+        target_style.get("corner_radii") or {}
+    ):
+        animated.append("corner_radius")
+    if str(source.get("kind") or "") != str(target.get("kind") or ""):
+        fallback.append("kind_change")
+    source_content = dict(source.get("content") or {})
+    target_content = dict(target.get("content") or {})
+    if str(source_content.get("text") or "") != str(
+        target_content.get("text") or ""
+    ):
+        fallback.append("text_content_crossfade")
+    if str(
+        source_content.get("source_path")
+        or source_content.get("path")
+        or ""
+    ) != str(
+        target_content.get("source_path")
+        or target_content.get("path")
+        or ""
+    ):
+        fallback.append("image_content_crossfade")
+    if str(source_style.get("blend_mode") or "normal") != str(
+        target_style.get("blend_mode") or "normal"
+    ):
+        fallback.append("blend_mode_discrete")
+    return animated, fallback
 
 
 def inspect_ui_smart_animate(
@@ -329,20 +403,35 @@ def inspect_ui_smart_animate(
         if row["artboard_id"] == target_artboard_id
         if (key := _smart_animate_match_key(row))
     }
-    matched_pairs = [
-        {
-            "match_key": key,
-            "source_object_id": row["id"],
-            "target_object_id": targets_by_key[key]["id"],
-        }
-        for row in source_rows
-        if (key := _smart_animate_match_key(row)) in targets_by_key
-    ]
-    reasons = ["browser_transform_fade_approximation"]
+    matched_pairs = []
+    reasons = []
+    for row in source_rows:
+        key = _smart_animate_match_key(row)
+        if not key or key not in targets_by_key:
+            continue
+        target = targets_by_key[key]
+        properties, fallback = _smart_animate_properties(row, target)
+        matched_pairs.append(
+            {
+                "match_key": key,
+                "source_object_id": row["id"],
+                "target_object_id": target["id"],
+                "properties": properties,
+                "fallback_properties": fallback,
+            }
+        )
+        reasons.extend(fallback)
     if not matched_pairs:
         reasons.insert(0, "no_stable_component_matches")
+    reasons = list(dict.fromkeys(reasons))
     return {
-        "status": "partial" if matched_pairs else "fallback",
+        "status": (
+            "fallback"
+            if not matched_pairs
+            else "partial"
+            if reasons
+            else "supported"
+        ),
         "matched_pairs": matched_pairs,
         "fallback_reasons": reasons,
     }

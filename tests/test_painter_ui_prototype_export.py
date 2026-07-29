@@ -62,6 +62,11 @@ def test_html_export_includes_extended_runtime_and_transition(
     assert 'x.trigger==="delay"' in html
     assert '"gamepadconnected"' in html
     assert '"smart_animate"' in html
+    assert "captureSmart" in html
+    assert "animateSmart" in html
+    assert "corner_radius" in html
+    assert 'ease_in_out:"ease-in-out"' in html
+    assert "browser_transform_fade_approximation" not in html
 
 
 def test_initial_state_uses_active_flow_artboard() -> None:
