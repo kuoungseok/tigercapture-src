@@ -7835,6 +7835,13 @@ AI Script Edit MVP integration:
   `paint.ui.component.variant.create`,
   `paint.ui.component.instance.variant.set`, and
   `paint.ui.component.instance.detach` share Undo and validation.
+- The selected Component Instance exposes a compact override list across its
+  complete subtree. Per-property Reset restores only one dotted path; Reset All
+  restores typed component-property defaults and all member values while
+  preserving the linked Instance and stable object IDs. UI and automation use
+  the same validated, one-step Undo services through
+  `paint.ui.component.override.reset` and
+  `paint.ui.component.override.reset_all`.
 - Painter UI Design includes a dedicated `Components` library tab. It groups
   base Definitions and Variants, reports Instance usage, filters by name,
   selects the stable Definition root, places Instances, creates Variants, and

@@ -859,6 +859,18 @@ Required Actions:
 - `paint.ui.library.update.inspect`
 - `paint.ui.library.update.apply`
 
+Implemented checkpoint (2026-07-29):
+
+- The compact Component section now lists every explicit property and nested
+  object override for the selected Instance without adding another permanent
+  panel.
+- `Reset` restores only the selected dotted-path value; `Reset All` restores
+  component-property defaults and all member values while preserving the
+  linked Instance, stable object IDs, selection, and one-step Undo.
+- UI commands and `paint.ui.component.override.reset/reset_all` use the same
+  validated document services. Inspector counts include the whole Instance
+  subtree instead of only the selected child.
+
 Exit criteria:
 
 - One component family supports size, state, icon, label, and theme variation

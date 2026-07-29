@@ -2755,6 +2755,56 @@ class PaintAdapterMixin(
         dialog._push_undo_state(label)
         return self._paint_ui_commit(dialog, label, document)
 
+    def paint_ui_component_override_reset(
+        self,
+        *,
+        instance_root_id: str,
+        object_id: str,
+        property_path: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import (
+            reset_ui_component_instance_override,
+        )
+
+        document, report = reset_ui_component_instance_override(
+            dialog._painter_ui_document,
+            instance_root_id=str(instance_root_id),
+            object_id=str(object_id),
+            property_path=str(property_path),
+        )
+        dialog._push_undo_state("Reset UI component override")
+        result = self._paint_ui_commit(
+            dialog,
+            "Reset UI component override",
+            document,
+        )
+        result["override_report"] = report
+        return result
+
+    def paint_ui_component_override_reset_all(
+        self,
+        *,
+        instance_root_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import (
+            reset_all_ui_component_instance_overrides,
+        )
+
+        document, report = reset_all_ui_component_instance_overrides(
+            dialog._painter_ui_document,
+            instance_root_id=str(instance_root_id),
+        )
+        dialog._push_undo_state("Reset all UI component overrides")
+        result = self._paint_ui_commit(
+            dialog,
+            "Reset all UI component overrides",
+            document,
+        )
+        result["override_report"] = report
+        return result
+
     def paint_ui_component_update(
         self,
         *,

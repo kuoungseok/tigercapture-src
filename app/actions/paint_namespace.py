@@ -1991,6 +1991,38 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a component Instance would become local content",
     )
     registry.register_adapter_action(
+        "paint.ui.component.override.reset",
+        "Reset one local component Instance override to its definition value.",
+        "paint",
+        "paint_ui_component_override_reset",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("instance_root_id", "object_id", "property_path"),
+        ),
+        required=("instance_root_id", "object_id", "property_path"),
+        undo_label="Reset UI component override",
+        dry_summary="one local component Instance override would be reset",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.override.reset_all",
+        "Reset every local override in a linked component Instance.",
+        "paint",
+        "paint_ui_component_override_reset_all",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+            },
+            required=("instance_root_id",),
+        ),
+        required=("instance_root_id",),
+        undo_label="Reset all UI component overrides",
+        dry_summary="all local component Instance overrides would be reset",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.add",
         "Create a typed reusable component definition rooted at a Painter UI object.",
         "paint",

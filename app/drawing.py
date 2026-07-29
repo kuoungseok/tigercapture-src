@@ -10539,6 +10539,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.component_detach_requested.connect(
             self._detach_painter_ui_component
         )
+        self._paint_ui_inspector.component_override_reset_requested.connect(
+            self._reset_painter_ui_component_override
+        )
+        self._paint_ui_inspector.component_override_reset_all_requested.connect(
+            self._reset_all_painter_ui_component_overrides
+        )
         self._paint_ui_inspector.component_update_requested.connect(
             self._update_painter_ui_component
         )
@@ -15421,6 +15427,50 @@ class PaintDialog(QDialog):
                 else "Detach UI component instance"
             )
         )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _reset_painter_ui_component_override(
+        self,
+        instance_root_id: str,
+        object_id: str,
+        property_path: str,
+    ) -> None:
+        from app.painter_ui_components import (
+            reset_ui_component_instance_override,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _report = reset_ui_component_instance_override(
+            current,
+            instance_root_id=str(instance_root_id),
+            object_id=str(object_id),
+            property_path=str(property_path),
+        )
+        self._push_undo_state("Reset UI component override")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _reset_all_painter_ui_component_overrides(
+        self,
+        instance_root_id: str,
+    ) -> None:
+        from app.painter_ui_components import (
+            reset_all_ui_component_instance_overrides,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _report = reset_all_ui_component_instance_overrides(
+            current,
+            instance_root_id=str(instance_root_id),
+        )
+        self._push_undo_state("Reset all UI component overrides")
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

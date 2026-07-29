@@ -138,6 +138,151 @@ def test_definition_update_syncs_instances_and_preserves_local_override() -> Non
     assert preserved["instance_overrides"]["content.text"] == "Local title"
 
 
+def test_instance_override_inspect_reset_and_reset_all_preserve_link() -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        inspect_ui_component_instance_overrides,
+        instantiate_ui_component,
+        reset_all_ui_component_instance_overrides,
+        reset_ui_component_instance_override,
+        set_ui_instance_component_property,
+    )
+    from app.painter_ui_document import update_ui_object, validate_ui_document
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, result = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+    )
+    instance_child = next(
+        row
+        for row in document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    document, _ = update_ui_object(
+        document,
+        instance_child["id"],
+        {
+            "content": {"text": "Local title"},
+            "style": {"text_color": "#CC8844"},
+        },
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=result["root_object_id"],
+        property_name="state",
+        property_value="pressed",
+    )
+
+    report = inspect_ui_component_instance_overrides(
+        document,
+        instance_root_id=result["root_object_id"],
+    )
+    assert report["count"] == 3
+    assert {
+        (row["kind"], row["property_path"])
+        for row in report["overrides"]
+    } == {
+        ("component_property", "component_properties.state"),
+        ("object_property", "content.text"),
+        ("object_property", "style.text_color"),
+    }
+
+    document, report = reset_ui_component_instance_override(
+        document,
+        instance_root_id=result["root_object_id"],
+        object_id=instance_child["id"],
+        property_path="content.text",
+    )
+    reset_child = next(
+        row for row in document["objects"] if row["id"] == instance_child["id"]
+    )
+    assert reset_child["content"]["text"] == "Profile"
+    assert reset_child["style"]["text_color"] == "#CC8844"
+    assert report["count"] == 2
+
+    document, report = reset_all_ui_component_instance_overrides(
+        document,
+        instance_root_id=result["root_object_id"],
+    )
+    reset_root = next(
+        row
+        for row in document["objects"]
+        if row["id"] == result["root_object_id"]
+    )
+    reset_child = next(
+        row for row in document["objects"] if row["id"] == instance_child["id"]
+    )
+    assert reset_root["component_role"] == "instance"
+    assert reset_root["component_properties"]["state"] == "normal"
+    assert reset_child["style"]["text_color"] == "#20242C"
+    assert report["count"] == 0
+    assert validate_ui_document(document)["ok"] is True
+
+
+def test_inspector_lists_instance_overrides_and_emits_reset_commands() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import update_ui_object
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, result = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+    )
+    instance_child = next(
+        row
+        for row in document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    document, _ = update_ui_object(
+        document,
+        instance_child["id"],
+        {"content": {"text": "Local title"}},
+    )
+    document["selection"] = {
+        "object_id": instance_child["id"],
+        "object_ids": [instance_child["id"]],
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    resets: list[tuple[str, str, str]] = []
+    reset_all: list[str] = []
+    inspector.component_override_reset_requested.connect(
+        lambda *args: resets.append(args)
+    )
+    inspector.component_override_reset_all_requested.connect(reset_all.append)
+
+    assert inspector.component_override_combo.count() == 1
+    assert "Title" in inspector.component_override_combo.currentText()
+    inspector.component_override_reset_button.click()
+    assert resets == [
+        (
+            result["root_object_id"],
+            instance_child["id"],
+            "content.text",
+        )
+    ]
+    inspector.component_override_reset_all_button.click()
+    assert reset_all == [result["root_object_id"]]
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_definition_child_add_remove_synchronizes_instance_topology() -> None:
     from app.painter_ui_components import (
         convert_ui_object_to_component,
@@ -205,6 +350,8 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         "paint.ui.component.variant.create",
         "paint.ui.component.instance.variant.set",
         "paint.ui.component.instance.detach",
+        "paint.ui.component.override.reset",
+        "paint.ui.component.override.reset_all",
     } <= action_ids
 
     created = registry.execute(
@@ -286,6 +433,51 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         for row in dialog._painter_ui_document["objects"]
         if row["id"] == instance_root["id"]
     )["component_properties"]["state"] == "normal"
+    from app.painter_ui_document import update_ui_object
+
+    instance_child = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    dialog._painter_ui_document, _ = update_ui_object(
+        dialog._painter_ui_document,
+        instance_child["id"],
+        {"content": {"text": "Local action title"}},
+    )
+    reset = registry.execute(
+        "paint.ui.component.override.reset",
+        {
+            "instance_root_id": instance_root["id"],
+            "object_id": instance_child["id"],
+            "property_path": "content.text",
+        },
+    ).to_dict()
+    assert reset["ok"] is True
+    assert reset["result"]["override_report"]["count"] == 0
+    assert next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == instance_child["id"]
+    )["content"]["text"] == "Profile"
+    dialog._undo()
+    assert next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == instance_child["id"]
+    )["content"]["text"] == "Local action title"
+    reset_all = registry.execute(
+        "paint.ui.component.override.reset_all",
+        {"instance_root_id": instance_root["id"]},
+    ).to_dict()
+    assert reset_all["ok"] is True
+    assert reset_all["result"]["override_report"]["count"] == 0
+    assert next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == instance_child["id"]
+    )["content"]["text"] == "Profile"
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

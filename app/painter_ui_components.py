@@ -1147,6 +1147,246 @@ def set_ui_instance_component_property(
     return document, copy.deepcopy(properties)
 
 
+def inspect_ui_component_instance_overrides(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+) -> dict[str, Any]:
+    """Return the explicit local differences for one component instance."""
+    from app.painter_ui_document import PainterUIDocumentError, normalize_ui_document
+
+    document = normalize_ui_document(value)
+    objects = {row["id"]: row for row in document["objects"]}
+    root = objects.get(str(instance_root_id))
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(
+            f"Component instance not found: {instance_root_id}"
+        )
+    component = next(
+        (
+            row
+            for row in document["components"]
+            if row["id"] == root["component_id"]
+        ),
+        None,
+    )
+    if (
+        component is None
+        or root["component_source_object_id"] != component["root_object_id"]
+    ):
+        raise PainterUIDocumentError(
+            f"Component instance root not found: {instance_root_id}"
+        )
+
+    overrides: list[dict[str, Any]] = []
+    defaults = component_property_defaults(component)
+    properties = normalize_ui_component_properties(
+        root.get("component_properties")
+    )
+    for name in sorted(set(defaults) | set(properties)):
+        value_item = copy.deepcopy(properties.get(name, defaults.get(name)))
+        default_item = copy.deepcopy(defaults.get(name))
+        if value_item == default_item:
+            continue
+        overrides.append(
+            {
+                "kind": "component_property",
+                "object_id": root["id"],
+                "object_name": root["name"],
+                "property_path": f"component_properties.{name}",
+                "label": name,
+                "value": value_item,
+                "default": default_item,
+            }
+        )
+
+    for object_id in _subtree_ids(document, root["id"]):
+        row = objects.get(object_id)
+        if row is None:
+            continue
+        for path, item in sorted(
+            normalize_ui_instance_overrides(
+                row.get("instance_overrides")
+            ).items()
+        ):
+            overrides.append(
+                {
+                    "kind": "object_property",
+                    "object_id": row["id"],
+                    "object_name": row["name"],
+                    "property_path": path,
+                    "label": path,
+                    "value": copy.deepcopy(item),
+                    "default": None,
+                }
+            )
+    return {
+        "instance_root_id": root["id"],
+        "component_id": component["id"],
+        "component_name": component["name"],
+        "count": len(overrides),
+        "overrides": overrides,
+    }
+
+
+def reset_ui_component_instance_override(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    object_id: str,
+    property_path: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reset one explicit instance override to its component definition."""
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    objects = {row["id"]: row for row in document["objects"]}
+    root = objects.get(str(instance_root_id))
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(
+            f"Component instance not found: {instance_root_id}"
+        )
+    component = next(
+        (
+            row
+            for row in document["components"]
+            if row["id"] == root["component_id"]
+        ),
+        None,
+    )
+    if (
+        component is None
+        or root["component_source_object_id"] != component["root_object_id"]
+    ):
+        raise PainterUIDocumentError(
+            f"Component instance root not found: {instance_root_id}"
+        )
+    path = str(property_path or "").strip()
+    target_id = str(object_id or instance_root_id)
+    member_ids = set(_subtree_ids(document, root["id"]))
+    if target_id not in member_ids:
+        raise PainterUIDocumentError(
+            f"Object is not in component instance: {target_id}"
+        )
+
+    changed = False
+    if path.startswith("component_properties."):
+        property_name = path.removeprefix("component_properties.")
+        defaults = component_property_defaults(component)
+        properties = normalize_ui_component_properties(
+            root.get("component_properties")
+        )
+        if property_name in defaults:
+            if properties.get(property_name) != defaults[property_name]:
+                properties[property_name] = copy.deepcopy(defaults[property_name])
+                changed = True
+        elif property_name in properties:
+            properties.pop(property_name)
+            changed = True
+        root["component_properties"] = properties
+    else:
+        target = objects[target_id]
+        overrides = normalize_ui_instance_overrides(
+            target.get("instance_overrides")
+        )
+        if path in overrides:
+            overrides.pop(path)
+            target["instance_overrides"] = overrides
+            changed = True
+    if not changed:
+        raise PainterUIDocumentError(
+            f"Component instance override not found: {property_path}"
+        )
+
+    document = sync_ui_component_instances(
+        document,
+        component["id"],
+        normalize=False,
+    )
+    document["selection"] = {
+        "object_id": target_id,
+        "object_ids": [target_id],
+    }
+    document["revision"] += 1
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component override reset: "
+            + ", ".join(validation["errors"])
+        )
+    return document, inspect_ui_component_instance_overrides(
+        document,
+        instance_root_id=root["id"],
+    )
+
+
+def reset_all_ui_component_instance_overrides(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reset every local property in one instance while keeping it linked."""
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    objects = {row["id"]: row for row in document["objects"]}
+    root = objects.get(str(instance_root_id))
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(
+            f"Component instance not found: {instance_root_id}"
+        )
+    component = next(
+        (
+            row
+            for row in document["components"]
+            if row["id"] == root["component_id"]
+        ),
+        None,
+    )
+    if (
+        component is None
+        or root["component_source_object_id"] != component["root_object_id"]
+    ):
+        raise PainterUIDocumentError(
+            f"Component instance root not found: {instance_root_id}"
+        )
+    for object_id in _subtree_ids(document, root["id"]):
+        member = objects.get(object_id)
+        if member is None:
+            continue
+        member["instance_overrides"] = {}
+        member["component_properties"] = {}
+    root["component_properties"] = component_property_defaults(component)
+    document = sync_ui_component_instances(
+        document,
+        component["id"],
+        normalize=False,
+    )
+    document["selection"] = {
+        "object_id": root["id"],
+        "object_ids": [root["id"]],
+    }
+    document["revision"] += 1
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component override reset: "
+            + ", ".join(validation["errors"])
+        )
+    return document, inspect_ui_component_instance_overrides(
+        document,
+        instance_root_id=root["id"],
+    )
+
+
 def resolve_ui_component_document(value: Mapping[str, Any]) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
@@ -1221,6 +1461,7 @@ __all__ = [
     "detach_ui_component_instance",
     "define_ui_component_property",
     "instantiate_ui_component",
+    "inspect_ui_component_instance_overrides",
     "merge_ui_instance_overrides",
     "normalize_ui_component_properties",
     "normalize_ui_component_property_bindings",
@@ -1229,6 +1470,8 @@ __all__ = [
     "normalize_ui_component_state_overrides",
     "normalize_ui_instance_overrides",
     "resolve_ui_component_document",
+    "reset_all_ui_component_instance_overrides",
+    "reset_ui_component_instance_override",
     "set_ui_component_state_override",
     "set_ui_instance_component_property",
     "switch_ui_component_instance_variant",

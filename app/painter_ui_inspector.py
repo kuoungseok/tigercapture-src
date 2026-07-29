@@ -304,6 +304,8 @@ class PainterUIInspector(QWidget):
     component_variant_create_requested = Signal(str, str)
     component_variant_switch_requested = Signal(str, str)
     component_detach_requested = Signal(str, bool, str)
+    component_override_reset_requested = Signal(str, str, str)
+    component_override_reset_all_requested = Signal(str)
     component_update_requested = Signal(str, object)
     token_add_requested = Signal(object)
     token_update_requested = Signal(str, object)
@@ -1127,6 +1129,40 @@ class PainterUIInspector(QWidget):
         detach_layout.addWidget(self.component_detach_button)
         detach_layout.addWidget(self.component_localize_button)
         form.addRow("", detach_row)
+        override_row = QFrame()
+        override_layout = QHBoxLayout(override_row)
+        override_layout.setContentsMargins(0, 0, 0, 0)
+        override_layout.setSpacing(3)
+        self.component_override_combo = QComboBox()
+        self.component_override_combo.setToolTip(
+            painter_text(
+                "Local values that differ from the component definition"
+            )
+        )
+        self.component_override_reset_button = QPushButton(
+            painter_text("Reset")
+        )
+        self.component_override_reset_button.setToolTip(
+            painter_text("Reset only the selected override")
+        )
+        self.component_override_reset_button.clicked.connect(
+            self._emit_component_override_reset
+        )
+        self.component_override_reset_all_button = QPushButton(
+            painter_text("Reset All")
+        )
+        self.component_override_reset_all_button.setToolTip(
+            painter_text(
+                "Reset every local override in this component instance"
+            )
+        )
+        self.component_override_reset_all_button.clicked.connect(
+            self._emit_component_override_reset_all
+        )
+        override_layout.addWidget(self.component_override_combo, 1)
+        override_layout.addWidget(self.component_override_reset_button)
+        override_layout.addWidget(self.component_override_reset_all_button)
+        form.addRow(painter_text("Overrides"), override_row)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
@@ -2465,6 +2501,9 @@ class PainterUIInspector(QWidget):
             self.component_variant_new_button,
             self.component_detach_button,
             self.component_localize_button,
+            self.component_override_combo,
+            self.component_override_reset_button,
+            self.component_override_reset_all_button,
             *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
@@ -2493,6 +2532,9 @@ class PainterUIInspector(QWidget):
             self.auto_layout_status_label.setToolTip("")
             self.component_state_combo.setCurrentIndex(0)
             self.component_variant_combo.clear()
+            self.component_override_combo.clear()
+            self.component_override_reset_button.setEnabled(False)
+            self.component_override_reset_all_button.setEnabled(False)
             for target, label in self.delivery_status_labels.items():
                 label.setText(f"{self._delivery_title(target)}: -")
                 label.setToolTip("")
@@ -2555,13 +2597,38 @@ class PainterUIInspector(QWidget):
         self.component_variant_new_button.setEnabled(bool(component_id))
         self.component_detach_button.setEnabled(instance_root is not None)
         self.component_localize_button.setEnabled(instance_root is not None)
+        self.component_override_combo.clear()
+        override_report = {"count": 0, "overrides": []}
+        if instance_root is not None:
+            from app.painter_ui_components import (
+                inspect_ui_component_instance_overrides,
+            )
+
+            override_report = inspect_ui_component_instance_overrides(
+                self._document,
+                instance_root_id=str(instance_root["id"]),
+            )
+            for override in override_report["overrides"]:
+                object_name = str(override["object_name"])
+                property_name = str(override["label"])
+                label = (
+                    property_name
+                    if override["kind"] == "component_property"
+                    else f"{object_name} · {property_name}"
+                )
+                self.component_override_combo.addItem(label, override)
+        has_overrides = bool(override_report["count"])
+        self.component_override_combo.setEnabled(has_overrides)
+        self.component_override_reset_button.setEnabled(has_overrides)
+        self.component_override_reset_all_button.setEnabled(has_overrides)
         if component_role == "definition":
             component_text = "Definition"
         elif component_role == "instance":
-            override_count = len(base_row.get("instance_overrides") or {})
+            override_count = int(override_report["count"])
             component_text = (
                 f"Instance / {component_state.title()} / "
                 f"{override_count} override"
+                + ("" if override_count == 1 else "s")
             )
         else:
             component_text = "Not a component"
@@ -3072,6 +3139,31 @@ class PainterUIInspector(QWidget):
                 if create_local_component
                 else ""
             ),
+        )
+
+    def _emit_component_override_reset(self) -> None:
+        row = self._selected_row()
+        instance_root = self._component_instance_root(row)
+        override = self.component_override_combo.currentData()
+        if (
+            self._syncing
+            or instance_root is None
+            or not isinstance(override, Mapping)
+        ):
+            return
+        self.component_override_reset_requested.emit(
+            str(instance_root["id"]),
+            str(override.get("object_id") or instance_root["id"]),
+            str(override.get("property_path") or ""),
+        )
+
+    def _emit_component_override_reset_all(self) -> None:
+        row = self._selected_row()
+        instance_root = self._component_instance_root(row)
+        if self._syncing or instance_root is None:
+            return
+        self.component_override_reset_all_requested.emit(
+            str(instance_root["id"])
         )
 
     def _on_selection_changed(self) -> None:

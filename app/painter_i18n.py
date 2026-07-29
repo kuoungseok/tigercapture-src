@@ -31,6 +31,33 @@ _LANGUAGES = ("en", "ko", "ja", "zh", "fr", "de")
 
 # English source, Korean, Japanese, Simplified Chinese, French, German.
 _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
+    ("Overrides", "오버라이드", "オーバーライド", "覆盖", "Remplacements", "Überschreibungen"),
+    ("Reset", "초기화", "リセット", "重置", "Réinitialiser", "Zurücksetzen"),
+    ("Reset All", "모두 초기화", "すべてリセット", "全部重置", "Tout réinitialiser", "Alle zurücksetzen"),
+    (
+        "Local values that differ from the component definition",
+        "컴포넌트 정의와 다른 로컬 값",
+        "コンポーネント定義と異なるローカル値",
+        "与组件定义不同的本地值",
+        "Valeurs locales différentes de la définition du composant",
+        "Lokale Werte, die von der Komponentendefinition abweichen",
+    ),
+    (
+        "Reset only the selected override",
+        "선택한 오버라이드만 초기화",
+        "選択したオーバーライドのみリセット",
+        "仅重置所选覆盖",
+        "Réinitialiser uniquement le remplacement sélectionné",
+        "Nur die ausgewählte Überschreibung zurücksetzen",
+    ),
+    (
+        "Reset every local override in this component instance",
+        "이 컴포넌트 인스턴스의 모든 로컬 오버라이드 초기화",
+        "このコンポーネントインスタンスの全ローカルオーバーライドをリセット",
+        "重置此组件实例中的所有本地覆盖",
+        "Réinitialiser tous les remplacements locaux de cette instance",
+        "Alle lokalen Überschreibungen dieser Instanz zurücksetzen",
+    ),
     ("New Page", "새 페이지", "新規ページ", "新建页面", "Nouvelle page", "Neue Seite"),
     ("Delete Page", "페이지 삭제", "ページを削除", "删除页面", "Supprimer la page", "Seite löschen"),
     (
