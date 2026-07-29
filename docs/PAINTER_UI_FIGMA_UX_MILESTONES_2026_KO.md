@@ -1400,7 +1400,7 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The checkpoint Registry evidence covers 249 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 253 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
@@ -1422,6 +1422,23 @@ Implemented checkpoint (2026-07-29, locale/font release corpus slice):
 - Desktop and compact evidence regenerate with
   `tools/qa_painter_ui_locale_audit.py` under
   `debugCapture/painter_ui_designer/locale_audit`.
+
+Implemented checkpoint (2026-07-29, crash-safe recovery slice):
+
+- `app/painter_autosave.py` owns atomic `.tspaint` recovery snapshots, compact
+  JSON manifests, content-hash rewrite suppression, retention pruning, and the
+  single background writer.
+- Dirty documents autosave every 60 seconds. File > Save Recovery Snapshot Now
+  and File > Recover Autosave provide explicit on-demand access without adding
+  another fixed Navigator or Inspector panel.
+- Recovery data uses the durable Tiger Studio runtime data directory and never
+  relies on disposable `debugCapture`.
+- Restore reloads the complete Painter document payload as dirty work while
+  retaining the original source path. Explicit Save clears the current session
+  recovery snapshot.
+- `paint.ui.recovery.inspect/create/restore/discard` provide Action parity;
+  discard is explicitly destructive. Korean and all supported-language recovery
+  labels are included in Painter i18n.
 
 Exit criteria:
 

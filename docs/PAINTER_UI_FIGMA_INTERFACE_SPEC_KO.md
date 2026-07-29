@@ -825,6 +825,22 @@ Locale and font release corpus:
 - UI > Locale and Font Audit, Quick Actions, and
   `paint.ui.locale_audit.inspect` share the same read-only report.
 
+Crash-safe recovery:
+
+- Dirty Painter documents are snapshotted every 60 seconds through a
+  single-worker background writer so serialization does not block canvas input.
+- Recovery `.tspaint` files and manifests live under the durable Tiger Studio
+  runtime data directory, never `debugCapture`.
+- File > Save Recovery Snapshot Now creates an immediate snapshot. File >
+  Recover Autosave opens a transient chooser with restore and explicit discard;
+  it does not reserve Inspector space.
+- Restore reopens the complete Paint, UI, Motion, 3D, and view payload as a
+  dirty document and preserves the original source path for the next Save.
+- A successful explicit Save removes the current session snapshot. Identical
+  autosaves are hash-skipped and the oldest sessions are pruned.
+- `paint.ui.recovery.inspect/create/restore/discard` expose the same service;
+  discard is destructive and requires Action confirmation.
+
 ## 10. 기존 기능 재배치 표
 
 | 기존 기능 | 현재 위치 | 새 위치 |

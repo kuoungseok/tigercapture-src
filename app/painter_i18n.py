@@ -821,6 +821,15 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Elided", "줄임", "省略", "省略", "Abrégé", "Gekürzt"),
     ("Glyphs", "글리프", "グリフ", "字形", "Glyphes", "Glyphen"),
     ("{languages} languages · {entries} critical strings · {issues} issues · {font}", "{languages}개 언어 · 핵심 문구 {entries}개 · 문제 {issues}개 · {font}", "{languages}言語 · 重要文言{entries}件 · 問題{issues}件 · {font}", "{languages} 种语言 · {entries} 个关键文本 · {issues} 个问题 · {font}", "{languages} langues · {entries} textes · {issues} problèmes · {font}", "{languages} Sprachen · {entries} Texte · {issues} Probleme · {font}"),
+    ("Save Recovery Snapshot Now", "복구 스냅샷 지금 저장", "復旧スナップショットを今すぐ保存", "立即保存恢复快照", "Enregistrer un instantané de récupération", "Wiederherstellung jetzt speichern"),
+    ("Recover Autosave...", "자동 저장 복구...", "自動保存を復旧...", "恢复自动保存...", "Récupérer une sauvegarde automatique...", "Automatische Sicherung wiederherstellen..."),
+    ("Recover autosave", "자동 저장 복구", "自動保存を復旧", "恢复自动保存", "Récupérer une sauvegarde automatique", "Automatische Sicherung wiederherstellen"),
+    ("Discard snapshot", "스냅샷 폐기", "スナップショットを破棄", "丢弃快照", "Supprimer l'instantané", "Snapshot verwerfen"),
+    ("Restore", "복원", "復元", "恢复", "Restaurer", "Wiederherstellen"),
+    ("Untitled Painter document", "제목 없는 Painter 문서", "名称未設定のPainter文書", "未命名 Painter 文档", "Document Painter sans titre", "Unbenanntes Painter-Dokument"),
+    ("Recovered", "복구됨", "復旧済み", "已恢复", "Récupéré", "Wiederhergestellt"),
+    ("{count} recovery snapshots", "복구 스냅샷 {count}개", "復旧スナップショット {count} 件", "{count} 个恢复快照", "{count} instantanés de récupération", "{count} Wiederherstellungs-Snapshots"),
+    ("No recovery snapshots are available.", "사용 가능한 복구 스냅샷이 없습니다.", "利用可能な復旧スナップショットはありません。", "没有可用的恢复快照。", "Aucun instantané de récupération disponible.", "Keine Wiederherstellungs-Snapshots verfügbar."),
 )
 
 _TABLE = {

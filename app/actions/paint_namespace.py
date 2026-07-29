@@ -1800,6 +1800,52 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter locale and font fallback would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.recovery.inspect",
+        "List crash-safe Painter recovery snapshots.",
+        "paint",
+        "paint_ui_recovery_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter recovery snapshots would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.create",
+        "Create a crash-safe Painter recovery snapshot without changing the document.",
+        "paint",
+        "paint_ui_recovery_create",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="a Painter recovery snapshot would be scheduled",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.restore",
+        "Restore a Painter recovery snapshot as an unsaved document.",
+        "paint",
+        "paint_ui_recovery_restore",
+        params_schema=schema_object(
+            {"session_id": {"type": "string"}},
+            required=("session_id",),
+        ),
+        required=("session_id",),
+        undo_label="Restore Painter recovery",
+        dry_summary="a Painter recovery snapshot would be restored",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.discard",
+        "Permanently discard a Painter recovery snapshot.",
+        "paint",
+        "paint_ui_recovery_discard",
+        params_schema=schema_object(
+            {"session_id": {"type": "string"}},
+            required=("session_id",),
+        ),
+        required=("session_id",),
+        destructive=True,
+        dry_summary="a Painter recovery snapshot would be discarded",
+    )
+    registry.register_adapter_action(
         "paint.ui.selection.parent",
         "Select the immediate parent of a Painter UI object without changing the document.",
         "paint",

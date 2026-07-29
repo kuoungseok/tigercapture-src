@@ -8202,6 +8202,17 @@ class PaintDialog(QDialog):
         self._painter_document_path = ""
         self._painter_document_asset_root = ""
         self._painter_document_dirty = False
+        import uuid
+
+        self._painter_recovery_session_id = uuid.uuid4().hex
+        self._painter_recovery_future = None
+        self._painter_recovery_last_error = ""
+        self._painter_recovery_timer = QTimer(self)
+        self._painter_recovery_timer.setInterval(60_000)
+        self._painter_recovery_timer.timeout.connect(
+            self._schedule_painter_recovery_snapshot
+        )
+        self._painter_recovery_timer.start()
         self._paint_layers: list[PaintLayer] = [
             PaintLayer("paint-layer-1", "Layer 1")
         ]
@@ -8486,6 +8497,17 @@ class PaintDialog(QDialog):
             "Save As...",
             lambda: self._prompt_save_painter_document(save_as=True),
             "Ctrl+Shift+S",
+        )
+        file_menu.addSeparator()
+        self._add_painter_menu_action(
+            file_menu,
+            "Save Recovery Snapshot Now",
+            lambda: self._schedule_painter_recovery_snapshot(force=True),
+        )
+        self._add_painter_menu_action(
+            file_menu,
+            "Recover Autosave...",
+            self._show_painter_recovery_dialog,
         )
         file_menu.addSeparator()
         self._add_painter_menu_action(file_menu, "Export PNG...", lambda: self._export_png_to_file(include_background=True), "Ctrl+Shift+E")
@@ -26914,6 +26936,107 @@ class PaintDialog(QDialog):
             },
         }
 
+    def _schedule_painter_recovery_snapshot(
+        self,
+        *,
+        force: bool = False,
+    ) -> dict:
+        future = getattr(self, "_painter_recovery_future", None)
+        if future is not None and not future.done():
+            return {
+                "schema": "tigerstudio.painter.recovery.schedule.v1",
+                "scheduled": False,
+                "reason": "writer_busy",
+            }
+        if not force and not bool(self._painter_document_dirty):
+            return {
+                "schema": "tigerstudio.painter.recovery.schedule.v1",
+                "scheduled": False,
+                "reason": "document_clean",
+            }
+        from app.painter_autosave import submit_recovery_snapshot
+
+        self._painter_recovery_last_error = ""
+        self._painter_recovery_future = submit_recovery_snapshot(
+            self._painter_recovery_session_id,
+            self._painter_document_payload(),
+            source_path=str(self._painter_document_path or ""),
+            background_png=self._painter_background_png_bytes(),
+        )
+        return {
+            "schema": "tigerstudio.painter.recovery.schedule.v1",
+            "scheduled": True,
+            "session_id": str(self._painter_recovery_session_id),
+        }
+
+    def _painter_recovery_rows(self) -> list[dict]:
+        from app.painter_autosave import list_recovery_snapshots
+
+        return list_recovery_snapshots()
+
+    def _show_painter_recovery_dialog(self) -> None:
+        from app.painter_recovery_dialog import PainterRecoveryDialog
+
+        dialog = getattr(self, "_painter_recovery_dialog", None)
+        if dialog is None:
+            dialog = PainterRecoveryDialog(self)
+            dialog.restore_requested.connect(
+                self._restore_painter_recovery_snapshot
+            )
+            dialog.discard_requested.connect(
+                self._discard_painter_recovery_snapshot
+            )
+            self._painter_recovery_dialog = dialog
+        dialog.set_snapshots(self._painter_recovery_rows())
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _restore_painter_recovery_snapshot(self, row: dict) -> dict:
+        from app.painter_i18n import painter_text
+
+        recovery_path = str(row.get("recovery_path") or "")
+        if not recovery_path:
+            raise ValueError("Painter recovery path is missing")
+        report = self.open_document_from_path(recovery_path)
+        self._painter_document_path = str(row.get("source_path") or "")
+        self._painter_document_dirty = True
+        import uuid
+
+        self._painter_recovery_session_id = uuid.uuid4().hex
+        source_name = (
+            Path(self._painter_document_path).name
+            if self._painter_document_path
+            else painter_text("Untitled Painter document")
+        )
+        self.setWindowTitle(
+            f"{source_name} ({painter_text('Recovered')}) - Tiger Studio Painter"
+        )
+        dialog = getattr(self, "_painter_recovery_dialog", None)
+        if dialog is not None:
+            dialog.close()
+        return {
+            "schema": "tigerstudio.painter.recovery.restore.v1",
+            "restored": True,
+            "source_path": str(self._painter_document_path),
+            "recovery_path": recovery_path,
+            "load_report": report,
+        }
+
+    def _discard_painter_recovery_snapshot(self, row: dict) -> dict:
+        from app.painter_autosave import discard_recovery_snapshot
+
+        session_id = str(row.get("session_id") or "")
+        removed = bool(discard_recovery_snapshot(session_id))
+        dialog = getattr(self, "_painter_recovery_dialog", None)
+        if dialog is not None:
+            dialog.set_snapshots(self._painter_recovery_rows())
+        return {
+            "schema": "tigerstudio.painter.recovery.discard.v1",
+            "discarded": removed,
+            "session_id": session_id,
+        }
+
     def save_document_to_path(self, path: str | Path) -> dict:
         from app.painter_document_io import save_painter_document
 
@@ -26924,6 +27047,12 @@ class PaintDialog(QDialog):
         )
         self._painter_document_path = str(report["path"])
         self._painter_document_dirty = False
+        from app.painter_autosave import discard_recovery_snapshot
+
+        discard_recovery_snapshot(self._painter_recovery_session_id)
+        import uuid
+
+        self._painter_recovery_session_id = uuid.uuid4().hex
         report["layer_count"] = len(self._paint_layers)
         report["stroke_count"] = len(self.canvas.embedded_strokes())
         report["blockout_primitive_count"] = len(
@@ -27185,6 +27314,9 @@ class PaintDialog(QDialog):
         self._painter_document_path = str(Path(path).resolve())
         self._painter_document_asset_root = str(report.get("asset_root") or "")
         self._painter_document_dirty = False
+        import uuid
+
+        self._painter_recovery_session_id = uuid.uuid4().hex
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._undo_labels.clear()

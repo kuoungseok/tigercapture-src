@@ -2947,6 +2947,53 @@ class PaintAdapterMixin(
 
         return inspect_painter_ui_locales()
 
+    def paint_ui_recovery_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        rows = dialog._painter_recovery_rows()
+        return {
+            "schema": "tigerstudio.painter.recovery.inspect.v1",
+            "count": len(rows),
+            "snapshots": rows,
+        }
+
+    def paint_ui_recovery_create(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        return dialog._schedule_painter_recovery_snapshot(force=True)
+
+    def paint_ui_recovery_restore(
+        self,
+        *,
+        session_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        row = next(
+            (
+                item
+                for item in dialog._painter_recovery_rows()
+                if str(item.get("session_id") or "") == str(session_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"Painter recovery snapshot not found: {session_id}")
+        return dialog._restore_painter_recovery_snapshot(row)
+
+    def paint_ui_recovery_discard(
+        self,
+        *,
+        session_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        row = next(
+            (
+                item
+                for item in dialog._painter_recovery_rows()
+                if str(item.get("session_id") or "") == str(session_id)
+            ),
+            {"session_id": str(session_id)},
+        )
+        return dialog._discard_painter_recovery_snapshot(row)
+
     def paint_ui_selection_parent(
         self,
         *,
