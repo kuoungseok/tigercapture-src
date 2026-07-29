@@ -1822,6 +1822,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter UI release packages would be verified",
     )
     registry.register_adapter_action(
+        "paint.ui.performance_budget.inspect",
+        "Inspect Painter UI document scale against production budgets.",
+        "paint",
+        "paint_ui_performance_budget_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI document performance budgets would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.recovery.inspect",
         "List crash-safe Painter recovery snapshots.",
         "paint",

@@ -23,6 +23,7 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.locale_audit.",
             "paint.ui.focus_audit.",
             "paint.ui.release_corpus.",
+            "paint.ui.performance_budget.",
             "paint.ui.recovery.",
             "paint.ui.selection.similar.",
         ),

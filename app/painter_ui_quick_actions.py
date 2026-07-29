@@ -178,11 +178,11 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "release_corpus"},
     },
     {
-        "id": "document.release_corpus",
-        "label": "UI release corpus",
-        "detail": "Verify editable exchange and delivery packages.",
-        "keywords": "release corpus round trip figma template handoff prototype review umg",
-        "operation": {"type": "release_corpus"},
+        "id": "document.performance_budget",
+        "label": "Performance budget",
+        "detail": "Inspect document scale against production warning and block limits.",
+        "keywords": "performance budget objects artboards images components prototype scale",
+        "operation": {"type": "performance_budget"},
     },
     {
         "id": "selection.duplicate_next_artboard",

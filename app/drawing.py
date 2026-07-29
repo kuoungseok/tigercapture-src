@@ -8812,6 +8812,11 @@ class PaintDialog(QDialog):
             "UI Release Corpus...",
             self._show_painter_ui_release_corpus,
         )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Performance Budget...",
+            self._show_painter_ui_performance_budget,
+        )
         select_same_menu = ui_menu.addMenu("Select Same")
         self._painter_ui_select_similar_actions = {}
         for criterion, label in (
@@ -14480,6 +14485,39 @@ class PaintDialog(QDialog):
         if target.exists():
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
+    def _show_painter_ui_performance_budget(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        from app.painter_ui_performance_budget_dialog import (
+            PainterUIPerformanceBudgetDialog,
+        )
+
+        dialog = getattr(self, "_painter_ui_performance_budget_dialog", None)
+        if dialog is None:
+            dialog = PainterUIPerformanceBudgetDialog(self)
+            dialog.refresh_requested.connect(
+                self._refresh_painter_ui_performance_budget
+            )
+            self._painter_ui_performance_budget_dialog = dialog
+        self._refresh_painter_ui_performance_budget()
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _refresh_painter_ui_performance_budget(self) -> None:
+        from app.painter_ui_performance_budget import (
+            inspect_painter_ui_performance_budget,
+        )
+
+        dialog = getattr(self, "_painter_ui_performance_budget_dialog", None)
+        if dialog is None:
+            return
+        dialog.set_report(
+            inspect_painter_ui_performance_budget(
+                getattr(self, "_painter_ui_document", None)
+            )
+        )
+
     def _apply_painter_ui_batch_rename(self, payload: object) -> None:
         from app.painter_ui_batch_rename import apply_ui_batch_rename
 
@@ -14595,6 +14633,8 @@ class PaintDialog(QDialog):
             self._show_painter_ui_focus_audit()
         elif operation_type == "release_corpus":
             self._show_painter_ui_release_corpus()
+        elif operation_type == "performance_budget":
+            self._show_painter_ui_performance_budget()
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

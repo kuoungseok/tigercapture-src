@@ -854,6 +854,21 @@ UI release round-trip corpus:
   at this gate is contract-only; Widget Blueprint compilation and a real Unreal
   capture remain separate release gates.
 
+Document-scale performance budgets:
+
+- `app/painter_ui_performance_budget.py` owns warning and release-block limits
+  for objects, artboards, images, components, prototype transitions, and
+  hierarchy depth.
+- Warning and blocked states are explicit. A hierarchy cycle is blocked even
+  when its raw depth count is below the numeric limit.
+- UI > Performance Budget and Quick Actions open a transient report for the
+  current document. Compact layout hides threshold detail while preserving the
+  current value and status.
+- `paint.ui.performance_budget.inspect` returns the same read-only report
+  without changing selection, revision, dirty state, save payload, or Undo.
+- This contract measures document scale only. It does not claim wall-clock
+  render performance; actual frame timing remains separate runtime QA.
+
 Crash-safe recovery:
 
 - Dirty Painter documents are snapshotted every 60 seconds through a

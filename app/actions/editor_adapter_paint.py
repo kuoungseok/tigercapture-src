@@ -2975,6 +2975,16 @@ class PaintAdapterMixin(
         )
         return run_painter_ui_release_corpus(target)
 
+    def paint_ui_performance_budget_inspect(self) -> dict[str, Any]:
+        from app.painter_ui_performance_budget import (
+            inspect_painter_ui_performance_budget,
+        )
+
+        dialog = self._paint_dialog_owner()
+        return inspect_painter_ui_performance_budget(
+            getattr(dialog, "_painter_ui_document", None)
+        )
+
     def paint_ui_recovery_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         rows = dialog._painter_recovery_rows()

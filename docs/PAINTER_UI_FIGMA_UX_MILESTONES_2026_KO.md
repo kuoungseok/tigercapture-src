@@ -1400,7 +1400,7 @@ Implemented checkpoint (2026-07-29, UI/Action parity slice):
   the audit does not encourage 248 permanent buttons or another fixed panel.
 - UI > UI / Action Parity and Quick Actions open an on-demand read-only dialog.
   `paint.ui.action_parity.inspect` returns the same report.
-- The checkpoint Registry evidence covers 255 Painter UI Actions, 15/15 surfaces,
+- The checkpoint Registry evidence covers 256 Painter UI Actions, 15/15 surfaces,
   zero missing required Actions, and zero orphan candidates.
 - Korean and supported-language labels plus desktop/compact evidence regenerate
   through `tools/qa_painter_ui_action_parity.py` under
@@ -1475,6 +1475,23 @@ Implemented checkpoint (2026-07-29, release round-trip corpus slice):
   `debugCapture/painter_ui_designer/release_corpus`.
 - All visible report copy participates in the six-language Painter localization
   table. The report explicitly avoids native `.fig` and Unreal runtime claims.
+
+Implemented checkpoint (2026-07-29, document-scale performance budget slice):
+
+- `app/painter_ui_performance_budget.py` defines versioned warning and block
+  limits for objects, artboards, images, components, prototype transitions, and
+  hierarchy depth. Hierarchy cycles are always release-blocking.
+- The inspector normalizes a copy and never mutates the source document. It
+  reports covered, warning, and blocked counts with stable metric IDs.
+- UI > Performance Budget and Quick Actions open a transient responsive report;
+  `paint.ui.performance_budget.inspect` exposes the same read-only contract.
+- Desktop shows current, warning, and block values. Compact layout preserves
+  metric/current/status and hides threshold columns without clipping.
+- `tools/qa_painter_ui_performance_budget.py` regenerates Korean desktop and
+  compact evidence under
+  `debugCapture/painter_ui_designer/performance_budget`.
+- The scale contract explicitly records `wall_clock_claim: not_measured`.
+  Runtime render timing is a separate QA gate and is not inferred from counts.
 
 Exit criteria:
 
