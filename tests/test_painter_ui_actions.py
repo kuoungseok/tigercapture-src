@@ -32,6 +32,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     action_ids = {row["id"] for row in registry.list_actions()}
     assert {
         "paint.ui.document.inspect",
+        "paint.ui.responsive.preview_matrix.inspect",
         "paint.ui.template.catalog.inspect",
         "paint.ui.template.apply",
         "paint.ui.workspace.set",

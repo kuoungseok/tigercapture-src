@@ -79,6 +79,17 @@ class PaintAdapterMixin(
 
         return inspect_ui_document(getattr(dialog, "_painter_ui_document", None))
 
+    def paint_ui_responsive_preview_matrix_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_responsive_preview import (
+            build_ui_responsive_preview_matrix,
+        )
+
+        _documents, report = build_ui_responsive_preview_matrix(
+            getattr(dialog, "_painter_ui_document", None)
+        )
+        return report
+
     def paint_ui_template_catalog_inspect(self) -> dict[str, Any]:
         from app.painter_ui_templates import inspect_ui_template_catalog
 

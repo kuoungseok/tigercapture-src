@@ -10524,6 +10524,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.responsive_override_remove_requested.connect(
             self._remove_painter_ui_responsive_override
         )
+        self._paint_ui_inspector.responsive_preview_requested.connect(
+            self._show_painter_ui_responsive_preview
+        )
+        self._paint_ui_inspector.responsive_preview_requested.connect(
+            self._show_painter_ui_responsive_preview
+        )
         self._paint_ui_inspector.component_create_requested.connect(
             self._create_painter_ui_component
         )
@@ -15055,6 +15061,34 @@ class PaintDialog(QDialog):
             {"responsive_overrides": overrides},
             label="Remove UI responsive override",
         )
+
+    def _show_painter_ui_responsive_preview(self) -> None:
+        from app.painter_ui_responsive_preview_panel import (
+            PainterUIResponsivePreviewPanel,
+        )
+
+        panel = getattr(self, "_painter_ui_responsive_preview_panel", None)
+        if panel is None:
+            panel = PainterUIResponsivePreviewPanel(self)
+            self._painter_ui_responsive_preview_panel = panel
+        panel.set_document(getattr(self, "_painter_ui_document", None))
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _show_painter_ui_responsive_preview(self) -> None:
+        from app.painter_ui_responsive_preview_panel import (
+            PainterUIResponsivePreviewPanel,
+        )
+
+        panel = getattr(self, "_painter_ui_responsive_preview_panel", None)
+        if panel is None:
+            panel = PainterUIResponsivePreviewPanel(self)
+            self._painter_ui_responsive_preview_panel = panel
+        panel.set_document(getattr(self, "_painter_ui_document", None))
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
 
     def _create_painter_ui_component(
         self,

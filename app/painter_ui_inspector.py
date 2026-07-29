@@ -299,6 +299,7 @@ class PainterUIInspector(QWidget):
     layout_grid_style_remove_requested = Signal(str)
     responsive_override_changed = Signal(str, str, str, object)
     responsive_override_remove_requested = Signal(str, str, str)
+    responsive_preview_requested = Signal()
     component_create_requested = Signal(str, str)
     component_instantiate_requested = Signal(str, str, float, float)
     component_variant_create_requested = Signal(str, str)
@@ -435,7 +436,24 @@ class PainterUIInspector(QWidget):
         self.delete_artboard_button.setAccessibleName("Delete active artboard")
         self.delete_artboard_button.setEnabled(False)
         self.delete_artboard_button.clicked.connect(self._emit_delete_artboard)
+        self.responsive_preview_button = QPushButton("")
+        self.responsive_preview_button.setObjectName("PainterUIIconButton")
+        self.responsive_preview_button.setFixedSize(28, 26)
+        self.responsive_preview_button.setIcon(
+            app_icon("grid", size=13, color="#D9E2ED")
+        )
+        self.responsive_preview_button.setIconSize(icon_size(13))
+        self.responsive_preview_button.setToolTip(
+            painter_text("Responsive Preview")
+        )
+        self.responsive_preview_button.setAccessibleName(
+            painter_text("Responsive Preview")
+        )
+        self.responsive_preview_button.clicked.connect(
+            self.responsive_preview_requested
+        )
         artboard_add_row.addWidget(self.artboard_combo, 1)
+        artboard_add_row.addWidget(self.responsive_preview_button)
         artboard_add_row.addWidget(add_artboard)
         artboard_add_row.addWidget(self.delete_artboard_button)
         root.addWidget(artboard_bar)

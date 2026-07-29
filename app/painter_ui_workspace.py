@@ -130,6 +130,7 @@ class PainterUIDesignOverlay(QWidget):
         self._active_artboard_drag_id = ""
         self._artboard_drag_origin = QPointF()
         self._rulers_visible = True
+        self._artboard_labels_visible = True
         self._ruler_size = 20.0
         self._ruler_guide_preview: tuple[str, float] | None = None
         self._ruler_origin_preview: QPointF | None = None
@@ -551,6 +552,10 @@ class PainterUIDesignOverlay(QWidget):
 
     def set_rulers_visible(self, visible: bool) -> None:
         self._rulers_visible = bool(visible)
+        self.update()
+
+    def set_artboard_labels_visible(self, visible: bool) -> None:
+        self._artboard_labels_visible = bool(visible)
         self.update()
 
     def rulers_visible(self) -> bool:
@@ -2378,11 +2383,12 @@ class PainterUIDesignOverlay(QWidget):
                 )
             )
             scene_painter.drawRect(viewport)
-            scene_painter.setPen(QColor("#B7C0CD"))
-            scene_painter.drawText(
-                QPointF(viewport.left(), viewport.top() - 7.0),
-                str(artboard["name"]),
-            )
+            if self._artboard_labels_visible:
+                scene_painter.setPen(QColor("#B7C0CD"))
+                scene_painter.drawText(
+                    QPointF(viewport.left(), viewport.top() - 7.0),
+                    str(artboard["name"]),
+                )
         scale, offset = self._view_transform()
         for section in self._document.get("sections", []):
             section_rect = QRectF(

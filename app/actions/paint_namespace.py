@@ -120,6 +120,19 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI document would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.responsive.preview_matrix.inspect",
+        (
+            "Inspect the non-destructive desktop, tablet, and mobile "
+            "portrait/landscape preview matrix."
+        ),
+        "paint",
+        "paint_ui_responsive_preview_matrix_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the six responsive preview contexts would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.template.catalog.inspect",
         "Inspect built-in complete-document templates, categories, tags, sources, and licenses.",
         "paint",

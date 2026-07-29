@@ -7804,6 +7804,13 @@ AI Script Edit MVP integration:
   drives Canvas, Constraint, Auto Layout, and Motion geometry resolution.
   Inspector can edit or clear the current context override, while automation
   uses `paint.ui.responsive.override.set/remove`; both use normal Undo/Redo.
+- The artboard bar exposes a transient six-context Responsive Preview Matrix:
+  Desktop, Tablet, and Mobile in Portrait and Landscape. Each cell uses the
+  production Painter canvas renderer against an isolated preview document, so
+  responsive overrides and themes resolve normally while the canonical
+  revision, selection, active artboard, persistence, and Undo history remain
+  unchanged. `paint.ui.responsive.preview_matrix.inspect` returns the same
+  context plan to automation without opening a fixed panel.
 - Painter UI artboards persist `light`, `dark`, or `high_contrast` preview
   themes. Typed tokens resolve default values, per-theme `theme_values`, and
   stable alias chains into provider-neutral object paths after responsive
