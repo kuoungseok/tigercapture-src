@@ -25,6 +25,7 @@ from app.painter_ui_constraints import (
 )
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_image_renderer import draw_ui_image
+from app.painter_i18n import painter_text
 from app.painter_ui_motion_bridge import resolved_ui_geometry
 from app.painter_ui_style_renderer import (
     draw_ui_object_inner_shadows,
@@ -83,6 +84,7 @@ class PainterUIDesignOverlay(QWidget):
     text_edit_finished = Signal(str, bool)
     vector_edit_changed = Signal(object)
     image_focal_requested = Signal(str, float, float)
+    objects_move_reparent_requested = Signal(object, str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -97,6 +99,7 @@ class PainterUIDesignOverlay(QWidget):
         self._preview_rect = QRectF()
         self._drag_offset = QPointF()
         self._move_original_positions: dict[str, tuple[float, float]] = {}
+        self._hierarchy_drop_preview_id = ""
         self._alt_duplicate_cycle_id = ""
         self._alt_duplicate_source_ids: list[str] = []
         self._alt_duplicate_drag_active = False
@@ -1522,6 +1525,30 @@ class PainterUIDesignOverlay(QWidget):
             for item in self._document["objects"]
             if str(item["id"]) in descendants and not item["locked"]
         }
+        self._hierarchy_drop_preview_id = ""
+
+    def _canvas_reparent_target(self, position: QPointF) -> str:
+        moving_ids = set(self._move_original_positions)
+        selected_ids = set(self._document["selection"]["object_ids"])
+        by_id = {row["id"]: row for row in self._document["objects"]}
+        for row in reversed(self._visible_objects()):
+            object_id = str(row["id"])
+            if (
+                object_id in moving_ids
+                or row["kind"] not in {"frame", "group"}
+                or not self._object_rect(row).contains(position)
+            ):
+                continue
+            parent_id = str(row.get("parent_id") or "")
+            invalid = object_id in selected_ids
+            while parent_id and not invalid:
+                invalid = parent_id in selected_ids
+                parent_id = str(
+                    (by_id.get(parent_id) or {}).get("parent_id") or ""
+                )
+            if not invalid:
+                return object_id
+        return ""
 
     def _auto_layout_canvas_controls(self):
         if self._tool != "select":
@@ -2367,6 +2394,33 @@ class PainterUIDesignOverlay(QWidget):
                     painter.drawRect(handle)
             painter.restore()
         self._paint_image_focal_control(painter)
+        if self._hierarchy_drop_preview_id:
+            target = next(
+                (
+                    row
+                    for row in self._document["objects"]
+                    if row["id"] == self._hierarchy_drop_preview_id
+                ),
+                None,
+            )
+            if target is not None:
+                target_rect = self._object_rect(target)
+                painter.save()
+                painter.setBrush(QColor(71, 197, 142, 30))
+                painter.setPen(
+                    QPen(
+                        QColor("#47C58E"),
+                        2.0,
+                        Qt.PenStyle.DashLine,
+                    )
+                )
+                painter.drawRoundedRect(target_rect, 6.0, 6.0)
+                painter.setPen(QColor("#D8FFF0"))
+                painter.drawText(
+                    target_rect.topLeft() + QPointF(8.0, 18.0),
+                    painter_text("Move inside"),
+                )
+                painter.restore()
 
         if self._interaction == "create" and not self._preview_rect.isNull():
             painter.setBrush(QColor(80, 130, 210, 48))
@@ -3072,6 +3126,26 @@ class PainterUIDesignOverlay(QWidget):
                         original[1] + delta_y,
                     ),
                 )
+                effective_row = next(
+                    (
+                        item
+                        for item in self._effective_document["objects"]
+                        if item["id"] == moving_row["id"]
+                    ),
+                    None,
+                )
+                if effective_row is not None:
+                    effective_row["x"] = moving_row["x"]
+                    effective_row["y"] = moving_row["y"]
+                geometry = self._resolved_geometry.get(moving_row["id"])
+                if geometry is not None:
+                    geometry["x"] = moving_row["x"]
+                    geometry["y"] = moving_row["y"]
+            self._hierarchy_drop_preview_id = (
+                ""
+                if self._alt_duplicate_drag_active
+                else self._canvas_reparent_target(event.position())
+            )
             self.update()
             event.accept()
             return
@@ -3452,7 +3526,22 @@ class PainterUIDesignOverlay(QWidget):
                 None,
             )
             if row is not None:
-                if interaction == "move" and len(self._move_original_positions) > 1:
+                if interaction == "move" and self._hierarchy_drop_preview_id:
+                    changes = {
+                        selected_id: {
+                            "x": float(selected_row["x"]),
+                            "y": float(selected_row["y"]),
+                        }
+                        for selected_id in self._move_original_positions
+                        for selected_row in self._document["objects"]
+                        if selected_row["id"] == selected_id
+                    }
+                    self.objects_move_reparent_requested.emit(
+                        changes,
+                        self._hierarchy_drop_preview_id,
+                        list(self._document["selection"]["object_ids"]),
+                    )
+                elif interaction == "move" and len(self._move_original_positions) > 1:
                     changes = {
                         selected_id: {
                             "x": float(selected_row["x"]),
@@ -3497,6 +3586,7 @@ class PainterUIDesignOverlay(QWidget):
         if self._tool == "select":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
+        self._hierarchy_drop_preview_id = ""
         self._resize_original_geometries = {}
         self._vector_original_content = None
         if self._vector_edit_object_id:

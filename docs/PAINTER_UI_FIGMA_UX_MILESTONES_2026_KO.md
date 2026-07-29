@@ -427,6 +427,21 @@ Implemented checkpoint (2026-07-29, contextual menu ordering slice):
   `tools/qa_painter_ui_context_menu.py`; evidence is regenerated under
   `debugCapture/painter_ui_context_menu_m1`.
 
+Implemented checkpoint (2026-07-29, hierarchy drop preview slice):
+
+- Canvas dragging over a valid Frame or Group displays a localized green
+  inside-target outline while the moving objects remain live under the
+  pointer. Self/descendant targets are excluded to prevent cycles.
+- Dropping commits geometry, parent, new-parent constraint capture, and
+  deterministic z-order as one Undo step. The existing
+  `paint.ui.object.reparent` service now accepts both Figma-style Frames and
+  Groups.
+- Layers drag replaces the ambiguous Qt indicator with explicit before/after
+  lines and an inside-area highlight.
+- `tools/qa_painter_ui_reparent_preview.py` verifies live desktop/compact
+  rendering, resulting parent ID, order, zero-width panels, and evidence under
+  `debugCapture/painter_ui_reparent_preview_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

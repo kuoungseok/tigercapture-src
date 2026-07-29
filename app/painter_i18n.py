@@ -585,6 +585,7 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Paste to replace", "대체하여 붙여넣기", "置き換えて貼り付け", "粘贴并替换", "Coller pour remplacer", "Zum Ersetzen einfügen"),
     ("Paste in place", "제자리에 붙여넣기", "同じ位置に貼り付け", "原位粘贴", "Coller sur place", "An Originalposition einfügen"),
     ("Recent actions", "최근 작업", "最近の操作", "最近操作", "Actions récentes", "Letzte Aktionen"),
+    ("Move inside", "안으로 이동", "内側へ移動", "移入内部", "Déplacer à l’intérieur", "Nach innen verschieben"),
     ("Scale selection...", "선택 영역 크기 조절...", "選択範囲を拡大・縮小...", "缩放所选内容...", "Mettre la sélection à l’échelle...", "Auswahl skalieren..."),
     ("Scale selection", "선택 영역 크기 조절", "選択範囲を拡大・縮小", "缩放所选内容", "Mettre la sélection à l’échelle", "Auswahl skalieren"),
     ("Scale percentage", "크기 비율 (%)", "拡大率 (%)", "缩放百分比 (%)", "Échelle (%)", "Skalierung (%)"),

@@ -4,8 +4,8 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
-from PySide6.QtCore import QSize, Signal, Qt
-from PySide6.QtGui import QValidator
+from PySide6.QtCore import QRect, QSize, Signal, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QValidator
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QAbstractItemView,
@@ -46,25 +46,18 @@ from app.painter_ui_sizing_control import PainterUISizingControl
 class PainterUILayerList(QListWidget):
     hierarchy_drop_requested = Signal(object, str, str)
 
-    def dropEvent(self, event) -> None:
-        selected_ids = [
-            str(item.data(Qt.ItemDataRole.UserRole) or "")
-            for item in self.selectedItems()
-            if str(item.data(Qt.ItemDataRole.UserRole) or "")
-        ]
-        if not selected_ids:
-            event.ignore()
-            return
-        point = event.position().toPoint()
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._hierarchy_drop_preview: tuple[str, str, QRect] | None = None
+
+    def _hierarchy_drop_plan(
+        self,
+        point,
+    ) -> tuple[str, str, QRect]:
         target = self.itemAt(point)
         if target is None:
-            self.hierarchy_drop_requested.emit(selected_ids, "", "root")
-            event.acceptProposedAction()
-            return
+            return "", "root", QRect()
         target_id = str(target.data(Qt.ItemDataRole.UserRole) or "")
-        if not target_id or target_id in selected_ids:
-            event.ignore()
-            return
         rect = self.visualItemRect(target)
         relative_y = point.y() - rect.top()
         if relative_y < rect.height() * 0.25:
@@ -77,7 +70,73 @@ class PainterUILayerList(QListWidget):
             placement = "inside"
         else:
             placement = "after"
+        return target_id, placement, rect
+
+    def dragMoveEvent(self, event) -> None:
+        super().dragMoveEvent(event)
+        point = event.position().toPoint()
+        target_id, placement, rect = self._hierarchy_drop_plan(point)
+        selected_ids = {
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            for item in self.selectedItems()
+        }
+        self._hierarchy_drop_preview = (
+            None
+            if target_id in selected_ids
+            else (target_id, placement, rect)
+        )
+        self.viewport().update()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._hierarchy_drop_preview = None
+        self.viewport().update()
+        super().dragLeaveEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        preview = self._hierarchy_drop_preview
+        if preview is None:
+            return
+        _target_id, placement, rect = preview
+        painter = QPainter(self.viewport())
+        if placement == "inside" and not rect.isNull():
+            painter.setBrush(QColor(71, 197, 142, 30))
+            painter.setPen(QPen(QColor("#47C58E"), 2.0))
+            painter.drawRoundedRect(rect.adjusted(2, 1, -2, -1), 4.0, 4.0)
+        else:
+            y = (
+                rect.top()
+                if placement == "before"
+                else rect.bottom()
+                if placement == "after"
+                else self.viewport().height() - 2
+            )
+            painter.setPen(QPen(QColor("#72A7FF"), 2.0))
+            painter.drawLine(4, y, self.viewport().width() - 4, y)
+        painter.end()
+
+    def dropEvent(self, event) -> None:
+        selected_ids = [
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            for item in self.selectedItems()
+            if str(item.data(Qt.ItemDataRole.UserRole) or "")
+        ]
+        if not selected_ids:
+            event.ignore()
+            return
+        point = event.position().toPoint()
+        target_id, placement, _rect = self._hierarchy_drop_plan(point)
+        if not target_id:
+            self.hierarchy_drop_requested.emit(selected_ids, "", "root")
+            self._hierarchy_drop_preview = None
+            event.acceptProposedAction()
+            return
+        if not target_id or target_id in selected_ids:
+            self._hierarchy_drop_preview = None
+            event.ignore()
+            return
         self.hierarchy_drop_requested.emit(selected_ids, target_id, placement)
+        self._hierarchy_drop_preview = None
         event.acceptProposedAction()
 
 
@@ -622,7 +681,7 @@ class PainterUIInspector(QWidget):
         self.layer_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.layer_list.setDragEnabled(True)
         self.layer_list.setAcceptDrops(True)
-        self.layer_list.setDropIndicatorShown(True)
+        self.layer_list.setDropIndicatorShown(False)
         self.layer_list.itemSelectionChanged.connect(self._on_selection_changed)
         self.layer_list.hierarchy_drop_requested.connect(
             self.hierarchy_drop_requested

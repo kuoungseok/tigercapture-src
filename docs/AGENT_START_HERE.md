@@ -156,6 +156,11 @@ Focused entry points:
   session-local recent ordering. Invalid commands stay hidden, and recent rows
   must trigger the canonical QAction; never add a second mutation path just
   for the promoted menu row.
+  Painter UI canvas hierarchy drops highlight valid Frame/Group containers and
+  commit through `_move_and_reparent_painter_ui_objects`; Layers use
+  `PainterUILayerList._hierarchy_drop_plan`. Keep live document,
+  effective-document, and resolved geometry synchronized during drag, or the
+  object will visually remain at its old position until release.
   As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
   main/cross alignment, gap, four-edge padding, and child Flow/Absolute
   controls. The implementation lives in

@@ -9725,6 +9725,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.objects_duplicate_requested.connect(
             self._duplicate_painter_ui_selection_for_drag
         )
+        self._painter_ui_overlay.objects_move_reparent_requested.connect(
+            self._move_and_reparent_painter_ui_objects
+        )
         self._painter_ui_overlay.object_create_requested.connect(
             self._create_painter_ui_object_from_rect
         )
@@ -15670,6 +15673,39 @@ class PaintDialog(QDialog):
         )
         self._push_undo_state("Move UI hierarchy")
         self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _move_and_reparent_painter_ui_objects(
+        self,
+        changes_by_id: object,
+        target_parent_id: str,
+        selected_object_ids: object,
+    ) -> None:
+        from app.painter_ui_batch_mutation import apply_ui_object_batch
+        from app.painter_ui_document import move_ui_objects_in_hierarchy
+
+        changes = (
+            dict(changes_by_id)
+            if isinstance(changes_by_id, dict)
+            else {}
+        )
+        selected_ids = (
+            [str(value) for value in selected_object_ids]
+            if isinstance(selected_object_ids, (list, tuple))
+            else []
+        )
+        if not changes or not selected_ids or not str(target_parent_id):
+            return
+        document = move_ui_objects_in_hierarchy(
+            getattr(self, "_painter_ui_document", None),
+            selected_ids,
+            target_parent_id=str(target_parent_id),
+            placement="inside",
+        )
+        document, _changed_ids = apply_ui_object_batch(document, changes)
+        self._push_undo_state("Move UI objects into container")
+        self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 

@@ -1667,8 +1667,10 @@ def move_ui_objects_in_hierarchy(
         parent = object_by_id.get(parent_id)
         if parent is None or parent["artboard_id"] != active:
             raise PainterUIDocumentError(f"UI parent object not found: {parent_id}")
-        if parent["kind"] != "group":
-            raise PainterUIDocumentError("UI objects can only nest inside a group")
+        if parent["kind"] not in {"frame", "group"}:
+            raise PainterUIDocumentError(
+                "UI objects can only nest inside a frame or group"
+            )
     if anchor:
         anchor_row = object_by_id.get(anchor)
         if anchor_row is None or anchor_row["artboard_id"] != active:

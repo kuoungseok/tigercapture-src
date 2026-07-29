@@ -51,6 +51,9 @@ Implemented:
 - Canvas context menus hide commands that are invalid for the current
   selection and promote up to three valid recent commands under a localized
   Recent Actions heading; promotion re-triggers the canonical QAction
+- Canvas drag highlights valid Frame/Group containers and commits geometry,
+  parent, recaptured constraints, and deterministic z-order in one Undo;
+  Layers drag distinguishes before/inside/after with line or area previews
 - typed stable-ID Vector Network content with node/segment selection,
   straight/Bezier conversion, handle editing, segment split, node join/remove,
   and open/closed path editing
