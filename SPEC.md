@@ -7907,6 +7907,10 @@ AI Script Edit MVP integration:
   selected-source links render as curves without reserving fixed workspace.
   Self-contained HTML Preview mirrors expanded overlay, state/variant,
   variable/mode, scroll, delayed/mouse/drag/gamepad, and transition behavior.
+  Smart Animate inspection matches component/scope stable references across
+  source and target artboards and reports `partial`, `fallback`, or `blocked`
+  with explicit reasons; browser output currently uses a transform/fade
+  approximation rather than claiming complete property interpolation.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

@@ -124,7 +124,7 @@ def update_ui_prototype_flow(
     flow_id: str,
     changes: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    from app.painter_ui_document import normalize_ui_document
+    from app.painter_ui_document import normalize_ui_document, validate_ui_document
 
     document = normalize_ui_document(value)
     prototype = _prototype(document)
@@ -149,6 +149,12 @@ def update_ui_prototype_flow(
         }
         prototype["flows"][index] = updated
         document["revision"] += 1
+        report = validate_ui_document(document)
+        if not report["ok"]:
+            raise ValueError(
+                "Invalid UI prototype flow update: "
+                + ", ".join(report["errors"])
+            )
         return document, copy.deepcopy(updated)
     raise ValueError(f"UI prototype flow not found: {flow_id}")
 
@@ -224,6 +230,88 @@ def set_ui_prototype_transition(
     )
 
 
+def _smart_animate_match_key(row: Mapping[str, Any]) -> str:
+    scope_id = str(row.get("component_scope_id") or "")
+    source_id = str(row.get("component_scope_source_object_id") or "")
+    if scope_id and source_id:
+        return f"scope:{scope_id}:{source_id}"
+    component_id = str(row.get("component_id") or "")
+    if component_id and str(row.get("component_role") or "") in {
+        "definition",
+        "instance",
+    }:
+        return f"component:{component_id}"
+    return ""
+
+
+def inspect_ui_smart_animate(
+    document: Mapping[str, Any],
+    interaction: Mapping[str, Any],
+) -> dict[str, Any]:
+    transition = normalize_ui_transition(
+        (interaction.get("parameters") or {}).get("transition")
+    )
+    if transition["kind"] != "smart_animate":
+        return {
+            "status": "not_applicable",
+            "matched_pairs": [],
+            "fallback_reasons": [],
+        }
+    source = next(
+        (
+            row
+            for row in document["objects"]
+            if row["id"] == str(interaction.get("source_object_id") or "")
+        ),
+        None,
+    )
+    target_artboard_id = str(
+        interaction.get("target_artboard_id") or ""
+    )
+    if source is None:
+        return {
+            "status": "blocked",
+            "matched_pairs": [],
+            "fallback_reasons": ["missing_source_object"],
+        }
+    if target_artboard_id not in {
+        row["id"] for row in document["artboards"]
+    }:
+        return {
+            "status": "blocked",
+            "matched_pairs": [],
+            "fallback_reasons": ["missing_target_artboard"],
+        }
+    source_rows = [
+        row
+        for row in document["objects"]
+        if row["artboard_id"] == source["artboard_id"]
+    ]
+    targets_by_key = {
+        key: row
+        for row in document["objects"]
+        if row["artboard_id"] == target_artboard_id
+        if (key := _smart_animate_match_key(row))
+    }
+    matched_pairs = [
+        {
+            "match_key": key,
+            "source_object_id": row["id"],
+            "target_object_id": targets_by_key[key]["id"],
+        }
+        for row in source_rows
+        if (key := _smart_animate_match_key(row)) in targets_by_key
+    ]
+    reasons = ["browser_transform_fade_approximation"]
+    if not matched_pairs:
+        reasons.insert(0, "no_stable_component_matches")
+    return {
+        "status": "partial" if matched_pairs else "fallback",
+        "matched_pairs": matched_pairs,
+        "fallback_reasons": reasons,
+    }
+
+
 def inspect_ui_prototype_authoring(
     value: Mapping[str, Any],
     *,
@@ -246,6 +334,7 @@ def inspect_ui_prototype_authoring(
                 and row["source_object_id"]
                 not in {item["id"] for item in document["objects"]}
             ),
+            "smart_animate": inspect_ui_smart_animate(document, row),
         }
         for row in document["interactions"]
         if not object_id or row["source_object_id"] == str(object_id)
@@ -268,6 +357,7 @@ __all__ = [
     "UI_PROTOTYPE_TRANSITIONS",
     "add_ui_prototype_flow",
     "inspect_ui_prototype_authoring",
+    "inspect_ui_smart_animate",
     "normalize_ui_prototype_contract",
     "normalize_ui_transition",
     "remove_ui_prototype_flow",

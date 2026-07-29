@@ -1003,8 +1003,11 @@ Implemented checkpoint (2026-07-29):
 - Self-contained HTML Preview mirrors the expanded trigger/action surface,
   including overlay swap, component state/variant, variables and modes,
   scroll, delayed/mouse/drag/gamepad triggers, and transition timing. Smart
-  Animate currently uses a browser transform/fade approximation; stable-ID
-  property matching and fallback reporting remain open M4 work.
+  Animate currently uses a browser transform/fade approximation. The authoring
+  report now matches component/scope stable references across source and target
+  artboards and exposes `partial`, `fallback`, or `blocked` with concrete
+  reasons in the compact connection list and Action result. Property-level
+  interpolation remains open M4 work.
 
 Exit criteria:
 

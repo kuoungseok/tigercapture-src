@@ -62,6 +62,11 @@ def test_prototype_flow_and_transition_round_trip() -> None:
     assert report["active_flow_id"] == flow["id"]
     assert report["interactions"][0]["transition"]["kind"] == "smart_animate"
     assert report["interactions"][0]["transition"]["duration_ms"] == 320
+    assert report["interactions"][0]["smart_animate"]["status"] == "fallback"
+    assert (
+        "no_stable_component_matches"
+        in report["interactions"][0]["smart_animate"]["fallback_reasons"]
+    )
     assert validate_ui_document(document)["ok"] is True
     assert normalize_ui_document(document) == document
 

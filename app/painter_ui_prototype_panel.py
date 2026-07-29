@@ -132,11 +132,22 @@ class PainterUIPrototypePanel(QWidget):
             self.target_combo.addItem(artboard["name"], artboard["id"])
         self.connection_list.clear()
         for row in report["interactions"]:
+            smart_animate = dict(row.get("smart_animate") or {})
+            smart_status = str(smart_animate.get("status") or "")
+            suffix = (
+                f"  [{smart_status}]"
+                if smart_status in {"partial", "fallback", "blocked"}
+                else ""
+            )
             item = QListWidgetItem(
                 f"{row['trigger'].replace('_', ' ')} -> "
-                f"{row['action'].replace('_', ' ')}"
+                f"{row['action'].replace('_', ' ')}{suffix}"
             )
             item.setData(Qt.ItemDataRole.UserRole, row)
+            if suffix:
+                item.setToolTip(
+                    ", ".join(smart_animate.get("fallback_reasons") or [])
+                )
             self.connection_list.addItem(item)
         enabled = bool(self._object_id)
         self.status_label.setText(
