@@ -486,6 +486,25 @@ Tidy Up은 동일 Artboard와 동일 부모의 잠금 해제 객체에만 적용
 방향은 선택 중심의 주축을 사용하고, 명시적 gap이 없으면 현재 선택 범위의 평균
 간격을 사용한다. UI와 `paint.ui.selection.tidy`는 같은 spacing plan을 사용한다.
 
+### 5.11 Cross-Artboard Duplicate
+
+`Duplicate to next artboard` is contextual, not a fixed Inspector section.
+It appears in the canvas context menu and transient Quick Actions only when a
+selection has a valid following artboard.
+
+- Copy selected roots, descendants, and referenced Boolean/Mask dependencies.
+- Preserve artboard-local geometry and hierarchy while assigning fresh stable
+  IDs to copied objects, responsive overrides, vector data, and interactions.
+- Remap interaction targets that are part of the copied hierarchy.
+- Convert copied component definitions into linked instances rather than
+  creating a second definition with the same component identity.
+- Preserve accessibility focus order when available. When the target already
+  uses an order, reset the copy to `0` and report the affected object ID.
+- UI and automation must call `app/painter_ui_cross_artboard.py` through
+  `paint.ui.object.duplicate_to_artboard` and create one Undo step.
+- The operation must not pin, widen, or otherwise make either side panel
+  permanent.
+
 ## 6. Prototype UI
 
 진입:

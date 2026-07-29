@@ -195,6 +195,10 @@ Focused entry points:
   document-asset search catalog. The Painter UI opens it only as a transient
   `Ctrl+/` / bottom-toolbar popover; mutating results must continue to call
   existing focused services instead of growing a parallel mutation layer.
+  `app/painter_ui_cross_artboard.py` owns responsive-screen duplication.
+  Context menus, Quick Actions, and `paint.ui.object.duplicate_to_artboard`
+  must use it so object trees, Boolean/Mask dependencies, component links,
+  interactions, focus-order conflict reporting, and one-step Undo stay aligned.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

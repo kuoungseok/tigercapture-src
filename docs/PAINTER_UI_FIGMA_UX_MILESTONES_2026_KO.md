@@ -464,6 +464,27 @@ Implemented checkpoint (2026-07-29, object property clipboard slice):
   `paint.ui.object.paste_replace` use `app/painter_ui_property_clipboard.py`,
   one-step Undo, and the same normalized batch mutation service.
 
+Implemented checkpoint (2026-07-29, cross-artboard duplication slice):
+
+- The UI canvas context menu and transient Quick Actions expose `Duplicate to
+  next artboard`; no fixed panel or permanent toolbar control is added.
+- The operation copies selected roots, their descendants, and referenced
+  Boolean operands or mask targets while preserving relative hierarchy and
+  artboard-local geometry.
+- Object, responsive-override, Vector Network, Boolean, Mask, and owned
+  interaction references receive deterministic fresh stable IDs. Internal
+  prototype targets are remapped to the copied hierarchy.
+- A copied component definition becomes a linked component instance instead of
+  creating a second invalid definition. Existing instances retain their
+  canonical definition links.
+- Accessibility focus order is preserved when available and reset to `0` with
+  an explicit report when the target artboard already owns that order.
+- UI and `paint.ui.object.duplicate_to_artboard` share
+  `app/painter_ui_cross_artboard.py`, one-step Undo, `.tspaint` persistence,
+  and the same validation path.
+- Desktop and 900x650 proof plus a machine-readable report regenerate through
+  `tools/qa_painter_ui_cross_artboard.py`.
+
 Implemented checkpoint (2026-07-29, Figma-style Scale slice):
 
 - Scale is selection-local and appears in the canvas context menu only when an

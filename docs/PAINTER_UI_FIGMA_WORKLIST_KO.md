@@ -269,6 +269,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
   commands, layers, pages, components, and variables without reserving
   workspace width. `paint.ui.quick_action.search` exposes the same ranked
   catalog to automation.
+- Cross-artboard duplication is available from the contextual canvas menu and
+  Quick Actions without adding fixed chrome. It copies complete selected
+  hierarchies plus Boolean/Mask dependencies and owned interactions, remaps
+  stable references, turns copied component definitions into linked instances,
+  reports focus-order conflict resets, and shares
+  `paint.ui.object.duplicate_to_artboard` with the UI mutation.
 
 ## P2. 인스펙터 확장
 

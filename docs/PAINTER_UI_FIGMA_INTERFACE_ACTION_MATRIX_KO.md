@@ -24,6 +24,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Multi-selection editing | Common bounds, proportional resize, mixed-value Common properties, partial state checks, one-step Undo | `paint.ui.property.batch_set` |
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Object property clipboard | Context-menu Copy/Paste Properties and Paste to Replace; stable IDs, hierarchy, position, and z-order preserved | `paint.ui.object.properties.copy/paste`, `paint.ui.object.paste_replace` |
+| Cross-artboard duplicate | Context-menu and Quick Actions command copies selected roots, descendants, Boolean/Mask dependencies, component-instance links, and owned interactions to the next or named artboard; conflicting focus order is reset explicitly | `paint.ui.object.duplicate_to_artboard` |
 | Figma-style Scale | Selection-only context command; shared-pivot geometry plus typography, corner, stroke, shadow, blur, and 9-slice scaling; mixed parent spaces blocked | `paint.ui.object.scale` |
 | Quick Actions | Transient bottom-toolbar / `Ctrl+/` search over contextual commands, active-page layers, artboards, components, and variables; compact overlay does not reserve canvas space | `paint.ui.quick_action.search` plus existing focused mutation Actions |
 | Inline text | Double-click canvas editing, Escape cancel, focus-out or Ctrl/Cmd+Enter commit, one-step Undo | `paint.ui.text.content.set` |

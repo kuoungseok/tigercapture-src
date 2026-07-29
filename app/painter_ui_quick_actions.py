@@ -101,6 +101,14 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "requires": "selection",
     },
     {
+        "id": "selection.duplicate_next_artboard",
+        "label": "Duplicate to next artboard",
+        "detail": "Copy the selected hierarchy to the next screen",
+        "keywords": "copy clone responsive screen page artboard",
+        "operation": {"type": "duplicate_to_next_artboard"},
+        "requires": "next_artboard",
+    },
+    {
         "id": "selection.delete",
         "label": "Delete selection",
         "detail": "Remove the selected object hierarchy",
@@ -183,6 +191,8 @@ def _enabled(requirement: str, context: Mapping[str, Any]) -> bool:
             count == 1
             and str(context.get("selected_kind") or "") in IMAGE_FILL_KINDS
         )
+    if requirement == "next_artboard":
+        return bool(context.get("cross_artboard_duplicate_eligible"))
     return True
 
 
@@ -317,6 +327,20 @@ def search_painter_ui_quick_actions(
         "selected_kind": str((selected or {}).get("kind") or ""),
         "active_artboard_id": document["active_artboard_id"],
     }
+    from app.painter_ui_cross_artboard import (
+        inspect_cross_artboard_duplicate,
+    )
+
+    cross_artboard = inspect_cross_artboard_duplicate(document)
+    context["cross_artboard_duplicate_eligible"] = bool(
+        cross_artboard["eligible"]
+    )
+    context["next_artboard_id"] = str(
+        cross_artboard["target_artboard_id"]
+    )
+    context["next_artboard_name"] = str(
+        cross_artboard["target_artboard_name"]
+    )
     candidates: list[dict[str, Any]] = []
     from app.painter_i18n import painter_text
 

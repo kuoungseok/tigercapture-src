@@ -63,6 +63,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.ruler.origin.set",
         "paint.ui.ruler.origin.reset",
         "paint.ui.object.add",
+        "paint.ui.object.duplicate_to_artboard",
         "paint.ui.object.update",
         "paint.ui.object.properties.copy",
         "paint.ui.object.properties.paste",

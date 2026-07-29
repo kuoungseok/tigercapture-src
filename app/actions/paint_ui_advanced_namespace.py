@@ -43,6 +43,17 @@ def _register(
 def register_paint_ui_advanced_actions(registry: Any) -> None:
     _register(
         registry,
+        "paint.ui.object.duplicate_to_artboard",
+        "Duplicate the selected UI hierarchy to the next or named artboard.",
+        "paint_ui_object_duplicate_to_artboard",
+        {
+            "object_ids": _ID_LIST,
+            "target_artboard_id": _ID,
+        },
+        undo_label="Duplicate UI selection to artboard",
+    )
+    _register(
+        registry,
         "paint.ui.mask.inspect",
         "Inspect a Painter UI object mask and ordered targets.",
         "paint_ui_mask_inspect",

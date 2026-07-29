@@ -31,6 +31,30 @@ _LANGUAGES = ("en", "ko", "ja", "zh", "fr", "de")
 
 # English source, Korean, Japanese, Simplified Chinese, French, German.
 _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
+    (
+        "Duplicate to next artboard",
+        "다음 아트보드로 복제",
+        "次のアートボードに複製",
+        "复制到下一个画板",
+        "Dupliquer vers le plan de travail suivant",
+        "Auf nächste Zeichenfläche duplizieren",
+    ),
+    (
+        "Copy the selected hierarchy to the next screen",
+        "선택한 계층을 다음 화면으로 복제",
+        "選択した階層を次の画面に複製",
+        "将所选层级复制到下一个画面",
+        "Copier la hiérarchie sélectionnée vers l’écran suivant",
+        "Ausgewählte Hierarchie auf den nächsten Bildschirm kopieren",
+    ),
+    (
+        "Duplicated to",
+        "복제 완료:",
+        "複製先:",
+        "已复制到:",
+        "Dupliqué vers :",
+        "Dupliziert nach:",
+    ),
     ("Vector", "벡터", "ベクター", "矢量", "Vecteur", "Vektor"),
     ("nodes", "노드", "ノード", "节点", "nœuds", "Knoten"),
     ("Straight", "직선", "直線", "直线", "Droit", "Gerade"),

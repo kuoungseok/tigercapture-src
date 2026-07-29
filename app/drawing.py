@@ -13830,6 +13830,8 @@ class PaintDialog(QDialog):
             self._scale_painter_ui_selection()
         elif operation_type == "duplicate_selection":
             self._duplicate_painter_ui_object(primary_id)
+        elif operation_type == "duplicate_to_next_artboard":
+            self._duplicate_painter_ui_selection_to_artboard()
         elif operation_type == "delete_selection":
             self._delete_painter_ui_selection()
         elif operation_type == "group_selection":
@@ -15530,6 +15532,38 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _duplicate_painter_ui_selection_to_artboard(
+        self,
+        target_artboard_id: str = "",
+    ) -> dict:
+        from app.painter_ui_cross_artboard import (
+            duplicate_ui_selection_to_artboard,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        try:
+            updated, report = duplicate_ui_selection_to_artboard(
+                current,
+                target_artboard_id=str(target_artboard_id or ""),
+            )
+        except Exception as exc:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(str(exc))
+            return {"ok": False, "message": str(exc)}
+        self._push_undo_state("Duplicate UI selection to artboard")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        target_name = str(report.get("target_artboard_name") or "")
+        if target_name:
+            from app.painter_i18n import painter_text
+
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(
+                    f"{painter_text('Duplicated to')} {target_name}"
+                )
+        return {"ok": True, **report}
 
     def _handle_painter_ui_key_command(self, command: str, coarse: bool) -> None:
         current = getattr(self, "_painter_ui_document", None)
@@ -23676,6 +23710,22 @@ class PaintDialog(QDialog):
             )
             menu.addSeparator()
             copy_action = menu.addAction(painter_text("Copy object"))
+            from app.painter_ui_cross_artboard import (
+                inspect_cross_artboard_duplicate,
+            )
+
+            cross_artboard = inspect_cross_artboard_duplicate(current)
+            target_name = str(
+                cross_artboard.get("target_artboard_name") or ""
+            )
+            duplicate_next_label = painter_text(
+                "Duplicate to next artboard"
+            )
+            if target_name:
+                duplicate_next_label = (
+                    f"{duplicate_next_label} · {target_name}"
+                )
+            duplicate_next_action = menu.addAction(duplicate_next_label)
             copy_properties_action = menu.addAction(
                 painter_text("Copy properties")
             )
@@ -23687,6 +23737,13 @@ class PaintDialog(QDialog):
             )
             scale_action = menu.addAction(painter_text("Scale selection..."))
             copy_action.setEnabled(bool(selected))
+            duplicate_next_action.setEnabled(
+                bool(cross_artboard.get("eligible"))
+            )
+            if not cross_artboard.get("eligible"):
+                duplicate_next_action.setToolTip(
+                    str(cross_artboard.get("reason") or "")
+                )
             copy_properties_action.setEnabled(bool(selected))
             paste_properties_action.setEnabled(
                 bool(selected_ids and has_clipboard)
@@ -23697,6 +23754,11 @@ class PaintDialog(QDialog):
             scale_action.setEnabled(bool(selected_ids))
             copy_action.triggered.connect(
                 lambda _checked=False: self._copy_painter_ui_object_payload()
+            )
+            duplicate_next_action.triggered.connect(
+                lambda _checked=False: (
+                    self._duplicate_painter_ui_selection_to_artboard()
+                )
             )
             copy_properties_action.triggered.connect(
                 lambda _checked=False: self._copy_painter_ui_object_payload()

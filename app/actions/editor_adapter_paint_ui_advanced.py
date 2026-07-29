@@ -14,6 +14,28 @@ class PaintUIAdvancedAdapterMixin:
         dialog._push_undo_state(label)
         return self._paint_ui_commit(dialog, label, document)
 
+    def paint_ui_object_duplicate_to_artboard(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        target_artboard_id: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_cross_artboard import (
+            duplicate_ui_selection_to_artboard,
+        )
+
+        dialog = self._paint_dialog_owner()
+        document, report = duplicate_ui_selection_to_artboard(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+            target_artboard_id=target_artboard_id,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Duplicate UI selection to artboard",
+            document,
+        )
+        return {**result, "duplicate": report}
+
     def paint_ui_mask_inspect(self, *, object_id: str) -> dict[str, Any]:
         from app.painter_ui_masks import inspect_ui_mask
 
