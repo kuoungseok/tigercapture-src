@@ -399,6 +399,20 @@ Implemented checkpoint (2026-07-29, contextual image editing slice):
 - Desktop and compact evidence is regenerated at
   `debugCapture/painter_ui_image_context_m1`.
 
+Implemented checkpoint (2026-07-29, Paste in Place slice):
+
+- The selection context menu enables localized Paste in Place after Copy.
+- UI and `paint.ui.object.paste_in_place` reuse complete-hierarchy
+  duplication with zero offset. Descendants, stable nested IDs, component
+  links, masks/Boolean dependencies, and owned interactions follow the same
+  remapping contract as ordinary duplicate.
+- Source coordinates and hierarchy are preserved while every copied identity
+  is regenerated. The operation creates one Undo step and persists through the
+  existing `.tspaint` document path.
+- Desktop/compact QA first asserts exact coordinate equality, then offsets only
+  the evidence copy so both hierarchies remain visible in the screenshot at
+  `debugCapture/painter_ui_paste_in_place_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

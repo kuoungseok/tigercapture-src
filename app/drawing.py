@@ -23902,6 +23902,9 @@ class PaintDialog(QDialog):
             )
             menu.addSeparator()
             copy_action = menu.addAction(painter_text("Copy object"))
+            paste_in_place_action = menu.addAction(
+                painter_text("Paste in place")
+            )
             from app.painter_ui_cross_artboard import (
                 inspect_cross_artboard_duplicate,
             )
@@ -23929,6 +23932,7 @@ class PaintDialog(QDialog):
             )
             scale_action = menu.addAction(painter_text("Scale selection..."))
             copy_action.setEnabled(bool(selected))
+            paste_in_place_action.setEnabled(has_clipboard)
             duplicate_next_action.setEnabled(
                 bool(cross_artboard.get("eligible"))
             )
@@ -23946,6 +23950,9 @@ class PaintDialog(QDialog):
             scale_action.setEnabled(bool(selected_ids))
             copy_action.triggered.connect(
                 lambda _checked=False: self._copy_painter_ui_object_payload()
+            )
+            paste_in_place_action.triggered.connect(
+                lambda _checked=False: self._paste_painter_ui_object_in_place()
             )
             duplicate_next_action.triggered.connect(
                 lambda _checked=False: (
@@ -24048,6 +24055,20 @@ class PaintDialog(QDialog):
         self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _paste_painter_ui_object_in_place(self) -> None:
+        payload = getattr(self, "_painter_ui_property_clipboard", None)
+        if not isinstance(payload, dict):
+            return
+        source_id = str(payload.get("source_object_id") or "")
+        if not source_id:
+            return
+        self._duplicate_painter_ui_selection(
+            [source_id],
+            offset_x=0.0,
+            offset_y=0.0,
+            label="Paste UI objects in place",
+        )
 
     def _paste_replace_painter_ui_objects(self) -> None:
         from app.painter_ui_property_clipboard import paste_replace_ui_objects

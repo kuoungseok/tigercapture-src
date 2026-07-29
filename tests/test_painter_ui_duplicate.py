@@ -150,6 +150,89 @@ def test_duplicate_action_is_undoable_and_persistent(tmp_path) -> None:
     app.processEvents()
 
 
+def test_paste_in_place_action_reuses_hierarchy_and_is_undoable() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_property_clipboard import copy_ui_object_payload
+
+    document, frame, child, interaction = _hierarchy_document()
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._painter_ui_document = copy.deepcopy(document)
+    registry = ActionRegistry(owner=dialog)
+    result = registry.execute(
+        "paint.ui.object.paste_in_place",
+        {"clipboard": copy_ui_object_payload(document, frame["id"])},
+    ).to_dict()
+
+    assert result["ok"] is True
+    report = result["result"]["paste_in_place"]
+    object_map = report["object_id_map"]
+    copied_frame = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == object_map[frame["id"]]
+    )
+    copied_child = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == object_map[child["id"]]
+    )
+    copied_interaction = next(
+        row
+        for row in dialog._painter_ui_document["interactions"]
+        if row["id"] == report["interaction_id_map"][interaction["id"]]
+    )
+    assert (copied_frame["x"], copied_frame["y"]) == (
+        frame["x"],
+        frame["y"],
+    )
+    assert copied_child["parent_id"] == copied_frame["id"]
+    assert copied_interaction["source_object_id"] == copied_child["id"]
+    assert copied_interaction["target_object_id"] == copied_frame["id"]
+    dialog._undo()
+    assert len(dialog._painter_ui_document["objects"]) == 2
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_canvas_copy_then_paste_in_place_uses_one_undo_step() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    document, frame, _child, _interaction = _hierarchy_document()
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._painter_ui_document = copy.deepcopy(document)
+    dialog._copy_painter_ui_object_payload()
+    undo_count = len(dialog._undo_labels)
+
+    dialog._paste_painter_ui_object_in_place()
+
+    copied_id = dialog._painter_ui_document["selection"]["object_id"]
+    copied = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == copied_id
+    )
+    assert copied_id != frame["id"]
+    assert (copied["x"], copied["y"]) == (frame["x"], frame["y"])
+    assert len(dialog._undo_labels) == undo_count + 1
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_alt_drag_duplicates_then_moves_the_copy() -> None:
     app = _app()
     from PySide6.QtCore import QPoint, Qt

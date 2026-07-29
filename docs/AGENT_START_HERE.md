@@ -148,6 +148,10 @@ Focused entry points:
   original-size restore, and the direct canvas focal handle are transient and
   reuse `paint.ui.image.place` / `paint.ui.image.fill.set`. Do not reintroduce
   these controls as a permanently visible Inspector section.
+  Painter UI Copy now also exposes localized Paste in Place. UI and
+  `paint.ui.object.paste_in_place` must continue to call
+  `duplicate_ui_selection(..., offset_x=0, offset_y=0)` so hierarchy,
+  references, stable IDs, Undo, and `.tspaint` do not diverge.
   As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
   main/cross alignment, gap, four-edge padding, and child Flow/Absolute
   controls. The implementation lives in

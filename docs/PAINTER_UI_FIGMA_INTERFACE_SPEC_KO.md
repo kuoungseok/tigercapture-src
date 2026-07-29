@@ -45,6 +45,9 @@ Implemented:
   raster export, and SVG export
 - UI/Action parity through `paint.ui.object.add/update`, with persistent
   `content` parameters and the existing Undo/Redo mutation path
+- Copy followed by Paste in Place duplicates the complete hierarchy at exact
+  source coordinates with fresh stable IDs, remapped interactions, one Undo,
+  and `paint.ui.object.paste_in_place` parity
 - typed stable-ID Vector Network content with node/segment selection,
   straight/Bezier conversion, handle editing, segment split, node join/remove,
   and open/closed path editing

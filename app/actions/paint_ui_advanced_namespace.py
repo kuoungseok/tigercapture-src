@@ -55,6 +55,17 @@ def register_paint_ui_advanced_actions(registry: Any) -> None:
     )
     _register(
         registry,
+        "paint.ui.object.paste_in_place",
+        "Paste copied UI hierarchies at their original coordinates.",
+        "paint_ui_object_paste_in_place",
+        {
+            "object_ids": _ID_LIST,
+            "clipboard": _OBJECT,
+        },
+        undo_label="Paste UI objects in place",
+    )
+    _register(
+        registry,
         "paint.ui.object.duplicate_to_artboard",
         "Duplicate the selected UI hierarchy to the next or named artboard.",
         "paint_ui_object_duplicate_to_artboard",

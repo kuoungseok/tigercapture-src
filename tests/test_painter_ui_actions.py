@@ -68,6 +68,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.object.properties.copy",
         "paint.ui.object.properties.paste",
         "paint.ui.object.paste_replace",
+        "paint.ui.object.paste_in_place",
         "paint.ui.object.scale",
         "paint.ui.vector.node.add",
         "paint.ui.vector.node.update",

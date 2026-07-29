@@ -26,6 +26,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Resolved Smart Guides | Move-time edge/center, text baseline, parent padding, and equal-gap snap labels computed from responsive/Auto Layout/Constraint geometry | `paint.ui.smart_guide.inspect` |
 | Object property clipboard | Context-menu Copy/Paste Properties and Paste to Replace; stable IDs, hierarchy, position, and z-order preserved | `paint.ui.object.properties.copy/paste`, `paint.ui.object.paste_replace` |
+| Paste in place | Context-menu Copy then Paste in Place duplicates the complete source hierarchy at exact coordinates with fresh stable IDs | `paint.ui.object.paste_in_place` |
 | Cross-artboard duplicate | Context-menu and Quick Actions command copies selected roots, descendants, Boolean/Mask dependencies, component-instance links, and owned interactions to the next or named artboard; conflicting focus order is reset explicitly | `paint.ui.object.duplicate_to_artboard` |
 | Transient distance measurement | Hold Alt to draw nearest left/right/top/bottom gaps from the current selection to overlapping objects or artboard bounds; no panel width is reserved | `paint.ui.dev.measurement.inspect` |
 | Figma-style Scale | Dedicated bottom-toolbar `Scale (K)` plus selection context command; proportional corner drag and shared-pivot geometry plus typography, corner, stroke, shadow, blur, and 9-slice scaling; mixed parent spaces blocked | `paint.ui.object.scale` |

@@ -58,6 +58,39 @@ class PaintUIAdvancedAdapterMixin:
         )
         return {**result, "duplicate": report}
 
+    def paint_ui_object_paste_in_place(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        clipboard: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.painter_ui_duplicate import duplicate_ui_selection
+
+        dialog = self._paint_dialog_owner()
+        payload = clipboard or getattr(
+            dialog,
+            "_painter_ui_property_clipboard",
+            None,
+        )
+        source_ids = list(object_ids or [])
+        if not source_ids and isinstance(payload, dict):
+            source_id = str(payload.get("source_object_id") or "")
+            if source_id:
+                source_ids = [source_id]
+        if not source_ids:
+            raise ValueError("Copy a Painter UI object before pasting in place")
+        document, report = duplicate_ui_selection(
+            dialog._painter_ui_document,
+            object_ids=source_ids,
+            offset_x=0.0,
+            offset_y=0.0,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Paste UI objects in place",
+            document,
+        )
+        return {**result, "paste_in_place": report}
+
     def paint_ui_dev_measurement_inspect(
         self,
         *,
