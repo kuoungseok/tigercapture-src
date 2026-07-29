@@ -2750,6 +2750,40 @@ class PaintAdapterMixin(
         )
         return dialog.painter_action_state()
 
+    def paint_ui_selection_similar_inspect(
+        self,
+        *,
+        criterion: str = "kind",
+        scope: str = "active_artboard",
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_select_similar import inspect_ui_select_similar
+
+        return inspect_ui_select_similar(
+            dialog._painter_ui_document,
+            criterion=criterion,
+            scope=scope,
+            object_id=object_id,
+        )
+
+    def paint_ui_selection_similar_select(
+        self,
+        *,
+        criterion: str = "kind",
+        scope: str = "active_artboard",
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        report = dialog._select_similar_painter_ui_objects(
+            criterion=criterion,
+            scope=scope,
+            object_id=object_id,
+        )
+        state = dialog.painter_action_state()
+        state["select_similar"] = report
+        return state
+
     def paint_ui_selection_parent(
         self,
         *,

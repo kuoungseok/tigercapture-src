@@ -893,7 +893,11 @@ overlay mode로 전환한다.
 
 - Quick Actions
 - Find/Replace
-- Select Similar
+- Select Similar uses an on-demand UI menu and searchable Quick Actions rather
+  than permanent canvas chrome. Object Type, Fill, Stroke, Text Style,
+  Component, Variant, Variable, Effect, and Interaction compare through one
+  stable service and show current active-artboard match counts before applying.
+  Selection is transient and must not dirty the document or add Undo.
 - Batch Rename
 - shortcut map
 - Product QA uses one read-only Action/UI audit report. Accessibility checks

@@ -1627,6 +1627,49 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Set UI selection",
         dry_summary="the active Painter UI selection would change",
     )
+    select_similar_params = schema_object(
+        {
+            "criterion": {
+                "type": "string",
+                "enum": [
+                    "kind",
+                    "fill",
+                    "stroke",
+                    "text_style",
+                    "component",
+                    "variant",
+                    "token",
+                    "effect",
+                    "interaction",
+                ],
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["active_artboard"],
+            },
+            "object_id": {"type": "string"},
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.similar.inspect",
+        "Preview matching UI objects for a selected property without changing selection.",
+        "paint",
+        "paint_ui_selection_similar_inspect",
+        params_schema=select_similar_params,
+        mutating=False,
+        changed=False,
+        dry_summary="matching Painter UI objects would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.similar.select",
+        "Select UI objects with the same property on the active artboard.",
+        "paint",
+        "paint_ui_selection_similar_select",
+        params_schema=select_similar_params,
+        mutating=False,
+        changed=False,
+        dry_summary="matching Painter UI objects would be selected",
+    )
     registry.register_adapter_action(
         "paint.ui.selection.parent",
         "Select the immediate parent of a Painter UI object without changing the document.",

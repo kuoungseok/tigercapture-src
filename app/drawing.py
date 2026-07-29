@@ -8684,6 +8684,34 @@ class PaintDialog(QDialog):
             self._delete_active_painter_ui_artboard,
         )
         ui_menu.addSeparator()
+        select_same_menu = ui_menu.addMenu("Select Same")
+        self._painter_ui_select_similar_actions = {}
+        for criterion, label in (
+            ("kind", "Object Type"),
+            ("fill", "Fill"),
+            ("stroke", "Stroke"),
+            ("text_style", "Text Style"),
+            ("component", "Component"),
+            ("variant", "Variant"),
+            ("token", "Variable"),
+            ("effect", "Effect"),
+            ("interaction", "Interaction"),
+        ):
+            action = self._add_painter_menu_action(
+                select_same_menu,
+                label,
+                lambda _checked=False, value=criterion: (
+                    self._select_similar_painter_ui_objects(
+                        criterion=value,
+                    )
+                ),
+            )
+            self._painter_ui_select_similar_actions[criterion] = action
+        select_same_menu.aboutToShow.connect(
+            self._refresh_painter_ui_select_similar_menu
+        )
+        self._painter_ui_select_similar_menu = select_same_menu
+        ui_menu.addSeparator()
         self._add_painter_menu_action(
             ui_menu,
             "Fit All Artboards",
@@ -13281,6 +13309,54 @@ class PaintDialog(QDialog):
         )
         self._refresh_painter_ui_overlay()
 
+    def _select_similar_painter_ui_objects(
+        self,
+        *,
+        criterion: str = "kind",
+        scope: str = "active_artboard",
+        object_id: str = "",
+    ) -> dict:
+        from app.painter_ui_select_similar import select_similar_ui_objects
+
+        document, report = select_similar_ui_objects(
+            getattr(self, "_painter_ui_document", None),
+            criterion=criterion,
+            scope=scope,
+            object_id=object_id,
+        )
+        self._painter_ui_document = document
+        self._refresh_painter_ui_overlay()
+        if report["available"]:
+            self._tool_status_label.setText(
+                f"Selected {report['match_count']} matching UI objects"
+            )
+        else:
+            self._tool_status_label.setText(str(report["reason"]))
+        return report
+
+    def _refresh_painter_ui_select_similar_menu(self) -> None:
+        from app.painter_ui_select_similar import inspect_ui_select_similar
+
+        document = getattr(self, "_painter_ui_document", None)
+        for criterion, action in getattr(
+            self,
+            "_painter_ui_select_similar_actions",
+            {},
+        ).items():
+            report = inspect_ui_select_similar(
+                document,
+                criterion=criterion,
+            )
+            action.setEnabled(bool(report["available"]))
+            base = str(action.property("base_label") or action.text())
+            action.setProperty("base_label", base)
+            action.setText(
+                f"{base} ({report['match_count']})"
+                if report["available"]
+                else base
+            )
+            action.setToolTip(str(report["reason"] or ""))
+
     def _select_parent_painter_ui_object(
         self,
         object_id: str = "",
@@ -14161,6 +14237,10 @@ class PaintDialog(QDialog):
             self._group_painter_ui_objects(selected_ids)
         elif operation_type == "ungroup_selection":
             self._ungroup_painter_ui_object(primary_id)
+        elif operation_type == "select_similar":
+            self._select_similar_painter_ui_objects(
+                criterion=str(operation.get("criterion") or "kind")
+            )
         elif operation_type == "animate_selection":
             self._animate_selected_painter_ui_object()
         elif operation_type == "inspector_presentation":

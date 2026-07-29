@@ -101,6 +101,33 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "requires": "selection",
     },
     {
+        "id": "selection.same_kind",
+        "label": "Select same object type",
+        "detail": "Select matching objects on the active artboard",
+        "keywords": "select similar same kind type",
+        "operation": {"type": "select_similar", "criterion": "kind"},
+        "requires": "selection",
+    },
+    {
+        "id": "selection.same_fill",
+        "label": "Select same fill",
+        "detail": "Select matching objects on the active artboard",
+        "keywords": "select similar same color fill",
+        "operation": {"type": "select_similar", "criterion": "fill"},
+        "requires": "selection",
+    },
+    {
+        "id": "selection.same_component",
+        "label": "Select same component",
+        "detail": "Select matching instances on the active artboard",
+        "keywords": "select similar same component instance",
+        "operation": {
+            "type": "select_similar",
+            "criterion": "component",
+        },
+        "requires": "selection",
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

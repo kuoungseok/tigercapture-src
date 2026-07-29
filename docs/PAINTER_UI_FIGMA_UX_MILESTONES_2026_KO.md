@@ -1320,6 +1320,25 @@ Implemented checkpoint (2026-07-29, accessibility audit slice):
   i18n guard pass. Remaining accessibility work in M7 includes keyboard focus
   visibility and locale-overflow/font-fallback corpus auditing.
 
+Implemented checkpoint (2026-07-29, Select Similar slice):
+
+- UI > Select Same exposes Object Type, Fill, Stroke, Text Style, Component,
+  Variant, Variable, Effect, and Interaction only as an on-demand submenu.
+  It does not reserve canvas or Inspector space.
+- Each meaningful criterion previews its active-artboard match count. Missing
+  component, variant, token, effect, or interaction values disable that row
+  explicitly instead of treating empty defaults as a match.
+- `app/painter_ui_select_similar.py` owns stable comparison and selection.
+  UI, Quick Actions, `paint.ui.selection.similar.inspect`, and
+  `paint.ui.selection.similar.select` share it.
+- Selection is transient: document revision, dirty state, save payload, and
+  Undo history do not change. Cross-artboard selection is not claimed until
+  the canonical selection model supports it.
+- Korean and supported-language labels are available through Painter i18n.
+  Desktop and compact evidence plus a machine-readable report regenerate via
+  `tools/qa_painter_ui_select_similar.py` under
+  `debugCapture/painter_ui_designer/select_similar`.
+
 Exit criteria:
 
 - Pan, zoom, selection, and resize stay responsive under the release corpus.
