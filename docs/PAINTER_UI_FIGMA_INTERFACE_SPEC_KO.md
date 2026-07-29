@@ -93,6 +93,9 @@ Implemented:
   per-artboard Page ownership, page-scoped canvas rendering, last-active
   artboard restoration, Quick Actions Page search, and Figma CANVAS-to-Page
   preservation
+- Painter UI document schema version 20 adds stable-ID Variable Collections
+  and Modes, per-artboard active mode selection, typed variable values, and
+  backward-compatible Light/Dark/High Contrast migration
 
 Still required by this contract:
 

@@ -13,6 +13,10 @@ from app.painter_ui_document import (
     UI_TOKEN_KINDS,
 )
 from app.painter_ui_object_scale import UI_SCALE_ORIGINS
+from app.painter_ui_variables import (
+    UI_VARIABLE_COLLECTION_KINDS,
+    UI_VARIABLE_TYPES,
+)
 
 
 PAINT_ACTION_BRUSH_STYLES = tuple(
@@ -2096,6 +2100,13 @@ def register_paint_actions(registry: Any) -> None:
                 "kind": {"type": "string", "enum": sorted(UI_TOKEN_KINDS)},
                 "value": {},
                 "theme_values": any_object,
+                "collection_id": {"type": "string"},
+                "variable_type": {
+                    "type": "string",
+                    "enum": ["", *UI_VARIABLE_TYPES],
+                },
+                "mode_values": any_object,
+                "scope": {"type": "array", "items": {"type": "string"}},
                 "alias_token_id": {"type": "string"},
                 "description": {"type": "string"},
             }
@@ -2118,6 +2129,135 @@ def register_paint_actions(registry: Any) -> None:
         required=("token_id",),
         undo_label="Remove UI token",
         dry_summary="a UI token would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.inspect",
+        "Inspect stable variable collections, modes, token counts, and active artboard modes.",
+        "paint",
+        "paint_ui_variable_collection_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="variable collections and active modes would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.add",
+        "Create a stable variable collection with one default mode.",
+        "paint",
+        "paint_ui_variable_collection_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "enum": list(UI_VARIABLE_COLLECTION_KINDS),
+                },
+                "description": {"type": "string"},
+            },
+            required=("name",),
+        ),
+        required=("name",),
+        undo_label="Add variable collection",
+        dry_summary="a variable collection would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.update",
+        "Rename or reclassify a variable collection without changing its stable ID.",
+        "paint",
+        "paint_ui_variable_collection_update",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("collection_id", "changes"),
+        ),
+        required=("collection_id", "changes"),
+        undo_label="Update variable collection",
+        dry_summary="a variable collection would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.remove",
+        "Remove a variable collection, blocking token references unless detachment is explicit.",
+        "paint",
+        "paint_ui_variable_collection_remove",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "detach_tokens": {"type": "boolean"},
+            },
+            required=("collection_id",),
+        ),
+        required=("collection_id",),
+        undo_label="Remove variable collection",
+        dry_summary="a variable collection would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.add",
+        "Add a stable mode to a variable collection.",
+        "paint",
+        "paint_ui_variable_mode_add",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            required=("collection_id", "name"),
+        ),
+        required=("collection_id", "name"),
+        undo_label="Add variable mode",
+        dry_summary="a variable mode would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.update",
+        "Rename a variable mode while preserving its stable ID.",
+        "paint",
+        "paint_ui_variable_mode_update",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            required=("collection_id", "mode_id", "name"),
+        ),
+        required=("collection_id", "mode_id", "name"),
+        undo_label="Update variable mode",
+        dry_summary="a variable mode would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.remove",
+        "Remove a variable mode, blocking values and active artboards unless detachment is explicit.",
+        "paint",
+        "paint_ui_variable_mode_remove",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "detach_values": {"type": "boolean"},
+            },
+            required=("collection_id", "mode_id"),
+        ),
+        required=("collection_id", "mode_id"),
+        undo_label="Remove variable mode",
+        dry_summary="a variable mode would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.set",
+        "Select a variable mode for one artboard and immediately resolve bound values.",
+        "paint",
+        "paint_ui_variable_mode_set",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+            },
+            required=("collection_id", "mode_id"),
+        ),
+        required=("collection_id", "mode_id"),
+        undo_label="Set variable mode",
+        dry_summary="an artboard variable mode would be selected",
     )
     token_property_paths = [
         "style.fill",

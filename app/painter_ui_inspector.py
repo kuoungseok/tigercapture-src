@@ -315,6 +315,13 @@ class PainterUIInspector(QWidget):
     token_binding_requested = Signal(str, str, str)
     token_import_requested = Signal(str)
     token_export_requested = Signal()
+    variable_collection_add_requested = Signal(object)
+    variable_collection_update_requested = Signal(str, object)
+    variable_collection_remove_requested = Signal(str, bool)
+    variable_mode_add_requested = Signal(str, str)
+    variable_mode_update_requested = Signal(str, str, str)
+    variable_mode_remove_requested = Signal(str, str, bool)
+    variable_mode_set_requested = Signal(str, str, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -845,6 +852,27 @@ class PainterUIInspector(QWidget):
         )
         self.token_library.token_export_requested.connect(
             self.token_export_requested
+        )
+        self.token_library.collection_add_requested.connect(
+            self.variable_collection_add_requested
+        )
+        self.token_library.collection_update_requested.connect(
+            self.variable_collection_update_requested
+        )
+        self.token_library.collection_remove_requested.connect(
+            self.variable_collection_remove_requested
+        )
+        self.token_library.mode_add_requested.connect(
+            self.variable_mode_add_requested
+        )
+        self.token_library.mode_update_requested.connect(
+            self.variable_mode_update_requested
+        )
+        self.token_library.mode_remove_requested.connect(
+            self.variable_mode_remove_requested
+        )
+        self.token_library.mode_set_requested.connect(
+            self.variable_mode_set_requested
         )
         add_inspector_tab(self.token_library, "Tokens", "sliders")
 

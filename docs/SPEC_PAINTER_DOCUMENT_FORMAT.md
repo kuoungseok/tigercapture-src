@@ -114,10 +114,11 @@ preview. The format preserves:
   `paint.ui.token.library.inspect` and undoable
   `paint.ui.token.bind/unbind` Actions.
 - Token-library JSON uses
-  `tigerstudio.painter.ui.token_library.v1` with source document metadata and
-  normalized token records. Import also accepts the legacy handoff token-array
-  form. ID conflicts require `update`, `skip`, or `regenerate`; regenerate
-  rewrites imported alias references to the corresponding new stable IDs.
+  `tigerstudio.painter.ui.token_library.v2` with source document metadata,
+  stable Variable Collection/Mode records, and normalized token records.
+  Import also accepts v1 and the legacy handoff token-array form. ID conflicts
+  require `update`, `skip`, or `regenerate`; regenerate rewrites imported
+  alias references to the corresponding new stable IDs.
   `paint.ui.token.library.import/export` and the Tokens tab share this service.
 - Component Definitions and Instances remain ordinary UI object subtrees.
   Objects persist `component_role` (`none`, `definition`, or `instance`),
@@ -155,7 +156,7 @@ preview. The format preserves:
   `tigerstudio.painter.ui.template_package.v1` manifests. A manifest includes
   stable template ID, version, category, tags, artboard presets, feature list,
   author, source, and explicit license terms. Applying a built-in template
-  creates a normal current-version UI document (version 19 at this checkpoint)
+  creates a normal current-version UI document (version 20 at this checkpoint)
   and stores immutable source provenance in `linked_targets.template_source`;
   all template contents remain ordinary editable artboards, objects, tokens,
   components, and interactions.

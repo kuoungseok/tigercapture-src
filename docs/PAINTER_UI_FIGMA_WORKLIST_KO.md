@@ -4,7 +4,8 @@ Status: canonical implementation backlog; P0-P10 local production foundation com
 
 M1 Page checkpoint (2026-07-29):
 
-- Painter UI document schema is version 19.
+- Painter UI document schema is version 20. Version 19 Page documents migrate
+  with stable-ID Theme Variable Collection/Mode records.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

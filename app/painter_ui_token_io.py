@@ -10,7 +10,10 @@ from typing import Any, Mapping, Sequence
 from app.painter_ui_document import normalize_ui_document, validate_ui_document
 
 
-TOKEN_LIBRARY_SCHEMA = "tigerstudio.painter.ui.token_library.v1"
+TOKEN_LIBRARY_SCHEMA = "tigerstudio.painter.ui.token_library.v2"
+LEGACY_TOKEN_LIBRARY_SCHEMAS = {
+    "tigerstudio.painter.ui.token_library.v1",
+}
 TOKEN_IMPORT_POLICIES = ("update", "skip", "regenerate")
 
 
@@ -20,6 +23,9 @@ def ui_token_library_payload(value: Mapping[str, Any]) -> dict[str, Any]:
         "schema": TOKEN_LIBRARY_SCHEMA,
         "source_document_id": document["document_id"],
         "source_revision": document["revision"],
+        "variable_collections": copy.deepcopy(
+            document["variable_collections"]
+        ),
         "tokens": copy.deepcopy(document["tokens"]),
     }
 
@@ -49,7 +55,7 @@ def export_ui_token_library(
 
 def _read_token_payload(
     source: str | Path | Mapping[str, Any] | Sequence[Any],
-) -> tuple[list[Mapping[str, Any]], dict[str, Any]]:
+) -> tuple[list[Mapping[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     metadata: dict[str, Any] = {}
     value: Any = source
     if isinstance(source, (str, Path)):
@@ -58,9 +64,14 @@ def _read_token_payload(
         metadata["path"] = str(path)
     if isinstance(value, Mapping):
         schema = str(value.get("schema") or "")
-        if schema and schema != TOKEN_LIBRARY_SCHEMA:
+        if (
+            schema
+            and schema != TOKEN_LIBRARY_SCHEMA
+            and schema not in LEGACY_TOKEN_LIBRARY_SCHEMAS
+        ):
             raise ValueError(f"Unsupported token library schema: {schema}")
         rows = value.get("tokens")
+        raw_collections = value.get("variable_collections")
         metadata.update(
             {
                 "source_document_id": str(
@@ -71,6 +82,7 @@ def _read_token_payload(
         )
     else:
         rows = value
+        raw_collections = None
     if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
         raise ValueError("Token library must contain a tokens array")
     typed_rows = [row for row in rows if isinstance(row, Mapping)]
@@ -80,8 +92,17 @@ def _read_token_payload(
     explicit_ids = [token_id for token_id in source_ids if token_id]
     if len(explicit_ids) != len(set(explicit_ids)):
         raise ValueError("Token library contains duplicate token IDs")
-    normalized = normalize_ui_document({"tokens": typed_rows})["tokens"]
-    return normalized, metadata
+    normalized_document = normalize_ui_document(
+        {
+            "tokens": typed_rows,
+            "variable_collections": raw_collections,
+        }
+    )
+    return (
+        normalized_document["tokens"],
+        normalized_document["variable_collections"],
+        metadata,
+    )
 
 
 def _next_token_id(reserved: set[str]) -> str:
@@ -103,7 +124,24 @@ def import_ui_token_library(
     if policy not in TOKEN_IMPORT_POLICIES:
         raise ValueError(f"Unsupported token conflict policy: {policy}")
     document = normalize_ui_document(value)
-    incoming, metadata = _read_token_payload(source)
+    incoming, incoming_collections, metadata = _read_token_payload(source)
+    collection_index = {
+        row["id"]: index
+        for index, row in enumerate(document["variable_collections"])
+    }
+    imported_collection_ids: list[str] = []
+    for collection in incoming_collections:
+        collection_id = str(collection["id"])
+        if collection_id in collection_index:
+            document["variable_collections"][
+                collection_index[collection_id]
+            ] = copy.deepcopy(collection)
+        else:
+            collection_index[collection_id] = len(
+                document["variable_collections"]
+            )
+            document["variable_collections"].append(copy.deepcopy(collection))
+        imported_collection_ids.append(collection_id)
     existing_ids = {row["id"] for row in document["tokens"]}
     reserved = set(existing_ids)
     id_map: dict[str, str] = {}
@@ -161,6 +199,7 @@ def import_ui_token_library(
         "ok": True,
         "conflict_policy": policy,
         "source_token_count": len(incoming),
+        "imported_collection_ids": imported_collection_ids,
         "added_ids": added_ids,
         "updated_ids": updated_ids,
         "skipped_ids": skipped_ids,
@@ -174,6 +213,7 @@ def import_ui_token_library(
 __all__ = [
     "TOKEN_IMPORT_POLICIES",
     "TOKEN_LIBRARY_SCHEMA",
+    "LEGACY_TOKEN_LIBRARY_SCHEMAS",
     "export_ui_token_library",
     "import_ui_token_library",
     "ui_token_library_payload",

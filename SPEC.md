@@ -7864,16 +7864,21 @@ AI Script Edit MVP integration:
   report to AI automation.
 - Painter UI Design includes a dedicated `Tokens` library tab for Color,
   Typography, Spacing, Radius, Border, Shadow, Opacity, Icon, and Image tokens.
-  It searches and groups typed tokens, edits default and Light/Dark/High
-  Contrast values, manages aliases, reports binding/alias usage and unused
-  tokens, and binds supported object properties by stable token ID. UI and AI
-  use the same document services through `paint.ui.token.library.inspect`,
-  `paint.ui.token.bind`, and `paint.ui.token.unbind`; token edits and bindings
-  remain Undo/Redo operations. The same panel imports and exports deterministic
-  token-library JSON. Import accepts legacy token arrays or the versioned
-  library envelope and requires an explicit `update`, `skip`, or `regenerate`
-  stable-ID conflict policy; regenerated aliases are remapped as one graph.
-  Automation uses `paint.ui.token.library.import/export`.
+  UI schema 20 adds stable-ID Variable Collections and Modes above those
+  semantic token kinds. Variables preserve explicit color, number, string, or
+  boolean types; artboards select modes independently for Theme, Density,
+  Locale, Platform, Brand, or custom collections. Existing Light/Dark/High
+  Contrast token values and artboard themes migrate without changing token
+  IDs. The compact Assets surface shows one collection and active mode at a
+  time, edits default/current-mode values, manages aliases, reports alias
+  chains and usage, and binds supported object properties by stable token ID.
+  UI and AI use the same Undoable services through
+  `paint.ui.variable.collection.*`, `paint.ui.variable.mode.*`,
+  `paint.ui.token.library.inspect`, `paint.ui.token.bind`, and
+  `paint.ui.token.unbind`. Deterministic token-library JSON schema v2 includes
+  collection/mode records and accepts v1 or legacy token arrays on import.
+  Conflict handling remains explicit `update`, `skip`, or `regenerate`;
+  regenerated aliases are remapped as one graph.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

@@ -70,6 +70,10 @@ def test_token_library_report_tracks_bindings_aliases_and_unused_tokens() -> Non
             "path": "style.fill",
         }
     ]
+    assert rows[alias["id"]]["alias_chain"] == [
+        alias["id"],
+        primary["id"],
+    ]
     assert rows[unused["id"]]["unused"] is True
 
 
@@ -140,7 +144,7 @@ def test_token_library_json_round_trip_and_conflict_policies(tmp_path) -> None:
     exported = export_ui_token_library(document, path)
     assert exported["ok"] is True
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema"] == "tigerstudio.painter.ui.token_library.v1"
+    assert payload["schema"] == "tigerstudio.painter.ui.token_library.v2"
     assert payload["tokens"][1]["alias_token_id"] == primary["id"]
 
     empty = {**document, "tokens": [], "objects": []}

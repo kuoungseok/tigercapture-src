@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 19
+UI_DOCUMENT_VERSION = 20
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -133,6 +133,8 @@ def create_ui_document(
 ) -> dict[str, Any]:
     page_id = "page-1"
     artboard_id = "artboard-1"
+    from app.painter_ui_variables import default_ui_variable_collections
+
     return {
         "schema": UI_DOCUMENT_SCHEMA,
         "version": UI_DOCUMENT_VERSION,
@@ -161,6 +163,9 @@ def create_ui_document(
                 "breakpoint": "custom",
                 "orientation": "landscape" if width >= height else "portrait",
                 "theme": "light",
+                "variable_modes": {
+                    "ui-variable-collection-theme": "ui-variable-mode-light"
+                },
                 "layout_grid_style_id": "",
                 "safe_area": {"left": 0, "top": 0, "right": 0, "bottom": 0},
                 "safe_area_visible": False,
@@ -201,6 +206,7 @@ def create_ui_document(
         ],
         "objects": [],
         "components": [],
+        "variable_collections": default_ui_variable_collections(),
         "tokens": [],
         "interactions": [],
         "sections": [],
@@ -227,8 +233,10 @@ def _normalize_artboard(
     height = _positive(row.get("height"), 1080.0)
     from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
     from app.painter_ui_themes import normalize_ui_theme
+    from app.painter_ui_variables import normalize_ui_artboard_variable_modes
 
     layout = normalize_ui_artboard_layout(row, width=width, height=height)
+    theme = normalize_ui_theme(row.get("theme"), "light")
     return {
         "id": str(row.get("id") or f"artboard-{index + 1}"),
         "page_id": str(row.get("page_id") or default_page_id),
@@ -243,7 +251,11 @@ def _normalize_artboard(
             row.get("orientation")
             or ("landscape" if width >= height else "portrait")
         ),
-        "theme": normalize_ui_theme(row.get("theme"), "light"),
+        "theme": theme,
+        "variable_modes": normalize_ui_artboard_variable_modes(
+            row.get("variable_modes"),
+            theme=theme,
+        ),
         "layout_grid_style_id": str(row.get("layout_grid_style_id") or ""),
         **layout,
     }
@@ -399,13 +411,45 @@ def _normalize_component(row: Mapping[str, Any], index: int) -> dict[str, Any]:
 def _normalize_token(row: Mapping[str, Any], index: int) -> dict[str, Any]:
     kind = str(row.get("kind") or "color").strip().casefold()
     from app.painter_ui_themes import normalize_ui_theme_values
+    from app.painter_ui_variables import (
+        LEGACY_THEME_COLLECTION_ID,
+        legacy_theme_mode_values,
+        normalize_ui_variable_mode_values,
+        normalize_ui_variable_type,
+    )
+
+    theme_values = normalize_ui_theme_values(row.get("theme_values"))
+    mode_values = normalize_ui_variable_mode_values(row.get("mode_values"))
+    if not mode_values:
+        mode_values = legacy_theme_mode_values(theme_values)
+    variable_type_explicit = (
+        bool(row.get("variable_type_explicit"))
+        if "variable_type_explicit" in row
+        else bool(str(row.get("variable_type") or "").strip())
+    )
 
     return {
         "id": str(row.get("id") or f"ui-token-{index + 1}"),
         "name": str(row.get("name") or f"Token {index + 1}"),
         "kind": kind,
         "value": copy.deepcopy(row.get("value")),
-        "theme_values": normalize_ui_theme_values(row.get("theme_values")),
+        "theme_values": theme_values,
+        "collection_id": str(
+            row.get("collection_id") or LEGACY_THEME_COLLECTION_ID
+        ),
+        "variable_type": normalize_ui_variable_type(
+            row.get("variable_type"),
+            kind=kind,
+        ),
+        "variable_type_explicit": variable_type_explicit,
+        "mode_values": mode_values,
+        "scope": [
+            str(value)
+            for value in row.get("scope", [])
+            if str(value or "")
+        ]
+        if isinstance(row.get("scope"), list)
+        else [],
         "alias_token_id": str(row.get("alias_token_id") or ""),
         "description": str(row.get("description") or ""),
     }
@@ -529,6 +573,11 @@ def normalize_ui_document(
         prefix="ui-component",
         normalizer=_normalize_component,
     )
+    from app.painter_ui_variables import normalize_ui_variable_collections
+
+    variable_collections = normalize_ui_variable_collections(
+        raw.get("variable_collections")
+    )
     tokens = _normalize_typed_rows(
         raw.get("tokens"),
         prefix="ui-token",
@@ -607,6 +656,7 @@ def normalize_ui_document(
         "artboards": artboards,
         "objects": objects,
         "components": components,
+        "variable_collections": variable_collections,
         "tokens": tokens,
         "interactions": interactions,
         "sections": sections,
@@ -670,6 +720,14 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     artboard_ids = [row["id"] for row in document["artboards"]]
     object_ids = [row["id"] for row in document["objects"]]
     component_ids = [row["id"] for row in document["components"]]
+    variable_collection_ids = [
+        row["id"] for row in document["variable_collections"]
+    ]
+    variable_mode_ids = [
+        mode["id"]
+        for collection in document["variable_collections"]
+        for mode in collection["modes"]
+    ]
     token_ids = [row["id"] for row in document["tokens"]]
     interaction_ids = [row["id"] for row in document["interactions"]]
     section_ids = [row["id"] for row in document["sections"]]
@@ -689,6 +747,10 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         errors.append("duplicate_object_id")
     if len(set(component_ids)) != len(component_ids):
         errors.append("duplicate_component_id")
+    if len(set(variable_collection_ids)) != len(variable_collection_ids):
+        errors.append("duplicate_variable_collection_id")
+    if len(set(variable_mode_ids)) != len(variable_mode_ids):
+        errors.append("duplicate_variable_mode_id")
     if len(set(token_ids)) != len(token_ids):
         errors.append("duplicate_token_id")
     if len(set(interaction_ids)) != len(interaction_ids):
@@ -704,6 +766,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         + artboard_ids
         + object_ids
         + component_ids
+        + variable_collection_ids
+        + variable_mode_ids
         + token_ids
         + interaction_ids
         + section_ids
@@ -718,6 +782,10 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     component_id_set = set(component_ids)
     component_by_id = {row["id"]: row for row in document["components"]}
     token_id_set = set(token_ids)
+    token_by_id = {row["id"]: row for row in document["tokens"]}
+    variable_collection_by_id = {
+        row["id"]: row for row in document["variable_collections"]
+    }
     layout_grid_style_id_set = set(layout_grid_style_ids)
     for artboard in document["artboards"]:
         if artboard["page_id"] not in page_id_set:
@@ -729,6 +797,17 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
             errors.append(
                 f"missing_layout_grid_style:{artboard['id']}:{style_id}"
             )
+        for collection_id, mode_id in artboard["variable_modes"].items():
+            collection = variable_collection_by_id.get(collection_id)
+            if collection is None:
+                errors.append(
+                    f"missing_variable_collection:{artboard['id']}:{collection_id}"
+                )
+            elif mode_id not in {mode["id"] for mode in collection["modes"]}:
+                errors.append(
+                    f"missing_variable_mode:{artboard['id']}:{collection_id}:"
+                    f"{mode_id}"
+                )
     artboard_by_id = {row["id"]: row for row in document["artboards"]}
     for page in document["pages"]:
         remembered = str(page.get("active_artboard_id") or "")
@@ -908,6 +987,16 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                 errors.append(
                     f"missing_token:{row['id']}:{property_name}:{token_id}"
                 )
+            token = token_by_id.get(token_id)
+            if (
+                token is not None
+                and token["scope"]
+                and property_name not in token["scope"]
+            ):
+                errors.append(
+                    f"token_scope_mismatch:{row['id']}:{property_name}:"
+                    f"{token_id}"
+                )
         if row["opacity"] <= 0.0:
             warnings.append(f"fully_transparent:{row['id']}")
         if not row["visible"]:
@@ -1018,12 +1107,62 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                 errors.append(
                     f"missing_section_object:{section['id']}:{object_id}"
                 )
+    from app.painter_ui_variables import (
+        UI_VARIABLE_SCOPES,
+        ui_variable_value_matches_type,
+    )
+
     for row in document["tokens"]:
         if row["kind"] not in UI_TOKEN_KINDS:
             errors.append(f"unsupported_token_kind:{row['id']}:{row['kind']}")
+        if row["variable_type_explicit"] and not ui_variable_value_matches_type(
+            row["value"],
+            row["variable_type"],
+        ):
+            errors.append(f"token_value_type_mismatch:{row['id']}")
+        for mode_id, mode_value in row["mode_values"].items():
+            if (
+                row["variable_type_explicit"]
+                and not ui_variable_value_matches_type(
+                    mode_value,
+                    row["variable_type"],
+                )
+            ):
+                errors.append(
+                    f"token_mode_value_type_mismatch:{row['id']}:{mode_id}"
+                )
+        for scope in row["scope"]:
+            if scope not in UI_VARIABLE_SCOPES:
+                errors.append(f"unsupported_token_scope:{row['id']}:{scope}")
+        collection = variable_collection_by_id.get(row["collection_id"])
+        if collection is None:
+            errors.append(
+                f"missing_token_collection:{row['id']}:{row['collection_id']}"
+            )
+        else:
+            collection_mode_ids = {
+                mode["id"] for mode in collection["modes"]
+            }
+            for mode_id in row["mode_values"]:
+                if mode_id not in collection_mode_ids:
+                    errors.append(
+                        f"missing_token_mode:{row['id']}:{mode_id}"
+                    )
         alias_id = row["alias_token_id"]
         if alias_id and alias_id not in token_id_set:
             errors.append(f"missing_token_alias:{row['id']}:{alias_id}")
+        if alias_id:
+            alias = next(
+                (token for token in document["tokens"] if token["id"] == alias_id),
+                None,
+            )
+            if (
+                alias is not None
+                and alias["variable_type"] != row["variable_type"]
+            ):
+                errors.append(
+                    f"token_alias_type_mismatch:{row['id']}:{alias_id}"
+                )
     _append_cycle_errors(
         document["tokens"],
         reference_key="alias_token_id",
@@ -1073,6 +1212,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "artboard_count": len(artboard_ids),
         "object_count": len(object_ids),
         "component_count": len(document["components"]),
+        "variable_collection_count": len(variable_collection_ids),
+        "variable_mode_count": len(variable_mode_ids),
         "token_count": len(document["tokens"]),
         "interaction_count": len(document["interactions"]),
         "layout_grid_style_count": len(layout_grid_style_ids),
@@ -1447,6 +1588,25 @@ def update_ui_artboard(
         if row["id"] != artboard_id:
             continue
         normalized_changes = dict(changes)
+        if (
+            "theme" in normalized_changes
+            and "variable_modes" not in normalized_changes
+        ):
+            from app.painter_ui_themes import normalize_ui_theme
+            from app.painter_ui_variables import (
+                LEGACY_THEME_COLLECTION_ID,
+                LEGACY_THEME_MODE_IDS,
+            )
+
+            theme_key = normalize_ui_theme(normalized_changes["theme"])
+            variable_modes = dict(row.get("variable_modes") or {})
+            variable_modes[LEGACY_THEME_COLLECTION_ID] = (
+                LEGACY_THEME_MODE_IDS.get(
+                    theme_key,
+                    LEGACY_THEME_MODE_IDS["light"],
+                )
+            )
+            normalized_changes["variable_modes"] = variable_modes
         if "layout_grid" in normalized_changes and "layout_grids" not in normalized_changes:
             grids = [dict(item) for item in row.get("layout_grids", [])]
             replacement = dict(normalized_changes["layout_grid"])
@@ -2204,6 +2364,10 @@ def add_ui_token(
     kind: str = "color",
     token_value: Any = None,
     theme_values: Mapping[str, Any] | None = None,
+    collection_id: str = "",
+    variable_type: str = "",
+    mode_values: Mapping[str, Any] | None = None,
+    scope: list[str] | None = None,
     alias_token_id: str = "",
     description: str = "",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2216,6 +2380,11 @@ def add_ui_token(
             "kind": kind,
             "value": token_value,
             "theme_values": dict(theme_values or {}),
+            "collection_id": collection_id,
+            "variable_type": variable_type,
+            "variable_type_explicit": bool(str(variable_type or "").strip()),
+            "mode_values": dict(mode_values or {}),
+            "scope": list(scope or []),
             "alias_token_id": alias_token_id,
             "description": description,
         },
@@ -2239,8 +2408,14 @@ def update_ui_token(
     for index, row in enumerate(document["tokens"]):
         if row["id"] != token_id:
             continue
+        normalized_changes = dict(changes)
+        if (
+            "variable_type" in normalized_changes
+            and "variable_type_explicit" not in normalized_changes
+        ):
+            normalized_changes["variable_type_explicit"] = True
         updated_row = _normalize_token(
-            {**row, **dict(changes), "id": row["id"]},
+            {**row, **normalized_changes, "id": row["id"]},
             index,
         )
         document["tokens"][index] = updated_row

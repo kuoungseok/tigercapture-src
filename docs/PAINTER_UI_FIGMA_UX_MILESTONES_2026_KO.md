@@ -10,6 +10,8 @@ Completed in the Page/navigation slice:
 
 - UI document schema 19 adds stable-ID `pages[]`, `active_page_id`, and
   per-artboard `page_id`; version 18 documents migrate into `Page 1`.
+- UI document schema 20 adds stable-ID Variable Collections/Modes and
+  per-artboard active mode selection while preserving schema 19 Pages.
 - Page add, rename, activate, and delete use the canonical document mutation
   service with one-step Undo, `.tspaint` persistence, and matching
   `paint.ui.page.*` Actions.
@@ -893,6 +895,21 @@ Implemented checkpoint (2026-07-29):
   combination report to automation. Reproducible visual evidence is generated
   by `tools/qa_painter_ui_component_playground.py` as
   `painter_ui_designer_m3_component_playground.png`.
+- UI schema 20 now persists stable-ID Variable Collections, stable-ID Modes,
+  per-artboard active mode maps, explicit color/number/string/boolean variable
+  types, mode values, aliases, and optional binding scopes. Schema 19
+  Light/Dark/High Contrast tokens migrate without changing token IDs.
+- The compact Tokens/Variables Assets surface shows one Collection and active
+  Mode at a time instead of reserving permanent Inspector space for every
+  mode. Collection and Mode add/rename/remove, current-mode value editing,
+  alias-chain/usage inspection, and artboard mode switching share the same
+  document services as automation.
+- `paint.ui.variable.collection.inspect/add/update/remove` and
+  `paint.ui.variable.mode.add/update/remove/set` provide Action parity and
+  one-step Undo. Token-library JSON v2 carries Collection/Mode records and
+  remains backward compatible with v1 and legacy arrays.
+- `tools/qa_painter_ui_variable_collections.py` regenerates compact-panel
+  evidence as `painter_ui_designer_m3_variable_collections.png`.
 
 Exit criteria:
 

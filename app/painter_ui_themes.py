@@ -42,6 +42,7 @@ def _token_value(
     token_id: str,
     *,
     theme: str,
+    variable_modes: Mapping[str, str] | None,
     tokens: Mapping[str, Mapping[str, Any]],
     stack: tuple[str, ...] = (),
 ) -> tuple[Any, list[str]]:
@@ -49,7 +50,19 @@ def _token_value(
     if token is None or token_id in stack:
         return None, list(stack)
     chain = [*stack, token_id]
+    collection_id = str(token.get("collection_id") or "")
     theme_values = normalize_ui_theme_values(token.get("theme_values"))
+    if (
+        collection_id == "ui-variable-collection-theme"
+        and theme in theme_values
+    ):
+        return copy.deepcopy(theme_values[theme]), chain
+    active_modes = variable_modes or {}
+    mode_id = str(active_modes.get(collection_id) or "")
+    mode_values = token.get("mode_values")
+    mode_values = mode_values if isinstance(mode_values, Mapping) else {}
+    if mode_id and mode_id in mode_values:
+        return copy.deepcopy(mode_values[mode_id]), chain
     if theme in theme_values:
         return copy.deepcopy(theme_values[theme]), chain
     alias_id = str(token.get("alias_token_id") or "")
@@ -60,6 +73,7 @@ def _token_value(
         return _token_value(
             alias_id,
             theme=theme,
+            variable_modes=active_modes,
             tokens=tokens,
             stack=tuple(chain),
         )
@@ -96,6 +110,7 @@ def resolve_ui_theme_object(
     *,
     theme: str,
     tokens: Mapping[str, Mapping[str, Any]],
+    variable_modes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     resolved = copy.deepcopy(dict(row))
     applied: dict[str, dict[str, Any]] = {}
@@ -107,6 +122,7 @@ def resolve_ui_theme_object(
         value, chain = _token_value(
             token_id,
             theme=normalized_theme,
+            variable_modes=variable_modes,
             tokens=tokens,
         )
         if value is None or not _set_binding_path(resolved, str(path), value):
@@ -133,15 +149,21 @@ def resolve_ui_theme_document(value: Mapping[str, Any]) -> dict[str, Any]:
         row["id"]: ui_theme_for_artboard(row)
         for row in document["artboards"]
     }
+    artboard_variable_modes = {
+        row["id"]: dict(row.get("variable_modes") or {})
+        for row in document["artboards"]
+    }
     document["objects"] = [
         resolve_ui_theme_object(
             row,
             theme=artboard_themes.get(row["artboard_id"], "light"),
+            variable_modes=artboard_variable_modes.get(row["artboard_id"], {}),
             tokens=tokens,
         )
         for row in document["objects"]
     ]
     document["resolved_themes"] = artboard_themes
+    document["resolved_variable_modes"] = artboard_variable_modes
     return document
 
 

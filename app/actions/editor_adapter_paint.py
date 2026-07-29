@@ -2873,6 +2873,10 @@ class PaintAdapterMixin(
         kind: str = "color",
         value: Any = None,
         theme_values: dict[str, Any] | None = None,
+        collection_id: str = "",
+        variable_type: str = "",
+        mode_values: dict[str, Any] | None = None,
+        scope: list[str] | None = None,
         alias_token_id: str = "",
         description: str = "",
     ) -> dict[str, Any]:
@@ -2885,6 +2889,10 @@ class PaintAdapterMixin(
             kind=kind,
             token_value=value,
             theme_values=theme_values,
+            collection_id=collection_id,
+            variable_type=variable_type,
+            mode_values=mode_values,
+            scope=scope,
             alias_token_id=alias_token_id,
             description=description,
         )
@@ -2922,6 +2930,175 @@ class PaintAdapterMixin(
         )
         dialog._push_undo_state("Remove UI token")
         return self._paint_ui_commit(dialog, "Remove UI token", document)
+
+    def paint_ui_variable_collection_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import inspect_ui_variable_collections
+
+        return inspect_ui_variable_collections(dialog._painter_ui_document)
+
+    def paint_ui_variable_collection_add(
+        self,
+        *,
+        name: str,
+        kind: str = "custom",
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import add_ui_variable_collection
+
+        document, row = add_ui_variable_collection(
+            dialog._painter_ui_document,
+            name=name,
+            kind=kind,
+            description=description,
+        )
+        dialog._push_undo_state("Add variable collection")
+        result = self._paint_ui_commit(
+            dialog,
+            "Add variable collection",
+            document,
+        )
+        result["variable_collection"] = row
+        return result
+
+    def paint_ui_variable_collection_update(
+        self,
+        *,
+        collection_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import update_ui_variable_collection
+
+        document, row = update_ui_variable_collection(
+            dialog._painter_ui_document,
+            collection_id,
+            changes,
+        )
+        dialog._push_undo_state("Update variable collection")
+        result = self._paint_ui_commit(
+            dialog,
+            "Update variable collection",
+            document,
+        )
+        result["variable_collection"] = row
+        return result
+
+    def paint_ui_variable_collection_remove(
+        self,
+        *,
+        collection_id: str,
+        detach_tokens: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import remove_ui_variable_collection
+
+        document, report = remove_ui_variable_collection(
+            dialog._painter_ui_document,
+            collection_id,
+            detach_tokens=detach_tokens,
+        )
+        dialog._push_undo_state("Remove variable collection")
+        result = self._paint_ui_commit(
+            dialog,
+            "Remove variable collection",
+            document,
+        )
+        result["variable_collection_remove"] = report
+        return result
+
+    def paint_ui_variable_mode_add(
+        self,
+        *,
+        collection_id: str,
+        name: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import add_ui_variable_mode
+
+        document, mode = add_ui_variable_mode(
+            dialog._painter_ui_document,
+            collection_id=collection_id,
+            name=name,
+        )
+        dialog._push_undo_state("Add variable mode")
+        result = self._paint_ui_commit(dialog, "Add variable mode", document)
+        result["variable_mode"] = mode
+        return result
+
+    def paint_ui_variable_mode_update(
+        self,
+        *,
+        collection_id: str,
+        mode_id: str,
+        name: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import update_ui_variable_mode
+
+        document, mode = update_ui_variable_mode(
+            dialog._painter_ui_document,
+            collection_id=collection_id,
+            mode_id=mode_id,
+            name=name,
+        )
+        dialog._push_undo_state("Update variable mode")
+        result = self._paint_ui_commit(
+            dialog,
+            "Update variable mode",
+            document,
+        )
+        result["variable_mode"] = mode
+        return result
+
+    def paint_ui_variable_mode_remove(
+        self,
+        *,
+        collection_id: str,
+        mode_id: str,
+        detach_values: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import remove_ui_variable_mode
+
+        document, report = remove_ui_variable_mode(
+            dialog._painter_ui_document,
+            collection_id=collection_id,
+            mode_id=mode_id,
+            detach_values=detach_values,
+        )
+        dialog._push_undo_state("Remove variable mode")
+        result = self._paint_ui_commit(
+            dialog,
+            "Remove variable mode",
+            document,
+        )
+        result["variable_mode_remove"] = report
+        return result
+
+    def paint_ui_variable_mode_set(
+        self,
+        *,
+        collection_id: str,
+        mode_id: str,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_variables import set_ui_variable_mode
+
+        document, report = set_ui_variable_mode(
+            dialog._painter_ui_document,
+            artboard_id=(
+                artboard_id or dialog._painter_ui_document["active_artboard_id"]
+            ),
+            collection_id=collection_id,
+            mode_id=mode_id,
+        )
+        dialog._push_undo_state("Set variable mode")
+        result = self._paint_ui_commit(dialog, "Set variable mode", document)
+        result["variable_mode_set"] = report
+        return result
 
     def paint_ui_token_suggest(
         self,

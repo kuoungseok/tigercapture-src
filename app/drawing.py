@@ -10578,6 +10578,27 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.token_export_requested.connect(
             self._export_painter_ui_tokens
         )
+        self._paint_ui_inspector.variable_collection_add_requested.connect(
+            self._add_painter_ui_variable_collection
+        )
+        self._paint_ui_inspector.variable_collection_update_requested.connect(
+            self._update_painter_ui_variable_collection
+        )
+        self._paint_ui_inspector.variable_collection_remove_requested.connect(
+            self._remove_painter_ui_variable_collection
+        )
+        self._paint_ui_inspector.variable_mode_add_requested.connect(
+            self._add_painter_ui_variable_mode
+        )
+        self._paint_ui_inspector.variable_mode_update_requested.connect(
+            self._update_painter_ui_variable_mode
+        )
+        self._paint_ui_inspector.variable_mode_remove_requested.connect(
+            self._remove_painter_ui_variable_mode
+        )
+        self._paint_ui_inspector.variable_mode_set_requested.connect(
+            self._set_painter_ui_variable_mode
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -15591,6 +15612,10 @@ class PaintDialog(QDialog):
             kind=str(values.get("kind") or "color"),
             token_value=values.get("value"),
             theme_values=values.get("theme_values"),
+            collection_id=str(values.get("collection_id") or ""),
+            variable_type=str(values.get("variable_type") or ""),
+            mode_values=values.get("mode_values"),
+            scope=values.get("scope"),
             alias_token_id=str(values.get("alias_token_id") or ""),
             description=str(values.get("description") or ""),
         )
@@ -15693,6 +15718,144 @@ class PaintDialog(QDialog):
         )
         if path:
             export_ui_token_library(self._painter_ui_document, path)
+
+    def _commit_painter_ui_variable_document(
+        self,
+        document: object,
+        label: str,
+    ) -> None:
+        if not isinstance(document, dict):
+            return
+        self._push_undo_state(label)
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_variable_collection(self, values: object) -> None:
+        from app.painter_ui_variables import add_ui_variable_collection
+
+        if not isinstance(values, dict):
+            return
+        document, _row = add_ui_variable_collection(
+            self._painter_ui_document,
+            name=str(values.get("name") or ""),
+            kind=str(values.get("kind") or "custom"),
+            description=str(values.get("description") or ""),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Add variable collection",
+        )
+
+    def _update_painter_ui_variable_collection(
+        self,
+        collection_id: str,
+        changes: object,
+    ) -> None:
+        from app.painter_ui_variables import update_ui_variable_collection
+
+        if not isinstance(changes, dict):
+            return
+        document, _row = update_ui_variable_collection(
+            self._painter_ui_document,
+            str(collection_id),
+            changes,
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Update variable collection",
+        )
+
+    def _remove_painter_ui_variable_collection(
+        self,
+        collection_id: str,
+        detach_tokens: bool,
+    ) -> None:
+        from app.painter_ui_variables import remove_ui_variable_collection
+
+        document, _report = remove_ui_variable_collection(
+            self._painter_ui_document,
+            str(collection_id),
+            detach_tokens=bool(detach_tokens),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Remove variable collection",
+        )
+
+    def _add_painter_ui_variable_mode(
+        self,
+        collection_id: str,
+        name: str,
+    ) -> None:
+        from app.painter_ui_variables import add_ui_variable_mode
+
+        document, _mode = add_ui_variable_mode(
+            self._painter_ui_document,
+            collection_id=str(collection_id),
+            name=str(name),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Add variable mode",
+        )
+
+    def _update_painter_ui_variable_mode(
+        self,
+        collection_id: str,
+        mode_id: str,
+        name: str,
+    ) -> None:
+        from app.painter_ui_variables import update_ui_variable_mode
+
+        document, _mode = update_ui_variable_mode(
+            self._painter_ui_document,
+            collection_id=str(collection_id),
+            mode_id=str(mode_id),
+            name=str(name),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Update variable mode",
+        )
+
+    def _remove_painter_ui_variable_mode(
+        self,
+        collection_id: str,
+        mode_id: str,
+        detach_values: bool,
+    ) -> None:
+        from app.painter_ui_variables import remove_ui_variable_mode
+
+        document, _report = remove_ui_variable_mode(
+            self._painter_ui_document,
+            collection_id=str(collection_id),
+            mode_id=str(mode_id),
+            detach_values=bool(detach_values),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Remove variable mode",
+        )
+
+    def _set_painter_ui_variable_mode(
+        self,
+        artboard_id: str,
+        collection_id: str,
+        mode_id: str,
+    ) -> None:
+        from app.painter_ui_variables import set_ui_variable_mode
+
+        document, _report = set_ui_variable_mode(
+            self._painter_ui_document,
+            artboard_id=str(artboard_id),
+            collection_id=str(collection_id),
+            mode_id=str(mode_id),
+        )
+        self._commit_painter_ui_variable_document(
+            document,
+            "Set variable mode",
+        )
 
     def _update_painter_ui_objects_batch(
         self,

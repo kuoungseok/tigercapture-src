@@ -123,9 +123,17 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.token.add",
         "paint.ui.token.update",
         "paint.ui.token.remove",
-        "paint.ui.token.bind",
-        "paint.ui.token.unbind",
-        "paint.ui.interaction.add",
+            "paint.ui.token.bind",
+            "paint.ui.token.unbind",
+            "paint.ui.variable.collection.inspect",
+            "paint.ui.variable.collection.add",
+            "paint.ui.variable.collection.update",
+            "paint.ui.variable.collection.remove",
+            "paint.ui.variable.mode.add",
+            "paint.ui.variable.mode.update",
+            "paint.ui.variable.mode.remove",
+            "paint.ui.variable.mode.set",
+            "paint.ui.interaction.add",
         "paint.ui.interaction.update",
         "paint.ui.interaction.remove",
         "paint.ui.motion.attach",
@@ -407,7 +415,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
-    assert stored["ui_document"]["version"] == 19
+    assert stored["ui_document"]["version"] == 20
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id
