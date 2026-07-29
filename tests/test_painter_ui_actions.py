@@ -1148,6 +1148,58 @@ def test_painter_ui_overlay_uses_canvas_first_wheel_navigation() -> None:
     app.processEvents()
 
 
+def test_painter_ui_overlay_native_gestures_preserve_focus_and_clamp() -> None:
+    app = _app()
+    from PySide6.QtCore import QPointF, Qt
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(900, 640)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.fit_artboard()
+    anchor = QPointF(450.0, 320.0)
+    before = overlay.view_state()
+    world_before = QPointF(
+        (anchor.x() - before["offset_x"]) / before["scale"],
+        (anchor.y() - before["offset_y"]) / before["scale"],
+    )
+    assert overlay.apply_native_gesture(
+        Qt.NativeGestureType.ZoomNativeGesture,
+        value=0.18,
+        position=anchor,
+    )
+    zoomed = overlay.view_state()
+    world_after = QPointF(
+        (anchor.x() - zoomed["offset_x"]) / zoomed["scale"],
+        (anchor.y() - zoomed["offset_y"]) / zoomed["scale"],
+    )
+    assert zoomed["scale"] > before["scale"]
+    assert abs(world_after.x() - world_before.x()) < 0.001
+    assert abs(world_after.y() - world_before.y()) < 0.001
+
+    assert overlay.apply_native_gesture(
+        Qt.NativeGestureType.PanNativeGesture,
+        delta=QPointF(12.25, -7.5),
+    )
+    panned = overlay.view_state()
+    assert abs(panned["offset_x"] - zoomed["offset_x"] - 12.25) < 0.001
+    assert abs(panned["offset_y"] - zoomed["offset_y"] + 7.5) < 0.001
+
+    overlay.pan_view(x=1_000_000.0, y=-1_000_000.0)
+    clamped = overlay.view_state()
+    bounds = overlay._scene_bounds()
+    assert bounds.left() * clamped["scale"] + clamped["offset_x"] <= 876.0
+    assert bounds.right() * clamped["scale"] + clamped["offset_x"] >= 24.0
+    assert bounds.top() * clamped["scale"] + clamped["offset_y"] <= 616.0
+    assert bounds.bottom() * clamped["scale"] + clamped["offset_y"] >= 24.0
+
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
 def test_painter_ui_overlay_marquee_selection_emits_replace_then_add() -> None:
     app = _app()
     from PySide6.QtCore import QPoint, Qt

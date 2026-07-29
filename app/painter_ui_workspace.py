@@ -5,7 +5,7 @@ import copy
 import math
 from typing import Any, Mapping
 
-from PySide6.QtCore import QPointF, QRectF, Signal, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Signal, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -744,6 +744,31 @@ class PainterUIDesignOverlay(QWidget):
             return self._fit_transform(self._scene_bounds())
         return self._view_scale, QPointF(self._view_offset)
 
+    def _clamped_view_offset(
+        self,
+        scale: float,
+        offset: QPointF,
+    ) -> QPointF:
+        bounds = self._scene_bounds()
+        if bounds.isEmpty() or self.width() <= 0 or self.height() <= 0:
+            return QPointF(offset)
+        visible_edge = max(
+            24.0,
+            min(96.0, min(float(self.width()), float(self.height())) * 0.16),
+        )
+        minimum_x = visible_edge - bounds.right() * scale
+        maximum_x = (
+            float(self.width()) - visible_edge - bounds.left() * scale
+        )
+        minimum_y = visible_edge - bounds.bottom() * scale
+        maximum_y = (
+            float(self.height()) - visible_edge - bounds.top() * scale
+        )
+        return QPointF(
+            max(minimum_x, min(maximum_x, float(offset.x()))),
+            max(minimum_y, min(maximum_y, float(offset.y()))),
+        )
+
     def _artboard_viewport(
         self,
         artboard: Mapping[str, Any] | None = None,
@@ -878,9 +903,12 @@ class PainterUIDesignOverlay(QWidget):
             (point.y() - old_offset.y()) / max(0.0001, old_scale),
         )
         self._view_scale = max(0.03, min(8.0, float(percent) / 100.0))
-        self._view_offset = QPointF(
-            point.x() - world.x() * self._view_scale,
-            point.y() - world.y() * self._view_scale,
+        self._view_offset = self._clamped_view_offset(
+            self._view_scale,
+            QPointF(
+                point.x() - world.x() * self._view_scale,
+                point.y() - world.y() * self._view_scale,
+            ),
         )
         self.update()
         self._emit_view_changed()
@@ -896,9 +924,12 @@ class PainterUIDesignOverlay(QWidget):
     ) -> dict[str, Any]:
         scale, offset = self._view_transform()
         self._view_scale = scale
-        self._view_offset = QPointF(
-            float(offset.x() + dx) if x is None else float(x),
-            float(offset.y() + dy) if y is None else float(y),
+        self._view_offset = self._clamped_view_offset(
+            scale,
+            QPointF(
+                float(offset.x() + dx) if x is None else float(x),
+                float(offset.y() + dy) if y is None else float(y),
+            ),
         )
         self.update()
         self._emit_view_changed()
@@ -938,7 +969,7 @@ class PainterUIDesignOverlay(QWidget):
                 _view_number("offset_y", 0.0),
             )
         self._view_scale = scale
-        self._view_offset = offset
+        self._view_offset = self._clamped_view_offset(scale, offset)
         self.update()
         if emit:
             self._emit_view_changed()
@@ -3145,8 +3176,9 @@ class PainterUIDesignOverlay(QWidget):
             return
         if self._interaction == "pan":
             self._view_scale, _offset = self._view_transform()
-            self._view_offset = self._pan_origin + (
-                event.position() - self._pan_start
+            self._view_offset = self._clamped_view_offset(
+                self._view_scale,
+                self._pan_origin + (event.position() - self._pan_start),
             )
             self.update()
             self._emit_view_changed()
@@ -3826,6 +3858,58 @@ class PainterUIDesignOverlay(QWidget):
                     dy=float(delta_y) * unit,
                 )
         event.accept()
+
+    def apply_native_gesture(
+        self,
+        gesture_type: Qt.NativeGestureType,
+        *,
+        value: float = 0.0,
+        delta: QPointF | None = None,
+        position: QPointF | None = None,
+    ) -> bool:
+        if gesture_type in {
+            Qt.NativeGestureType.BeginNativeGesture,
+            Qt.NativeGestureType.EndNativeGesture,
+        }:
+            return True
+        if gesture_type == Qt.NativeGestureType.PanNativeGesture:
+            movement = QPointF(delta) if delta is not None else QPointF()
+            self.pan_view(dx=movement.x(), dy=movement.y())
+            return True
+        if gesture_type == Qt.NativeGestureType.ZoomNativeGesture:
+            old_scale, _offset = self._view_transform()
+            factor = math.exp(max(-1.5, min(1.5, float(value))))
+            anchor = (
+                QPointF(position)
+                if position is not None
+                else QPointF(
+                    float(self.width()) * 0.5,
+                    float(self.height()) * 0.5,
+                )
+            )
+            self.set_zoom_percent(
+                old_scale * factor * 100.0,
+                anchor=anchor,
+            )
+            return True
+        if gesture_type == Qt.NativeGestureType.SmartZoomNativeGesture:
+            if not self.fit_selection():
+                self.fit_artboard()
+            return True
+        return False
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.NativeGesture:
+            handled = self.apply_native_gesture(
+                event.gestureType(),
+                value=float(event.value()),
+                delta=QPointF(event.delta()),
+                position=QPointF(event.position()),
+            )
+            if handled:
+                event.accept()
+                return True
+        return super().event(event)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()

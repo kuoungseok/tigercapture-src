@@ -463,11 +463,17 @@ Implemented checkpoint (2026-07-29, remembered viewport slice):
   so resizing the Painter window does not move the remembered design focus.
 - Pan, zoom, fit, pointer navigation, and `paint.ui.view.*` Actions all pass
   through the overlay's shared `view_changed` contract.
+- Native trackpad Pan/Zoom gestures use that same contract. Pinch keeps the
+  world point below the cursor stable, two-finger movement preserves subpixel
+  offsets, and Smart Zoom focuses the selection or active artboard.
+- Mouse, trackpad, and Action panning share a minimum-visible-edge clamp, so
+  every artboard cannot be pushed completely beyond recovery.
 - Viewport changes remain non-document, non-Undo workspace state, while
   `.tspaint` saves and restores them under
   `workspace.ui_artboard_viewports`.
 - `tools/qa_painter_ui_page_viewports.py` verifies independent Phone/Desktop
-  restoration at desktop and compact sizes with zero-width Auto-hide panels.
+  restoration plus native gesture/clamp behavior at desktop and compact sizes
+  with zero-width Auto-hide panels.
   Regenerable evidence stays under
   `debugCapture/painter_ui_page_viewports_m1`.
 

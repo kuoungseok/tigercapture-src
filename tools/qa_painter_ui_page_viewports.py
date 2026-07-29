@@ -25,6 +25,7 @@ def main() -> int:
     os.environ.setdefault("TIGERSTUDIO_PAINTER_PANEL_SETTINGS", "0")
 
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPointF, Qt
 
     from app.actions.registry import ActionRegistry
     from app.drawing import PaintDialog, create_blank_paint_pixmap
@@ -93,20 +94,58 @@ def main() -> int:
         desktop_restored = dialog._painter_ui_overlay.view_state()
         desktop_path = output_dir / f"desktop_restored_{label}.png"
         desktop_saved = dialog.grab().save(str(desktop_path), "PNG")
+        overlay = dialog._painter_ui_overlay
+        native_before = overlay.view_state()
+        native_zoomed = overlay.apply_native_gesture(
+            Qt.NativeGestureType.ZoomNativeGesture,
+            value=0.12,
+            position=QPointF(
+                float(overlay.width()) * 0.5,
+                float(overlay.height()) * 0.5,
+            ),
+        )
+        native_panned = overlay.apply_native_gesture(
+            Qt.NativeGestureType.PanNativeGesture,
+            delta=QPointF(13.5, -8.25),
+        )
+        overlay.pan_view(x=1_000_000.0, y=-1_000_000.0)
+        native_view = overlay.view_state()
+        bounds = overlay._scene_bounds()
+        clamped = bool(
+            bounds.left() * native_view["scale"] + native_view["offset_x"]
+            <= float(overlay.width()) - 24.0
+            and bounds.right() * native_view["scale"]
+            + native_view["offset_x"]
+            >= 24.0
+            and bounds.top() * native_view["scale"] + native_view["offset_y"]
+            <= float(overlay.height()) - 24.0
+            and bounds.bottom() * native_view["scale"]
+            + native_view["offset_y"]
+            >= 24.0
+        )
+        native_path = output_dir / f"native_clamp_{label}.png"
+        native_saved = dialog.grab().save(str(native_path), "PNG")
 
         results[label] = {
             "ok": bool(
                 phone_saved
                 and desktop_saved
+                and native_saved
                 and _same_view(phone, phone_restored)
                 and _same_view(desktop, desktop_restored)
+                and native_zoomed
+                and native_panned
+                and native_view["scale"] > native_before["scale"]
+                and clamped
                 and dialog._paint_inspector_frame.width() <= 40
                 and dialog._painter_ui_navigator.width() <= 40
             ),
             "phone_screenshot": str(phone_path),
             "desktop_screenshot": str(desktop_path),
+            "native_clamp_screenshot": str(native_path),
             "phone": phone_restored,
             "desktop": desktop_restored,
+            "native_clamped": clamped,
         }
         dialog.close()
         dialog.deleteLater()
