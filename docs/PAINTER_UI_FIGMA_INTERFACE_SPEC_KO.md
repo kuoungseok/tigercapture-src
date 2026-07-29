@@ -781,6 +781,13 @@ Batch Rename:
 - Layers 선택 후 Rename
 - prefix/suffix/number/replace pattern
 - 적용 전 결과 preview
+- `UI > Batch Rename`과 Quick Actions에서만 여는 비고정 대화상자다.
+- 선택 객체의 stable ID와 계층은 유지하고 `name`만 변경한다.
+- preview의 stable match ID를 기준으로 일부 결과만 선택 적용할 수 있다.
+- UI와 `paint.ui.batch_rename.inspect/apply` Action은 동일한
+  `app/painter_ui_batch_rename.py` 서비스를 사용한다.
+- 미리보기는 읽기 전용이며 적용은 한 번의 revision, dirty transition,
+  Undo 단계로 저장한다.
 
 Shortcut:
 

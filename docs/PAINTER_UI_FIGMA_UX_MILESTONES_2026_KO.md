@@ -1357,6 +1357,22 @@ Implemented checkpoint (2026-07-29, Find/Replace slice):
   covered. Evidence regenerates via `tools/qa_painter_ui_find_replace.py`
   under `debugCapture/painter_ui_designer/find_replace`.
 
+Implemented checkpoint (2026-07-29, Batch Rename slice):
+
+- UI > Batch Rename and Quick Actions open an on-demand dialog for the current
+  UI selection; no fixed canvas or Inspector space is consumed.
+- `app/painter_ui_batch_rename.py` previews find/replace, prefix, suffix, and
+  deterministic numbering while preserving stable object IDs and hierarchy.
+- Every preview row has a stable match ID and can be excluded before apply.
+  No-op rows are omitted, and invalid or missing object targets fail
+  explicitly.
+- UI, `paint.ui.batch_rename.inspect`, and
+  `paint.ui.batch_rename.apply` share the same service. Apply creates one
+  document revision, dirty transition, and Undo step.
+- Korean and supported-language copy plus desktop and compact evidence are
+  covered. `tools/qa_painter_ui_batch_rename.py` regenerates evidence under
+  `debugCapture/painter_ui_designer/batch_rename`.
+
 Exit criteria:
 
 - Pan, zoom, selection, and resize stay responsive under the release corpus.

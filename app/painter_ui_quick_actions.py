@@ -135,6 +135,14 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "find_replace"},
     },
     {
+        "id": "selection.batch_rename",
+        "label": "Batch Rename",
+        "detail": "Preview names for the selected UI objects before applying.",
+        "keywords": "batch rename layers prefix suffix number replace",
+        "operation": {"type": "batch_rename"},
+        "requires": "selection",
+    },
+    {
         "id": "selection.duplicate_next_artboard",
         "label": "Duplicate to next artboard",
         "detail": "Copy the selected hierarchy to the next screen",

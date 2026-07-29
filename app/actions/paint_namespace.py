@@ -1716,6 +1716,50 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Find / Replace",
         dry_summary="selected Painter UI replacements would be applied",
     )
+    batch_rename_params = schema_object(
+        {
+            "object_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "find": {"type": "string"},
+            "replacement": {"type": "string"},
+            "prefix": {"type": "string"},
+            "suffix": {"type": "string"},
+            "numbering": {"type": "boolean"},
+            "number_start": {"type": "integer"},
+            "number_padding": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8,
+            },
+            "number_separator": {"type": "string"},
+            "case_sensitive": {"type": "boolean"},
+            "selected_match_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.batch_rename.inspect",
+        "Preview batch names for selected Painter UI objects.",
+        "paint",
+        "paint_ui_batch_rename_inspect",
+        params_schema=batch_rename_params,
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI batch names would be previewed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.batch_rename.apply",
+        "Apply reviewed Painter UI object names as one undo step.",
+        "paint",
+        "paint_ui_batch_rename_apply",
+        params_schema=batch_rename_params,
+        undo_label="Batch Rename",
+        dry_summary="reviewed Painter UI names would be applied",
+    )
     registry.register_adapter_action(
         "paint.ui.selection.parent",
         "Select the immediate parent of a Painter UI object without changing the document.",

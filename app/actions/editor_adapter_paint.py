@@ -2841,6 +2841,83 @@ class PaintAdapterMixin(
         state["find_replace"] = report
         return state
 
+    def paint_ui_batch_rename_inspect(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        find: str = "",
+        replacement: str = "",
+        prefix: str = "",
+        suffix: str = "",
+        numbering: bool = False,
+        number_start: int = 1,
+        number_padding: int = 0,
+        number_separator: str = " ",
+        case_sensitive: bool = False,
+        selected_match_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        del selected_match_ids
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_batch_rename import inspect_ui_batch_rename
+
+        return inspect_ui_batch_rename(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+            find=find,
+            replacement=replacement,
+            prefix=prefix,
+            suffix=suffix,
+            numbering=numbering,
+            number_start=number_start,
+            number_padding=number_padding,
+            number_separator=number_separator,
+            case_sensitive=case_sensitive,
+        )
+
+    def paint_ui_batch_rename_apply(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        find: str = "",
+        replacement: str = "",
+        prefix: str = "",
+        suffix: str = "",
+        numbering: bool = False,
+        number_start: int = 1,
+        number_padding: int = 0,
+        number_separator: str = " ",
+        case_sensitive: bool = False,
+        selected_match_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_batch_rename import apply_ui_batch_rename
+
+        document, report = apply_ui_batch_rename(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+            find=find,
+            replacement=replacement,
+            prefix=prefix,
+            suffix=suffix,
+            numbering=numbering,
+            number_start=number_start,
+            number_padding=number_padding,
+            number_separator=number_separator,
+            case_sensitive=case_sensitive,
+            selected_match_ids=selected_match_ids,
+        )
+        if int(report.get("applied_count") or 0):
+            dialog._push_undo_state("Batch Rename")
+            state = self._paint_ui_commit(
+                dialog,
+                "Batch Rename",
+                document,
+            )
+        else:
+            state = dialog.painter_action_state()
+        state["batch_rename"] = report
+        return state
+
     def paint_ui_selection_parent(
         self,
         *,
