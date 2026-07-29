@@ -653,6 +653,18 @@ Disposition:
 - Actor Only
 - Blocked
 
+Implemented Inspect/Dev contract (2026-07-29):
+
+- Inspect remains one of the three contextual right-side modes. Developer
+  handoff is the first Inspect sub-tab, not another permanent top-level panel.
+- Ready state and pinned annotations bind to stable section, artboard,
+  component, or object IDs through `linked_targets.dev_handoff`.
+- One shared report supplies geometry, layout, typography, tokens and alias
+  chains, accessibility, interactions, measurements, validation, and
+  target-specific delivery dispositions to both UI and Actions.
+- The Inspector may shrink to compact remote-work widths; hidden pages no
+  longer force the canvas to surrender a fixed minimum width.
+
 코드 스니펫은 실제 adapter가 생성한 경우에만 표시한다. Painter가 지원하지
 않는 CSS/iOS/Android/UMG 코드를 임의로 만들어 보여주지 않는다.
 

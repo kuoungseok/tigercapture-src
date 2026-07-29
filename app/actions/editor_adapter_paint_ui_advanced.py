@@ -106,6 +106,144 @@ class PaintUIAdvancedAdapterMixin:
             object_ids=object_ids,
         )
 
+    def paint_ui_dev_ready_set(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        ready: bool,
+        note: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_handoff import set_ui_dev_ready
+
+        dialog = self._paint_dialog_owner()
+        document, status = set_ui_dev_ready(
+            dialog._painter_ui_document,
+            target_type=target_type,
+            target_id=target_id,
+            ready=ready,
+            note=note,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Set UI developer readiness",
+            document,
+        )
+        return {**result, "readiness": status}
+
+    def paint_ui_dev_inspect(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+
+        dialog = self._paint_dialog_owner()
+        return inspect_ui_dev_handoff(
+            dialog._painter_ui_document,
+            object_ids=object_ids,
+        )
+
+    def paint_ui_dev_annotation_add(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        text: str,
+        kind: str = "note",
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_handoff import add_ui_dev_annotation
+
+        dialog = self._paint_dialog_owner()
+        document, annotation = add_ui_dev_annotation(
+            dialog._painter_ui_document,
+            target_type=target_type,
+            target_id=target_id,
+            text=text,
+            kind=kind,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Add UI developer annotation",
+            document,
+        )
+        return {**result, "annotation": annotation}
+
+    def paint_ui_dev_annotation_update(
+        self,
+        *,
+        annotation_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_handoff import update_ui_dev_annotation
+
+        dialog = self._paint_dialog_owner()
+        document, annotation = update_ui_dev_annotation(
+            dialog._painter_ui_document,
+            annotation_id,
+            changes,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Update UI developer annotation",
+            document,
+        )
+        return {**result, "annotation": annotation}
+
+    def paint_ui_dev_annotation_remove(
+        self,
+        *,
+        annotation_id: str,
+    ) -> dict[str, Any]:
+        from app.painter_ui_dev_handoff import remove_ui_dev_annotation
+
+        dialog = self._paint_dialog_owner()
+        document = remove_ui_dev_annotation(
+            dialog._painter_ui_document,
+            annotation_id,
+        )
+        return self._paint_ui_advanced_apply(
+            "Remove UI developer annotation",
+            document,
+        )
+
+    def paint_ui_dev_revision_compare(
+        self,
+        *,
+        checkpoint_id: str,
+    ) -> dict[str, Any]:
+        from app.painter_ui_review import diff_ui_checkpoint
+
+        dialog = self._paint_dialog_owner()
+        return diff_ui_checkpoint(dialog._painter_ui_document, checkpoint_id)
+
+    def paint_ui_delivery_feature_inspect(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        from app.painter_ui_delivery import ui_object_delivery_statuses
+
+        dialog = self._paint_dialog_owner()
+        return ui_object_delivery_statuses(
+            dialog._painter_ui_document,
+            object_id,
+        )
+
+    def paint_ui_delivery_artifact_open(
+        self,
+        *,
+        path: str,
+    ) -> dict[str, Any]:
+        from pathlib import Path
+
+        target = Path(path).expanduser().resolve()
+        if not target.exists():
+            raise ValueError(f"Painter UI delivery artifact not found: {path}")
+        return {
+            "schema": "tigerstudio.painter.ui.delivery_artifact.v1",
+            "path": str(target),
+            "kind": "directory" if target.is_dir() else target.suffix.casefold().lstrip("."),
+            "bytes": target.stat().st_size if target.is_file() else 0,
+        }
+
     def paint_ui_smart_guide_inspect(
         self,
         *,

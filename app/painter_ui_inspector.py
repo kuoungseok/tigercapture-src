@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -367,6 +368,9 @@ class PainterUIInspector(QWidget):
     prototype_preview_changed = Signal(bool)
     prototype_preview_reset_requested = Signal()
     stress_preview_requested = Signal(str, str)
+    dev_ready_set_requested = Signal(str, str, bool, str)
+    dev_annotation_add_requested = Signal(str, str, str)
+    dev_revision_compare_requested = Signal()
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
     temporary_close_requested = Signal()
@@ -381,6 +385,11 @@ class PainterUIInspector(QWidget):
         self._temporary_expanded = False
         self._auto_hide = False
         self.setObjectName("PainterUIInspector")
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -695,6 +704,12 @@ class PainterUIInspector(QWidget):
         tabs.tabBar().setAutoHide(True)
         tabs.tabBar().setExpanding(True)
         tabs.tabBar().setUsesScrollButtons(False)
+        tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        tabs.setMinimumWidth(0)
+        tabs.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Ignored,
+        )
         self._tabs = tabs
         self._tabs.currentChanged.connect(self._emit_context_mode_changed)
         root.addWidget(tabs, 1)
@@ -1040,6 +1055,24 @@ class PainterUIInspector(QWidget):
         ):
             source.connect(target)
         add_inspector_tab(self.production_panel, "Publish", "export")
+
+        from app.painter_ui_dev_panel import PainterUIDevPanel
+
+        self.dev_panel = PainterUIDevPanel()
+        self.dev_panel.ready_set_requested.connect(
+            self.dev_ready_set_requested
+        )
+        self.dev_panel.annotation_add_requested.connect(
+            self.dev_annotation_add_requested
+        )
+        self.dev_panel.revision_compare_requested.connect(
+            self.dev_revision_compare_requested
+        )
+        self.production_panel.tabs.insertTab(
+            0,
+            self.dev_panel,
+            painter_text("Inspect / Dev"),
+        )
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -2401,6 +2434,9 @@ class PainterUIInspector(QWidget):
         self.token_library.set_document(self._document)
         self.prototype_panel.set_document(self._document)
         self.production_panel.set_document(self._document)
+        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+
+        self.dev_panel.set_report(inspect_ui_dev_handoff(self._document))
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         active_page = self._document["active_page_id"]

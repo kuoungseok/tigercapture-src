@@ -793,6 +793,30 @@ QWidget#PainterUIInspector QTreeWidget::item:selected {
     color: #ffffff;
 }
 
+QWidget#PainterUIDevPanel {
+    background-color: #15191f;
+}
+
+QFrame#PainterUIDevCard {
+    background-color: #1b222c;
+    border: 1px solid #303b49;
+    border-radius: 5px;
+}
+
+QLabel#PainterUIDevMetrics {
+    color: #c5d0dd;
+    background-color: #10151c;
+    border: 1px solid #293441;
+    border-radius: 4px;
+    padding: 7px;
+}
+
+QWidget#PainterUIDevPanel QListWidget {
+    background-color: #10151c;
+    border: 1px solid #293441;
+    border-radius: 4px;
+}
+
 QFrame#PainterUISelectionContext {
     background-color: #20262e;
     border: 1px solid #34404d;
@@ -10461,6 +10485,15 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.stress_preview_requested.connect(
             self._set_painter_ui_stress_preview
         )
+        self._paint_ui_inspector.dev_ready_set_requested.connect(
+            self._set_painter_ui_dev_ready
+        )
+        self._paint_ui_inspector.dev_annotation_add_requested.connect(
+            self._add_painter_ui_dev_annotation
+        )
+        self._paint_ui_inspector.dev_revision_compare_requested.connect(
+            self._compare_painter_ui_dev_revision
+        )
         self._paint_ui_inspector.template_save_requested.connect(
             self._save_painter_ui_template
         )
@@ -15249,6 +15282,66 @@ class PaintDialog(QDialog):
         )
         if panel is not None:
             panel.set_status(str(text))
+
+    def _set_painter_ui_dev_ready(
+        self,
+        target_type: str,
+        target_id: str,
+        ready: bool,
+        note: str,
+    ) -> None:
+        from app.painter_ui_dev_handoff import set_ui_dev_ready
+
+        document, _status = set_ui_dev_ready(
+            self._painter_ui_document,
+            target_type=target_type,
+            target_id=target_id,
+            ready=ready,
+            note=note,
+        )
+        self._push_undo_state("Set UI developer readiness")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_dev_annotation(
+        self,
+        target_type: str,
+        target_id: str,
+        text: str,
+    ) -> None:
+        from app.painter_ui_dev_handoff import add_ui_dev_annotation
+
+        document, _annotation = add_ui_dev_annotation(
+            self._painter_ui_document,
+            target_type=target_type,
+            target_id=target_id,
+            text=text,
+        )
+        self._push_undo_state("Add UI developer annotation")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _compare_painter_ui_dev_revision(self) -> None:
+        from app.painter_ui_review import inspect_ui_review
+
+        review = inspect_ui_review(self._painter_ui_document)
+        checkpoints = review.get("checkpoints") or []
+        if not checkpoints:
+            self._painter_ui_production_status(
+                "Create a review checkpoint before comparing revisions."
+            )
+            return
+        from app.painter_ui_review import diff_ui_checkpoint
+
+        report = diff_ui_checkpoint(
+            self._painter_ui_document,
+            str(checkpoints[-1]["id"]),
+        )
+        self._painter_ui_production_status(
+            f"Revision comparison: {report['change_count']} changes."
+        )
 
     def _save_painter_ui_template(self, template_id: str, name: str) -> None:
         if not str(template_id).strip() or not str(name).strip():

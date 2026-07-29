@@ -1158,6 +1158,39 @@ Required Actions:
 - `paint.ui.delivery.feature.inspect`
 - `paint.ui.delivery.artifact.open`
 
+Implemented checkpoint (2026-07-29, Dev handoff vertical slice):
+
+- Inspect mode now owns a compact `Inspect / Dev` surface instead of adding a
+  fourth top-level workspace mode. Design, Prototype, and Inspect remain the
+  only top-level modes.
+- `linked_targets.dev_handoff` stores stable-ID readiness and pinned developer
+  annotations without duplicating object geometry or style data.
+- The shared inspection service reports resolved geometry, Auto Layout,
+  typography, token bindings and alias chains, accessibility, interactions,
+  nearest measurements, annotations, validation, and per-target delivery.
+- UI and Actions call the same mutation service. Ready and annotation changes
+  create one Undo entry and survive `.tspaint` document normalization.
+- The required M6 Action surface is registered:
+  `paint.ui.dev.ready.set`, `paint.ui.dev.inspect`,
+  `paint.ui.dev.annotation.add/update/remove`,
+  `paint.ui.dev.measurement.inspect`, `paint.ui.dev.revision.compare`,
+  `paint.ui.delivery.feature.inspect`, and
+  `paint.ui.delivery.artifact.open`.
+- Inspector minimum-size pressure was removed. The real Inspector was captured
+  at 340 px desktop and 244 px compact widths with no content overlap.
+- Evidence:
+  `debugCapture/painter_ui_designer/dev_handoff/dev_handoff_desktop.png`,
+  `dev_handoff_compact.png`, and `report.json`.
+- Verification: 389 Painter UI tests and 20 architecture/i18n guards pass.
+
+Remaining M6 scope:
+
+- adapter-owned copyable CSS/Web, iOS, Android, App, and UMG snippets;
+- richer variable mode resolution and a dedicated alias-chain drill-down;
+- component playground/variant table inside Inspect;
+- annotation edit/remove controls and exported pinned measurement overlays;
+- real runtime opening of validated artifacts from the desktop shell.
+
 Exit criteria:
 
 - A developer can reconstruct supported layout without asking for hidden

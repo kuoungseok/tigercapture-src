@@ -49,6 +49,7 @@ class PainterUIProductionPanel(QWidget):
         root.setSpacing(4)
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
+        self.tabs = tabs
         root.addWidget(tabs)
 
         library = QWidget()

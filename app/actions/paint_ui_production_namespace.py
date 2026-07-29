@@ -363,6 +363,84 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_developer_inspect",
         {},
     )
+    undo_action(
+        "paint.ui.dev.ready.set",
+        "Set stable-ID developer readiness on a UI object, component, frame, or section",
+        "paint_ui_dev_ready_set",
+        {
+            "target_type": {
+                "type": "string",
+                "enum": ["object", "component", "artboard", "section"],
+            },
+            "target_id": {"type": "string"},
+            "ready": {"type": "boolean"},
+            "note": {"type": "string"},
+        },
+        required=("target_type", "target_id", "ready"),
+        undo_label="Set UI developer readiness",
+    )
+    read_action(
+        "paint.ui.dev.inspect",
+        "Inspect selected UI geometry, layout, tokens, accessibility, interactions, measurements, and delivery",
+        "paint_ui_dev_inspect",
+        {"object_ids": string_array},
+    )
+    undo_action(
+        "paint.ui.dev.annotation.add",
+        "Pin a developer annotation to a stable UI target",
+        "paint_ui_dev_annotation_add",
+        {
+            "target_type": {
+                "type": "string",
+                "enum": ["object", "component", "artboard", "section"],
+            },
+            "target_id": {"type": "string"},
+            "text": {"type": "string"},
+            "kind": {"type": "string"},
+        },
+        required=("target_type", "target_id", "text"),
+        undo_label="Add UI developer annotation",
+    )
+    undo_action(
+        "paint.ui.dev.annotation.update",
+        "Update a pinned developer annotation",
+        "paint_ui_dev_annotation_update",
+        {
+            "annotation_id": {"type": "string"},
+            "changes": any_object,
+        },
+        required=("annotation_id", "changes"),
+        undo_label="Update UI developer annotation",
+    )
+    undo_action(
+        "paint.ui.dev.annotation.remove",
+        "Remove a pinned developer annotation",
+        "paint_ui_dev_annotation_remove",
+        {"annotation_id": {"type": "string"}},
+        required=("annotation_id",),
+        undo_label="Remove UI developer annotation",
+    )
+    read_action(
+        "paint.ui.dev.revision.compare",
+        "Compare the current UI document with a named checkpoint",
+        "paint_ui_dev_revision_compare",
+        {"checkpoint_id": {"type": "string"}},
+        required=("checkpoint_id",),
+    )
+    read_action(
+        "paint.ui.delivery.feature.inspect",
+        "Inspect per-target Native, Material, Baked, or Blocked delivery for a UI object",
+        "paint_ui_delivery_feature_inspect",
+        {"object_id": {"type": "string"}},
+        required=("object_id",),
+    )
+    read_action(
+        "paint.ui.delivery.artifact.open",
+        "Resolve and validate a generated Painter UI delivery artifact",
+        "paint_ui_delivery_artifact_open",
+        {"path": {"type": "string"}},
+        required=("path",),
+    )
 
     read_action(
         "paint.ui.prototype.inspect",
