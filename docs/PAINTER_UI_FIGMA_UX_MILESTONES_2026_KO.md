@@ -498,6 +498,26 @@ Implemented checkpoint (2026-07-29, remembered viewport slice):
   Regenerable evidence stays under
   `debugCapture/painter_ui_page_viewports_m1`.
 
+Implemented checkpoint (2026-07-29, large-document interaction slice):
+
+- A reproducible 4-Page, 20-artboard, 500-object product QA now measures
+  normalization, first UI synchronization, repeated Page switching, and real
+  widget painting instead of inferring responsiveness from small fixtures.
+- Collapsed Auto-hide Inspector content is synchronized lazily. Selecting an
+  object, opening the temporary Properties popover, Pinning, or Floating still
+  refreshes the canonical Inspector immediately.
+- Hidden no-selection refreshes no longer rebuild Components, Tokens,
+  Production, Figma resources, Motion delivery, and layer widgets.
+- Vector and Boolean contextual state is evaluated once per refresh; an empty
+  or single ordinary selection bypasses expensive Boolean document
+  normalization.
+- On the reference QA machine, initial synchronization improved from
+  6382 ms to 1255 ms and median Page switching from 1224 ms to 318 ms.
+  Canvas capture remained about 53 ms.
+- `tools/qa_painter_ui_large_document.py` enforces generous interaction
+  ceilings and writes regenerable evidence under
+  `debugCapture/painter_ui_large_document_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

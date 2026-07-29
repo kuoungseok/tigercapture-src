@@ -126,3 +126,50 @@ def test_collapsed_inspector_opens_contextual_properties_for_new_selection() -> 
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_hidden_inspector_defers_large_document_sync_until_needed() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#F5F7FA"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1200, 760)
+    dialog.show()
+    app.processEvents()
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._paint_ui_inspector.set_auto_hide(True)
+    document = create_ui_document(800, 600)
+    dialog._painter_ui_document = document
+    inspector = dialog._paint_ui_inspector
+    original = inspector.set_document
+    calls: list[str] = []
+
+    def record(value) -> None:
+        calls.append(str((value or {}).get("active_artboard_id") or ""))
+        original(value)
+
+    inspector.set_document = record
+    dialog._refresh_painter_ui_overlay()
+    assert calls == []
+
+    dialog._toggle_painter_ui_inspector()
+    assert calls == ["artboard-1"]
+    dialog._hide_painter_ui_quick_properties()
+    calls.clear()
+
+    document, row = add_ui_object(document, kind="text", name="Title")
+    dialog._painter_ui_document = document
+    dialog._refresh_painter_ui_overlay()
+    assert calls == ["artboard-1"]
+    assert dialog._painter_ui_quick_properties.isVisible()
+    assert inspector._document["selection"]["object_id"] == row["id"]
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()

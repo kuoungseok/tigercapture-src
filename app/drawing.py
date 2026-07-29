@@ -14597,11 +14597,41 @@ class PaintDialog(QDialog):
         if str(getattr(self, "_canvas_workspace_mode", "paint")) != "ui_design":
             bar.hide()
             return
+        document = getattr(self, "_painter_ui_document", None) or {}
+        selection = document.get("selection") or {}
+        selected_ids = list(selection.get("object_ids") or [])
+        primary_id = str(selection.get("object_id") or "")
+        primary = next(
+            (
+                row
+                for row in document.get("objects", [])
+                if row.get("id") == primary_id
+            ),
+            None,
+        )
+        primary_boolean = (
+            ((primary or {}).get("content") or {}).get("boolean") or {}
+        )
+        if len(selected_ids) < 2 and not (
+            len(selected_ids) == 1
+            and bool(primary_boolean.get("enabled", False))
+            and bool(primary_boolean.get("group", False))
+        ):
+            bar.set_state(
+                {
+                    "mode": "selection",
+                    "eligible": False,
+                    "reason": "select_two_shapes",
+                    "group_id": "",
+                    "operation": "",
+                    "operand_ids": [],
+                    "selection_ids": selected_ids,
+                }
+            )
+            return
         from app.painter_ui_boolean import inspect_ui_boolean_selection
 
-        report = inspect_ui_boolean_selection(
-            getattr(self, "_painter_ui_document", None)
-        )
+        report = inspect_ui_boolean_selection(document)
         bar.set_state(report)
         toolbar = getattr(self, "_ui_design_tool_host", None)
         if toolbar is not None:
@@ -16074,15 +16104,33 @@ class PaintDialog(QDialog):
         if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
             overlay.show()
             overlay.raise_()
-        self._sync_painter_ui_vector_context(
-            overlay._vector_edit_state()
-            if overlay._vector_edit_object_id
-            else {}
-        )
-        self._sync_painter_ui_boolean_context()
         self._sync_painter_ui_image_context()
         inspector = getattr(self, "_paint_ui_inspector", None)
-        if inspector is not None:
+        selected = str(
+            (
+                (getattr(self, "_painter_ui_document", {}) or {}).get(
+                    "selection"
+                )
+                or {}
+            ).get("object_id")
+            or ""
+        )
+        inspector_needs_sync = bool(
+            inspector is not None
+            and (
+                selected
+                or not inspector.is_collapsed()
+                or inspector.is_temporary_expanded()
+                or bool(
+                    getattr(
+                        self,
+                        "_painter_ui_inspector_detached",
+                        False,
+                    )
+                )
+            )
+        )
+        if inspector_needs_sync:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
             inspector.set_stress_preview_report(stress_report)
         navigator = getattr(self, "_painter_ui_navigator", None)
@@ -16101,20 +16149,14 @@ class PaintDialog(QDialog):
             None,
         )
         if breadcrumb is not None:
-            breadcrumb.set_document(
-                getattr(self, "_painter_ui_document", None)
-            )
-        selected = str(
-            (
-                (getattr(self, "_painter_ui_document", {}) or {}).get(
-                    "selection"
+            if selected:
+                breadcrumb.set_document(
+                    getattr(self, "_painter_ui_document", None)
                 )
-                or {}
-            ).get("object_id")
-            or ""
-        )
+            else:
+                breadcrumb.hide()
         linked = self._painter_ui_linked_motion_id(selected) if selected else ""
-        if inspector is not None:
+        if inspector_needs_sync:
             report = None
             if selected:
                 from app.painter_ui_motion_delivery import (
@@ -24835,6 +24877,10 @@ class PaintDialog(QDialog):
             )
         self._set_canvas_workspace_mode("ui_design")
         inspector = self._paint_ui_inspector
+        if value != "auto_hide":
+            inspector.set_document(
+                getattr(self, "_painter_ui_document", None)
+            )
         if value == "floating":
             inspector.set_auto_hide(False)
             self._detach_painter_ui_inspector()
@@ -24883,6 +24929,7 @@ class PaintDialog(QDialog):
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is None:
             return
+        inspector.set_document(getattr(self, "_painter_ui_document", None))
         if bool(getattr(self, "_painter_ui_inspector_detached", False)):
             window = getattr(
                 self,

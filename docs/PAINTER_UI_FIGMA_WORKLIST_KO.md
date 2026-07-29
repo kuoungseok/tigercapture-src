@@ -16,6 +16,10 @@ M1 Page checkpoint (2026-07-29):
 - Figma CANVAS records import as real Tiger Studio Pages.
 - Reproducible desktop/compact QA lives under the disposable
   `debugCapture/painter_ui_pages_m1` report path.
+- Large-document QA covers 4 Pages, 20 artboards, and 500 objects. Auto-hidden
+  no-selection Inspector work is deferred until selection or explicit
+  Properties/Pin/Floating use, reducing measured Page switching from 1224 ms
+  median to 318 ms without changing the canonical Inspector.
 
 P0-P2 completion checkpoint (2026-07-28):
 
