@@ -272,6 +272,7 @@ class PainterUIDragDoubleSpinBox(_PainterUIDragValueMixin, QDoubleSpinBox):
 
 
 class PainterUIInspector(QWidget):
+    context_mode_changed = Signal(str)
     template_apply_requested = Signal(str)
     template_save_requested = Signal(str, str)
     template_install_requested = Signal(str)
@@ -690,6 +691,7 @@ class PainterUIInspector(QWidget):
         tabs.tabBar().setExpanding(True)
         tabs.tabBar().setUsesScrollButtons(False)
         self._tabs = tabs
+        self._tabs.currentChanged.connect(self._emit_context_mode_changed)
         root.addWidget(tabs, 1)
         self._collapsible_widgets = (
             artboard_bar,
@@ -2196,6 +2198,15 @@ class PainterUIInspector(QWidget):
             "inspect": inspect_page,
         }
         self._tabs.setCurrentWidget(design_page)
+
+    def _emit_context_mode_changed(self, _index: int = -1) -> None:
+        current = self._tabs.currentWidget()
+        for mode, page in (
+            getattr(self, "_context_pages", {}) or {}
+        ).items():
+            if current is page:
+                self.context_mode_changed.emit(str(mode))
+                return
 
     def _sync_context_tabs(self, selection_count: int) -> None:
         """Expose only tools that make sense for the current canvas context."""

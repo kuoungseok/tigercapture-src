@@ -9735,6 +9735,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.object_create_requested.connect(
             self._create_painter_ui_object_from_rect
         )
+        self._painter_ui_overlay.prototype_connection_requested.connect(
+            self._add_painter_ui_canvas_prototype_connection
+        )
         self._painter_ui_overlay.key_command.connect(
             self._handle_painter_ui_key_command
         )
@@ -10384,6 +10387,11 @@ class PaintDialog(QDialog):
         from app.painter_ui_inspector import PainterUIInspector
 
         self._paint_ui_inspector = PainterUIInspector()
+        self._paint_ui_inspector.context_mode_changed.connect(
+            lambda mode: self._painter_ui_overlay.set_prototype_authoring_visible(
+                str(mode) == "prototype"
+            )
+        )
         self._paint_ui_inspector.collapsed_changed.connect(
             self._set_painter_ui_inspector_collapsed
         )
@@ -15872,6 +15880,23 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_canvas_prototype_connection(
+        self,
+        source_object_id: str,
+        target_artboard_id: str,
+        target_object_id: str,
+    ) -> None:
+        self._add_painter_ui_prototype_connection(
+            {
+                "source_object_id": str(source_object_id),
+                "trigger": "click",
+                "action": "navigate",
+                "target_artboard_id": str(target_artboard_id),
+                "target_object_id": str(target_object_id),
+                "name": "Canvas prototype connection",
+            }
+        )
 
     def _remove_painter_ui_prototype_connection(
         self,

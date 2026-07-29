@@ -270,6 +270,18 @@ box-shadow:0 16px 60px #0008;transform-origin:top left}
 const data=JSON.parse(document.getElementById("tiger-data").textContent);
 let state=data.initial_state;
 const rows=data.document.interactions.filter(x=>x.enabled);
+const byId=id=>document.getElementById(id);
+function transitionFor(row){
+ const t=(row.parameters||{}).transition||{};
+ return {kind:t.kind||"instant",duration:Number(t.duration_ms||0),easing:t.easing||"ease"};
+}
+function animateTarget(id,transition){
+ const el=byId("artboard-"+id);if(!el||transition.kind==="instant"||transition.duration<=0)return;
+ let start={opacity:0},end={opacity:1};
+ if(["move_in","slide","smart_animate"].includes(transition.kind))start={opacity:.2,transform:"translateX(28px)"};
+ else if(["move_out","push"].includes(transition.kind))start={opacity:.2,transform:"translateX(-28px)"};
+ el.animate([start,end],{duration:transition.duration,easing:transition.easing,fill:"both"});
+}
 function render(){
  document.querySelectorAll(".artboard").forEach(el=>{
   const id=el.id.replace("artboard-","");
@@ -282,25 +294,41 @@ function render(){
  Object.entries(state.object_opacity).forEach(([id,v])=>{
   const el=document.getElementById(id);if(el)el.style.opacity=v;
  });
+ Object.entries(state.object_states).forEach(([id,v])=>{
+  const el=byId(id);if(el)el.dataset.componentState=v;
+ });
 }
 function fire(id,trigger,key=""){
  rows.filter(x=>x.source_object_id===id&&x.trigger===trigger).forEach(x=>{
   const p=x.parameters||{};if(p.key&&p.key.toLowerCase()!==key.toLowerCase())return;
+  const transition=transitionFor(x);
   if(x.action==="navigate"&&x.target_artboard_id){state.history.push(state.artboard_id);state.artboard_id=x.target_artboard_id}
   else if(x.action==="back"&&state.history.length)state.artboard_id=state.history.pop();
   else if(x.action==="open_overlay"&&x.target_artboard_id&&!state.overlay_artboard_ids.includes(x.target_artboard_id))state.overlay_artboard_ids.push(x.target_artboard_id);
   else if(x.action==="close_overlay")state.overlay_artboard_ids.pop();
+  else if(x.action==="swap_overlay"&&x.target_artboard_id){if(state.overlay_artboard_ids.length)state.overlay_artboard_ids[state.overlay_artboard_ids.length-1]=x.target_artboard_id;else state.overlay_artboard_ids.push(x.target_artboard_id)}
+  else if(["change_state","change_variant"].includes(x.action)&&x.target_object_id)state.object_states[x.target_object_id]=String(p.state||p.variant||x.name||"");
   else if(x.action==="set_visibility"&&x.target_object_id)state.object_visibility[x.target_object_id]=p.visible!==false;
   else if(x.action==="set_opacity"&&x.target_object_id)state.object_opacity[x.target_object_id]=Number(p.opacity??1);
+  else if(x.action==="set_material_scalar"&&x.target_object_id){state.material_scalars[x.target_object_id]??={};state.material_scalars[x.target_object_id][p.name||"value"]=Number(p.value||0)}
+  else if(x.action==="set_variable"&&p.variable_id)state.variables[p.variable_id]=p.value;
+  else if(x.action==="set_variable_mode"&&p.collection_id)state.variable_modes[p.collection_id]=String(p.mode_id||"");
+  else if(x.action==="scroll_to"&&x.target_object_id){const el=byId(x.target_object_id);if(el)el.scrollIntoView({behavior:"smooth",block:"center"})}
   else if(x.action==="play_sound"&&p.uri)new Audio(p.uri).play();
   else if(x.action==="play_animation"&&x.target_object_id){const el=document.getElementById(x.target_object_id);if(el)el.animate([{opacity:.4,transform:"scale(.98)"},{opacity:1,transform:"scale(1)"}],{duration:Number(p.duration_ms||250)})}
- });render();
+  render();
+  if(x.target_artboard_id)animateTarget(x.target_artboard_id,transition);
+ });
 }
 document.querySelectorAll(".ui-object").forEach(el=>{
  el.onclick=()=>fire(el.id,"click");el.ondblclick=()=>fire(el.id,"double_click");
- el.onmouseenter=()=>fire(el.id,"hover");el.onpointerdown=()=>fire(el.id,"press");
+ el.onmouseenter=()=>{fire(el.id,"hover");fire(el.id,"mouse_enter")};
+ el.onmouseleave=()=>fire(el.id,"mouse_leave");
+ el.onpointerdown=()=>fire(el.id,"press");
+ el.ondragend=()=>fire(el.id,"drag");
  el.onfocus=()=>fire(el.id,"focus");el.onkeydown=e=>fire(el.id,"keyboard",e.key);
-});render();
+ rows.filter(x=>x.source_object_id===el.id&&x.trigger==="delay").forEach(x=>setTimeout(()=>fire(el.id,"delay"),Number((x.parameters||{}).delay_ms||0)));
+});window.addEventListener("gamepadconnected",()=>rows.filter(x=>x.trigger==="gamepad").forEach(x=>fire(x.source_object_id,"gamepad")));render();
 </script></body></html>""" % ("".join(artboards), data_json.replace("</", "<\\/"))
     index = root / "index.html"
     index.write_text(page, encoding="utf-8")

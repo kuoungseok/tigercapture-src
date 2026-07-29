@@ -85,6 +85,7 @@ class PainterUIDesignOverlay(QWidget):
     vector_edit_changed = Signal(object)
     image_focal_requested = Signal(str, float, float)
     objects_move_reparent_requested = Signal(object, str, object)
+    prototype_connection_requested = Signal(str, str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -146,6 +147,9 @@ class PainterUIDesignOverlay(QWidget):
         self._vector_active_segment_id = ""
         self._vector_original_content: dict[str, Any] | None = None
         self._image_focal_edit_object_id = ""
+        self._prototype_drag_position: QPointF | None = None
+        self._prototype_hover_artboard_id = ""
+        self._prototype_authoring_visible = False
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -1074,6 +1078,123 @@ class PainterUIDesignOverlay(QWidget):
             width * scale,
             height * scale,
         )
+
+    def prototype_connection_handle_rect(self) -> QRectF:
+        if not self._prototype_authoring_visible:
+            return QRectF()
+        row = self._selected_row()
+        if row is None or bool(row.get("locked", False)):
+            return QRectF()
+        rect = self._object_rect(row)
+        center = QPointF(rect.right() + 13.0, rect.center().y())
+        return QRectF(center.x() - 7.0, center.y() - 7.0, 14.0, 14.0)
+
+    def set_prototype_authoring_visible(self, visible: bool) -> None:
+        value = bool(visible)
+        if self._prototype_authoring_visible == value:
+            return
+        self._prototype_authoring_visible = value
+        if not value and self._interaction == "prototype_connection":
+            self._cancel_interaction()
+        self.update()
+
+    def _prototype_target_artboard(self, point: QPointF) -> str:
+        for artboard in reversed(self._document["artboards"]):
+            viewport, _scale = self._artboard_viewport(artboard)
+            if viewport.contains(point):
+                return str(artboard["id"])
+        return ""
+
+    def _prototype_connection_endpoint(
+        self,
+        interaction: Mapping[str, Any],
+    ) -> QPointF | None:
+        target_object_id = str(interaction.get("target_object_id") or "")
+        if target_object_id:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == target_object_id
+                ),
+                None,
+            )
+            if row is not None:
+                return self._object_rect(row).center()
+        target_artboard_id = str(
+            interaction.get("target_artboard_id") or ""
+        )
+        artboard = next(
+            (
+                item
+                for item in self._document["artboards"]
+                if item["id"] == target_artboard_id
+            ),
+            None,
+        )
+        if artboard is None:
+            return None
+        viewport, _scale = self._artboard_viewport(artboard)
+        return QPointF(viewport.left(), viewport.center().y())
+
+    @staticmethod
+    def _paint_prototype_curve(
+        painter: QPainter,
+        start: QPointF,
+        end: QPointF,
+        *,
+        preview: bool = False,
+    ) -> None:
+        path = QPainterPath(start)
+        bend = max(48.0, abs(end.x() - start.x()) * 0.42)
+        direction = 1.0 if end.x() >= start.x() else -1.0
+        path.cubicTo(
+            QPointF(start.x() + bend * direction, start.y()),
+            QPointF(end.x() - bend * direction, end.y()),
+            end,
+        )
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(
+                QColor("#8CB8FF") if preview else QColor("#6FA0F5"),
+                2.0,
+                Qt.PenStyle.DashLine if preview else Qt.PenStyle.SolidLine,
+            )
+        )
+        painter.drawPath(path)
+        painter.setBrush(QColor("#8CB8FF"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(end, 4.0, 4.0)
+        painter.restore()
+
+    def _paint_prototype_connections(self, painter: QPainter) -> None:
+        selected = str(self._document["selection"]["object_id"] or "")
+        handle = self.prototype_connection_handle_rect()
+        if not selected or handle.isNull():
+            return
+        start = handle.center()
+        for interaction in self._document.get("interactions", []):
+            if (
+                not bool(interaction.get("enabled", True))
+                or str(interaction.get("source_object_id") or "") != selected
+            ):
+                continue
+            endpoint = self._prototype_connection_endpoint(interaction)
+            if endpoint is not None:
+                self._paint_prototype_curve(painter, start, endpoint)
+        if self._prototype_drag_position is not None:
+            self._paint_prototype_curve(
+                painter,
+                start,
+                self._prototype_drag_position,
+                preview=True,
+            )
+        painter.save()
+        painter.setPen(QPen(QColor("#DCEAFF"), 1.5))
+        painter.setBrush(QColor("#2F73D9"))
+        painter.drawEllipse(handle)
+        painter.restore()
 
     def object_ids_at(self, x: float, y: float) -> list[str]:
         position = QPointF(float(x), float(y))
@@ -2532,7 +2653,24 @@ class PainterUIDesignOverlay(QWidget):
                 for handle in self._handle_rects(multi_bounds).values():
                     painter.drawRect(handle)
             painter.restore()
+        self._paint_prototype_connections(painter)
         self._paint_image_focal_control(painter)
+        if self._prototype_hover_artboard_id:
+            target_artboard = next(
+                (
+                    row
+                    for row in self._document["artboards"]
+                    if row["id"] == self._prototype_hover_artboard_id
+                ),
+                None,
+            )
+            if target_artboard is not None:
+                viewport, _scale = self._artboard_viewport(target_artboard)
+                painter.save()
+                painter.setBrush(QColor(111, 160, 245, 24))
+                painter.setPen(QPen(QColor("#8CB8FF"), 2.0))
+                painter.drawRect(viewport)
+                painter.restore()
         if self._hierarchy_drop_preview_id:
             target = next(
                 (
@@ -2640,6 +2778,8 @@ class PainterUIDesignOverlay(QWidget):
         self._alt_duplicate_cycle_id = ""
         self._alt_duplicate_source_ids = []
         self._alt_duplicate_drag_active = False
+        self._prototype_drag_position = None
+        self._prototype_hover_artboard_id = ""
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -2843,6 +2983,15 @@ class PainterUIDesignOverlay(QWidget):
 
         selected_row = self._selected_row()
         if selected_row is not None and not selected_row["locked"]:
+            prototype_handle = self.prototype_connection_handle_rect()
+            if prototype_handle.contains(event.position()):
+                self._interaction = "prototype_connection"
+                self._active_object_id = str(selected_row["id"])
+                self._prototype_drag_position = QPointF(event.position())
+                self._prototype_hover_artboard_id = ""
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                event.accept()
+                return
             selected_rect = self._object_rect(selected_row)
             local_position = self._unrotated_point(
                 event.position(),
@@ -3014,6 +3163,26 @@ class PainterUIDesignOverlay(QWidget):
         self.set_measurements_visible(
             bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
         )
+        if self._interaction == "prototype_connection":
+            self._prototype_drag_position = QPointF(event.position())
+            target = self._prototype_target_artboard(event.position())
+            source_row = next(
+                (
+                    row
+                    for row in self._document["objects"]
+                    if row["id"] == self._active_object_id
+                ),
+                None,
+            )
+            self._prototype_hover_artboard_id = (
+                target
+                if source_row is not None
+                and target != str(source_row["artboard_id"])
+                else ""
+            )
+            self.update()
+            event.accept()
+            return
         if self._interaction == "alt_duplicate_pending":
             delta = event.position() - self._press_position
             if abs(delta.x()) + abs(delta.y()) < 4.0:
@@ -3423,7 +3592,29 @@ class PainterUIDesignOverlay(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         interaction = self._interaction
         object_id = self._active_object_id
-        if interaction == "alt_duplicate_pending":
+        if interaction == "prototype_connection" and object_id:
+            target_artboard_id = self._prototype_target_artboard(
+                event.position()
+            )
+            source_row = next(
+                (
+                    row
+                    for row in self._document["objects"]
+                    if row["id"] == object_id
+                ),
+                None,
+            )
+            if (
+                source_row is not None
+                and target_artboard_id
+                and target_artboard_id != str(source_row["artboard_id"])
+            ):
+                self.prototype_connection_requested.emit(
+                    object_id,
+                    target_artboard_id,
+                    "",
+                )
+        elif interaction == "alt_duplicate_pending":
             if self._alt_duplicate_cycle_id:
                 self.object_selection_requested.emit(
                     self._alt_duplicate_cycle_id,

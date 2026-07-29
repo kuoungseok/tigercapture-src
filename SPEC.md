@@ -7901,6 +7901,12 @@ AI Script Edit MVP integration:
   `paint.ui.prototype.transition.set` share the same Undoable document
   services. Motion clips remain canonical stable-ID links; Painter does not
   duplicate Motion keyframes.
+- The selected UI object exposes a contextual prototype connection handle on
+  the canvas. Dragging it to another artboard creates the same Undoable
+  click/navigate interaction as Inspector and Action authoring, while existing
+  selected-source links render as curves without reserving fixed workspace.
+  Self-contained HTML Preview mirrors expanded overlay, state/variant,
+  variable/mode, scroll, delayed/mouse/drag/gamepad, and transition behavior.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,
