@@ -895,6 +895,30 @@ class PaintAdapterMixin(
             output_dir,
         )
 
+    def paint_ui_ppt_inspect(
+        self,
+        *,
+        scope: str = "active_artboard",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ppt_bridge import inspect_painter_ui_ppt
+
+        return inspect_painter_ui_ppt(
+            dialog._painter_ui_document,
+            scope=scope,
+        )
+
+    def paint_ui_ppt_send(
+        self,
+        *,
+        scope: str = "active_artboard",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        method = getattr(dialog, "_send_painter_ui_to_ppt", None)
+        if not callable(method):
+            raise RuntimeError("Painter PPT bridge is unavailable")
+        return dict(method(scope=scope) or {})
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

@@ -284,6 +284,8 @@ class PainterUIInspector(QWidget):
     prototype_export_requested = Signal(str)
     web_preflight_requested = Signal()
     web_package_requested = Signal(str)
+    ppt_preflight_requested = Signal(str)
+    ppt_send_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
     figma_document_imported = Signal(object, str, object)
     figma_export_requested = Signal(str)
@@ -1052,6 +1054,8 @@ class PainterUIInspector(QWidget):
             (self.production_panel.prototype_export_requested, self.prototype_export_requested),
             (self.production_panel.web_preflight_requested, self.web_preflight_requested),
             (self.production_panel.web_package_requested, self.web_package_requested),
+            (self.production_panel.ppt_preflight_requested, self.ppt_preflight_requested),
+            (self.production_panel.ppt_send_requested, self.ppt_send_requested),
             (self.production_panel.assets_export_requested, self.assets_export_requested),
             (self.production_panel.figma_document_imported, self.figma_document_imported),
             (self.production_panel.figma_export_requested, self.figma_export_requested),

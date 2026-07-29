@@ -34,6 +34,8 @@ class PainterUIProductionPanel(QWidget):
     prototype_export_requested = Signal(str)
     web_preflight_requested = Signal()
     web_package_requested = Signal(str)
+    ppt_preflight_requested = Signal(str)
+    ppt_send_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
     figma_document_imported = Signal(object, str, object)
     figma_export_requested = Signal(str)
@@ -147,6 +149,32 @@ class PainterUIProductionPanel(QWidget):
         web_row.addWidget(self.web_preflight_button)
         web_row.addWidget(self.web_package_button)
         deliver_layout.addLayout(web_row)
+        self.ppt_scope_combo = QComboBox()
+        self.ppt_scope_combo.addItem(
+            painter_text("Active Artboard"),
+            "active_artboard",
+        )
+        self.ppt_scope_combo.addItem(
+            painter_text("All Artboards"),
+            "all_artboards",
+        )
+        self.ppt_preflight_button = QPushButton(painter_text("PPT Preflight"))
+        self.ppt_preflight_button.clicked.connect(
+            lambda: self.ppt_preflight_requested.emit(
+                str(self.ppt_scope_combo.currentData())
+            )
+        )
+        self.ppt_send_button = QPushButton(painter_text("Send to PPT"))
+        self.ppt_send_button.clicked.connect(
+            lambda: self.ppt_send_requested.emit(
+                str(self.ppt_scope_combo.currentData())
+            )
+        )
+        ppt_row = QHBoxLayout()
+        ppt_row.addWidget(self.ppt_scope_combo, 1)
+        ppt_row.addWidget(self.ppt_preflight_button)
+        ppt_row.addWidget(self.ppt_send_button)
+        deliver_layout.addLayout(ppt_row)
         deliver_layout.addWidget(density_label)
         format_row = QHBoxLayout()
         for control in (self.asset_png, self.asset_webp, self.asset_svg):

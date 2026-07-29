@@ -1586,9 +1586,8 @@ Implemented checkpoint (2026-07-29, M8 AI Prototype Build slice):
 - `tools/qa_painter_ui_ai_prototype.py` regenerates Korean desktop/compact
   evidence and a machine-readable report under
   `debugCapture/painter_ui_designer/ai_prototype`.
-- Remaining M8 required work is Painter-to-PPT transfer and Paint/Vector
-  conversion. Those Actions remain intentionally absent until their real
-  artifacts and Undo contracts exist.
+- Remaining M8 required work is Paint/Vector conversion. Those Actions remain
+  intentionally absent until their real artifacts and Undo contracts exist.
 
 Implemented checkpoint (2026-07-29, M8 executable Web delivery slice):
 
@@ -1605,6 +1604,21 @@ Implemented checkpoint (2026-07-29, M8 executable Web delivery slice):
 - `tools/qa_painter_ui_web_delivery.py` loads the artifact in Qt WebEngine and
   proves nonblank desktop and 390 px compact output. Hosting remains explicitly
   out of scope.
+
+Implemented checkpoint (2026-07-29, M8 Painter-to-PPT slice):
+
+- `app/painter_ui_ppt_bridge.py` targets the existing shared PPT `DeckSpec` and
+  `PptGeneratorWindow`; no parallel presentation model was introduced.
+- Active or all artboards become slides. Text, buttons, rectangular shapes,
+  lines, and valid images remain editable; unsupported exact geometry is
+  individually baked and reported instead of silently simplified.
+- Source aspect ratios are fitted into the 16:9 deck without stretching, and
+  stable Painter artboard/object IDs survive in PPT metadata.
+- Publish > Deliver and automation share `paint.ui.ppt.inspect/send`. Painter
+  revision and Undo history remain unchanged because the receiving PPT deck is
+  the mutated document.
+- `tools/qa_painter_ui_ppt_bridge.py` captures the real PPT Maker with desktop
+  and mobile slides and writes a real PPTX artifact for QA.
 
 Exit criteria:
 

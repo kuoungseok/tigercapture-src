@@ -175,12 +175,15 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.umg.",
             "paint.ui.advanced_delivery.",
             "paint.ui.web.",
+            "paint.ui.ppt.",
         ),
         "required": (
             "paint.ui.delivery.preflight",
             "paint.ui.advanced_delivery.inspect",
             "paint.ui.web.preflight",
             "paint.ui.web.package",
+            "paint.ui.ppt.inspect",
+            "paint.ui.ppt.send",
         ),
     },
     {

@@ -10696,6 +10696,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.web_package_requested.connect(
             self._package_painter_ui_web
         )
+        self._paint_ui_inspector.ppt_preflight_requested.connect(
+            self._preflight_painter_ui_ppt
+        )
+        self._paint_ui_inspector.ppt_send_requested.connect(
+            self._send_painter_ui_to_ppt
+        )
         self._paint_ui_inspector.assets_export_requested.connect(
             self._export_painter_ui_assets
         )
@@ -16047,6 +16053,68 @@ class PaintDialog(QDialog):
             self._painter_ui_production_status(
                 f"Web package blocked: {len(report['preflight']['blockers'])} issues"
             )
+
+    def _preflight_painter_ui_ppt(
+        self,
+        scope: str = "active_artboard",
+    ) -> dict:
+        from app.painter_ui_ppt_bridge import inspect_painter_ui_ppt
+
+        report = inspect_painter_ui_ppt(
+            self._painter_ui_document,
+            scope=scope,
+        )
+        self._painter_ui_production_status(
+            (
+                f"PPT ready: {report['slide_count']} slides, "
+                f"{report['counts']['Native']} native, "
+                f"{report['counts']['Baked']} baked"
+            )
+            if report["ok"]
+            else f"PPT blocked: {len(report['blockers'])} issues"
+        )
+        return report
+
+    def _send_painter_ui_to_ppt(
+        self,
+        scope: str = "active_artboard",
+    ) -> dict:
+        from PySide6.QtCore import QStandardPaths
+
+        from app.painter_ui_ppt_bridge import painter_ui_to_ppt_deck
+        from app.pptgen.ui.window import PptGeneratorWindow
+
+        base = Path(
+            QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppDataLocation
+            )
+        )
+        document = self._painter_ui_document
+        asset_dir = (
+            base
+            / "painter_ppt_assets"
+            / str(document["document_id"])
+            / str(document["revision"])
+        )
+        deck, report = painter_ui_to_ppt_deck(
+            document,
+            scope=scope,
+            asset_dir=asset_dir,
+        )
+        window = getattr(self, "_painter_ui_ppt_window", None)
+        created = window is None
+        if window is None:
+            window = PptGeneratorWindow(deck=deck, source_owner=self)
+            self._painter_ui_ppt_window = window
+        else:
+            window.set_deck(deck)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self._painter_ui_production_status(
+            f"Sent to PPT: {report['slide_count']} slides"
+        )
+        return {**report, "opened": True, "created": created}
 
     def _open_painter_ui_artifact(self, path: str) -> None:
         from app.painter_ui_artifact import open_painter_ui_artifact

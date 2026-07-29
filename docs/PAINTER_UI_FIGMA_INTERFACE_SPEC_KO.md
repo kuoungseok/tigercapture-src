@@ -1243,3 +1243,26 @@ overlay mode로 전환한다.
 - `tools/qa_painter_ui_web_delivery.py` opens the generated package in Qt
   WebEngine and captures real desktop and 390 px compact evidence under
   disposable `debugCapture/painter_ui_designer/web_delivery`.
+
+## 21. Painter UI to PPT Maker Contract
+
+- `app/painter_ui_ppt_bridge.py` converts Painter artboards into the existing
+  shared `app.pptgen.schema.DeckSpec`; it does not create another presentation
+  document or window.
+- Active Artboard and All Artboards are explicit scopes in Publish > Deliver.
+  Every selected artboard becomes one slide and keeps its stable source
+  artboard ID in slide metadata.
+- Text, buttons, rectangular frames/groups, lines, and valid source images
+  remain editable PPT elements. Ellipse, polygon, star, arc, path, progress,
+  Motion Actor, and missing-image placeholders are individually raster-baked
+  with explicit `Baked` metadata instead of being silently approximated.
+- Source aspect ratio is fitted into the shared 16:9 deck without geometric
+  distortion. Every element keeps its Painter object ID, source kind, and
+  delivery classification in PPT metadata.
+- UI and automation share `paint.ui.ppt.inspect/send`. Sending changes the PPT
+  Maker deck, not the Painter document, so Painter revision and Undo history
+  remain unchanged.
+- Generated bake assets live in the durable application data location when
+  sent from Painter. Regenerable QA copies under `debugCapture` are disposable.
+- `tools/qa_painter_ui_ppt_bridge.py` proves a two-slide editable deck inside
+  the real shared PPT Maker and writes a real `.pptx` QA artifact.

@@ -425,3 +425,12 @@ selects explicit desktop/tablet/mobile breakpoint artboards before interaction,
 and records SHA-256 artifacts. Its claim is local executable Web output only:
 hosting and backend services are not included. Regenerate browser evidence with
 `tools/qa_painter_ui_web_delivery.py`; its output belongs in `debugCapture`.
+
+## Painter UI PPT Delivery Boundary
+
+`app/painter_ui_ppt_bridge.py` is the focused adapter from Painter UI into the
+shared `app.pptgen.schema.DeckSpec` and `PptGeneratorWindow`. Use
+`paint.ui.ppt.inspect/send`; do not add a Painter-specific PPT window or deck
+schema. Preserve stable Painter IDs in PPT metadata, keep supported objects
+editable, and individually bake unsupported exact geometry with an explicit
+classification. Sending mutates the receiving PPT deck, not Painter history.

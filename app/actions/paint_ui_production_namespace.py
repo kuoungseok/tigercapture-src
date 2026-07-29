@@ -608,6 +608,22 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         {"output_dir": {"type": "string"}},
         required=("output_dir",),
     )
+    ppt_scope = {
+        "type": "string",
+        "enum": ["active_artboard", "all_artboards"],
+    }
+    read_action(
+        "paint.ui.ppt.inspect",
+        "Inspect editable and baked Painter UI delivery to PPT Maker",
+        "paint_ui_ppt_inspect",
+        {"scope": ppt_scope},
+    )
+    read_action(
+        "paint.ui.ppt.send",
+        "Convert Painter UI artboards and open them in PPT Maker",
+        "paint_ui_ppt_send",
+        {"scope": ppt_scope},
+    )
 
 
 __all__ = ["register_paint_ui_production_actions"]
