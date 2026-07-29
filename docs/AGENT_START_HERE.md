@@ -186,6 +186,10 @@ Focused entry points:
   `app/painter_ui_styles.py`. The Styles Assets panel and
   `paint.ui.style.*` Actions use that service. Existing Layout Grid Styles are
   adapted into the same report/UI and must not be reimplemented.
+  Versioned local design-system packages live in
+  `app/painter_ui_library_store.py` as `.tsuilib`. The Libraries Assets tab and
+  `paint.ui.library.*` Actions share its install/update/defer/rollback state.
+  Installing a package must not silently mutate the active document.
   M2 Content Test is implemented in `app/painter_ui_stress_preview.py`.
   `paint.ui.layout.stress_preview` and the Inspector share one presentation
   entry point; only the canvas Overlay receives the ephemeral preview document.

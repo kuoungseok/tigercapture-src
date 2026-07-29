@@ -219,6 +219,110 @@ class PaintAdapterMixin(
             candidate_path,
         )
 
+    def paint_ui_library_package_export(
+        self,
+        *,
+        path: str,
+        library_id: str,
+        name: str,
+        version: int = 1,
+        description: str = "",
+        author: str = "",
+        license_id: str = "User-Owned",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_library_store import export_ui_library_package
+
+        return export_ui_library_package(
+            dialog._painter_ui_document,
+            path,
+            library_id=library_id,
+            name=name,
+            version=version,
+            description=description,
+            author=author,
+            license_id=license_id,
+        )
+
+    def paint_ui_library_package_install(
+        self,
+        *,
+        path: str,
+        store_root: str = "",
+        activate: bool = True,
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import install_ui_library_package
+
+        return install_ui_library_package(
+            path,
+            store_root=store_root or None,
+            activate=activate,
+        )
+
+    def paint_ui_library_store_inspect(
+        self,
+        *,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import inspect_ui_library_store
+
+        return inspect_ui_library_store(store_root=store_root or None)
+
+    def paint_ui_library_update_inspect(
+        self,
+        *,
+        candidate_path: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import compare_ui_library_update
+
+        return compare_ui_library_update(
+            candidate_path,
+            store_root=store_root or None,
+        )
+
+    def paint_ui_library_update_apply(
+        self,
+        *,
+        candidate_path: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import install_ui_library_package
+
+        return install_ui_library_package(
+            candidate_path,
+            store_root=store_root or None,
+            activate=True,
+        )
+
+    def paint_ui_library_update_defer(
+        self,
+        *,
+        library_id: str,
+        version: int,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import defer_ui_library_update
+
+        return defer_ui_library_update(
+            library_id,
+            version,
+            store_root=store_root or None,
+        )
+
+    def paint_ui_library_rollback(
+        self,
+        *,
+        library_id: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_library_store import rollback_ui_library
+
+        return rollback_ui_library(
+            library_id,
+            store_root=store_root or None,
+        )
+
     def paint_ui_review_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_review import inspect_ui_review

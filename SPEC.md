@@ -7886,6 +7886,14 @@ AI Script Edit MVP integration:
   usage, validates token references/scopes, and shares one Undoable mutation
   service with `paint.ui.style.library.inspect` and
   `paint.ui.style.add/update/remove/apply/unlink`.
+- Painter UI local design-system delivery uses versioned `.tsuilib` archives.
+  `app/painter_ui_library_store.py` packages component Definition subtrees,
+  Styles, Variable Collections/Modes, tokens, license metadata, and hashed
+  image/font resources. The contextual Libraries Assets tab and
+  `paint.ui.library.package.*`, `paint.ui.library.store.inspect`,
+  `paint.ui.library.update.*`, and `paint.ui.library.rollback` share one
+  validated store. Accept/Defer/Rollback change local library state only;
+  installation never silently alters the active `.tspaint` document.
 - Painter UI Design includes a visual `Templates` library and full gallery.
   The initial catalog contains 12 original complete-document templates across
   11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,

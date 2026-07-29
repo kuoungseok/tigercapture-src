@@ -10584,6 +10584,21 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.style_unlink_requested.connect(
             self._unlink_painter_ui_style
         )
+        self._paint_ui_inspector.library_package_export_requested.connect(
+            self._export_painter_ui_library_package
+        )
+        self._paint_ui_inspector.library_package_install_requested.connect(
+            self._install_painter_ui_library_package
+        )
+        self._paint_ui_inspector.library_update_apply_requested.connect(
+            self._apply_painter_ui_library_update
+        )
+        self._paint_ui_inspector.library_update_defer_requested.connect(
+            self._defer_painter_ui_library_update
+        )
+        self._paint_ui_inspector.library_rollback_requested.connect(
+            self._rollback_painter_ui_library
+        )
         self._paint_ui_inspector.token_binding_requested.connect(
             self._bind_painter_ui_token
         )
@@ -15775,6 +15790,59 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _refresh_painter_ui_library_panel(self) -> None:
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        panel = getattr(inspector, "library_panel", None)
+        if panel is not None:
+            panel.refresh_store()
+
+    def _export_painter_ui_library_package(self, values: object) -> None:
+        from app.painter_ui_library_store import export_ui_library_package
+
+        if not isinstance(values, dict):
+            return
+        document = getattr(self, "_painter_ui_document", None)
+        if not document:
+            return
+        export_ui_library_package(
+            document,
+            str(values.get("path") or ""),
+            library_id=str(values.get("library_id") or ""),
+            name=str(values.get("name") or ""),
+            version=int(values.get("version") or 1),
+            description=str(values.get("description") or ""),
+            author=str(values.get("author") or ""),
+            license_id=str(values.get("license_id") or "User-Owned"),
+        )
+
+    def _install_painter_ui_library_package(self, path: str) -> None:
+        from app.painter_ui_library_store import install_ui_library_package
+
+        install_ui_library_package(str(path))
+        self._refresh_painter_ui_library_panel()
+
+    def _apply_painter_ui_library_update(self, path: str) -> None:
+        from app.painter_ui_library_store import install_ui_library_package
+
+        install_ui_library_package(str(path), activate=True)
+        self._refresh_painter_ui_library_panel()
+
+    def _defer_painter_ui_library_update(
+        self,
+        library_id: str,
+        version: int,
+    ) -> None:
+        from app.painter_ui_library_store import defer_ui_library_update
+
+        defer_ui_library_update(str(library_id), int(version))
+        self._refresh_painter_ui_library_panel()
+
+    def _rollback_painter_ui_library(self, library_id: str) -> None:
+        from app.painter_ui_library_store import rollback_ui_library
+
+        rollback_ui_library(str(library_id))
+        self._refresh_painter_ui_library_panel()
 
     def _bind_painter_ui_token(
         self,

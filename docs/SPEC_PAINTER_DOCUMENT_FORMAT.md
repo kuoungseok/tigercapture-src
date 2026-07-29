@@ -162,6 +162,12 @@ preview. The format preserves:
   components, and interactions.
   `paint.ui.template.catalog.inspect/apply` use the same instantiate service as
   the visual Template Gallery.
+- Reusable design-system libraries use the separate versioned `.tsuilib`
+  archive contract `tigerstudio.painter.ui.library_package.v1`. It packages
+  component Definition subtrees, Color/Text/Effect and Layout Grid Styles,
+  Variable Collections/Modes, tokens, explicit license metadata, and hashed
+  image/font resources. Install/update state is external workspace state, not
+  `.tspaint` document revision or Undo data.
 - UI schema 21 adds stable-ID named Color, Text, and Effect Style records plus
   per-object `style_ids`. A Style stores only supported appearance properties,
   optional token-ID bindings, name, and description. Updating a Style

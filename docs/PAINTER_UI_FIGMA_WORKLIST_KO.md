@@ -9,6 +9,9 @@ M1 Page checkpoint (2026-07-29):
   documents gain empty named-Style collections without changing object IDs.
 - M3 named Color/Text/Effect Styles and existing Layout Grid Styles share one
   compact Assets library and `paint.ui.style.*` mutation contract.
+- M3 `.tsuilib` local packages and the compact Libraries Assets tab implement
+  hash/license validation, version review, accept, defer, and rollback.
+  Cross-document insertion from installed packages remains pending.
 - Stable-ID `pages[]`, `active_page_id`, and artboard `page_id` are canonical;
   version 18 documents migrate into `Page 1`.
 - Page CRUD, Navigator inline rename/add/delete, Undo, `.tspaint` round trip,

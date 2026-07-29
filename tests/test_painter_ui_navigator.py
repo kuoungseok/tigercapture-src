@@ -146,14 +146,20 @@ def test_inspector_can_move_layers_page_to_split_workspace() -> None:
     from app.painter_ui_inspector import PainterUIInspector
 
     inspector = PainterUIInspector()
-    assert inspector._tabs.count() == 8
+    assert inspector._tabs.count() == 9
     page = inspector.take_layers_page()
     assert page is inspector.layers_page
-    assert inspector._tabs.count() == 7
+    assert inspector._tabs.count() == 8
     assert inspector._tabs.indexOf(page) == -1
     assert inspector._tabs.tabWhatsThis(inspector._tabs.currentIndex()) == "Design"
     assets = inspector.take_asset_pages()
-    assert list(assets) == ["Sections", "Components", "Styles", "Tokens"]
+    assert list(assets) == [
+        "Sections",
+        "Components",
+        "Styles",
+        "Libraries",
+        "Tokens",
+    ]
     assert inspector._tabs.count() == 3
     assert [
         inspector._tabs.tabText(index)

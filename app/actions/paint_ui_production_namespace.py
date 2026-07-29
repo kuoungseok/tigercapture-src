@@ -128,6 +128,79 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         },
         required=("candidate_path",),
     )
+    read_action(
+        "paint.ui.library.package.export",
+        "Export components, styles, variables, and durable assets as .tsuilib",
+        "paint_ui_library_package_export",
+        {
+            "path": {"type": "string"},
+            "library_id": {"type": "string"},
+            "name": {"type": "string"},
+            "version": {"type": "integer", "minimum": 1},
+            "description": {"type": "string"},
+            "author": {"type": "string"},
+            "license_id": {"type": "string"},
+        },
+        required=("path", "library_id", "name"),
+    )
+    read_action(
+        "paint.ui.library.package.install",
+        "Validate and install a .tsuilib package into the local library store",
+        "paint_ui_library_package_install",
+        {
+            "path": {"type": "string"},
+            "store_root": {"type": "string"},
+            "activate": {"type": "boolean"},
+        },
+        required=("path",),
+    )
+    read_action(
+        "paint.ui.library.store.inspect",
+        "Inspect installed UI library versions and active/deferred state",
+        "paint_ui_library_store_inspect",
+        {"store_root": {"type": "string"}},
+    )
+    read_action(
+        "paint.ui.library.update.inspect",
+        "Review counts, hashes, and versions before accepting a library update",
+        "paint_ui_library_update_inspect",
+        {
+            "candidate_path": {"type": "string"},
+            "store_root": {"type": "string"},
+        },
+        required=("candidate_path",),
+    )
+    read_action(
+        "paint.ui.library.update.apply",
+        "Install and activate a reviewed UI library update",
+        "paint_ui_library_update_apply",
+        {
+            "candidate_path": {"type": "string"},
+            "store_root": {"type": "string"},
+        },
+        required=("candidate_path",),
+    )
+    read_action(
+        "paint.ui.library.update.defer",
+        "Remember a deferred UI library version without activating it",
+        "paint_ui_library_update_defer",
+        {
+            "library_id": {"type": "string"},
+            "version": {"type": "integer", "minimum": 1},
+            "store_root": {"type": "string"},
+        },
+        required=("library_id", "version"),
+    )
+    read_action(
+        "paint.ui.library.rollback",
+        "Switch an active local UI library back to its previous installed version",
+        "paint_ui_library_rollback",
+        {
+            "library_id": {"type": "string"},
+            "store_root": {"type": "string"},
+        },
+        required=("library_id",),
+    )
 
     read_action(
         "paint.ui.review.inspect",
