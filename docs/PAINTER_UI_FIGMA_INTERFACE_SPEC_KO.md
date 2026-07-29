@@ -48,6 +48,9 @@ Implemented:
 - Copy followed by Paste in Place duplicates the complete hierarchy at exact
   source coordinates with fresh stable IDs, remapped interactions, one Undo,
   and `paint.ui.object.paste_in_place` parity
+- Canvas context menus hide commands that are invalid for the current
+  selection and promote up to three valid recent commands under a localized
+  Recent Actions heading; promotion re-triggers the canonical QAction
 - typed stable-ID Vector Network content with node/segment selection,
   straight/Bezier conversion, handle editing, segment split, node join/remove,
   and open/closed path editing

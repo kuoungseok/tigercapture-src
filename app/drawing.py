@@ -29,6 +29,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QAction,
     QBrush,
     QColor,
     QCursor,
@@ -8161,6 +8162,7 @@ class PaintDialog(QDialog):
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
         self._painter_ui_property_clipboard: dict | None = None
+        self._painter_ui_recent_context_actions: list[str] = []
         self._paint_initial_color_scroll_pending = True
         self._tool_rail_collapsed = False
         self._tool_rail_full_width = 40
@@ -23856,7 +23858,12 @@ class PaintDialog(QDialog):
         reset_pan_action.triggered.connect(self._reset_canvas_pan)
         return menu
 
-    def _show_canvas_context_menu(self, global_pos: QPoint) -> None:
+    def _show_canvas_context_menu(
+        self,
+        global_pos: QPoint,
+        *,
+        execute: bool = True,
+    ) -> QMenu:
         if str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design":
             from app.painter_i18n import painter_text
 
@@ -24017,10 +24024,100 @@ class PaintDialog(QDialog):
             fit_action.triggered.connect(
                 lambda: self._fit_painter_ui_view("selection")
             )
-            menu.exec(global_pos)
-            return
+            self._prepare_painter_ui_context_menu(
+                menu,
+                {
+                    "place_image": place_image_action,
+                    "set_image_fill": set_image_fill_action,
+                    "copy_object": copy_action,
+                    "paste_in_place": paste_in_place_action,
+                    "duplicate_next": duplicate_next_action,
+                    "copy_properties": copy_properties_action,
+                    "paste_properties": paste_properties_action,
+                    "paste_replace": paste_replace_action,
+                    "scale_selection": scale_action,
+                    "select_parent": parent_action,
+                    "deep_select": deep_action,
+                    "enter_group": enter_scope_action,
+                    "exit_group": exit_scope_action,
+                    "fit_selection": fit_action,
+                },
+            )
+            if execute:
+                menu.exec(global_pos)
+            return menu
         menu = self._build_canvas_context_menu()
-        menu.exec(global_pos)
+        if execute:
+            menu.exec(global_pos)
+        return menu
+
+    def _prepare_painter_ui_context_menu(
+        self,
+        menu: QMenu,
+        actions_by_id: dict[str, QAction],
+    ) -> None:
+        from app.painter_ui_context_history import (
+            recent_available_actions,
+            record_context_action,
+        )
+
+        for action_id, action in actions_by_id.items():
+            action.setVisible(action.isEnabled())
+            action.triggered.connect(
+                lambda _checked=False, key=action_id: setattr(
+                    self,
+                    "_painter_ui_recent_context_actions",
+                    record_context_action(
+                        getattr(
+                            self,
+                            "_painter_ui_recent_context_actions",
+                            [],
+                        ),
+                        key,
+                    ),
+                )
+            )
+        visible_actions = [
+            action
+            for action in menu.actions()
+            if action.isVisible() and not action.isSeparator()
+        ]
+        for action in menu.actions():
+            if not action.isSeparator():
+                continue
+            index = menu.actions().index(action)
+            before = any(
+                row.isVisible() and not row.isSeparator()
+                for row in menu.actions()[:index]
+            )
+            after = any(
+                row.isVisible() and not row.isSeparator()
+                for row in menu.actions()[index + 1 :]
+            )
+            action.setVisible(before and after)
+        recent_ids = recent_available_actions(
+            getattr(self, "_painter_ui_recent_context_actions", []),
+            (
+                action_id
+                for action_id, action in actions_by_id.items()
+                if action.isVisible() and action.isEnabled()
+            ),
+        )
+        if not recent_ids or not visible_actions:
+            return
+        first = visible_actions[0]
+        heading = QAction(painter_text("Recent actions"), menu)
+        heading.setEnabled(False)
+        menu.insertAction(first, heading)
+        for action_id in recent_ids:
+            source = actions_by_id[action_id]
+            recent = QAction(source.icon(), source.text(), menu)
+            recent.setToolTip(source.toolTip())
+            recent.triggered.connect(source.trigger)
+            menu.insertAction(first, recent)
+        separator = QAction(menu)
+        separator.setSeparator(True)
+        menu.insertAction(first, separator)
 
     def _copy_painter_ui_object_payload(self) -> None:
         from app.painter_ui_property_clipboard import copy_ui_object_payload

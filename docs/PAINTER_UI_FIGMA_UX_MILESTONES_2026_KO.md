@@ -413,6 +413,20 @@ Implemented checkpoint (2026-07-29, Paste in Place slice):
   the evidence copy so both hierarchies remain visible in the screenshot at
   `debugCapture/painter_ui_paste_in_place_m1`.
 
+Implemented checkpoint (2026-07-29, contextual menu ordering slice):
+
+- The canvas menu no longer displays disabled selection-only commands. Image,
+  hierarchy, clipboard, scale, and fit rows appear only when the current
+  selection can execute them.
+- Up to three session-local commands are promoted under the localized Recent
+  Actions heading only when they remain valid in the new context.
+- Promoted rows trigger their canonical QAction, so command behavior, Actions,
+  mutation, and Undo do not fork. Recent ordering does not mutate the document
+  or create history entries.
+- The actual product QMenu is rendered at desktop and compact sizes by
+  `tools/qa_painter_ui_context_menu.py`; evidence is regenerated under
+  `debugCapture/painter_ui_context_menu_m1`.
+
 Implemented checkpoint (2026-07-29, inline text editing slice):
 
 - Double-clicking an unlocked text object opens a canvas-native plain-text

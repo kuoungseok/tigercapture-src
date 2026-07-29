@@ -152,6 +152,10 @@ Focused entry points:
   `paint.ui.object.paste_in_place` must continue to call
   `duplicate_ui_selection(..., offset_x=0, offset_y=0)` so hierarchy,
   references, stable IDs, Undo, and `.tspaint` do not diverge.
+  Painter UI canvas menus use `app/painter_ui_context_history.py` for
+  session-local recent ordering. Invalid commands stay hidden, and recent rows
+  must trigger the canonical QAction; never add a second mutation path just
+  for the promoted menu row.
   As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
   main/cross alignment, gap, four-edge padding, and child Flow/Absolute
   controls. The implementation lives in
