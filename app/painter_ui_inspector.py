@@ -302,6 +302,7 @@ class PainterUIInspector(QWidget):
     responsive_preview_requested = Signal()
     component_create_requested = Signal(str, str)
     component_instantiate_requested = Signal(str, str, float, float)
+    component_playground_requested = Signal(str)
     component_variant_create_requested = Signal(str, str)
     component_variant_switch_requested = Signal(str, str)
     component_detach_requested = Signal(str, bool, str)
@@ -1082,8 +1083,23 @@ class PainterUIInspector(QWidget):
         self.component_instance_button.clicked.connect(
             self._emit_component_instantiate
         )
+        self.component_playground_button = QPushButton("")
+        self.component_playground_button.setIcon(
+            app_icon("play", size=12, color="#CBD5E2")
+        )
+        self.component_playground_button.setIconSize(icon_size(12))
+        self.component_playground_button.setToolTip(
+            painter_text("Component Playground")
+        )
+        self.component_playground_button.setAccessibleName(
+            painter_text("Component Playground")
+        )
+        self.component_playground_button.clicked.connect(
+            self._emit_component_playground
+        )
         component_layout.addWidget(self.component_create_button)
         component_layout.addWidget(self.component_instance_button)
+        component_layout.addWidget(self.component_playground_button)
         form.addRow("Component", component_row)
         self.component_status_label = QLabel("Not a component")
         self.component_status_label.setObjectName("PaintMuted")
@@ -2514,6 +2530,7 @@ class PainterUIInspector(QWidget):
             self.responsive_clear_button,
             self.component_create_button,
             self.component_instance_button,
+            self.component_playground_button,
             self.component_state_combo,
             self.component_variant_combo,
             self.component_variant_new_button,
@@ -2575,6 +2592,7 @@ class PainterUIInspector(QWidget):
         component_id = str(base_row.get("component_id") or "")
         self.component_create_button.setEnabled(component_role == "none")
         self.component_instance_button.setEnabled(bool(component_id))
+        self.component_playground_button.setEnabled(bool(component_id))
         instance_root = self._component_instance_root(base_row)
         self.component_state_combo.setEnabled(instance_root is not None)
         component_state = str(
@@ -3092,6 +3110,12 @@ class PainterUIInspector(QWidget):
             float(row["x"]) + 32.0,
             float(row["y"]) + 32.0,
         )
+
+    def _emit_component_playground(self) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or not row.get("component_id"):
+            return
+        self.component_playground_requested.emit(str(row["component_id"]))
 
     def _emit_component_state(self) -> None:
         row = self._selected_row()

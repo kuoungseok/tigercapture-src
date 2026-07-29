@@ -7849,6 +7849,13 @@ AI Script Edit MVP integration:
   the same validated, one-step Undo services through
   `paint.ui.component.override.reset` and
   `paint.ui.component.override.reset_all`.
+- Component Definition or Instance selection exposes a contextual,
+  non-modal Component Playground. Typed text, boolean, number, enum/state, and
+  instance-swap controls materialize an isolated preview through the production
+  canvas renderer without changing the source document, linked Instances,
+  selection, canonical revision, persistence, or Undo history.
+  `paint.ui.component.playground.inspect` evaluates the same property
+  combination for automation.
 - Painter UI Design includes a dedicated `Components` library tab. It groups
   base Definitions and Variants, reports Instance usage, filters by name,
   selects the stable Definition root, places Instances, creates Variants, and

@@ -166,6 +166,23 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter component library would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.component.playground.inspect",
+        "Inspect a Component with preview-only property values.",
+        "paint",
+        "paint_ui_component_playground_inspect",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_values": any_object,
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a Component property combination would be previewed",
+    )
+    registry.register_adapter_action(
         "paint.ui.token.library.inspect",
         "Inspect design tokens, theme values, aliases, stable bindings, and unused-token status.",
         "paint",

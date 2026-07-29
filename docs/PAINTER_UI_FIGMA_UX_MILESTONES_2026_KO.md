@@ -883,6 +883,16 @@ Implemented checkpoint (2026-07-29):
 - UI commands and `paint.ui.component.override.reset/reset_all` use the same
   validated document services. Inspector counts include the whole Instance
   subtree instead of only the selected child.
+- Component selections now expose a contextual play icon that opens a
+  transient Component Playground; no fixed panel reduces the canvas.
+- Text, boolean, number, enum/state, and instance-swap properties rebuild an
+  isolated materialized preview through the production canvas renderer.
+  Source definitions, Instances, selection, canonical revision, persistence,
+  and Undo history are unchanged.
+- `paint.ui.component.playground.inspect` returns the same validated property
+  combination report to automation. Reproducible visual evidence is generated
+  by `tools/qa_painter_ui_component_playground.py` as
+  `painter_ui_designer_m3_component_playground.png`.
 
 Exit criteria:
 

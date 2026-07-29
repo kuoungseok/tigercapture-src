@@ -458,6 +458,24 @@ class PaintAdapterMixin(
             getattr(dialog, "_painter_ui_document", None)
         )
 
+    def paint_ui_component_playground_inspect(
+        self,
+        *,
+        component_id: str,
+        property_values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_component_playground import (
+            build_ui_component_playground,
+        )
+
+        _preview, report = build_ui_component_playground(
+            getattr(dialog, "_painter_ui_document", None),
+            component_id=str(component_id),
+            property_values=dict(property_values or {}),
+        )
+        return report
+
     def paint_ui_token_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_token_library import inspect_ui_token_library

@@ -10536,6 +10536,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.component_instantiate_requested.connect(
             self._instantiate_painter_ui_component
         )
+        self._paint_ui_inspector.component_playground_requested.connect(
+            self._show_painter_ui_component_playground
+        )
+        self._paint_ui_inspector.component_playground_requested.connect(
+            self._show_painter_ui_component_playground
+        )
         self._paint_ui_inspector.component_variant_create_requested.connect(
             self._create_painter_ui_component_variant
         )
@@ -15394,6 +15400,46 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _show_painter_ui_component_playground(
+        self,
+        component_id: str,
+    ) -> None:
+        from app.painter_ui_component_playground_panel import (
+            PainterUIComponentPlaygroundPanel,
+        )
+
+        panel = getattr(self, "_painter_ui_component_playground_panel", None)
+        if panel is None:
+            panel = PainterUIComponentPlaygroundPanel(self)
+            self._painter_ui_component_playground_panel = panel
+        panel.set_component(
+            getattr(self, "_painter_ui_document", None),
+            str(component_id),
+        )
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _show_painter_ui_component_playground(
+        self,
+        component_id: str,
+    ) -> None:
+        from app.painter_ui_component_playground_panel import (
+            PainterUIComponentPlaygroundPanel,
+        )
+
+        panel = getattr(self, "_painter_ui_component_playground_panel", None)
+        if panel is None:
+            panel = PainterUIComponentPlaygroundPanel(self)
+            self._painter_ui_component_playground_panel = panel
+        panel.set_component(
+            getattr(self, "_painter_ui_document", None),
+            str(component_id),
+        )
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
 
     def _create_painter_ui_component_variant(
         self,

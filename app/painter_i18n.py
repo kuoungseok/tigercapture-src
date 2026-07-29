@@ -59,6 +59,8 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
         "Alle lokalen Überschreibungen dieser Instanz zurücksetzen",
     ),
     ("Responsive Preview", "반응형 프리뷰", "レスポンシブプレビュー", "响应式预览", "Aperçu adaptatif", "Responsive Vorschau"),
+    ("Component Playground", "컴포넌트 플레이그라운드", "コンポーネントプレイグラウンド", "组件试验场", "Atelier de composant", "Komponenten-Spielwiese"),
+    ("Component Properties", "컴포넌트 속성", "コンポーネントプロパティ", "组件属性", "Propriétés du composant", "Komponenteneigenschaften"),
     ("New Page", "새 페이지", "新規ページ", "新建页面", "Nouvelle page", "Neue Seite"),
     ("Delete Page", "페이지 삭제", "ページを削除", "删除页面", "Supprimer la page", "Seite löschen"),
     (

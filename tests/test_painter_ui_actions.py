@@ -114,6 +114,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.component.override.reset",
         "paint.ui.component.override.reset_all",
         "paint.ui.component.library.inspect",
+        "paint.ui.component.playground.inspect",
         "paint.ui.token.library.inspect",
         "paint.ui.token.library.import",
         "paint.ui.token.library.export",
