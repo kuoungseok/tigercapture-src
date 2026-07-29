@@ -225,6 +225,14 @@ Focused entry points:
   closed fill geometry and rebases object bounds. Their transient context-bar
   commands and `paint.ui.vector.path.reverse/simplify/outline` Actions share
   one-step Undo and the same document mutation services.
+  M8 AI Prototype Build lives in `app/painter_ui_ai_prototype.py`. The Publish
+  AI mode and `paint.ui.ai.prototype.plan/apply` share this review-first
+  service; planning is non-mutating and apply is one Undo step. Static
+  Web/App/UMG capability classification lives in
+  `app/painter_ui_advanced_delivery.py` and is exposed by
+  `paint.ui.advanced_delivery.inspect`. Do not claim Web package, PPT transfer,
+  or Paint/Vector conversion until those remaining M8 adapters produce real
+  artifacts.
   Schema 16 added persistent Polygon/Star/Arc parameters through the shared
   `app/painter_ui_parametric_shapes.py` geometry contract. The grouped Shape
   flyout, contextual Inspector, `paint.ui.object.add/update`, canvas hit

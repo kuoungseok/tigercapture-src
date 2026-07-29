@@ -845,6 +845,41 @@ class PaintAdapterMixin(
 
         return audit_ui_design(dialog._painter_ui_document)
 
+    def paint_ui_ai_prototype_plan(self, *, prompt: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ai_prototype import plan_ui_prototype_build
+
+        return plan_ui_prototype_build(
+            dialog._painter_ui_document,
+            prompt=prompt,
+        )
+
+    def paint_ui_ai_prototype_apply(
+        self,
+        *,
+        plan: dict[str, Any],
+        selected_operation_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ai_prototype import apply_ui_prototype_build
+
+        document, report = apply_ui_prototype_build(
+            dialog._painter_ui_document,
+            plan,
+            selected_operation_ids=selected_operation_ids,
+        )
+        dialog._push_undo_state("Apply AI prototype build")
+        self._paint_ui_commit(dialog, "Apply AI prototype build", document)
+        return {**dialog.painter_action_state(), "ai_prototype_apply": report}
+
+    def paint_ui_advanced_delivery_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_advanced_delivery import (
+            inspect_advanced_ui_delivery,
+        )
+
+        return inspect_advanced_ui_delivery(dialog._painter_ui_document)
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

@@ -574,6 +574,27 @@ def register_paint_ui_production_actions(registry: Any) -> None:
         "paint_ui_ai_audit",
         {},
     )
+    read_action(
+        "paint.ui.ai.prototype.plan",
+        "Plan an editable UI and bounded prototype interactions for explicit review",
+        "paint_ui_ai_prototype_plan",
+        {"prompt": {"type": "string"}},
+        required=("prompt",),
+    )
+    undo_action(
+        "paint.ui.ai.prototype.apply",
+        "Apply an approved editable UI and prototype interaction plan",
+        "paint_ui_ai_prototype_apply",
+        {"plan": any_object, "selected_operation_ids": string_array},
+        required=("plan",),
+        undo_label="Apply AI prototype build",
+    )
+    read_action(
+        "paint.ui.advanced_delivery.inspect",
+        "Classify the current Painter UI for Web, App, and UMG delivery",
+        "paint_ui_advanced_delivery_inspect",
+        {},
+    )
 
 
 __all__ = ["register_paint_ui_production_actions"]

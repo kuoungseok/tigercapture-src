@@ -854,6 +854,29 @@ UI release round-trip corpus:
   at this gate is contract-only; Widget Blueprint compilation and a real Unreal
   capture remain separate release gates.
 
+AI Prototype Build:
+
+- The AI tab offers `Screen Design` and `Interactive Prototype` modes without
+  adding a timeline or another fixed canvas panel.
+- `app/painter_ui_ai_prototype.py` builds a review-first plan from the existing
+  editable AI design service, then adds bounded canonical Hover/Click
+  interactions through `add_ui_interaction`.
+- Planning never mutates the Painter document. Apply rejects another document,
+  a stale revision, or omission of the required editable-UI operation.
+- `paint.ui.ai.prototype.plan/apply` use the same service as the UI. Apply is
+  one Undo step and the result remains normal `.tspaint` objects and
+  interactions rather than flattened generated media.
+- `app/painter_ui_advanced_delivery.py` reports feature-level Web/App/UMG
+  dispositions as Native, Vector, Platform Effect, Material, Baked,
+  Actor Only, or Blocked. `paint.ui.advanced_delivery.inspect` exposes the same
+  non-mutating report.
+- The plan and apply reports include prototype validation, accessibility and
+  product audit, and Web/App/UMG delivery preflight. They make capability
+  claims only; real package generation remains owned by each target adapter.
+- Korean desktop and compact QA regenerate through
+  `tools/qa_painter_ui_ai_prototype.py` under
+  `debugCapture/painter_ui_designer/ai_prototype`.
+
 Document-scale performance budgets:
 
 - `app/painter_ui_performance_budget.py` owns warning and release-block limits

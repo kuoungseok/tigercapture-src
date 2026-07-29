@@ -1567,6 +1567,29 @@ Required Actions:
 - `paint.ui.convert.to_paint/to_vector`
 - `paint.ui.advanced_delivery.inspect`
 
+Implemented checkpoint (2026-07-29, M8 AI Prototype Build slice):
+
+- `app/painter_ui_ai_prototype.py` composes the existing editable AI design
+  planner with canonical Hover/Click interactions. It preserves stable object
+  IDs in the reviewed preview and does not create a private prototype runtime.
+- Plan is read-only and requires explicit apply. Apply validates document ID
+  and source revision, requires the editable design operation, commits through
+  the normal Painter UI document, and produces one Undo step.
+- The Publish AI surface switches between Screen Design and Interactive
+  Prototype without adding fixed canvas chrome. Its plan summary includes
+  compact Web/App/UMG readiness.
+- `app/painter_ui_advanced_delivery.py` classifies every object for Web, App,
+  and UMG as Native, Vector, Platform Effect, Material, Baked, Actor Only, or
+  Blocked. This is a capability preflight, not a generated-artifact claim.
+- UI and automation share `paint.ui.ai.prototype.plan/apply` and
+  `paint.ui.advanced_delivery.inspect`.
+- `tools/qa_painter_ui_ai_prototype.py` regenerates Korean desktop/compact
+  evidence and a machine-readable report under
+  `debugCapture/painter_ui_designer/ai_prototype`.
+- Remaining M8 required work is executable Web package generation,
+  Painter-to-PPT transfer, and Paint/Vector conversion. Those Actions remain
+  intentionally absent until their real artifacts and Undo contracts exist.
+
 Exit criteria:
 
 - AI output remains editable and passes the same Action, Undo, validation, and

@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.painter_ui_document import normalize_ui_document
+from app.painter_i18n import painter_text
 from app.painter_ui_review import inspect_ui_review
 
 
@@ -39,6 +41,8 @@ class PainterUIProductionPanel(QWidget):
     ai_plan_requested = Signal(str)
     ai_apply_requested = Signal(object)
     ai_audit_requested = Signal()
+    ai_prototype_plan_requested = Signal(str)
+    ai_prototype_apply_requested = Signal(object)
     artifact_open_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
@@ -169,23 +173,31 @@ class PainterUIProductionPanel(QWidget):
         ai = QWidget()
         ai_layout = QVBoxLayout(ai)
         ai_layout.setContentsMargins(4, 4, 4, 4)
+        self.ai_mode_combo = QComboBox()
+        self.ai_mode_combo.addItem(painter_text("Screen Design"), "screen")
+        self.ai_mode_combo.addItem(
+            painter_text("Interactive Prototype"),
+            "prototype",
+        )
         self.ai_prompt_edit = QLineEdit()
         self.ai_prompt_edit.setPlaceholderText(
-            "Describe a screen, component, or product UI"
+            painter_text("Describe a screen, component, or product UI")
         )
-        plan = QPushButton("Plan and Preview")
-        plan.clicked.connect(
-            lambda: self.ai_plan_requested.emit(self.ai_prompt_edit.text().strip())
-        )
-        self.ai_summary = QLabel("No AI plan")
+        plan = QPushButton(painter_text("Plan and Preview"))
+        plan.clicked.connect(self._request_ai_plan)
+        self.ai_summary = QLabel(painter_text("No AI plan"))
         self.ai_summary.setWordWrap(True)
-        apply_plan = QPushButton("Apply Approved Plan")
-        apply_plan.clicked.connect(lambda: self.ai_apply_requested.emit(self._ai_plan))
-        audit = QPushButton("Run Product QA")
+        self.ai_delivery_label = QLabel("Web · App · UMG")
+        self.ai_delivery_label.setWordWrap(True)
+        apply_plan = QPushButton(painter_text("Apply Approved Plan"))
+        apply_plan.clicked.connect(self._request_ai_apply)
+        audit = QPushButton(painter_text("Run Product QA"))
         audit.clicked.connect(self.ai_audit_requested)
+        ai_layout.addWidget(self.ai_mode_combo)
         ai_layout.addWidget(self.ai_prompt_edit)
         ai_layout.addWidget(plan)
         ai_layout.addWidget(self.ai_summary)
+        ai_layout.addWidget(self.ai_delivery_label)
         ai_layout.addWidget(apply_plan)
         ai_layout.addWidget(audit)
         from app.painter_ui_accessibility_panel import (
@@ -230,8 +242,38 @@ class PainterUIProductionPanel(QWidget):
         self._ai_plan = dict(plan)
         self.ai_summary.setText(
             str(plan.get("summary") or "AI plan ready")
-            + f"\n{len(plan.get('operations', []))} operations, explicit apply required."
+            + "\n"
+            + painter_text("Explicit apply required")
+            + f" · {len(plan.get('operations', []))}"
         )
+        delivery = plan.get("delivery")
+        delivery = delivery if isinstance(delivery, Mapping) else {}
+        targets = delivery.get("targets")
+        targets = targets if isinstance(targets, Mapping) else {}
+        self.ai_delivery_label.setText(
+            " · ".join(
+                f"{target.upper()} "
+                + (
+                    painter_text("Ready")
+                    if bool((targets.get(target) or {}).get("ok"))
+                    else painter_text("Blocked")
+                )
+                for target in ("web", "app", "umg")
+            )
+        )
+
+    def _request_ai_plan(self) -> None:
+        prompt = self.ai_prompt_edit.text().strip()
+        if self.ai_mode_combo.currentData() == "prototype":
+            self.ai_prototype_plan_requested.emit(prompt)
+        else:
+            self.ai_plan_requested.emit(prompt)
+
+    def _request_ai_apply(self) -> None:
+        if self.ai_mode_combo.currentData() == "prototype":
+            self.ai_prototype_apply_requested.emit(self._ai_plan)
+        else:
+            self.ai_apply_requested.emit(self._ai_plan)
 
     def set_status(self, text: str) -> None:
         self.status_label.setText(str(text))

@@ -57,6 +57,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |
 | Tokens and themes | Token library, exact scoped-value suggestions, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.suggest`, `paint.ui.token.*`, `paint.ui.theme.*` |
 | Prototype interactions | Prototype authoring/preview and production panel | `paint.ui.interaction.*` |
+| AI Prototype Build | Publish AI mode selector, review summary, Web/App/UMG readiness | `paint.ui.ai.prototype.plan/apply`, `paint.ui.advanced_delivery.inspect` |
 | Motion link | Inspector Animate/Preview and Motion Actor placement | `paint.ui.motion.*`, `paint.ui.motion_actor.*` |
 | Delivery/UMG | Production preflight/export and shared TigerStudioUMG flow | `paint.ui.delivery.*`, `paint.ui.handoff.export` |
 

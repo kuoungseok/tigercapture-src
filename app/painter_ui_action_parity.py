@@ -173,8 +173,12 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.handoff.",
             "paint.ui.assets.",
             "paint.ui.umg.",
+            "paint.ui.advanced_delivery.",
         ),
-        "required": ("paint.ui.delivery.preflight",),
+        "required": (
+            "paint.ui.delivery.preflight",
+            "paint.ui.advanced_delivery.inspect",
+        ),
     },
     {
         "id": "dev_review",
@@ -196,6 +200,7 @@ _FAMILIES: tuple[dict[str, Any], ...] = (
             "paint.ui.figma.import",
             "paint.ui.figma.export",
             "paint.ui.ai.plan",
+            "paint.ui.ai.prototype.plan",
         ),
     },
 )

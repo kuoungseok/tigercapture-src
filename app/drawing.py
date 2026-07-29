@@ -10717,6 +10717,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.ai_audit_requested.connect(
             self._audit_painter_ui_ai_design
         )
+        self._paint_ui_inspector.ai_prototype_plan_requested.connect(
+            self._plan_painter_ui_ai_prototype
+        )
+        self._paint_ui_inspector.ai_prototype_apply_requested.connect(
+            self._apply_painter_ui_ai_prototype
+        )
         self._paint_ui_inspector.artboard_selected.connect(
             self._set_painter_ui_artboard
         )
@@ -16166,6 +16172,45 @@ class PaintDialog(QDialog):
             panel.set_audit_report(report)
         self._painter_ui_production_status(
             f"QA: {counts['error']} errors, {counts['warning']} warnings"
+        )
+
+    def _plan_painter_ui_ai_prototype(self, prompt: str) -> None:
+        if not str(prompt).strip():
+            self._painter_ui_production_status(
+                "Describe the interactive UI to create."
+            )
+            return
+        from app.painter_ui_ai_prototype import plan_ui_prototype_build
+
+        plan = plan_ui_prototype_build(
+            self._painter_ui_document,
+            prompt=prompt,
+        )
+        self._paint_ui_inspector.production_panel.set_ai_plan(plan)
+        count = len(plan.get("interaction_specs") or [])
+        self._painter_ui_production_status(
+            f"AI prototype plan ready: {count} interactions to review."
+        )
+
+    def _apply_painter_ui_ai_prototype(self, plan: object) -> None:
+        if not isinstance(plan, dict) or not plan:
+            self._painter_ui_production_status(
+                "Create an AI prototype plan first."
+            )
+            return
+        from app.painter_ui_ai_prototype import apply_ui_prototype_build
+
+        document, report = apply_ui_prototype_build(
+            self._painter_ui_document,
+            plan,
+        )
+        self._push_undo_state("Apply AI prototype build")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._painter_ui_production_status(
+            "AI prototype applied: "
+            f"{len(report['added_interaction_ids'])} interactions."
         )
 
     def _instantiate_painter_ui_component(
