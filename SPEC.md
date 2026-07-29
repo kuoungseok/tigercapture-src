@@ -5835,8 +5835,10 @@ AI Script Edit MVP integration:
   scoped adjustment effects; outside and invalid IDs are filtered. The Effects
   inspector exposes `All Descendants` and `Selected Descendants`, and
   Actions/MCP expose `motion.effect_group.scope.get/set`. Preview and export
-  use the same scoped stack. OpenGL-only preview backends explicitly fall back
-  to the shared raster graph when an effect group is active.
+  use the same scoped stack. A single common GPU effect on a group target is
+  folded into that target's OpenGL pass. A target that would receive a stacked
+  layer/group/adjustment effect chain explicitly falls back to the shared
+  raster graph rather than changing effect order.
 - Numeric rows in the Effects and Masks inspectors expose keyframe diamonds.
   The diamond adds, updates, or removes a keyframe at the selected layer's
   local time after in-point, source-time, reverse, and time-remap conversion.
@@ -6628,12 +6630,20 @@ AI Script Edit MVP integration:
   A bounded nine-tap card-shadow shader preserves the existing depth,
   azimuth/elevation, strength, softness, and receiver-alpha rules for one
   active receiving card. Multiple receiving depths remain an explicit raster
-  fallback. Eligibility otherwise rejects adjustment/precomp, effect groups,
-  unsupported or stacked effects, external Craft textures, projected
-  Painterly textures, and Painterly material overrides; those graphs keep the
-  accurate shared raster fallback with an explicit reason. Source-layer
-  rasterization and texture upload remain measurable CPU preparation work, so
-  this is not a claim that the complete Motion graph is GPU-native.
+  fallback. The common compositor also runs brightness/contrast, saturation,
+  Gaussian blur, unsharp mask, glow, vignette, drop shadow, light sweep,
+  deterministic fractal noise, posterize, directional blur, and displacement
+  as fragment-shader passes. One global adjustment pass and one selected
+  adjustment or effect-group pass per target use the same Preview/Export
+  backend. Nested precompositions may enter the compositor as evaluated raster
+  source textures and are counted by `precomp_source_raster_count`; this does
+  not claim that nested child evaluation itself is GPU-native.
+  Stacked effect chains, corner pin, mesh warp, paper fold, scan cleanup,
+  chroma/luma/difference keying, external Craft textures, projected Painterly
+  textures, and Painterly material overrides remain accurate shared-raster
+  fallbacks with explicit reasons. Source-layer rasterization and texture
+  upload remain measurable CPU preparation work, so this is not a claim that
+  the complete Motion graph is GPU-native.
   The formal 15.36-second product probe recorded 450 swaps at 29.29 fps,
   one loop, `motion_glass_gpu`, and GL error 0. Its same-time CPU reference
   measured mean RGB absolute error 4.51/255 and p95 8/255 against automatic
@@ -6646,6 +6656,12 @@ AI Script Edit MVP integration:
   reads the completed FBO back to CPU memory. Unsupported and tiled graphs
   continue to use the shared raster renderer, and backend diagnostics disclose
   the fallback reason.
+  `tools/qa_motion_common_effect_gpu.py` proves a real offscreen OpenGL graph
+  containing a group-scoped posterize pass, a layer saturation pass, and a
+  global vignette adjustment. It records three common GPU passes, one
+  adjustment pass, GL error 0, and mean RGB absolute error 1.67/255 against
+  the CPU reference. The backend reports `motion_compositor_gpu`; Glass and
+  Craft/Painterly retain `motion_glass_gpu` and `motion_style_gpu`.
 - M23 Mixed Media Craft Workspace v1 is implemented around the provider-neutral
   `tigerstudio.motion.collage.v1` contract. A collage board binds existing
   Motion layers to stable item IDs, deterministic layout seed and z-order,

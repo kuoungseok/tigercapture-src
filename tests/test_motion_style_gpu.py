@@ -75,7 +75,7 @@ def test_style_gpu_rejects_unsupported_and_stacked_effects() -> None:
     graph = build_render_graph(composition, 500, render_quality="preview")
     assert MotionGlassGpuRenderer.can_draw(graph) == (
         False,
-        "unsupported_effect_requires_raster",
+        "stacked_effects_require_raster",
     )
 
     composition.layers[-1].effects = [
@@ -85,8 +85,62 @@ def test_style_gpu_rejects_unsupported_and_stacked_effects() -> None:
     graph = build_render_graph(composition, 500, render_quality="preview")
     assert MotionGlassGpuRenderer.can_draw(graph) == (
         False,
-        "stacked_style_effects_require_raster",
+        "stacked_effects_require_raster",
     )
+
+
+def test_common_effects_are_eligible_for_gpu_compositor() -> None:
+    for kind in (
+        "brightness_contrast",
+        "saturation",
+        "gaussian_blur",
+        "unsharp_mask",
+        "glow",
+        "vignette",
+        "drop_shadow",
+        "light_sweep",
+        "fractal_noise",
+        "posterize",
+        "directional_blur",
+        "displacement",
+    ):
+        graph = build_render_graph(
+            _composition(MotionEffectRef(kind=kind)),
+            500,
+            render_quality="preview",
+        )
+        assert MotionGlassGpuRenderer.can_draw(graph) == (True, "")
+
+
+def test_common_gpu_compositor_accepts_adjustment_effect_group_and_precomp() -> None:
+    composition = _composition(MotionEffectRef(kind="saturation"))
+    adjustment = MotionLayer(
+        id="adjustment",
+        layer_type="adjustment",
+        effects=[MotionEffectRef(kind="vignette")],
+    )
+    composition.layers.append(adjustment)
+    graph = build_render_graph(composition, 500, render_quality="preview")
+    assert MotionGlassGpuRenderer.can_draw(graph) == (True, "")
+
+    composition.layers.pop()
+    group = MotionLayer(
+        id="group",
+        layer_type="group",
+        effects=[MotionEffectRef(kind="posterize")],
+    )
+    composition.layers[-1].parent_id = group.id
+    composition.layers.insert(1, group)
+    graph = build_render_graph(composition, 500, render_quality="preview")
+    assert MotionGlassGpuRenderer.can_draw(graph) == (False, "stacked_effects_require_raster")
+
+    composition.layers[-1].effects.clear()
+    graph = build_render_graph(composition, 500, render_quality="preview")
+    assert MotionGlassGpuRenderer.can_draw(graph) == (True, "")
+
+    composition.layers[-1].layer_type = "precomp"
+    graph = build_render_graph(composition, 500, render_quality="preview")
+    assert MotionGlassGpuRenderer.can_draw(graph) == (True, "")
 
 
 def test_style_gpu_accepts_motion_blur_for_shared_gpu_sampling() -> None:

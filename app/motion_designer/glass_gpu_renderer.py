@@ -24,6 +24,11 @@ from PySide6.QtOpenGL import (
 
 from .glass_material import glass_effect
 from .craft_style import is_craft_style_effect
+from .gpu_effect_contract import (
+    gpu_effect_parameters,
+    is_common_gpu_effect,
+    unsupported_gpu_effect_reason,
+)
 from .keyframes import evaluate_property
 from .painterly_look import is_painterly_look_effect
 from .render_graph import RenderGraph, RenderNode, render_graph_image
@@ -103,6 +108,10 @@ uniform int u_shadow_enabled;
 uniform vec2 u_shadow_offset;
 uniform float u_shadow_softness;
 uniform float u_shadow_alpha;
+uniform int u_effect_kind;
+uniform vec4 u_effect_values_a;
+uniform vec2 u_effect_values_b;
+uniform vec4 u_effect_color;
 varying vec2 v_uv;
 
 vec2 backdrop_uv(vec2 uv) {
@@ -255,6 +264,151 @@ vec4 source_over_color(vec4 behind, vec3 rgb, float alpha) {
     return vec4(premul, output_alpha);
 }
 
+vec4 effect_input(vec2 uv, int backdrop_input) {
+    return backdrop_input == 1 ? backdrop(uv) : source_pixel(uv);
+}
+
+vec4 effect_blur(vec2 uv, int backdrop_input, float radius) {
+    vec2 step_uv = u_texel * max(0.0, radius);
+    vec4 value = effect_input(uv, backdrop_input) * 0.20;
+    value += effect_input(uv + vec2(step_uv.x, 0.0), backdrop_input) * 0.12;
+    value += effect_input(uv - vec2(step_uv.x, 0.0), backdrop_input) * 0.12;
+    value += effect_input(uv + vec2(0.0, step_uv.y), backdrop_input) * 0.12;
+    value += effect_input(uv - vec2(0.0, step_uv.y), backdrop_input) * 0.12;
+    value += effect_input(uv + step_uv * 0.707, backdrop_input) * 0.08;
+    value += effect_input(uv - step_uv * 0.707, backdrop_input) * 0.08;
+    value += effect_input(
+        uv + vec2(step_uv.x, -step_uv.y) * 0.707,
+        backdrop_input
+    ) * 0.08;
+    value += effect_input(
+        uv + vec2(-step_uv.x, step_uv.y) * 0.707,
+        backdrop_input
+    ) * 0.08;
+    return value;
+}
+
+float fractal_value(vec2 uv) {
+    float total = 0.0;
+    float weight = 0.0;
+    float frequency = 1.0;
+    float amplitude = 1.0;
+    float seed = u_effect_color.r * 997.0;
+    for (int octave = 0; octave < 8; ++octave) {
+        if (float(octave) < u_effect_values_a.z) {
+            vec2 cell = floor(
+                uv / max(u_texel * u_effect_values_a.y / frequency, u_texel)
+            );
+            float phase = u_effect_values_b.x + u_time * u_effect_values_b.y;
+            total += hash21(cell + seed + floor(phase) * 7919.0) * amplitude;
+            weight += amplitude;
+            frequency *= 2.0;
+            amplitude *= 0.5;
+        }
+    }
+    return total / max(0.0001, weight);
+}
+
+vec4 common_effect_pixel(int backdrop_input) {
+    vec2 uv = v_uv;
+    if (u_effect_kind == 12) {
+        float phase = u_time * u_effect_values_a.z;
+        uv += vec2(
+            sin(v_uv.y / max(u_texel.y * u_effect_values_a.y, u_texel.y)
+                * 6.28318 + phase) * u_effect_values_a.x * u_texel.x,
+            cos(v_uv.x / max(u_texel.x * u_effect_values_a.y, u_texel.x)
+                * 6.28318 - phase * 0.73) * u_effect_values_a.x * u_texel.y
+        );
+    }
+    vec4 source = effect_input(uv, backdrop_input);
+    vec3 rgb = straight_rgb(source);
+    if (u_effect_kind == 1) {
+        rgb = (rgb - 0.5) * u_effect_values_a.y + 0.5
+              + u_effect_values_a.x;
+    } else if (u_effect_kind == 2) {
+        float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+        rgb = vec3(luma) + (rgb - vec3(luma)) * u_effect_values_a.x;
+    } else if (u_effect_kind == 3) {
+        return effect_blur(uv, backdrop_input, u_effect_values_a.x);
+    } else if (u_effect_kind == 4) {
+        vec4 soft = effect_blur(uv, backdrop_input, u_effect_values_a.x);
+        rgb += (rgb - straight_rgb(soft)) * u_effect_values_a.y;
+    } else if (u_effect_kind == 5) {
+        vec4 soft = effect_blur(uv, backdrop_input, u_effect_values_a.y);
+        vec3 halo = straight_rgb(soft);
+        float selected = step(
+            u_effect_values_a.x,
+            max(halo.r, max(halo.g, halo.b))
+        );
+        rgb += halo * selected * u_effect_values_a.z;
+    } else if (u_effect_kind == 6) {
+        vec2 centered = v_uv * 2.0 - 1.0;
+        float radius = length(centered);
+        float softness = max(0.05, u_effect_values_a.y);
+        float shade = 1.0 - u_effect_values_a.x * smoothstep(
+            1.0 - softness,
+            1.0,
+            radius
+        );
+        rgb *= shade;
+    } else if (u_effect_kind == 7) {
+        vec2 offset = vec2(
+            u_effect_values_a.x * u_texel.x,
+            u_effect_values_a.y * u_texel.y
+        );
+        float shadow = effect_blur(
+            v_uv - offset,
+            backdrop_input,
+            u_effect_values_a.z
+        ).a * u_effect_values_a.w;
+        vec4 behind = vec4(
+            u_effect_color.rgb * shadow,
+            shadow
+        );
+        return source_over_color(behind, rgb, source.a);
+    } else if (u_effect_kind == 8) {
+        float angle = radians(u_effect_values_a.z);
+        vec2 delta = v_uv - u_effect_values_a.xy;
+        float distance = abs(
+            delta.x * cos(angle) + delta.y * sin(angle)
+        );
+        float width = max(0.005, u_effect_values_a.w);
+        float inner = width * max(0.0, 1.0 - u_effect_values_b.x);
+        float sweep = 1.0 - smoothstep(inner, width, distance);
+        rgb += u_effect_color.rgb * sweep * u_effect_values_b.y;
+    } else if (u_effect_kind == 9) {
+        float noise = clamp(
+            (fractal_value(v_uv) - 0.5) * u_effect_values_a.w + 0.5,
+            0.0,
+            1.0
+        );
+        rgb = mix(rgb, vec3(noise), u_effect_values_a.x);
+    } else if (u_effect_kind == 10) {
+        float levels = max(2.0, u_effect_values_a.x);
+        vec3 quantized = floor(rgb * (levels - 1.0) + 0.5)
+                         / (levels - 1.0);
+        rgb = mix(rgb, quantized, u_effect_values_a.y);
+    } else if (u_effect_kind == 11) {
+        vec4 accumulated = vec4(0.0);
+        float angle = radians(u_effect_values_a.y);
+        vec2 vector = vec2(cos(angle), sin(angle))
+                      * u_effect_values_a.x * u_texel;
+        int samples = int(clamp(u_effect_values_a.z, 2.0, 32.0));
+        for (int index = 0; index < 32; ++index) {
+            if (index < samples) {
+                float phase = float(index) / max(1.0, float(samples - 1))
+                              - 0.5;
+                accumulated += effect_input(
+                    v_uv - vector * phase,
+                    backdrop_input
+                );
+            }
+        }
+        return accumulated / float(samples);
+    }
+    return vec4(clamp(rgb, 0.0, 1.0) * source.a, source.a);
+}
+
 vec4 craft_pixel() {
     float t = u_time;
     vec2 weave = vec2(
@@ -363,6 +517,19 @@ void main() {
         );
         return;
     }
+    if (u_mode == 5) {
+        vec4 effected = common_effect_pixel(0);
+        gl_FragColor = source_over_color(
+            shadowed_backdrop(),
+            straight_rgb(effected),
+            effected.a
+        );
+        return;
+    }
+    if (u_mode == 6) {
+        gl_FragColor = common_effect_pixel(1);
+        return;
+    }
     vec4 original = backdrop(v_uv);
     float mask = source_pixel(v_uv).a * u_opacity;
     vec2 wave = vec2(
@@ -421,6 +588,38 @@ _GPU_MATTE_MODES = {
 }
 
 
+def _gpu_effects_by_target(graph: RenderGraph) -> dict[str, list]:
+    effects: dict[str, list] = {}
+    for group in graph.effect_groups:
+        for layer_id in group.target_layer_ids:
+            effects.setdefault(layer_id, []).extend(
+                effect for effect in group.effects if effect.enabled
+            )
+    lower_ids: set[str] = set()
+    for node in graph.nodes:
+        if node.layer_type == "adjustment":
+            if node.adjustment_scope_mode == "selected_layers_below":
+                active = [
+                    effect for effect in node.effects or () if effect.enabled
+                ]
+                for layer_id in node.adjustment_target_layer_ids:
+                    if layer_id in lower_ids:
+                        effects.setdefault(layer_id, []).extend(active)
+            continue
+        if node.layer_type not in {"group", "null", "camera", "light"}:
+            lower_ids.add(node.layer_id)
+    return effects
+
+
+def _effective_gpu_effects(
+    node: RenderNode,
+    targeted: dict[str, list],
+) -> list:
+    return [
+        effect for effect in node.effects or () if effect.enabled
+    ] + list(targeted.get(node.layer_id, ()))
+
+
 def _effect_value(effect, name: str, time_ms: float, default: float) -> float:
     prop = effect.params.get(name)
     try:
@@ -446,14 +645,27 @@ class MotionGlassGpuRenderer:
     def can_draw(graph: RenderGraph) -> tuple[bool, str]:
         if GL is None:
             return False, "pyopengl_unavailable"
-        if graph.effect_groups:
-            return False, "effect_group_requires_raster"
         receiver_count = sum(1 for node in graph.nodes if node.receive_shadows)
         if receiver_count > 1 and any(node.cast_shadows for node in graph.nodes):
             return False, "multi_receiver_card_shadow_requires_raster"
+        targeted_effects = _gpu_effects_by_target(graph)
         gpu_effect_count = 0
         for node in graph.nodes:
-            effect = glass_effect(node.effects)
+            if node.layer_type in {"group", "null", "camera", "light"}:
+                continue
+            active_effects = _effective_gpu_effects(node, targeted_effects)
+            if node.layer_type == "adjustment":
+                if node.adjustment_scope_mode == "selected_layers_below":
+                    continue
+                if not active_effects:
+                    continue
+                if len(active_effects) > 1:
+                    return False, "stacked_adjustment_effects_require_raster"
+                if not is_common_gpu_effect(active_effects[0]):
+                    return False, unsupported_gpu_effect_reason(active_effects[0])
+                gpu_effect_count += 1
+                continue
+            effect = glass_effect(active_effects)
             gpu_motion_blur = (
                 node.motion_blur_samples > 1
                 and (
@@ -465,29 +677,22 @@ class MotionGlassGpuRenderer:
                 gpu_effect_count += 1
                 if any(
                     item.enabled and item.kind.strip().lower() != "tiger_glass"
-                    for item in node.effects or ()
+                    for item in active_effects
                 ):
                     return False, "glass_layer_has_additional_effects"
             else:
-                active_effects = [
-                    item for item in node.effects or () if item.enabled
-                ]
                 if active_effects:
-                    if not all(
-                        is_craft_style_effect(item)
-                        or is_painterly_look_effect(item)
-                        for item in active_effects
-                    ):
-                        return False, "unsupported_effect_requires_raster"
                     if len(active_effects) > 1:
-                        return False, "stacked_style_effects_require_raster"
+                        return False, "stacked_effects_require_raster"
                     style_effect = active_effects[0]
-                    if (
+                    if is_common_gpu_effect(style_effect):
+                        gpu_effect_count += 1
+                    elif (
                         is_craft_style_effect(style_effect)
                         and isinstance(style_effect.metadata.get("texture"), dict)
                     ):
                         return False, "craft_texture_requires_raster"
-                    if is_painterly_look_effect(style_effect):
+                    elif is_painterly_look_effect(style_effect):
                         if isinstance(
                             style_effect.metadata.get("projected_texture"),
                             dict,
@@ -498,11 +703,13 @@ class MotionGlassGpuRenderer:
                         )
                         if isinstance(overrides, dict) and overrides:
                             return False, "material_id_pass_unavailable"
-                    gpu_effect_count += 1
+                        gpu_effect_count += 1
+                    elif is_craft_style_effect(style_effect):
+                        gpu_effect_count += 1
+                    else:
+                        return False, unsupported_gpu_effect_reason(style_effect)
                 elif gpu_motion_blur:
                     gpu_effect_count += 1
-            if node.layer_type in {"adjustment", "precomp"}:
-                return False, f"{node.layer_type}_requires_raster"
             if node.matte_layer_id:
                 matte_mode = node.matte_mode.strip().lower()
                 if node.matte_inverted and not matte_mode.endswith("_inverted"):
@@ -688,21 +895,75 @@ class MotionGlassGpuRenderer:
         matte_ids = {
             node.matte_layer_id for node in graph.nodes if node.matte_layer_id
         }
+        targeted_effects = _gpu_effects_by_target(graph)
         raster_nodes = []
         active_shadow_receiver: RenderNode | None = None
         shadow_receiver_by_caster: dict[str, RenderNode] = {}
         for node in graph.nodes:
             if node.layer_id in matte_ids:
                 continue
+            if node.layer_type == "adjustment":
+                if node.adjustment_scope_mode == "selected_layers_below":
+                    continue
+                adjustment_effects = _effective_gpu_effects(
+                    node,
+                    targeted_effects,
+                )
+                if not adjustment_effects:
+                    continue
+                if raster_nodes:
+                    stages.append((
+                        "raster",
+                        None,
+                        render_graph_image(
+                            replace(
+                                graph,
+                                nodes=list(raster_nodes),
+                                effect_groups=[],
+                            ),
+                            output_size=raster_size,
+                        ),
+                        None,
+                        None,
+                    ))
+                    raster_nodes.clear()
+                empty = QImage(
+                    raster_size[0],
+                    raster_size[1],
+                    QImage.Format_RGBA8888_Premultiplied,
+                )
+                empty.fill(0)
+                stages.append((
+                    "adjustment",
+                    replace(node, effects=adjustment_effects),
+                    empty,
+                    None,
+                    None,
+                ))
+                continue
+            if node.layer_type in {"group", "null", "camera", "light"}:
+                continue
+            effective_effects = _effective_gpu_effects(
+                node,
+                targeted_effects,
+            )
+            effective_node = replace(node, effects=effective_effects)
             receiver_for_shadow = active_shadow_receiver
-            effect = glass_effect(node.effects)
+            effect = glass_effect(effective_effects)
             style_effect = next(
                 (
-                    item for item in node.effects or ()
+                    item for item in effective_effects
                     if item.enabled and (
                         is_craft_style_effect(item)
                         or is_painterly_look_effect(item)
                     )
+                ),
+                None,
+            )
+            common_effect = next(
+                (
+                    item for item in effective_effects
+                    if is_common_gpu_effect(item)
                 ),
                 None,
             )
@@ -716,9 +977,10 @@ class MotionGlassGpuRenderer:
             if (
                 effect is None
                 and style_effect is None
+                and common_effect is None
                 and not gpu_motion_blur
             ):
-                raster_nodes.append(node)
+                raster_nodes.append(effective_node)
                 if node.receive_shadows:
                     active_shadow_receiver = node
                 continue
@@ -786,15 +1048,17 @@ class MotionGlassGpuRenderer:
                     if effect is not None
                     else "style"
                     if style_effect is not None
+                    else "effect"
+                    if common_effect is not None
                     else "motion"
                 ),
-                node,
+                effective_node,
                 render_graph_image(
                     replace(
                         graph,
                         nodes=[
                             replace(
-                                node,
+                                effective_node,
                                 effects=[],
                                 motion_blur_samples=1,
                                 motion_blur_vector=(0.0, 0.0),
@@ -939,6 +1203,8 @@ class MotionGlassGpuRenderer:
         blend_pass_count = 0
         matte_pass_count = 0
         shadow_pass_count = 0
+        common_effect_pass_count = 0
+        adjustment_pass_count = 0
         raster_pass_count = 0
         for (
             kind,
@@ -969,6 +1235,13 @@ class MotionGlassGpuRenderer:
                         is_craft_style_effect(item)
                         or is_painterly_look_effect(item)
                     )
+                ),
+                None,
+            )
+            common_effect = next(
+                (
+                    item for item in node.effects or ()
+                    if is_common_gpu_effect(item)
                 ),
                 None,
             )
@@ -1160,6 +1433,37 @@ class MotionGlassGpuRenderer:
                     QVector4D(paper.redF(), paper.greenF(), paper.blueF(), paper.alphaF()),
                 )
                 painterly_pass_count += 1
+            elif common_effect is not None:
+                parameters = gpu_effect_parameters(
+                    common_effect,
+                    node.local_time_ms,
+                    pixel_scale=scale,
+                )
+                self._set_uniform(
+                    "u_mode",
+                    6 if kind == "adjustment" else 5,
+                )
+                self._set_uniform("u_effect_kind", parameters.mode)
+                self._set_uniform(
+                    "u_effect_values_a",
+                    QVector4D(*parameters.values[:4]),
+                )
+                self._set_uniform(
+                    "u_effect_values_b",
+                    QVector2D(*parameters.values[4:]),
+                )
+                self._set_uniform(
+                    "u_effect_color",
+                    QVector4D(
+                        parameters.color.redF(),
+                        parameters.color.greenF(),
+                        parameters.color.blueF(),
+                        parameters.color.alphaF(),
+                    ),
+                )
+                common_effect_pass_count += 1
+                if kind == "adjustment":
+                    adjustment_pass_count += 1
             else:
                 self._set_uniform("u_mode", 4)
             self._draw_quad()
@@ -1207,7 +1511,10 @@ class MotionGlassGpuRenderer:
         backend = (
             "motion_glass_gpu"
             if glass_pass_count and not craft_pass_count and not painterly_pass_count
+            and not common_effect_pass_count
             else "motion_style_gpu"
+            if craft_pass_count or painterly_pass_count
+            else "motion_compositor_gpu"
         )
         self.last_diagnostics = {
             "backend": backend,
@@ -1219,7 +1526,12 @@ class MotionGlassGpuRenderer:
             "blend_pass_count": blend_pass_count,
             "matte_pass_count": matte_pass_count,
             "shadow_pass_count": shadow_pass_count,
+            "common_effect_pass_count": common_effect_pass_count,
+            "adjustment_pass_count": adjustment_pass_count,
             "raster_segment_count": raster_pass_count,
+            "precomp_source_raster_count": sum(
+                1 for node in graph.nodes if node.layer_type == "precomp"
+            ),
             "base_cpu_raster_ms": raster_ms,
             "gpu_submit_ms": gpu_ms,
             "viewport_width": raster_size[0],
