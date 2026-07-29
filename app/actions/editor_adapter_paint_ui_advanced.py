@@ -326,6 +326,32 @@ class PaintUIAdvancedAdapterMixin:
         result = self._paint_ui_advanced_apply("Set UI Boolean", document)
         return {**result, "object": row}
 
+    def paint_ui_vector_boolean_compose(
+        self,
+        *,
+        operation: str,
+        operand_ids: list[str] | None = None,
+        name: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_boolean import compose_ui_boolean
+
+        dialog = self._paint_dialog_owner()
+        selected = list(
+            operand_ids
+            or dialog._painter_ui_document["selection"]["object_ids"]
+        )
+        document, row = compose_ui_boolean(
+            dialog._painter_ui_document,
+            operation,
+            selected,
+            name=name,
+        )
+        result = self._paint_ui_advanced_apply(
+            "Create UI Boolean group",
+            document,
+        )
+        return {**result, "object": row}
+
     def paint_ui_vector_boolean_release(
         self,
         *,

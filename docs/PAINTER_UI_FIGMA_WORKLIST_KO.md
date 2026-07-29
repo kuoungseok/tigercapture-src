@@ -4,7 +4,10 @@ Status: canonical implementation backlog; P0-P10 local production foundation com
 
 P0-P2 completion checkpoint (2026-07-28):
 
-- Painter UI document schema is version 17.
+- Painter UI document schema is version 18.
+- Schema 18 adds explicit non-destructive Boolean groups, transient
+  multi-selection authoring, editable operand release, and shared
+  Canvas/PNG/SVG result geometry.
 - Schema 17 adds typed stable-ID Vector Networks shared by canvas, vector
   editing, Action, PNG, and editable SVG output.
 - Vector Edit includes transient Reverse, conservative Simplify, and editable
@@ -26,6 +29,7 @@ P0-P2 completion checkpoint (2026-07-28):
 - Missing remote components remain recoverable through relink, localize, and
   replace operations instead of being silently discarded.
 - Editable Boolean operands and Figma Sections are persisted with stable IDs.
+  Boolean authoring no longer requires users to type operand IDs.
 - Figma comments map to the existing object-anchored Painter Review contract.
 - Shared TigerStudioUMG preflight explicitly blocks advanced Painter
   appearance that has no real native/material/bake generation path yet.

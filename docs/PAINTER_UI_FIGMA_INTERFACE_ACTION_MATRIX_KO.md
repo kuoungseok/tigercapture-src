@@ -42,7 +42,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Mixed text styles | Text-range Inspector controls and range-aware canvas rendering | `paint.ui.text.range.style.inspect/set/remove` |
 | Variable fonts | Contextual `wght/wdth/opsz` controls, QFont canvas/export application, Figma metadata preservation, explicit UMG blocked-until-bake status | `paint.ui.typography.variable_axis.set/reset` |
 | Remote component recovery | Relink, localize, replace controls with explicit missing-library state | `paint.ui.component.remote.inspect/relink/localize/replace` |
-| Boolean vector editing | Union/Subtract/Intersect/Exclude operands with editable canvas result | `paint.ui.vector.boolean.inspect/set/release` |
+| Boolean vector editing | Compatible multi-selection transient bar; Union/Subtract/Intersect/Exclude; editable operand release; Canvas/PNG/SVG parity | `paint.ui.vector.boolean.inspect/compose/set/release` |
 | Figma sections and comments | Sections tab and object-anchored Painter Review mapping | `paint.ui.section.inspect/create/update/remove`, `paint.ui.review.*` |
 | Components and Instances | Components library plus Inspector create/instance/Variant/switch/detach controls | `paint.ui.component.*` |
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |

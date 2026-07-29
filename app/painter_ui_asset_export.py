@@ -54,12 +54,16 @@ def _objects_for_artboard(
     document: Mapping[str, Any],
     artboard_id: str,
 ) -> list[dict[str, Any]]:
+    rows = [
+        dict(row)
+        for row in document["objects"]
+        if row["artboard_id"] == artboard_id and row["visible"]
+    ]
+    from app.painter_ui_boolean_geometry import boolean_operand_ids
+
+    hidden_operands = boolean_operand_ids(rows)
     return sorted(
-        (
-            dict(row)
-            for row in document["objects"]
-            if row["artboard_id"] == artboard_id and row["visible"]
-        ),
+        (row for row in rows if row["id"] not in hidden_operands),
         key=lambda row: (int(row["z_index"]), row["id"]),
     )
 
@@ -118,6 +122,20 @@ def render_ui_artboard(
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(scale, scale)
+    all_rows = [
+        row
+        for row in document["objects"]
+        if row["artboard_id"] == str(artboard_id)
+    ]
+
+    def document_rect(row: Mapping[str, Any]) -> QRectF:
+        return QRectF(
+            float(row["x"]),
+            float(row["y"]),
+            float(row["width"]),
+            float(row["height"]),
+        )
+
     for row in _objects_for_artboard(document, str(artboard_id)):
         rect = QRectF(
             float(row["x"]),
@@ -142,7 +160,16 @@ def render_ui_artboard(
         painter.setBrush(fill)
         radius = max(0.0, float(style.get("radius", 0.0) or 0.0))
         kind = row["kind"]
-        if kind == "ellipse":
+        from app.painter_ui_boolean_geometry import resolve_ui_boolean_path
+
+        boolean_path = resolve_ui_boolean_path(
+            all_rows,
+            row,
+            document_rect,
+        )
+        if boolean_path is not None:
+            painter.drawPath(boolean_path)
+        elif kind == "ellipse":
             painter.drawEllipse(rect)
             _draw_image_fill(
                 painter,
@@ -303,7 +330,32 @@ def _svg_for_artboard(
                 row["y"] + row["height"] * row.get("pivot_y", 0.5),
             )
         )
-        if row["kind"] == "ellipse":
+        from app.painter_ui_boolean_geometry import (
+            qpath_to_svg_path,
+            resolve_ui_boolean_path,
+        )
+
+        all_rows = [
+            item
+            for item in document["objects"]
+            if item["artboard_id"] == artboard["id"]
+        ]
+        boolean_path = resolve_ui_boolean_path(
+            all_rows,
+            row,
+            lambda item: QRectF(
+                float(item["x"]),
+                float(item["y"]),
+                float(item["width"]),
+                float(item["height"]),
+            ),
+        )
+        if boolean_path is not None:
+            rows.append(
+                '<path d="%s" fill-rule="evenodd" %s/>'
+                % (qpath_to_svg_path(boolean_path), common)
+            )
+        elif row["kind"] == "ellipse":
             rows.append(
                 '<ellipse cx="%s" cy="%s" rx="%s" ry="%s" %s/>'
                 % (

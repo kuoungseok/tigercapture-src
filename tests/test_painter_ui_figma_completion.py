@@ -252,6 +252,7 @@ def test_advanced_action_families_are_registered() -> None:
         "paint.ui.appearance.stroke.set",
         "paint.ui.text.range.style.set",
         "paint.ui.component.remote.relink",
+        "paint.ui.vector.boolean.compose",
         "paint.ui.vector.boolean.set",
         "paint.ui.section.create",
     } <= action_ids

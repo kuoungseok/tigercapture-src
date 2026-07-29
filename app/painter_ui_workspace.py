@@ -1486,13 +1486,9 @@ class PainterUIDesignOverlay(QWidget):
         )
 
     def _boolean_operand_ids(self) -> set[str]:
-        result: set[str] = set()
-        for row in self._effective_document["objects"]:
-            boolean = (row.get("content") or {}).get("boolean")
-            if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
-                continue
-            result.update(str(item) for item in boolean.get("operand_ids", []))
-        return result
+        from app.painter_ui_boolean_geometry import boolean_operand_ids
+
+        return boolean_operand_ids(self._effective_document["objects"])
 
     def _clipping_ancestors(
         self,
@@ -1594,49 +1590,11 @@ class PainterUIDesignOverlay(QWidget):
         painter.restore()
 
     def _object_shape_path(self, row: Mapping[str, Any]) -> QPainterPath:
-        rect = self._object_rect(row)
-        path = QPainterPath()
-        if row["kind"] == "ellipse":
-            path.addEllipse(rect)
-            return path
-        from app.painter_ui_parametric_shapes import (
-            PARAMETRIC_SHAPE_KINDS,
-            parametric_shape_path,
-        )
+        from app.painter_ui_boolean_geometry import ui_object_shape_path
 
-        if row["kind"] in PARAMETRIC_SHAPE_KINDS:
-            return parametric_shape_path(
-                rect,
-                str(row["kind"]),
-                row.get("content"),
-            )
-        style = row.get("style") or {}
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
-        _viewport, scale = self._artboard_viewport(artboard)
-        radii = style.get("corner_radii")
-        radii = radii if isinstance(radii, Mapping) else {}
-        fallback = max(0.0, float(style.get("radius") or 0.0))
-        tl = max(0.0, float(radii.get("top_left", fallback) or 0.0) * scale)
-        tr = max(0.0, float(radii.get("top_right", fallback) or 0.0) * scale)
-        br = max(0.0, float(radii.get("bottom_right", fallback) or 0.0) * scale)
-        bl = max(0.0, float(radii.get("bottom_left", fallback) or 0.0) * scale)
-        maximum = min(rect.width(), rect.height()) * 0.5
-        tl, tr, br, bl = (min(maximum, item) for item in (tl, tr, br, bl))
-        path.moveTo(rect.left() + tl, rect.top())
-        path.lineTo(rect.right() - tr, rect.top())
-        path.quadTo(rect.topRight(), QPointF(rect.right(), rect.top() + tr))
-        path.lineTo(rect.right(), rect.bottom() - br)
-        path.quadTo(rect.bottomRight(), QPointF(rect.right() - br, rect.bottom()))
-        path.lineTo(rect.left() + bl, rect.bottom())
-        path.quadTo(rect.bottomLeft(), QPointF(rect.left(), rect.bottom() - bl))
-        path.lineTo(rect.left(), rect.top() + tl)
-        path.quadTo(rect.topLeft(), QPointF(rect.left() + tl, rect.top()))
-        path.closeSubpath()
-        return path
+        rect = self._object_rect(row)
+        scale = rect.width() / max(0.001, float(row["width"]))
+        return ui_object_shape_path(row, rect, geometry_scale=scale)
 
     def _mask_source_for_target(
         self,
@@ -1703,32 +1661,17 @@ class PainterUIDesignOverlay(QWidget):
         painter.restore()
 
     def _boolean_path(self, row: Mapping[str, Any]) -> QPainterPath | None:
-        boolean = (row.get("content") or {}).get("boolean")
-        if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
-            return None
-        by_id = {
-            item["id"]: item for item in self._effective_document["objects"]
-        }
-        operands = [
-            by_id[item]
-            for item in boolean.get("operand_ids", [])
-            if item in by_id
-        ]
-        if len(operands) < 2:
-            return None
-        result = self._object_shape_path(operands[0])
-        operation = str(boolean.get("operation") or "union")
-        for operand in operands[1:]:
-            path = self._object_shape_path(operand)
-            if operation == "subtract":
-                result = result.subtracted(path)
-            elif operation == "intersect":
-                result = result.intersected(path)
-            elif operation == "exclude":
-                result = result.xored(path)
-            else:
-                result = result.united(path)
-        return result
+        from app.painter_ui_boolean_geometry import resolve_ui_boolean_path
+
+        return resolve_ui_boolean_path(
+            self._effective_document["objects"],
+            row,
+            self._object_rect,
+            geometry_scale_for_object=lambda operand: (
+                self._object_rect(operand).width()
+                / max(0.001, float(operand["width"]))
+            ),
+        )
 
     @staticmethod
     def _composition_mode(blend_mode: object):
@@ -1839,7 +1782,15 @@ class PainterUIDesignOverlay(QWidget):
         )
         _viewport, scale = self._artboard_viewport(artboard)
         content = row.get("content", {})
-        if kind == "path" and not has_ui_vector_geometry(content):
+        boolean_enabled = bool(
+            isinstance(content.get("boolean"), Mapping)
+            and content["boolean"].get("enabled")
+        )
+        if (
+            kind == "path"
+            and not boolean_enabled
+            and not has_ui_vector_geometry(content)
+        ):
             painter.restore()
             return
         draw_ui_object_shadow(painter, rect, kind, style, scale=scale)

@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 17
+UI_DOCUMENT_VERSION = 18
 UI_OBJECT_KINDS = {
     "frame",
     "group",

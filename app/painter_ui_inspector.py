@@ -2813,18 +2813,6 @@ class PainterUIInspector(QWidget):
                 )
             ):
                 visible_groups.add("image")
-            if (
-                self.advanced_properties_toggle.isChecked()
-                and kind in {
-                "rectangle",
-                "ellipse",
-                "line",
-                "path",
-                "polygon",
-                "star",
-                }
-            ):
-                visible_groups.add("boolean")
             if component_role != "none":
                 visible_groups.add("component")
             if (

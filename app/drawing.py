@@ -244,7 +244,8 @@ QWidget#PaintUIDesignToolHost {
     border-radius: 7px;
 }
 
-QFrame#PainterUIVectorContextBar {
+QFrame#PainterUIVectorContextBar,
+QFrame#PainterUIBooleanContextBar {
     background-color: #1b2129;
     border: 1px solid #4b5b6d;
     border-radius: 6px;
@@ -267,6 +268,11 @@ QPushButton#PainterUIVectorContextButton {
 QPushButton#PainterUIVectorContextButton:hover {
     background-color: #2b3541;
     border-color: #566b83;
+}
+
+QPushButton#PainterUIVectorContextButton:checked {
+    background-color: #263d59;
+    border-color: #6fa9ee;
 }
 
 QPushButton#PainterUIVectorContextButton:disabled {
@@ -9756,6 +9762,16 @@ class PaintDialog(QDialog):
         self._painter_ui_vector_context_bar.command_requested.connect(
             self._handle_painter_ui_vector_command
         )
+        from app.painter_ui_boolean_context_bar import (
+            PainterUIBooleanContextBar,
+        )
+
+        self._painter_ui_boolean_context_bar = PainterUIBooleanContextBar(
+            canvas_host
+        )
+        self._painter_ui_boolean_context_bar.command_requested.connect(
+            self._handle_painter_ui_boolean_command
+        )
         self._painter_ui_overlay.hide()
         from app.painter_ui_selection_breadcrumb import (
             PainterUISelectionBreadcrumb,
@@ -14248,6 +14264,9 @@ class PaintDialog(QDialog):
         bar = getattr(self, "_painter_ui_vector_context_bar", None)
         if bar is None:
             return
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) != "ui_design":
+            bar.hide()
+            return
         bar.set_state(state if isinstance(state, dict) else {})
         toolbar = getattr(self, "_ui_design_tool_host", None)
         if toolbar is not None:
@@ -14377,6 +14396,64 @@ class PaintDialog(QDialog):
             label=label,
         )
         self._sync_painter_ui_vector_context(overlay._vector_edit_state())
+
+    def _sync_painter_ui_boolean_context(self) -> None:
+        bar = getattr(self, "_painter_ui_boolean_context_bar", None)
+        if bar is None:
+            return
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) != "ui_design":
+            bar.hide()
+            return
+        from app.painter_ui_boolean import inspect_ui_boolean_selection
+
+        report = inspect_ui_boolean_selection(
+            getattr(self, "_painter_ui_document", None)
+        )
+        bar.set_state(report)
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None:
+            bar.place_above(toolbar)
+
+    def _handle_painter_ui_boolean_command(self, command: str) -> None:
+        bar = getattr(self, "_painter_ui_boolean_context_bar", None)
+        if bar is None:
+            return
+        value = str(command or "").strip().casefold()
+        state = bar.state()
+        if not state.get("eligible"):
+            return
+        from app.painter_ui_boolean import (
+            compose_ui_boolean,
+            release_ui_boolean,
+            set_ui_boolean,
+        )
+
+        if value == "release" and state.get("mode") == "group":
+            document = release_ui_boolean(
+                self._painter_ui_document,
+                str(state.get("group_id") or ""),
+            )
+            label = "Release UI Boolean"
+        elif value in {"union", "subtract", "intersect", "exclude"}:
+            if state.get("mode") == "group":
+                document, _row = set_ui_boolean(
+                    self._painter_ui_document,
+                    str(state.get("group_id") or ""),
+                    value,
+                    list(state.get("operand_ids") or []),
+                    group=True,
+                )
+                label = "Set UI Boolean"
+            else:
+                document, _row = compose_ui_boolean(
+                    self._painter_ui_document,
+                    value,
+                    list(state.get("selection_ids") or []),
+                )
+                label = "Create UI Boolean group"
+        else:
+            return
+        self._commit_painter_ui_service_document(document, label)
 
     def _update_painter_ui_clip(
         self,
@@ -15558,6 +15635,7 @@ class PaintDialog(QDialog):
             if overlay._vector_edit_object_id
             else {}
         )
+        self._sync_painter_ui_boolean_context()
         scope = self._painter_ui_edit_scope_state()
         overlay.set_edit_scope(str(scope["scope_id"]))
         overlay.set_motion_actor_sources(
@@ -15679,6 +15757,12 @@ class PaintDialog(QDialog):
             and hasattr(toolbar, "place_in_parent")
         ):
             toolbar.place_in_parent()
+        self._sync_painter_ui_vector_context(
+            overlay._vector_edit_state()
+            if overlay._vector_edit_object_id
+            else {}
+        )
+        self._sync_painter_ui_boolean_context()
         if breadcrumb is not None:
             breadcrumb.place()
 
@@ -23808,6 +23892,17 @@ class PaintDialog(QDialog):
             and toolbar is not None
         ):
             vector_bar.place_above(toolbar)
+        boolean_bar = getattr(
+            self,
+            "_painter_ui_boolean_context_bar",
+            None,
+        )
+        if (
+            boolean_bar is not None
+            and boolean_bar.isVisible()
+            and toolbar is not None
+        ):
+            boolean_bar.place_above(toolbar)
         quick_actions = getattr(self, "_painter_ui_quick_actions", None)
         if quick_actions is not None and quick_actions.isVisible():
             quick_actions._place()
@@ -24642,6 +24737,13 @@ class PaintDialog(QDialog):
             )
             if vector_bar is not None and vector_bar.isVisible():
                 vector_bar.place_above(ui_toolbar)
+            boolean_bar = getattr(
+                self,
+                "_painter_ui_boolean_context_bar",
+                None,
+            )
+            if boolean_bar is not None and boolean_bar.isVisible():
+                boolean_bar.place_above(ui_toolbar)
         breadcrumb = getattr(
             self,
             "_painter_ui_selection_breadcrumb",

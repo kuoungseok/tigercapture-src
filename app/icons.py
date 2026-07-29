@@ -425,6 +425,33 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.setBrush(_color(color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(QPolygonF(points))
+    elif n in {
+        "boolean-union",
+        "boolean_union",
+        "boolean-subtract",
+        "boolean_subtract",
+        "boolean-intersect",
+        "boolean_intersect",
+        "boolean-exclude",
+        "boolean_exclude",
+    }:
+        left_shape = QPainterPath()
+        right_shape = QPainterPath()
+        left_shape.addEllipse(QRectF(s * .16, s * .26, s * .46, s * .48))
+        right_shape.addEllipse(QRectF(s * .38, s * .26, s * .46, s * .48))
+        if "subtract" in n:
+            result = left_shape.subtracted(right_shape)
+        elif "intersect" in n:
+            result = left_shape.intersected(right_shape)
+        elif "exclude" in n:
+            result = left_shape.united(right_shape).subtracted(
+                left_shape.intersected(right_shape)
+            )
+        else:
+            result = left_shape.united(right_shape)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_color(color))
+        painter.drawPath(result)
     elif n in {"filter", "funnel"}:
         funnel = QPainterPath()
         funnel.moveTo(s * .16, s * .22)

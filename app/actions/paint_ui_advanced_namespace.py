@@ -256,6 +256,19 @@ def register_paint_ui_advanced_actions(registry: Any) -> None:
     )
     _register(
         registry,
+        "paint.ui.vector.boolean.compose",
+        "Create a non-destructive Boolean group from selected sibling shapes.",
+        "paint_ui_vector_boolean_compose",
+        {
+            "operation": {"type": "string"},
+            "operand_ids": _ID_LIST,
+            "name": {"type": "string"},
+        },
+        required=("operation",),
+        undo_label="Create UI Boolean group",
+    )
+    _register(
+        registry,
         "paint.ui.vector.boolean.release",
         "Release a Painter UI Boolean group to editable operands.",
         "paint_ui_vector_boolean_release",

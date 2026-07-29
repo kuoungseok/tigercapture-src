@@ -50,13 +50,18 @@ Implemented:
 - shared vector rendering for Canvas, PNG, and editable SVG export
 - UI/Action parity through `paint.ui.vector.node.*`,
   `paint.ui.vector.segment.*`, and `paint.ui.vector.path.*`
-- Painter UI document schema version 17; schema 16 remains the parametric
-  Polygon/Star/Arc checkpoint and schema 17 adds typed Vector Networks
+- Reverse Path, conservative Simplify, and editable Outline Stroke in the
+  transient Vector Edit bar
+- Figma-style multi-selection Boolean bar for Union, Subtract, Intersect, and
+  Exclude, with non-destructive group release
+- shared Boolean geometry for Canvas, PNG, and editable SVG output
+- UI/Action parity through `paint.ui.vector.boolean.compose/set/release`
+- Painter UI document schema version 18; schema 17 remains the typed Vector
+  Network checkpoint and schema 18 marks explicit non-destructive Boolean
+  groups
 
 Still required by this contract:
 
-- advanced Vector Edit commands: reverse path, outline stroke, simplify, and
-  broader non-destructive Boolean release UX
 - full M1+ interaction and delivery work tracked by the milestone document
 
 The left navigator and right Inspector are not permanently fixed sidebars.

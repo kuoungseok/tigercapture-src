@@ -158,7 +158,12 @@ Focused entry points:
   applies axes in Qt canvas/export paths, preserves them in Figma shared plugin
   metadata, and explicitly blocks Unreal UMG output until a real deterministic
   text-bake path exists.
-  Schema 17 adds typed stable-ID Vector Networks through
+  Schema 18 adds explicit non-destructive Boolean groups. Compatible sibling
+  shapes compose through the transient multi-selection bar or
+  `paint.ui.vector.boolean.compose`; `set/release` preserve editable operands,
+  and Canvas/PNG/SVG resolve `app/painter_ui_boolean_geometry.py`. Do not
+  restore the old Inspector operand-ID text field as primary UX.
+  Schema 17 added typed stable-ID Vector Networks through
   `app/painter_ui_vector_network.py`. The Pen/Vector tool, double-click Vector
   Edit, canvas node/segment/Bezier-handle editing, contextual command bar,
   Canvas/PNG/SVG paths, and `paint.ui.vector.*` Actions must share that
