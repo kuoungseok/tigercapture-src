@@ -1,5 +1,11 @@
 # Painter UI Figma-Class Interface Specification
 
+> 2026-07-31 UI3 전체 UX 감사:
+> [PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md](PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md)
+>
+> 기존 구현 체크포인트는 backend/Action 완료를 포함한다. 실제 화면 구조,
+> 기능 노출 시점, Figma UI3 작업 흐름의 완료 판정은 위 감사 문서를 우선한다.
+
 Status: active UX contract; UI-P0 shell and core M1 canvas/vector workflows implemented
 
 Date: 2026-07-29

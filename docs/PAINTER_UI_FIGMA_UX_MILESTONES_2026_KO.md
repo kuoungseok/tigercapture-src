@@ -1,5 +1,10 @@
 # Painter UI Figma UX Development Milestones
 
+> 2026-07-31 기준 UI3 전체 요소와 현재 구현의 재감사 결과는
+> [PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md](PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md)를
+> 따른다. 이 문서의 과거 `implemented` 체크포인트는 계약과 Action 완료를
+> 포함하며, UI 배치와 점진 노출까지 완료됐다는 뜻은 아니다.
+
 Status: active roadmap; M0 shell and the M1 Page/navigation foundation implemented
 
 Date: 2026-07-29
