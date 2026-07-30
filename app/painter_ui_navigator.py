@@ -297,13 +297,18 @@ class PainterUINavigatorPanel(QFrame):
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
 
-    def set_auto_hide(self, auto_hide: bool) -> None:
+    def set_auto_hide(
+        self,
+        auto_hide: bool,
+        *,
+        user_initiated: bool = False,
+    ) -> None:
         value = bool(auto_hide)
         changed = self._auto_hide != value
         if not changed and self._collapsed == value:
             return
         self._auto_hide = value
-        self.set_collapsed(value)
+        self.set_collapsed(value, user_initiated=user_initiated)
         if changed:
             self.auto_hide_changed.emit(value)
 
@@ -488,7 +493,10 @@ class PainterUINavigatorPanel(QFrame):
         if self._temporary_expanded:
             self.temporary_close_requested.emit()
             return
-        self.set_auto_hide(not self._collapsed)
+        self.set_auto_hide(
+            not self._collapsed,
+            user_initiated=True,
+        )
 
     def set_document(self, document: Mapping[str, Any] | None) -> None:
         value = dict(document) if isinstance(document, Mapping) else {}

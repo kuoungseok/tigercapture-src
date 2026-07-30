@@ -61,3 +61,29 @@ def test_panel_state_uses_compact_defaults(tmp_path) -> None:
         QSettings.Format.IniFormat,
     )
     assert load_painter_ui_panel_state(settings) == DEFAULT_PANEL_STATE
+
+
+def test_legacy_default_hidden_navigator_migrates_to_visible(tmp_path) -> None:
+    _app()
+    from PySide6.QtCore import QSettings
+
+    from app.painter_ui_panel_state import (
+        SETTINGS_GROUP,
+        load_painter_ui_panel_state,
+    )
+
+    settings = QSettings(
+        str(tmp_path / "legacy-hidden.ini"),
+        QSettings.Format.IniFormat,
+    )
+    settings.beginGroup(SETTINGS_GROUP)
+    settings.setValue("navigator_width", 420)
+    settings.setValue("navigator_collapsed", True)
+    settings.setValue("navigator_auto_hide", True)
+    settings.setValue("navigator_user_override", False)
+    settings.endGroup()
+
+    state = load_painter_ui_panel_state(settings)
+    assert state["navigator_width"] == 168
+    assert state["navigator_collapsed"] is False
+    assert state["navigator_auto_hide"] is False

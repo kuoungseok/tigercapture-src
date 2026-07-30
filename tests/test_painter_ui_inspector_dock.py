@@ -52,6 +52,7 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
     )
     dialog.resize(1500, 900)
     dialog._set_canvas_workspace_mode("ui_design")
+    dialog._painter_ui_navigator.set_auto_hide(True)
     dialog.show()
     app.processEvents()
 
@@ -303,7 +304,7 @@ def test_ui_workspace_splitter_freely_resizes_both_side_panels() -> None:
     app.processEvents()
 
 
-def test_ui_workspace_defaults_to_zero_width_fluid_side_panels() -> None:
+def test_ui_workspace_defaults_to_visible_narrow_navigator() -> None:
     app = _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap
 
@@ -322,10 +323,18 @@ def test_ui_workspace_defaults_to_zero_width_fluid_side_panels() -> None:
     dialog.show()
     app.processEvents()
 
-    assert dialog._painter_ui_navigator.is_auto_hide()
-    assert dialog._painter_ui_navigator.maximumWidth() == 0
+    assert not dialog._painter_ui_navigator.is_auto_hide()
+    assert not dialog._painter_ui_navigator.is_collapsed()
+    assert dialog._painter_ui_navigator.width() >= 112
+    assert dialog._painter_ui_navigator.width() <= 220
     assert dialog._paint_ui_inspector.is_auto_hide()
     assert dialog._paint_inspector_frame.maximumWidth() == 0
+
+    dialog._toggle_painter_ui_navigator()
+    app.processEvents()
+    assert dialog._painter_ui_navigator.is_auto_hide()
+    assert dialog._painter_ui_navigator.is_collapsed()
+    assert dialog._painter_ui_navigator.maximumWidth() == 0
 
     dialog._toggle_painter_ui_navigator()
     app.processEvents()

@@ -12,8 +12,8 @@ SETTINGS_GROUP = "painter/ui_design/panels"
 
 DEFAULT_PANEL_STATE = {
     "navigator_width": 168,
-    "navigator_collapsed": True,
-    "navigator_auto_hide": True,
+    "navigator_collapsed": False,
+    "navigator_auto_hide": False,
     "navigator_user_override": False,
     "inspector_width": 268,
     "inspector_collapsed": True,
@@ -63,20 +63,31 @@ def load_painter_ui_panel_state(
                 ),
             ),
         )
+        navigator_user_override = _bool_value(
+            store.value("navigator_user_override", None),
+            bool(DEFAULT_PANEL_STATE["navigator_user_override"]),
+        )
+        navigator_collapsed = _bool_value(
+            store.value("navigator_collapsed", None),
+            bool(DEFAULT_PANEL_STATE["navigator_collapsed"]),
+        )
+        navigator_auto_hide = _bool_value(
+            store.value("navigator_auto_hide", None),
+            bool(DEFAULT_PANEL_STATE["navigator_auto_hide"]),
+        )
+        if not navigator_user_override:
+            navigator_width = int(DEFAULT_PANEL_STATE["navigator_width"])
+            navigator_collapsed = bool(
+                DEFAULT_PANEL_STATE["navigator_collapsed"]
+            )
+            navigator_auto_hide = bool(
+                DEFAULT_PANEL_STATE["navigator_auto_hide"]
+            )
         return {
             "navigator_width": navigator_width,
-            "navigator_collapsed": _bool_value(
-                store.value("navigator_collapsed", None),
-                bool(DEFAULT_PANEL_STATE["navigator_collapsed"]),
-            ),
-            "navigator_auto_hide": _bool_value(
-                store.value("navigator_auto_hide", None),
-                bool(DEFAULT_PANEL_STATE["navigator_auto_hide"]),
-            ),
-            "navigator_user_override": _bool_value(
-                store.value("navigator_user_override", None),
-                bool(DEFAULT_PANEL_STATE["navigator_user_override"]),
-            ),
+            "navigator_collapsed": navigator_collapsed,
+            "navigator_auto_hide": navigator_auto_hide,
+            "navigator_user_override": navigator_user_override,
             "inspector_width": inspector_width,
             "inspector_collapsed": _bool_value(
                 store.value("inspector_collapsed", None),

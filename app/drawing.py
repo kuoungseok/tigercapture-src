@@ -10987,7 +10987,7 @@ class PaintDialog(QDialog):
             bool(
                 self._painter_ui_panel_state.get(
                     "navigator_auto_hide",
-                    True,
+                    False,
                 )
             )
         )
@@ -26515,7 +26515,7 @@ class PaintDialog(QDialog):
         if (
             str(getattr(self, "_canvas_workspace_mode", "paint"))
             == "ui_design"
-            and int(host.width()) < 360
+            and int(self.width()) < 720
             and navigator is not None
             and not bool(
                 getattr(navigator, "_collapse_user_override", False)
@@ -26913,7 +26913,7 @@ class PaintDialog(QDialog):
             self._hide_painter_ui_navigator_popover()
             return
         if not navigator.is_collapsed():
-            navigator.set_auto_hide(True)
+            navigator.set_auto_hide(True, user_initiated=True)
             return
         self._show_painter_ui_navigator_popover()
 
