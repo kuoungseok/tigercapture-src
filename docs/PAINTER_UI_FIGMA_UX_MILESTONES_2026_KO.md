@@ -4,6 +4,11 @@
 > [PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md](PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md)를
 > 따른다. 이 문서의 과거 `implemented` 체크포인트는 계약과 Action 완료를
 > 포함하며, UI 배치와 점진 노출까지 완료됐다는 뜻은 아니다.
+>
+> 기능별 진입점, 표시 조건, 공개 구현의 캔버스 구조, 반복 사용자 피드백과
+> 최종 노출 등급은
+> [PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md](PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md)를
+> 따른다.
 
 Status: active roadmap; M0 shell and the M1 Page/navigation foundation implemented
 

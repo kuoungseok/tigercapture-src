@@ -3,6 +3,9 @@
 > 2026-07-31 UI3 전체 UX 감사:
 > [PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md](PAINTER_UI_FIGMA_UI3_COMPLETE_AUDIT_KO.md)
 >
+> 공식·GitHub·사용자 워크플로 다중 출처 기능/배치 조사:
+> [PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md](PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md)
+>
 > 기존 구현 체크포인트는 backend/Action 완료를 포함한다. 실제 화면 구조,
 > 기능 노출 시점, Figma UI3 작업 흐름의 완료 판정은 위 감사 문서를 우선한다.
 

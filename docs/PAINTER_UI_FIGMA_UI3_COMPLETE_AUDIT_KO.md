@@ -5,6 +5,11 @@ Scope: Tiger Studio Painter의 `UI 디자인` 모드
 Reference: Figma Design UI3의 공식 Help Center와 현재 Tiger Studio 소스  
 Non-goal: Figma의 브랜드, 색상, 아이콘을 복제하거나 협업 서비스를 구현하는 것
 
+> 공식 문서, 공개 구현, 사용자 그룹과 튜터리얼을 교차 조사한 기능별
+> 진입점·표시 조건·배치 계약은
+> [PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md](PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md)를
+> 함께 따른다.
+
 ## 1. 결론
 
 Tiger Studio Painter UI는 기능 기반이 빈약한 상태가 아니다.
@@ -1035,4 +1040,3 @@ Canvas:
 - Figma의 공식 UI가 변경되면 조사 날짜와 source를 갱신한다.
 - Tiger Studio 고유 기능은 Figma toolbar에 억지로 넣지 않고 해당 workflow의
   Assets, Actions, Prototype, Dev, Deliver surface에 배치한다.
-
