@@ -296,13 +296,15 @@ QSpinBox#PainterUIZoomPercent {
     min-height: 26px;
 }
 
-QPushButton#PainterUIZoomFitButton {
+QPushButton#PainterUIZoomFitButton,
+QPushButton#PainterUIZoomStepButton {
     background-color: #202832;
     border: 1px solid #34404e;
     border-radius: 4px;
 }
 
-QPushButton#PainterUIZoomFitButton:hover {
+QPushButton#PainterUIZoomFitButton:hover,
+QPushButton#PainterUIZoomStepButton:hover {
     background-color: #2a3542;
     border-color: #6387ad;
 }
@@ -706,6 +708,7 @@ QPushButton#PainterUIFloatingToolButton:focus,
 QToolButton#PainterUIFloatingToolButton:focus,
 QPushButton#PainterUIVectorContextButton:focus,
 QPushButton#PainterUIZoomFitButton:focus,
+QPushButton#PainterUIZoomStepButton:focus,
 QPushButton#PainterUIBreadcrumbItem:focus,
 QPushButton#PainterUIPanelCollapse:focus,
 QPushButton#PainterUITemplateBrowse:focus,
@@ -8605,13 +8608,15 @@ class PaintDialog(QDialog):
 
         view_menu = menu_bar.addMenu("View")
         self._painter_view_menu = view_menu
-        self._add_painter_menu_action(view_menu, "Zoom In", self._zoom_in, "Ctrl++")
-        self._add_painter_menu_action(view_menu, "Zoom Out", self._zoom_out, "Ctrl+-")
-        self._add_painter_menu_action(view_menu, "Fit", self._zoom_fit, "Ctrl+0")
-        self._add_painter_menu_action(view_menu, "100%", lambda: self._set_zoom_percent(100), "Ctrl+1")
+        self._add_painter_menu_action(view_menu, "Zoom In", self._view_zoom_in, "Ctrl++")
+        self._add_painter_menu_action(view_menu, "Zoom Out", self._view_zoom_out, "Ctrl+-")
+        self._add_painter_menu_action(view_menu, "Fit All", self._view_fit_all, "Ctrl+0")
+        self._add_painter_menu_action(view_menu, "Fit Selection", self._view_fit_selection, "Shift+2")
+        self._add_painter_menu_action(view_menu, "Fit Artboard", self._view_fit_artboard)
+        self._add_painter_menu_action(view_menu, "100%", self._view_zoom_100, "Ctrl+1")
         view_menu.addSeparator()
-        self._add_painter_menu_action(view_menu, "Pan Tool", lambda: self._set_tool("pan"), "H")
-        self._add_painter_menu_action(view_menu, "Reset Pan", self._reset_canvas_pan)
+        self._add_painter_menu_action(view_menu, "Pan / Hand Tool", self._view_pan_tool, "H")
+        self._add_painter_menu_action(view_menu, "Reset Pan", self._view_reset_pan)
         view_menu.addSeparator()
         self._add_painter_menu_action(
             view_menu,
@@ -14105,6 +14110,7 @@ class PaintDialog(QDialog):
     def _set_painter_ui_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
         selected = requested if requested in {
+            "pan",
             "scale",
             "frame",
             "rectangle",
@@ -14165,6 +14171,75 @@ class PaintDialog(QDialog):
                 }[requested]
             )
         return {"mode": requested, **overlay.view_state()}
+
+    def _ui_design_view_active(self) -> bool:
+        return (
+            str(getattr(self, "_canvas_workspace_mode", "paint"))
+            == "ui_design"
+        )
+
+    def _view_zoom_in(self) -> None:
+        if not self._ui_design_view_active():
+            self._zoom_in()
+            return
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return
+        from app.painter_ui_zoom_popover import stepped_ui_zoom_percent
+
+        current = float(overlay.view_state().get("zoom_percent") or 100.0)
+        self._set_painter_ui_zoom(stepped_ui_zoom_percent(current, 1))
+
+    def _view_zoom_out(self) -> None:
+        if not self._ui_design_view_active():
+            self._zoom_out()
+            return
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return
+        from app.painter_ui_zoom_popover import stepped_ui_zoom_percent
+
+        current = float(overlay.view_state().get("zoom_percent") or 100.0)
+        self._set_painter_ui_zoom(stepped_ui_zoom_percent(current, -1))
+
+    def _view_zoom_100(self) -> None:
+        if self._ui_design_view_active():
+            self._set_painter_ui_zoom(100.0)
+        else:
+            self._set_zoom_percent(100)
+
+    def _view_fit_all(self) -> None:
+        if self._ui_design_view_active():
+            self._fit_painter_ui_view("all")
+        else:
+            self._zoom_fit()
+
+    def _view_fit_selection(self) -> None:
+        if self._ui_design_view_active():
+            self._fit_painter_ui_view("selection")
+        else:
+            self._zoom_fit()
+
+    def _view_fit_artboard(self) -> None:
+        if self._ui_design_view_active():
+            self._fit_painter_ui_view("artboard")
+        else:
+            self._zoom_fit()
+
+    def _view_pan_tool(self) -> None:
+        if self._ui_design_view_active():
+            self._set_painter_ui_tool("pan")
+        else:
+            self._set_tool("pan")
+
+    def _view_reset_pan(self) -> None:
+        if self._ui_design_view_active():
+            overlay = getattr(self, "_painter_ui_overlay", None)
+            if overlay is not None:
+                overlay.pan_view(x=0.0, y=0.0)
+                overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+            return
+        self._reset_canvas_pan()
 
     def _set_painter_ui_zoom(
         self,

@@ -75,6 +75,13 @@ def test_zoom_popover_emits_percent_and_transient_indicator() -> None:
     toolbar.zoom_popover.percent_spin.editingFinished.emit()
     assert zooms == [175.0]
 
+    toolbar.zoom_popover.set_zoom_percent(100)
+    toolbar.zoom_popover.zoom_in_button.click()
+    toolbar.zoom_popover.zoom_out_button.click()
+    assert zooms[-2:] == [125.0, 100.0]
+    assert not toolbar.zoom_popover.zoom_in_button.icon().isNull()
+    assert not toolbar.zoom_popover.zoom_out_button.icon().isNull()
+
     toolbar.zoom_popover.hide()
     toolbar.set_zoom_percent(212.4)
     app.processEvents()
@@ -133,6 +140,23 @@ def test_floating_toolbar_exposes_dedicated_scale_tool() -> None:
     assert emitted == ["scale"]
     assert toolbar.tool_buttons["scale"].isChecked()
     assert not toolbar.tool_buttons["select"].isChecked()
+    toolbar.deleteLater()
+
+
+def test_floating_toolbar_exposes_hand_pan_tool() -> None:
+    _app()
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    toolbar = PainterUIFloatingToolbar()
+    emitted: list[str] = []
+    toolbar.tool_requested.connect(emitted.append)
+
+    toolbar.tool_buttons["pan"].click()
+
+    assert emitted == ["pan"]
+    assert toolbar.tool_buttons["pan"].isChecked()
+    assert not toolbar.tool_buttons["pan"].icon().isNull()
+    assert "Hand" in toolbar.tool_buttons["pan"].accessibleName()
     toolbar.deleteLater()
 
 

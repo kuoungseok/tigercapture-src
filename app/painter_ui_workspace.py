@@ -610,14 +610,18 @@ class PainterUIDesignOverlay(QWidget):
         requested = str(tool or "select").strip().casefold()
         self._tool = (
             requested
-            if requested in _CREATE_TOOLS or requested == "scale"
+            if requested in _CREATE_TOOLS or requested in {"scale", "pan"}
             else "select"
         )
         self._cancel_interaction()
         self.setCursor(
-            Qt.CursorShape.CrossCursor
-            if self._tool in _CREATE_TOOLS
-            else Qt.CursorShape.ArrowCursor
+            Qt.CursorShape.OpenHandCursor
+            if self._tool == "pan"
+            else (
+                Qt.CursorShape.CrossCursor
+                if self._tool in _CREATE_TOOLS
+                else Qt.CursorShape.ArrowCursor
+            )
         )
         return self._tool
 
@@ -2962,7 +2966,7 @@ class PainterUIDesignOverlay(QWidget):
             self._finish_text_edit(commit=True)
         if event.button() == Qt.MouseButton.MiddleButton or (
             event.button() == Qt.MouseButton.LeftButton
-            and self._space_pan_active
+            and (self._space_pan_active or self._tool == "pan")
         ):
             self._interaction = "pan"
             self._pan_start = QPointF(event.position())
@@ -3799,7 +3803,9 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         self.setToolTip("")
-        if self._tool == "select":
+        if self._tool == "pan":
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        elif self._tool == "select":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         event.ignore()
 
@@ -4142,7 +4148,9 @@ class PainterUIDesignOverlay(QWidget):
                         )
         self._cancel_interaction()
         self._active_artboard_drag_id = ""
-        if self._tool == "select":
+        if self._tool == "pan":
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        elif self._tool == "select":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
         self._hierarchy_drop_preview_id = ""
@@ -4456,9 +4464,13 @@ class PainterUIDesignOverlay(QWidget):
             self._space_pan_active = False
             if self._interaction != "pan":
                 self.setCursor(
-                    Qt.CursorShape.CrossCursor
-                    if self._tool in _CREATE_TOOLS
-                    else Qt.CursorShape.ArrowCursor
+                    Qt.CursorShape.OpenHandCursor
+                    if self._tool == "pan"
+                    else (
+                        Qt.CursorShape.CrossCursor
+                        if self._tool in _CREATE_TOOLS
+                        else Qt.CursorShape.ArrowCursor
+                    )
                 )
             event.accept()
             return

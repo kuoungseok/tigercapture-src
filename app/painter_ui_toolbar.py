@@ -69,6 +69,14 @@ class PainterUIFloatingToolbar(QFrame):
         self.tool_buttons["select"] = select_button
         self._tool_group_for_kind["select"] = select_button
 
+        pan_button = self._tool_button("Pan / Hand (H)", "hand")
+        pan_button.clicked.connect(
+            lambda _checked=False: self._select_direct_tool("pan")
+        )
+        layout.addWidget(pan_button)
+        self.tool_buttons["pan"] = pan_button
+        self._tool_group_for_kind["pan"] = pan_button
+
         scale_button = self._tool_button("Scale (K)", "scale")
         scale_button.clicked.connect(
             lambda _checked=False: self._select_direct_tool("scale")

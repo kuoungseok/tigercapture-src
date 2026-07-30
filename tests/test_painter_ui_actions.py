@@ -1257,6 +1257,48 @@ def test_painter_ui_overlay_uses_canvas_first_wheel_navigation() -> None:
     app.processEvents()
 
 
+def test_painter_ui_hand_tool_pans_with_left_drag() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(900, 640)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.fit_artboard()
+    overlay.show()
+    app.processEvents()
+
+    assert overlay.set_tool("pan") == "pan"
+    assert overlay.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    before = overlay.view_state()
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(420, 300),
+    )
+    assert overlay.cursor().shape() == Qt.CursorShape.ClosedHandCursor
+    QTest.mouseMove(overlay, QPoint(470, 340))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(470, 340),
+    )
+    after = overlay.view_state()
+
+    assert after["offset_x"] > before["offset_x"]
+    assert after["offset_y"] > before["offset_y"]
+    assert overlay.cursor().shape() == Qt.CursorShape.OpenHandCursor
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
 def test_painter_ui_overlay_native_gestures_preserve_focus_and_clamp() -> None:
     app = _app()
     from PySide6.QtCore import QPointF, Qt

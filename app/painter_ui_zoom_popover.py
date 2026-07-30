@@ -13,6 +13,15 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 
+UI_ZOOM_STEPS = (3, 6, 12, 25, 50, 75, 100, 125, 150, 200, 300, 400, 600, 800)
+
+
+def stepped_ui_zoom_percent(percent: float, direction: int) -> float:
+    current = max(3.0, min(800.0, float(percent)))
+    if int(direction) > 0:
+        return float(next((step for step in UI_ZOOM_STEPS if step > current), 800))
+    return float(next((step for step in reversed(UI_ZOOM_STEPS) if step < current), 3))
+
 
 class PainterUIZoomPopover(QFrame):
     zoom_requested = Signal(float)
@@ -27,6 +36,14 @@ class PainterUIZoomPopover(QFrame):
         root.setContentsMargins(7, 7, 7, 7)
         root.setSpacing(5)
 
+        zoom_row = QHBoxLayout()
+        zoom_row.setContentsMargins(0, 0, 0, 0)
+        zoom_row.setSpacing(3)
+
+        self.zoom_out_button = self._zoom_button("Zoom out", "zoom-out")
+        self.zoom_out_button.clicked.connect(lambda: self._step_zoom(-1))
+        zoom_row.addWidget(self.zoom_out_button)
+
         self.percent_spin = QSpinBox()
         self.percent_spin.setObjectName("PainterUIZoomPercent")
         self.percent_spin.setRange(3, 800)
@@ -34,7 +51,12 @@ class PainterUIZoomPopover(QFrame):
         self.percent_spin.setKeyboardTracking(False)
         self.percent_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.percent_spin.editingFinished.connect(self._emit_zoom)
-        root.addWidget(self.percent_spin)
+        zoom_row.addWidget(self.percent_spin)
+
+        self.zoom_in_button = self._zoom_button("Zoom in", "zoom-in")
+        self.zoom_in_button.clicked.connect(lambda: self._step_zoom(1))
+        zoom_row.addWidget(self.zoom_in_button)
+        root.addLayout(zoom_row)
 
         fit_row = QHBoxLayout()
         fit_row.setContentsMargins(0, 0, 0, 0)
@@ -87,5 +109,28 @@ class PainterUIZoomPopover(QFrame):
     def _emit_zoom(self) -> None:
         self.zoom_requested.emit(float(self.percent_spin.value()))
 
+    def _step_zoom(self, direction: int) -> None:
+        value = stepped_ui_zoom_percent(
+            float(self.percent_spin.value()),
+            direction,
+        )
+        self.set_zoom_percent(value)
+        self.zoom_requested.emit(value)
 
-__all__ = ["PainterUIZoomPopover"]
+    @staticmethod
+    def _zoom_button(label: str, icon_name: str) -> QPushButton:
+        button = QPushButton("")
+        button.setObjectName("PainterUIZoomStepButton")
+        button.setFixedSize(30, 28)
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.setIcon(app_icon(icon_name, size=14, color="#E4E8EE"))
+        button.setIconSize(icon_size(14))
+        return button
+
+
+__all__ = [
+    "PainterUIZoomPopover",
+    "UI_ZOOM_STEPS",
+    "stepped_ui_zoom_percent",
+]

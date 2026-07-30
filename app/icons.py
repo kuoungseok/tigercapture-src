@@ -1011,9 +1011,19 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawPolygon(nib)
         painter.drawEllipse(QPointF(s * .50, s * .47), s * .075, s * .075)
         painter.drawLine(QPointF(s * .50, s * .55), QPointF(s * .50, s * .78))
-    elif n in {"zoom", "search"}:
+    elif n in {"zoom", "search", "zoom-in", "zoom_in", "zoom-out", "zoom_out"}:
         painter.drawEllipse(QPointF(s * .43, s * .42), s * .23, s * .23)
         painter.drawLine(QPointF(s * .60, s * .60), QPointF(s * .82, s * .82))
+        if n in {"zoom-in", "zoom_in", "zoom-out", "zoom_out"}:
+            painter.drawLine(
+                QPointF(s * .31, s * .42),
+                QPointF(s * .55, s * .42),
+            )
+            if n in {"zoom-in", "zoom_in"}:
+                painter.drawLine(
+                    QPointF(s * .43, s * .30),
+                    QPointF(s * .43, s * .54),
+                )
     elif n in {"cursor", "select", "pointer"}:
         path = QPainterPath()
         path.moveTo(s * .25, s * .16)
