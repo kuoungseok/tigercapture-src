@@ -34,6 +34,32 @@ OUTPUT_KIND_TARGET_PPI = {
     "large_format": 150,
 }
 
+OUTPUT_KIND_TARGET_CONTRACT = {
+    "color": {
+        "source": "adobe_photoshop_general_high_quality_print_guidance",
+        "url": "https://helpx.adobe.com/ca/photoshop/desktop/crop-resize-transform/resize-adjust-resolution/resolution-specs-for-printing-images.html",
+        "printer_confirmation_required": True,
+    },
+    "line_art": {
+        "source": "clip_studio_official_monochrome_manga_guidance",
+        "url": "https://tips.clip-studio.com/en-us/articles/1747",
+        "printer_confirmation_required": True,
+    },
+    "large_format": {
+        "source": "tiger_authored_starting_point_not_a_print_quality_threshold",
+        "url": "",
+        "printer_confirmation_required": True,
+    },
+}
+
+PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT = 16384
+PAINTER_CANVAS_LIMIT_CONTRACT = {
+    "source": "tiger_authored_current_runtime_capacity_not_a_qt_or_file_format_limit",
+    "limit_px_per_axis": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+    "largest_native_runtime_evidence_px": [8192, 8192],
+    "universal_capacity_claim": False,
+}
+
 
 def _number(value: Any, fallback: float) -> float:
     try:
@@ -100,6 +126,7 @@ def normalize_output_settings(
     output_kind = str(source.get("output_kind") or "color").strip().casefold()
     if output_kind not in OUTPUT_KIND_TARGET_PPI:
         output_kind = "color"
+    include_bleed = bool(source.get("include_bleed", mode == "print"))
     ppi = max(36, min(1200, int(round(_number(source.get("ppi"), 300 if mode == "print" else 96)))))
     bleed_mm = max(0.0, min(50.0, _number(source.get("bleed_mm"), 3.0 if mode == "print" else 0.0)))
     width_mm = _number(source.get("width_mm"), 0.0)
@@ -110,7 +137,7 @@ def normalize_output_settings(
             pixel_height,
             ppi=ppi,
             unit="mm",
-            bleed_mm=bleed_mm if mode == "print" else 0.0,
+            bleed_mm=bleed_mm if mode == "print" and include_bleed else 0.0,
         )
     return {
         "schema": PAINTER_OUTPUT_SCHEMA,
@@ -120,7 +147,7 @@ def normalize_output_settings(
         "height_mm": round(max(0.1, height_mm), 4),
         "ppi": ppi,
         "bleed_mm": round(bleed_mm, 4),
-        "include_bleed": bool(source.get("include_bleed", mode == "print")),
+        "include_bleed": include_bleed,
         "safe_margin_mm": round(max(0.0, min(100.0, _number(source.get("safe_margin_mm"), 5.0 if mode == "print" else 0.0))), 4),
         "output_kind": output_kind,
         "color_space": str(source.get("color_space") or "srgb"),
@@ -158,35 +185,49 @@ def output_preflight(
     )
     warnings: list[str] = []
     errors: list[str] = []
+    if (
+        pixel_width > PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT
+        or pixel_height > PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT
+    ):
+        errors.append(
+            "Pixel dimensions exceed Tiger Painter's current authored runtime limit; "
+            "this is not a Qt, PNG, TIFF, or PSD format limit."
+        )
     if normalized["mode"] == "screen":
         return {
             "schema": "tigerstudio.painter.output-preflight.v1",
-            "ok": True,
+            "ok": not errors,
             "mode": "screen",
             "settings": normalized,
             "effective_ppi": None,
             "target_ppi": None,
+            "target_contract": None,
+            "print_quality_threshold_claim": False,
+            "canvas_limit_contract": dict(PAINTER_CANVAS_LIMIT_CONTRACT),
             "warnings": [],
-            "errors": [],
+            "errors": errors,
             "summary": f"{pixel_width} × {pixel_height} px · screen",
         }
     x_ppi, y_ppi = effective_ppi(normalized, pixel_width, pixel_height)
+    effective_bleed_mm = (
+        float(normalized["bleed_mm"])
+        if bool(normalized["include_bleed"])
+        else 0.0
+    )
     effective = min(x_ppi, y_ppi)
     target = OUTPUT_KIND_TARGET_PPI[normalized["output_kind"]]
-    if effective < target * 0.5:
-        errors.append(
-            f"Effective resolution {effective:.0f} PPI is far below the {target} PPI target."
-        )
-    elif effective < target * 0.9:
+    target_contract = OUTPUT_KIND_TARGET_CONTRACT[normalized["output_kind"]]
+    if effective < target:
         warnings.append(
-            f"Effective resolution {effective:.0f} PPI is below the {target} PPI target."
+            f"Effective resolution {effective:.0f} PPI is below the {target} PPI guidance value."
         )
-    if normalized["bleed_mm"] <= 0.0:
+    warnings.append(
+        "Resolution guidance is not a print-quality pass/fail threshold; confirm the required PPI with the printer or print service."
+    )
+    if not effective_bleed_mm:
         warnings.append("No bleed is configured; confirm this with the printer.")
     if normalized["color_space"] == "srgb":
         warnings.append("Document colors are sRGB; confirm the printer's requested profile.")
-    if pixel_width > 16384 or pixel_height > 16384:
-        errors.append("Pixel dimensions exceed Painter's 16384 px canvas limit.")
     return {
         "schema": "tigerstudio.painter.output-preflight.v1",
         "ok": not errors,
@@ -196,11 +237,14 @@ def output_preflight(
         "effective_ppi_x": round(x_ppi, 2),
         "effective_ppi_y": round(y_ppi, 2),
         "target_ppi": target,
+        "target_contract": dict(target_contract),
+        "print_quality_threshold_claim": False,
+        "canvas_limit_contract": dict(PAINTER_CANVAS_LIMIT_CONTRACT),
         "warnings": warnings,
         "errors": errors,
         "summary": (
             f"{normalized['width_mm']:g} × {normalized['height_mm']:g} mm · "
             f"{effective:.0f} PPI · {pixel_width} × {pixel_height} px · "
-            f"{normalized['bleed_mm']:g} mm bleed"
+            f"{effective_bleed_mm:g} mm bleed"
         ),
     }

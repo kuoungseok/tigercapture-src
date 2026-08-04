@@ -644,6 +644,21 @@ class PaintUIAdvancedAdapterMixin:
         document = release_ui_boolean(dialog._painter_ui_document, object_id)
         return self._paint_ui_advanced_apply("Release UI Boolean", document)
 
+    def paint_ui_vector_boolean_flatten(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        from app.painter_ui_boolean import flatten_ui_boolean
+
+        dialog = self._paint_dialog_owner()
+        document, row = flatten_ui_boolean(
+            dialog._painter_ui_document,
+            object_id,
+        )
+        result = self._paint_ui_advanced_apply("Flatten UI Boolean", document)
+        return {**result, "object": row}
+
     def paint_ui_section_inspect(
         self,
         *,

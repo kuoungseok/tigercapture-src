@@ -118,6 +118,44 @@ def test_text_renderer_applies_alignment_weight_and_line_height() -> None:
     assert 228 <= bounds.right() <= 240
 
 
+def test_figma_auto_width_text_uses_pixel_line_height_without_padding_or_wrap() -> None:
+    _app()
+    import pytest
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QFont, QFontMetricsF, QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_text_block, ui_font
+
+    style = {
+        "font_family": "Arial",
+        "font_size": 20,
+        "line_height": 32,
+        "line_height_unit": "px",
+        "text_color": "#FFFFFFFF",
+    }
+    image = QImage(120, 100, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    base_font = QFont()
+    painter = QPainter(image)
+    report = draw_ui_text_block(
+        painter,
+        QRectF(0, 0, 48, 96),
+        "Tiger Studio\nText Layout",
+        style,
+        base_font,
+        text_resize="auto_width",
+    )
+    painter.end()
+
+    font_height = QFontMetricsF(ui_font(base_font, style, 1.0)).height()
+    assert report["line_count"] == 2
+    assert report["line_height"] == 32
+    assert report["line_height_unit"] == "px"
+    assert report["layout_height"] == pytest.approx(font_height + 32, abs=1.0)
+    assert report["effective_padding"] == 0
+    assert report["wrap_mode"] == "no_wrap"
+
+
 def test_canvas_object_renderer_calls_shared_style_renderer(monkeypatch) -> None:
     app = _app()
     from PySide6.QtCore import QRectF

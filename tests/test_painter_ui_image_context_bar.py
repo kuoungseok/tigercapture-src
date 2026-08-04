@@ -217,6 +217,9 @@ def test_canvas_focal_handle_updates_fill_and_persists(tmp_path) -> None:
     overlay = dialog._painter_ui_overlay
     overlay.resize(1000, 760)
     overlay.set_document(document)
+    # Focal-point assertions require enough canvas resolution to represent
+    # fractional movement independently of persisted user zoom state.
+    overlay.set_zoom_percent(100.0)
     overlay.show()
     dialog._sync_painter_ui_image_context()
     dialog._handle_painter_ui_image_context_command("focal")

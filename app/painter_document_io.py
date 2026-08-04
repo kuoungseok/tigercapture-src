@@ -5,18 +5,32 @@ import copy
 import hashlib
 import json
 import os
+import operator
 import tempfile
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
 
-PAINTER_DOCUMENT_SCHEMA = "tigerstudio.painter.document.v1"
-PAINTER_DOCUMENT_VERSION = 1
+PAINTER_DOCUMENT_SCHEMA = "tigerstudio.painter.document.v3"
+PAINTER_DOCUMENT_VERSION = 3
+_LEGACY_DOCUMENT_SCHEMAS = {
+    "tigerstudio.painter.document.v1": 1,
+    "tigerstudio.painter.document.v2": 2,
+}
 PAINTER_DOCUMENT_EXTENSION = ".tspaint"
 _DOCUMENT_ENTRY = "document.json"
 _MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 _MAX_ASSET_BYTES = 512 * 1024 * 1024
+
+PAINTER_DOCUMENT_SECURITY_POLICY = {
+    "schema": "tigerstudio.painter.document_security_policy.v1",
+    "metadata_bytes": _MAX_DOCUMENT_BYTES,
+    "asset_bytes_total": _MAX_ASSET_BYTES,
+    "source": "tiger_authored_archive_resource_guard_not_a_tspaint_or_zip_format_limit",
+    "format_limit_claim": False,
+    "universal_safe_capacity_claim": False,
+}
 
 
 class PainterDocumentError(ValueError):
@@ -69,6 +83,10 @@ def _embed_external_paths(document: dict[str, Any]) -> tuple[dict[str, bytes], l
     for index, row in enumerate(document.get("stickers") or []):
         if isinstance(row, dict):
             embed(row, "png_path", "stickers", index)
+    for index, row in enumerate(document.get("layers") or []):
+        if isinstance(row, dict):
+            embed(row, "raster_asset", "layers", index)
+            embed(row, "mask_asset", "layer-masks", index)
     pbr = document.get("pbr")
     if isinstance(pbr, dict):
         embed(pbr, "source_path", "pbr", 0)
@@ -97,18 +115,69 @@ def save_painter_document(
     document: Mapping[str, Any],
     *,
     background_png: bytes | None = None,
+    layer_raster_pngs: Mapping[str, bytes] | None = None,
+    layer_mask_pngs: Mapping[str, bytes] | None = None,
+    selection_mask_png: bytes | None = None,
 ) -> dict[str, Any]:
     output = normalize_painter_document_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = copy.deepcopy(dict(document))
     payload["schema"] = PAINTER_DOCUMENT_SCHEMA
     payload["format_version"] = PAINTER_DOCUMENT_VERSION
+    raster_payload = {
+        str(layer_id): bytes(data)
+        for layer_id, data in dict(layer_raster_pngs or {}).items()
+        if data
+    }
+    mask_payload = {
+        str(layer_id): bytes(data)
+        for layer_id, data in dict(layer_mask_pngs or {}).items()
+        if data
+    }
+    for row in payload.get("layers") or []:
+        if isinstance(row, dict) and str(row.get("layer_id") or "") in raster_payload:
+            row["raster_asset"] = ""
+        if isinstance(row, dict) and str(row.get("layer_id") or "") in mask_payload:
+            row["mask_asset"] = ""
     assets, missing = _embed_external_paths(payload)
     if background_png:
         assets["assets/background.png"] = bytes(background_png)
         payload.setdefault("background", {})["asset"] = _asset_uri(
             "assets/background.png"
         )
+    if selection_mask_png:
+        assets["assets/selection/mask.png"] = bytes(selection_mask_png)
+        payload.setdefault("selection", {})["mask_asset"] = _asset_uri(
+            "assets/selection/mask.png"
+        )
+    for index, row in enumerate(payload.get("layers") or []):
+        if not isinstance(row, dict):
+            continue
+        layer_id = str(row.get("layer_id") or "")
+        data = raster_payload.get(layer_id)
+        if not data:
+            continue
+        digest = hashlib.blake2b(layer_id.encode("utf-8"), digest_size=6).hexdigest()
+        entry = f"assets/layers/{index:03d}_{digest}.png"
+        assets[entry] = data
+        row["raster_asset"] = _asset_uri(entry)
+        mask_data = mask_payload.get(layer_id)
+        if mask_data:
+            mask_entry = f"assets/layer-masks/{index:03d}_{digest}.png"
+            assets[mask_entry] = mask_data
+            row["mask_asset"] = _asset_uri(mask_entry)
+    # Masks without a paint raster still need their own archive asset.
+    for index, row in enumerate(payload.get("layers") or []):
+        if not isinstance(row, dict) or str(row.get("mask_asset") or ""):
+            continue
+        layer_id = str(row.get("layer_id") or "")
+        mask_data = mask_payload.get(layer_id)
+        if not mask_data:
+            continue
+        digest = hashlib.blake2b(layer_id.encode("utf-8"), digest_size=6).hexdigest()
+        mask_entry = f"assets/layer-masks/{index:03d}_{digest}.png"
+        assets[mask_entry] = mask_data
+        row["mask_asset"] = _asset_uri(mask_entry)
     payload["asset_manifest"] = [
         {
             "entry": entry,
@@ -154,12 +223,23 @@ def save_painter_document(
         "asset_count": len(assets),
         "missing_external_assets": missing,
         "bytes": output.stat().st_size,
+        "security_policy": dict(PAINTER_DOCUMENT_SECURITY_POLICY),
     }
 
 
 def _safe_archive_entry(value: str) -> str:
-    entry = PurePosixPath(str(value or ""))
-    if entry.is_absolute() or ".." in entry.parts:
+    raw = str(value or "")
+    windows_entry = PureWindowsPath(raw)
+    entry = PurePosixPath(raw.replace("\\", "/"))
+    if (
+        not raw
+        or "\x00" in raw
+        or entry.is_absolute()
+        or windows_entry.is_absolute()
+        or bool(windows_entry.drive)
+        or ".." in entry.parts
+        or any(":" in part for part in entry.parts)
+    ):
         raise PainterDocumentError(f"Unsafe Painter archive entry: {value}")
     return entry.as_posix()
 
@@ -172,6 +252,22 @@ def _resolve_asset_uris(value: Any, mapping: Mapping[str, str]) -> Any:
     if isinstance(value, str) and value.startswith("asset://"):
         return mapping.get(value[8:], value)
     return value
+
+
+def _migrate_document(document: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade legacy documents to the v3 raster-layer-mask contract."""
+    migrated = copy.deepcopy(document)
+    schema = str(migrated.get("schema") or "")
+    version = int(migrated.get("format_version", 0) or 0)
+    if schema in _LEGACY_DOCUMENT_SCHEMAS and version == _LEGACY_DOCUMENT_SCHEMAS[schema]:
+        for row in migrated.get("layers") or []:
+            if isinstance(row, dict):
+                row.setdefault("raster_asset", "")
+                row.setdefault("mask_asset", "")
+        migrated.setdefault("asset_manifest", [])
+        migrated["schema"] = PAINTER_DOCUMENT_SCHEMA
+        migrated["format_version"] = PAINTER_DOCUMENT_VERSION
+    return migrated
 
 
 def load_painter_document(
@@ -200,13 +296,37 @@ def load_painter_document(
             raise PainterDocumentError("Painter document metadata is invalid") from exc
         if not isinstance(document, dict):
             raise PainterDocumentError("Painter document root must be an object")
-        if document.get("schema") != PAINTER_DOCUMENT_SCHEMA:
+        source_schema = str(document.get("schema") or "")
+        source_version = int(document.get("format_version", 0) or 0)
+        if source_schema != PAINTER_DOCUMENT_SCHEMA and source_schema not in _LEGACY_DOCUMENT_SCHEMAS:
             raise PainterDocumentError("Unsupported Painter document schema")
-        version = int(document.get("format_version", 0) or 0)
-        if version < 1 or version > PAINTER_DOCUMENT_VERSION:
+        expected_version = (
+            PAINTER_DOCUMENT_VERSION
+            if source_schema == PAINTER_DOCUMENT_SCHEMA
+            else _LEGACY_DOCUMENT_SCHEMAS[source_schema]
+        )
+        if source_version != expected_version:
             raise PainterDocumentError(
-                f"Unsupported Painter document version: {version}"
+                f"Unsupported Painter document version: {source_version}"
             )
+        if source_schema == PAINTER_DOCUMENT_SCHEMA:
+            state = document.get("document")
+            state = state if isinstance(state, dict) else {}
+            try:
+                raw_width = state.get("width")
+                raw_height = state.get("height")
+                if isinstance(raw_width, bool) or isinstance(raw_height, bool):
+                    raise TypeError
+                width = operator.index(raw_width)
+                height = operator.index(raw_height)
+            except TypeError as exc:
+                raise PainterDocumentError(
+                    "Painter document canvas dimensions are missing or invalid"
+                ) from exc
+            if width <= 0 or height <= 0:
+                raise PainterDocumentError(
+                    "Painter document canvas dimensions are missing or invalid"
+                )
         total = 0
         mapping: dict[str, str] = {}
         for row in document.get("asset_manifest") or []:
@@ -229,17 +349,25 @@ def load_painter_document(
             if expected and hashlib.sha256(data).hexdigest() != expected:
                 raise PainterDocumentError(f"Painter asset checksum failed: {entry}")
             target = extraction_root.joinpath(*PurePosixPath(entry).parts)
+            resolved_root = extraction_root.resolve()
+            resolved_target = target.resolve()
+            if not resolved_target.is_relative_to(resolved_root):
+                raise PainterDocumentError(f"Unsafe Painter archive entry: {entry}")
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             mapping[entry] = str(target.resolve())
-    resolved = _resolve_asset_uris(document, mapping)
+    resolved = _resolve_asset_uris(_migrate_document(document), mapping)
     return resolved, {
         "schema": "tigerstudio.painter.document.load_report.v1",
         "path": str(source.resolve()),
         "format": PAINTER_DOCUMENT_SCHEMA,
         "format_version": int(resolved["format_version"]),
+        "source_format": source_schema,
+        "source_format_version": source_version,
+        "migrated": source_schema != PAINTER_DOCUMENT_SCHEMA,
         "asset_count": len(mapping),
         "asset_root": str(extraction_root.resolve()),
+        "security_policy": dict(PAINTER_DOCUMENT_SECURITY_POLICY),
     }
 
 
@@ -247,6 +375,7 @@ __all__ = [
     "PAINTER_DOCUMENT_EXTENSION",
     "PAINTER_DOCUMENT_SCHEMA",
     "PAINTER_DOCUMENT_VERSION",
+    "PAINTER_DOCUMENT_SECURITY_POLICY",
     "PainterDocumentError",
     "load_painter_document",
     "normalize_painter_document_path",

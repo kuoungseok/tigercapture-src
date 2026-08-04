@@ -84,6 +84,7 @@ def add_ui_review_comment(
     author: str = "",
     x: float = 0.5,
     y: float = 0.5,
+    region: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     document = normalize_ui_document(value)
     object_key = str(object_id or "")
@@ -122,6 +123,16 @@ def add_ui_review_comment(
         },
         "replies": [],
     }
+    if isinstance(region, Mapping):
+        width = max(0.0, min(1.0, float(region.get("width", 0.0))))
+        height = max(0.0, min(1.0, float(region.get("height", 0.0))))
+        if width > 0.0 or height > 0.0:
+            row["region"] = {
+                "x": max(0.0, min(1.0, float(region.get("x", x)))),
+                "y": max(0.0, min(1.0, float(region.get("y", y)))),
+                "width": width,
+                "height": height,
+            }
     target["comments"].append(row)
     return _commit_review(document, target), row
 
@@ -144,6 +155,37 @@ def update_ui_review_comment(
             updated["text"] = text
         if "resolved" in changes:
             updated["resolved"] = bool(changes["resolved"])
+        if "anchor" in changes and isinstance(changes["anchor"], Mapping):
+            anchor = changes["anchor"]
+            updated["anchor"] = {
+                "x": max(0.0, min(1.0, float(anchor.get("x", 0.5)))),
+                "y": max(0.0, min(1.0, float(anchor.get("y", 0.5)))),
+            }
+        if "object_id" in changes:
+            object_id = str(changes.get("object_id") or "")
+            if object_id and object_id not in {
+                str(item["id"]) for item in document["objects"]
+            }:
+                raise ValueError(f"Painter UI review object not found: {object_id}")
+            updated["object_id"] = object_id
+        if "artboard_id" in changes:
+            artboard_id = str(changes.get("artboard_id") or "")
+            if artboard_id not in {
+                str(item["id"]) for item in document["artboards"]
+            }:
+                raise ValueError(f"Painter UI review artboard not found: {artboard_id}")
+            updated["artboard_id"] = artboard_id
+        if "region" in changes:
+            region = changes.get("region")
+            if isinstance(region, Mapping):
+                updated["region"] = {
+                    "x": max(0.0, min(1.0, float(region.get("x", 0.0)))),
+                    "y": max(0.0, min(1.0, float(region.get("y", 0.0)))),
+                    "width": max(0.0, min(1.0, float(region.get("width", 0.0)))),
+                    "height": max(0.0, min(1.0, float(region.get("height", 0.0)))),
+                }
+            else:
+                updated.pop("region", None)
         if "reply" in changes and str(changes["reply"] or "").strip():
             replies = list(updated.get("replies") or [])
             replies.append(

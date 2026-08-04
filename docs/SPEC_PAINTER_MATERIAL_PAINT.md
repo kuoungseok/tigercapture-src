@@ -1,6 +1,7 @@
 # Tiger Studio Painter Material Paint
 
-Status: product implementation with Bristle Engine v2 and Wet Canvas v1
+Status: product implementation with Bristle Engine v2, shared Texture Lab
+surface generation, and Wet Canvas v1
 
 ## Goal
 
@@ -63,13 +64,48 @@ stroke-channel rasterization.
 1. Stroke paths are rasterized at the requested preview/export resolution.
 2. Height accumulates where strokes overlap, so repeated paint visibly builds.
 3. Bristle and impasto profiles add directional ridge variation.
-4. Tangent-space normals are derived from authored height, not RGB luminance.
-5. AO is derived from local heightfield concavity.
+4. Tangent-space normals are derived from authored height, not RGB luminance,
+   through the shared Texture Lab `normal_map_from_height` stage.
+5. AO uses the shared Texture Lab `ao_map_from_height` stage. Live Painter
+   preview selects its bounded realtime mode; final Texture Lab generation can
+   use the higher-quality horizon algorithm.
 6. Roughness uses the stroke values and wetness/gloss response.
 7. A directional heightfield shadow pass makes raised paint cast a soft local
    shadow in the interactive material preview.
 8. Painter's PBR generation path merges these native channels over the
    image-derived fallback maps.
+9. After native and image-derived Height are merged, Normal is regenerated
+   from the final Height instead of blending two encoded normal RGB images.
+10. Material Normal follows the selected DirectX/OpenGL convention and the
+    same strength, radius, and filter settings as Texture Lab.
+
+### Artist Relief Shading
+
+Painter's working canvas is not a neutral product-material turntable. Thick
+paint relief must remain legible while the artist is drawing, including when
+the movable key light approaches a front-facing direction. The canvas therefore
+uses `painter_artist_relief_readability_v1`:
+
+- the authored Normal remains the source of all directional relief;
+- diffuse lighting is a clamped `N dot L`, and specular response uses
+  `N dot H`; normals are decoded and normalized before either dot product;
+- DirectX/OpenGL is an export encoding choice. CPU Painter, CPU Texture Lab,
+  and GPU Texture Lab convert the selected Green-channel convention into
+  their canonical tangent basis before lighting, so the same Height produces
+  the same light direction in both formats;
+- the movable PBR key light remains active;
+- a low-energy fixed rake contribution adds only the signed deviation from a
+  flat normal, so it cannot relight a flat canvas;
+- local Height detail and a very small slope lift prevent fine ridges from
+  disappearing;
+- canvas pixels are never UV-shifted, because doing so would misregister the
+  brush cursor and editable stroke geometry.
+
+True parallax is shown in the dedicated Texture Lab/OpenGL PBR preview, where
+view direction and an oblique surface are available. Painter material defaults
+keep POM enabled with strength `0.76`, depth `0.060`, and `32` steps. These are
+preview defaults; exported Height and Normal stay neutral reusable maps rather
+than baking the artist-readability lighting into textures.
 
 ### Bristle Engine v2
 
@@ -87,6 +123,12 @@ along the stroke. Height, direction, roughness, normal, AO, and the visible
 color therefore describe the same authored brush marks. Long interactive
 paths are bounded to 256 lane samples to protect Painter responsiveness.
 
+Palette Knife additionally consumes per-point pressure, load, signed tilt,
+barrel rotation, and tangential pressure. Pressure/load change contact width
+and deposition; tilt shifts the contact patch; rotation/tangential pressure
+move the raised blade-edge ridge. This is an authored 2.5D relief model, not a
+full deforming metal-blade or fluid simulation.
+
 ### Tablet input
 
 Painter consumes native Qt tablet press/move/release events. Each accepted
@@ -102,6 +144,10 @@ feedback. The existing Texture Lab/OpenGL plane renderer remains the
 authoritative PBR inspection surface and consumes the merged native maps.
 Normal PNG export remains visually compatible; PBR map export can preserve the
 native Height/Normal/AO/Roughness channels.
+
+Material live preview and the committed stroke both start with Brush Engine
+v2, the same deterministic brush seed, material settings, and bristle count.
+Pen-up must not switch from a legacy preview shape to a different final shape.
 
 ### Wet Canvas v1
 
@@ -141,6 +187,12 @@ not synthesized from the wet RGB result.
 - Choosing a material-compatible brush on a normal layer does not silently
   change the document. The brush remains a color brush until the user creates
   or converts a Material Paint layer.
+- The `Oil Colour Studies` preset card is an explicit material action. Choosing
+  one of its dimensional paint colors creates/selects Material Paint, applies
+  the Palette Knife profile, and enables PBR relief preview.
+- Brush `Size px` and `Opacity %` controls in both the top tool-options row and
+  the quick brush menu accept hover-wheel input without requiring a click.
+  One wheel notch changes `1 px` or `1%`; `Shift+wheel` changes five units.
 
 ## Automation
 
@@ -201,10 +253,17 @@ the complete underdrawing 3D Blockout scene. File-menu Open/Save/Save As and
   unzoomed canvas resolution and are scaled only for display; selection,
   guides, pixel grid, and the live stroke remain viewport-native overlays.
 - The feature must preserve QPainter and remote-session fallback behavior.
+- PBR preview/export scales `width_px` from document resolution to the requested
+  map resolution so the relative brush footprint does not change with output
+  size.
 
 ## Follow-up Work
 
 - Persistent GPU Height/Roughness atlas and retained OpenGL material shader.
+- Incremental/tiled asynchronous Height/Normal/AO updates. Full-frame CPU
+  regeneration remains a pen-up hitch risk on documents with many thick-paint
+  strokes even though per-sample latency guards pass.
+- 16-bit Height export for deep impasto; current PNG Height output is 8-bit.
 - Palette-knife height displacement and scrape/carve operations.
 - Persistent GPU wet atlas, conservative paint-volume advection, bidirectional
   physical brush/canvas pigment storage, spectral/validated pigment mixing,

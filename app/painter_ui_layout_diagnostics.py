@@ -7,6 +7,7 @@ from typing import Any
 from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
 from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_constraints import normalize_ui_constraints
+from app.painter_ui_scroll import inspect_ui_scroll, normalize_ui_scroll
 
 
 def _diagnostic(
@@ -112,9 +113,73 @@ def diagnose_ui_layout(document: Mapping[str, Any]) -> dict[str, Any]:
                     )
                 )
 
+        scroll_report = inspect_ui_scroll(document, object_id)
+        for reason in scroll_report["reasons"]:
+            diagnostics.append(
+                _diagnostic(
+                    "error",
+                    reason,
+                    object_id,
+                    {
+                        "scroll_overflow_requires_frame": (
+                            "Overflow scrolling is available only on frames."
+                        ),
+                        "scroll_overflow_requires_clip_content": (
+                            "Enable Clip content before using overflow scrolling."
+                        ),
+                        "scroll_position_requires_scrollable_parent": (
+                            "Fixed and sticky objects require a scrollable parent frame."
+                        ),
+                        "sticky_requires_vertical_overflow": (
+                            "Sticky positioning requires vertical parent overflow."
+                        ),
+                        "fixed_in_auto_layout_requires_ignore_auto_layout": (
+                            "A fixed Auto Layout child must Ignore auto layout."
+                        ),
+                    }.get(reason, reason.replace("_", " ").capitalize()),
+                )
+            )
+        scroll = normalize_ui_scroll(row.get("scroll"))
+        if scroll["overflow"] != "none":
+            frame_left = float(row.get("x") or 0.0)
+            frame_top = float(row.get("y") or 0.0)
+            frame_right = frame_left + float(row.get("width") or 1.0)
+            frame_bottom = frame_top + float(row.get("height") or 1.0)
+            direct_children = children.get(object_id, [])
+            horizontal_overflow = any(
+                float(child.get("x") or 0.0) < frame_left
+                or float(child.get("x") or 0.0)
+                + float(child.get("width") or 1.0)
+                > frame_right
+                for child in direct_children
+            )
+            vertical_overflow = any(
+                float(child.get("y") or 0.0) < frame_top
+                or float(child.get("y") or 0.0)
+                + float(child.get("height") or 1.0)
+                > frame_bottom
+                for child in direct_children
+            )
+            needs_horizontal = scroll["overflow"] in {"horizontal", "both"}
+            needs_vertical = scroll["overflow"] in {"vertical", "both"}
+            if (
+                (needs_horizontal and not horizontal_overflow)
+                or (needs_vertical and not vertical_overflow)
+            ):
+                diagnostics.append(
+                    _diagnostic(
+                        "warning",
+                        "scroll_overflow_has_no_overflow_content",
+                        object_id,
+                        "The selected scroll axis has no content beyond the frame bounds.",
+                    )
+                )
+
         layout = normalize_ui_auto_layout(row.get("layout"))
         mode = layout["mode"]
-        if mode not in {"horizontal", "vertical"}:
+        if mode not in {"horizontal", "vertical", "grid"}:
+            continue
+        if mode == "grid":
             continue
         main_axis = "width" if mode == "horizontal" else "height"
         padding = layout["padding"]

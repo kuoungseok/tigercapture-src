@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import operator
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -11,6 +13,11 @@ from PySide6.QtGui import QImage, QPainter
 
 
 WET_CANVAS_SCHEMA = "tigerstudio.painter.wet_canvas.v1"
+WET_CANVAS_DRYING_MIN_SECONDS = 1.0
+WET_CANVAS_DRYING_MAX_SECONDS = 86400.0
+WET_CANVAS_DRYING_UI_MINUTES_MIN = 1
+WET_CANVAS_DRYING_UI_MINUTES_MAX = 1440
+SECONDS_PER_MINUTE = 60.0
 WET_CANVAS_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "mixing": 0.42,
@@ -56,9 +63,47 @@ def normalize_wet_canvas_settings(value: Mapping[str, Any] | None) -> dict[str, 
             WET_CANVAS_DEFAULTS["diffusion"],
         ),
         "pickup": _clamp01(source.get("pickup"), WET_CANVAS_DEFAULTS["pickup"]),
-        "drying_seconds": max(1.0, min(86400.0, drying_seconds)),
-        "elapsed_seconds": max(0.0, min(86400.0, elapsed_seconds)),
+        "drying_seconds": max(
+            WET_CANVAS_DRYING_MIN_SECONDS,
+            min(WET_CANVAS_DRYING_MAX_SECONDS, drying_seconds),
+        ),
+        "elapsed_seconds": max(
+            0.0,
+            min(WET_CANVAS_DRYING_MAX_SECONDS, elapsed_seconds),
+        ),
     }
+
+
+def drying_seconds_to_ui_minutes(value: object) -> int:
+    """Map serialized seconds to the full 1..1,440 minute edit domain.
+
+    Positive half-minute ties round upward. Values below one minute remain
+    representable by the one-minute UI endpoint without mutating serialized
+    state until the user edits the control.
+    """
+
+    seconds = normalize_wet_canvas_settings({"drying_seconds": value})[
+        "drying_seconds"
+    ]
+    rounded = int(math.floor(seconds / SECONDS_PER_MINUTE + 0.5))
+    return max(
+        WET_CANVAS_DRYING_UI_MINUTES_MIN,
+        min(WET_CANVAS_DRYING_UI_MINUTES_MAX, rounded),
+    )
+
+
+def drying_ui_minutes_to_seconds(value: object) -> float:
+    """Convert a UI minute value to serialized seconds without truncation."""
+
+    if isinstance(value, bool):
+        raise ValueError("drying minutes must be an integer")
+    try:
+        minutes = operator.index(value)
+    except TypeError as exc:
+        raise ValueError("drying minutes must be an integer") from exc
+    if not WET_CANVAS_DRYING_UI_MINUTES_MIN <= minutes <= WET_CANVAS_DRYING_UI_MINUTES_MAX:
+        raise ValueError("drying minutes are outside the 1..1440 edit domain")
+    return float(minutes) * SECONDS_PER_MINUTE
 
 
 def wet_canvas_remaining(value: Mapping[str, Any] | None) -> float:
@@ -233,6 +278,7 @@ def render_wet_layer_qimage(
         rendered_count += 1
 
     diffusion_applied = False
+    diffusion_error = ""
     if rendered_count and remaining > 0.0 and state["diffusion"] > 0.0:
         try:
             import cv2
@@ -269,8 +315,9 @@ def render_wet_layer_qimage(
                 where=canvas_alpha[..., None] > 1e-6,
             )
             diffusion_applied = True
-        except Exception:
+        except Exception as exc:
             diffusion_applied = False
+            diffusion_error = f"{type(exc).__name__}: {exc}"
 
     output = np.zeros((target_h, target_w, 4), dtype=np.float32)
     output[..., :3] = np.clip(canvas_rgb, 0.0, 1.0) * 255.0
@@ -284,6 +331,7 @@ def render_wet_layer_qimage(
         "diffusion": float(state["diffusion"]),
         "pickup": float(state["pickup"]),
         "diffusion_applied": bool(diffusion_applied),
+        "diffusion_error": diffusion_error,
         "model": "deterministic_rgb_shallow_wet_layer_v1",
         "physical_pigment_claim": False,
     }
@@ -291,8 +339,14 @@ def render_wet_layer_qimage(
 
 __all__ = [
     "WET_CANVAS_DEFAULTS",
+    "WET_CANVAS_DRYING_MAX_SECONDS",
+    "WET_CANVAS_DRYING_MIN_SECONDS",
+    "WET_CANVAS_DRYING_UI_MINUTES_MAX",
+    "WET_CANVAS_DRYING_UI_MINUTES_MIN",
     "WET_CANVAS_SCHEMA",
     "advance_wet_canvas",
+    "drying_seconds_to_ui_minutes",
+    "drying_ui_minutes_to_seconds",
     "dry_wet_canvas",
     "normalize_wet_canvas_settings",
     "render_wet_layer_qimage",

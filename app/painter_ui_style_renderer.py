@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import html
 import math
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
@@ -12,11 +14,13 @@ from PySide6.QtGui import (
     QFont,
     QGradient,
     QImage,
+    QImageReader,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QRadialGradient,
+    QTransform,
     QTextCharFormat,
     QTextLayout,
     QTextOption,
@@ -67,38 +71,167 @@ def _gradient_stops(value: object) -> list[tuple[float, QColor]]:
     return sorted(stops, key=lambda item: item[0])
 
 
+def _pattern_image(value: object) -> QImage:
+    row = value if isinstance(value, Mapping) else {}
+    size = max(4, min(128, int(round(float(row.get("scale") or 12.0)))))
+    image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    background = ui_color(row.get("background"), "#FFFFFFFF")
+    foreground = ui_color(row.get("foreground"), "#C8D2E0FF")
+    image.fill(background)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    kind = str(row.get("kind") or "dots").casefold()
+    if kind == "checker":
+        half = max(1, size // 2)
+        painter.fillRect(0, 0, half, half, foreground)
+        painter.fillRect(half, half, size - half, size - half, foreground)
+    elif kind == "stripes":
+        painter.setPen(QPen(foreground, max(1.0, size * 0.24)))
+        painter.drawLine(-size // 2, size, size // 2, 0)
+        painter.drawLine(size // 2, size, size + size // 2, 0)
+    elif kind == "grid":
+        painter.setPen(QPen(foreground, max(1.0, size * 0.08)))
+        painter.drawLine(0, 0, size, 0)
+        painter.drawLine(0, 0, 0, size)
+    else:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(foreground)
+        radius = max(1.0, size * 0.15)
+        painter.drawEllipse(QPointF(size * 0.5, size * 0.5), radius, radius)
+    painter.end()
+    return image
+
+
+@lru_cache(maxsize=48)
+def _load_media_frame(path_text: str, frame_time_ms: int = 0) -> QImage:
+    path = Path(str(path_text or "")).expanduser()
+    if not path.is_file():
+        return QImage()
+    suffix = path.suffix.casefold()
+    if suffix in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
+        try:
+            import cv2
+
+            capture = cv2.VideoCapture(str(path))
+            if frame_time_ms > 0:
+                capture.set(cv2.CAP_PROP_POS_MSEC, float(frame_time_ms))
+            ok, frame = capture.read()
+            capture.release()
+            if ok and frame is not None:
+                rgba = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+                return QImage(
+                    rgba.data,
+                    int(rgba.shape[1]),
+                    int(rgba.shape[0]),
+                    int(rgba.strides[0]),
+                    QImage.Format.Format_RGBA8888,
+                ).copy()
+        except Exception:
+            return QImage()
+    reader = QImageReader(str(path))
+    reader.setAutoTransform(True)
+    return reader.read()
+
+
+def _media_brush(paint: Mapping[str, Any], rect: QRectF) -> QBrush:
+    source = str(paint.get("source_path") or paint.get("poster_path") or "")
+    image = _load_media_frame(source, int(float(paint.get("frame_time_ms") or 0.0)))
+    if image.isNull() or rect.width() <= 0 or rect.height() <= 0:
+        return QBrush(_pattern_image({"kind": "checker", "scale": 12}))
+    mode = str(paint.get("fit") or "fill").casefold()
+    if mode == "tile":
+        brush = QBrush(image)
+        brush.setTransform(QTransform.fromTranslate(rect.left(), rect.top()))
+        return brush
+    target_w = max(1, min(4096, int(round(rect.width()))))
+    target_h = max(1, min(4096, int(round(rect.height()))))
+    target = QImage(target_w, target_h, QImage.Format.Format_ARGB32_Premultiplied)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    if mode == "stretch":
+        destination = QRectF(0, 0, target_w, target_h)
+    else:
+        keep = Qt.AspectRatioMode.KeepAspectRatio
+        scaled = image.size().scaled(target_w, target_h, keep)
+        if mode == "fill" and (scaled.width() < target_w or scaled.height() < target_h):
+            scaled = image.size().scaled(target_w, target_h, Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+        destination = QRectF(
+            (target_w - scaled.width()) * 0.5,
+            (target_h - scaled.height()) * 0.5,
+            scaled.width(),
+            scaled.height(),
+        )
+    painter.drawImage(destination, image)
+    painter.end()
+    brush = QBrush(target)
+    brush.setTransform(QTransform.fromTranslate(rect.left(), rect.top()))
+    return brush
+
+
+def _paint_brush(paint: Mapping[str, Any], rect: QRectF | None) -> QBrush:
+    paint_type = str(paint.get("type") or "solid").casefold()
+    opacity = max(0.0, min(1.0, float(paint.get("opacity", 1.0) or 0.0)))
+    if paint_type == "pattern":
+        brush = QBrush(_pattern_image(paint.get("pattern")))
+        if rect is not None:
+            brush.setTransform(QTransform.fromTranslate(rect.left(), rect.top()))
+        return brush
+    if paint_type in {"image", "video"} and rect is not None:
+        return _media_brush(paint, rect)
+    if paint_type in {"linear", "radial"} and isinstance(paint.get("gradient"), Mapping):
+        gradient_style = paint["gradient"]
+        stops = _gradient_stops(gradient_style.get("stops"))
+        start = _gradient_point(gradient_style.get("start"), (0.0, 0.5))
+        end = _gradient_point(gradient_style.get("end"), (1.0, 0.5))
+        if paint_type == "radial":
+            radius = math.hypot(end.x() - start.x(), end.y() - start.y())
+            gradient: QGradient = QRadialGradient(start, max(0.0001, radius))
+        else:
+            gradient = QLinearGradient(start, end)
+        gradient.setCoordinateMode(QGradient.CoordinateMode.ObjectBoundingMode)
+        for position, color in stops:
+            color.setAlphaF(color.alphaF() * opacity)
+            gradient.setColorAt(position, color)
+        return QBrush(gradient)
+    color = ui_color(paint.get("color"), "#00000000")
+    color.setAlphaF(color.alphaF() * opacity)
+    return QBrush(color)
+
+
 def ui_fill_brush(
     style: Mapping[str, Any],
     rect: QRectF | None = None,
 ) -> QBrush:
     paints = style.get("fills")
     if isinstance(paints, list):
-        visible = next(
-            (
-                row
-                for row in paints
-                if isinstance(row, Mapping) and row.get("visible", True)
-            ),
-            None,
-        )
-        if visible is not None:
-            paint_type = str(visible.get("type") or "solid").casefold()
-            opacity = max(
-                0.0,
-                min(1.0, float(visible.get("opacity", 1.0) or 0.0)),
-            )
-            if paint_type in {"linear", "radial"} and isinstance(
-                visible.get("gradient"),
-                Mapping,
-            ):
-                style = {
-                    **dict(style),
-                    "fill_gradient": visible["gradient"],
-                }
-            else:
-                color = ui_color(visible.get("color"), "#00000000")
-                color.setAlphaF(color.alphaF() * opacity)
-                return QBrush(color)
+        visible = [
+            row for row in paints
+            if isinstance(row, Mapping) and row.get("visible", True)
+        ]
+        if visible:
+            if len(visible) == 1 or rect is None:
+                return _paint_brush(visible[0], rect)
+            width = max(1, min(4096, int(round(rect.width()))))
+            height = max(1, min(4096, int(round(rect.height()))))
+            surface = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+            surface.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(surface)
+            local_rect = QRectF(0, 0, width, height)
+            modes = {
+                "multiply": QPainter.CompositionMode.CompositionMode_Multiply,
+                "screen": QPainter.CompositionMode.CompositionMode_Screen,
+                "overlay": QPainter.CompositionMode.CompositionMode_Overlay,
+                "darken": QPainter.CompositionMode.CompositionMode_Darken,
+                "lighten": QPainter.CompositionMode.CompositionMode_Lighten,
+            }
+            for paint in reversed(visible):
+                painter.setCompositionMode(modes.get(str(paint.get("blend_mode") or "normal"), QPainter.CompositionMode.CompositionMode_SourceOver))
+                painter.fillRect(local_rect, _paint_brush(paint, local_rect))
+            painter.end()
+            brush = QBrush(surface)
+            brush.setTransform(QTransform.fromTranslate(rect.left(), rect.top()))
+            return brush
     gradient_style = style.get("fill_gradient")
     if not isinstance(gradient_style, Mapping):
         return QBrush(ui_color(style.get("fill"), "#506884"))
@@ -298,6 +431,7 @@ def draw_ui_vector_paths(
 
 
 def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> QFont:
+    from app.font_fallback import registered_design_font_family
     from app.painter_ui_typography import apply_ui_font_axes
 
     font = QFont(base_font)
@@ -307,7 +441,7 @@ def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> Q
     font.setWeight(QFont.Weight(weight))
     family = str(style.get("font_family") or "").strip()
     if family:
-        font.setFamily(family)
+        font.setFamily(registered_design_font_family(family))
     apply_ui_font_axes(font, style.get("font_axes"))
     return font
 
@@ -315,6 +449,26 @@ def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> Q
 def ui_text_alignment(style: Mapping[str, Any]) -> str:
     alignment = str(style.get("text_align") or "left").strip().casefold()
     return alignment if alignment in {"left", "center", "right"} else "left"
+
+
+def ui_text_vertical_alignment(style: Mapping[str, Any]) -> str:
+    alignment = str(
+        style.get("text_vertical_align")
+        or style.get("vertical_align")
+        or "center"
+    ).strip().casefold()
+    return alignment if alignment in {"top", "center", "bottom"} else "center"
+
+
+def _ui_line_height(style: Mapping[str, Any]) -> tuple[float, str]:
+    try:
+        value = float(style.get("line_height") or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    unit = str(style.get("line_height_unit") or "").strip().casefold()
+    if unit in {"px", "pixel", "pixels"} or value > 4.0:
+        return max(0.0, value), "px"
+    return max(0.5, min(4.0, value or 1.2)), "ratio"
 
 
 def _shape_path(kind: str, rect: QRectF, radius: float) -> QPainterPath:
@@ -556,6 +710,9 @@ def _layout_text(
     rect: QRectF,
     alignment: str,
     line_height: float,
+    line_height_unit: str,
+    wrap_mode: QTextOption.WrapMode,
+    vertical_alignment: str,
     text_ranges: object = None,
 ) -> tuple[QTextLayout, list[Any], float]:
     normalized_text = (
@@ -596,7 +753,7 @@ def _layout_text(
     if formats:
         layout.setFormats(formats)
     option = QTextOption()
-    option.setWrapMode(QTextOption.WrapMode.WordWrap)
+    option.setWrapMode(wrap_mode)
     layout.setTextOption(option)
     layout.beginLayout()
     lines = []
@@ -607,15 +764,25 @@ def _layout_text(
         line.setLineWidth(max(1.0, rect.width()))
         lines.append(line)
 
-    spacing = max(0.5, min(4.0, float(line_height)))
     heights = [float(line.height()) for line in lines]
+    if str(line_height_unit) == "px":
+        line_advances = [max(1.0, float(line_height))] * max(
+            0, len(heights) - 1
+        )
+    else:
+        spacing = max(0.5, min(4.0, float(line_height)))
+        line_advances = [height * spacing for height in heights[:-1]]
     total_height = (
-        heights[-1] + sum(height * spacing for height in heights[:-1])
-        if heights
-        else 0.0
+        heights[-1] + sum(line_advances) if heights else 0.0
     )
-    y = rect.top() + max(0.0, (rect.height() - total_height) * 0.5)
-    for line, height in zip(lines, heights):
+    if vertical_alignment == "top":
+        y = rect.top()
+    elif vertical_alignment == "bottom":
+        y = rect.bottom() - total_height
+    else:
+        y = rect.top() + (rect.height() - total_height) * 0.5
+    y = max(rect.top(), y)
+    for index, (line, _height) in enumerate(zip(lines, heights)):
         if alignment == "right":
             x = rect.right() - float(line.naturalTextWidth())
         elif alignment == "center":
@@ -623,7 +790,8 @@ def _layout_text(
         else:
             x = rect.left()
         line.setPosition(QPointF(x, y))
-        y += height * spacing
+        if index < len(line_advances):
+            y += line_advances[index]
     layout.endLayout()
     return layout, lines, total_height
 
@@ -637,23 +805,39 @@ def draw_ui_text_block(
     *,
     scale: float = 1.0,
     text_ranges: object = None,
+    text_resize: str = "",
 ) -> dict[str, Any]:
     font = ui_font(base_font, style, scale)
     alignment = ui_text_alignment(style)
-    line_height = max(0.5, min(4.0, float(style.get("line_height") or 1.2)))
-    padding = max(0.0, float(style.get("text_padding") or 6.0) * scale)
+    vertical_alignment = ui_text_vertical_alignment(style)
+    line_height, line_height_unit = _ui_line_height(style)
+    resize_mode = str(text_resize or "").strip().casefold().replace("-", "_")
+    if "text_padding" in style and style.get("text_padding") is not None:
+        padding_value = float(style.get("text_padding") or 0.0)
+    else:
+        padding_value = 0.0 if resize_mode == "auto_width" else 6.0
+    padding = max(0.0, padding_value * scale)
+    wrap_mode = (
+        QTextOption.WrapMode.NoWrap
+        if resize_mode == "auto_width"
+        else QTextOption.WrapMode.WordWrap
+    )
     text_rect = rect.adjusted(padding, 0.0, -padding, 0.0)
     layout, lines, total_height = _layout_text(
         str(text),
         font,
         text_rect,
         alignment,
-        line_height,
+        line_height * scale if line_height_unit == "px" else line_height,
+        line_height_unit,
+        wrap_mode,
+        vertical_alignment,
         text_ranges,
     )
 
     painter.save()
-    painter.setClipRect(rect)
+    if resize_mode != "auto_width":
+        painter.setClipRect(rect)
     shadows = _style_shadow_effects(style, "drop_shadow")
     if not shadows:
         shadow = style.get("text_shadow")
@@ -699,7 +883,15 @@ def draw_ui_text_block(
         "font_weight": int(font.weight()),
         "line_count": len(lines),
         "line_height": line_height,
+        "line_height_unit": line_height_unit,
         "layout_height": total_height,
+        "effective_padding": padding_value,
+        "wrap_mode": (
+            "no_wrap"
+            if wrap_mode == QTextOption.WrapMode.NoWrap
+            else "word_wrap"
+        ),
+        "vertical_alignment": vertical_alignment,
     }
 
 
@@ -711,4 +903,5 @@ __all__ = [
     "ui_color",
     "ui_font",
     "ui_text_alignment",
+    "ui_text_vertical_alignment",
 ]

@@ -19,6 +19,15 @@ from typing import Any, Iterable, Sequence
 
 Vec3 = tuple[float, float, float]
 
+BLOCKOUT_CAMERA_NEAR_PLANE = 0.06
+BLOCKOUT_PROJECTION_MODEL_CONTRACT = {
+    "schema": "tigerstudio.painter.blockout_projection_model.v1",
+    "model": "tiger_authored_preview_camera_v1",
+    "near_plane": BLOCKOUT_CAMERA_NEAR_PLANE,
+    "physical_camera_claim": False,
+    "external_3d_application_parity_claim": False,
+}
+
 SUPPORTED_PRIMITIVES = {
     "arch",
     "box",
@@ -588,6 +597,7 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
     ]
     return {
         "schema": "tigerstudio.painter.3d_blockout.projection.v1",
+        "model_contract": dict(BLOCKOUT_PROJECTION_MODEL_CONTRACT),
         "viewport": {"width": w, "height": h},
         "scene": normalized.to_dict(),
         "floor_tiles": floor_tiles,
@@ -750,7 +760,9 @@ def _project_world_checker_floor(
                 (x0, y0 + size, 0.0),
             )
             camera_points = [_world_to_camera_point(point, scene.camera) for point in corners]
-            clipped = _clip_camera_polygon_near(camera_points, near=0.06)
+            clipped = _clip_camera_polygon_near(
+                camera_points, near=BLOCKOUT_CAMERA_NEAR_PLANE
+            )
             if len(clipped) < 3:
                 continue
             projected = [_project_camera_point(point, scene.camera, width, height) for point in clipped]
@@ -941,7 +953,7 @@ def _rotate_xyz(point: Vec3, rotation: Vec3) -> Vec3:
 
 def _project_point(point: Vec3, camera: BlockoutCamera, width: int, height: int) -> dict[str, float] | None:
     camera_point = _world_to_camera_point(point, camera)
-    if camera_point[1] <= 0.04:
+    if camera_point[1] <= BLOCKOUT_CAMERA_NEAR_PLANE:
         return None
     return _project_camera_point(camera_point, camera, width, height)
 
@@ -1080,12 +1092,13 @@ def _vec_to_list(value: Vec3) -> list[float]:
 
 def _primitive_index(primitive_id: str) -> int:
     text = str(primitive_id or "")
-    if ":" not in text:
-        return 0
+    if not text.startswith("blockout:"):
+        return -1
     try:
-        return int(text.rsplit(":", 1)[1])
-    except Exception:
-        return 0
+        value = int(text.removeprefix("blockout:"))
+    except ValueError:
+        return -1
+    return value if value > 0 else -1
 
 
 def _normalize_hex(value: Any) -> str:

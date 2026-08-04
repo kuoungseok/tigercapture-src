@@ -81,6 +81,10 @@ class PainterUIInspectorDockWindow(QDialog):
         object_name: str = "PainterUIInspectorDockWindow",
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
+        self._owner = parent if isinstance(parent, QWidget) else None
+        self._owner_closing = False
+        if self._owner is not None:
+            self._owner.installEventFilter(self)
         self.setObjectName(object_name)
         self.setWindowTitle(str(title))
         self.setMinimumSize(340, 420)
@@ -100,6 +104,15 @@ class PainterUIInspectorDockWindow(QDialog):
         )
         self._content_layout.addWidget(self.scroll_area, 1)
         self._widget: QWidget | None = None
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._owner and event.type() == QEvent.Type.Close:
+            # A normal user close means "dock this panel".  An owner close is
+            # application teardown, so the floating tool must not veto it or
+            # remain as the last top-level window keeping Qt alive.
+            self._owner_closing = True
+            self.close()
+        return super().eventFilter(watched, event)
 
     def attach(self, widget: QWidget) -> None:
         if self._widget is widget:
@@ -135,6 +148,10 @@ class PainterUIInspectorDockWindow(QDialog):
             self._widget.setMaximumWidth(width)
 
     def closeEvent(self, event) -> None:
+        if self._owner_closing:
+            event.accept()
+            self.deleteLater()
+            return
         event.ignore()
         self.dock_requested.emit()
 

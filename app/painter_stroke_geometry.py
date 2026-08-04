@@ -2,11 +2,23 @@
 from __future__ import annotations
 
 import math
+import operator
 from typing import Any, Mapping, Sequence
 
 
 _CHANNELS = ("pressure", "tilt", "rotation", "load")
 _SIGNED_CHANNELS = ("tilt_x", "tilt_y", "tangential_pressure")
+
+ACTION_STROKE_SAMPLING_MODEL_CONTRACT = {
+    "schema": "tigerstudio.painter.action_stroke_sampling_model.v1",
+    "model": "tiger_authored_catmull_rom_action_path_v1",
+    "defaults": {"samples_per_segment": 8, "max_points": 512},
+    "caller_requested_point_budget_preserved": True,
+    "source_control_points_preserved": True,
+    "interior_samples_distributed_across_complete_path": True,
+    "tablet_input_model_claim": False,
+    "external_brush_path_parity_claim": False,
+}
 
 
 def smooth_action_points(
@@ -23,21 +35,32 @@ def smooth_action_points(
     corners. This helper expands only those action-authored controls.
     """
 
+    try:
+        segment_samples = operator.index(samples_per_segment)
+        requested_budget = operator.index(max_points)
+    except TypeError as exc:
+        raise ValueError("samples_per_segment and max_points must be integers") from exc
     rows = [_normalized_point(point) for point in points]
     if len(rows) < 3:
         return rows
-    segment_samples = max(2, min(24, int(samples_per_segment)))
-    budget = max(len(rows), min(2048, int(max_points)))
-    out: list[dict[str, float]] = []
-    for index in range(len(rows) - 1):
+    segment_samples = max(2, min(24, segment_samples))
+    budget = max(len(rows), requested_budget)
+    segment_count = len(rows) - 1
+    interior_budget = min(
+        budget - len(rows),
+        segment_count * (segment_samples - 1),
+    )
+    out: list[dict[str, float]] = [dict(rows[0])]
+    for index in range(segment_count):
         p0 = rows[max(0, index - 1)]
         p1 = rows[index]
         p2 = rows[index + 1]
         p3 = rows[min(len(rows) - 1, index + 2)]
-        for sample in range(segment_samples):
-            if len(out) >= budget - 1:
-                break
-            t = sample / float(segment_samples)
+        previous_quota = (index * interior_budget) // segment_count
+        current_quota = ((index + 1) * interior_budget) // segment_count
+        segment_interior_count = current_quota - previous_quota
+        for sample in range(1, segment_interior_count + 1):
+            t = sample / float(segment_interior_count + 1)
             row = {
                 "x": _clamp01(_catmull(p0["x"], p1["x"], p2["x"], p3["x"], t)),
                 "y": _clamp01(_catmull(p0["y"], p1["y"], p2["y"], p3["y"], t)),
@@ -64,27 +87,30 @@ def smooth_action_points(
                 )
             if not out or _distance(out[-1], row) > 1e-7:
                 out.append(row)
-        if len(out) >= budget - 1:
-            break
-    if not out or _distance(out[-1], rows[-1]) > 1e-7:
-        out.append(dict(rows[-1]))
+        out.append(dict(p2))
     return out[:budget]
 
 
 def _normalized_point(point: Mapping[str, Any]) -> dict[str, float]:
+    def finite(channel: str, default: float) -> float:
+        value = float(point.get(channel, default))
+        if not math.isfinite(value):
+            raise ValueError(f"{channel} must be finite")
+        return value
+
     row = {
-        "x": _clamp01(float(point.get("x", 0.0))),
-        "y": _clamp01(float(point.get("y", 0.0))),
+        "x": _clamp01(finite("x", 0.0)),
+        "y": _clamp01(finite("y", 0.0)),
     }
     for channel, default in (
-        ("pressure", 0.82),
+        ("pressure", 1.0),
         ("tilt", 0.5),
         ("rotation", 0.5),
         ("load", 1.0),
     ):
-        row[channel] = _clamp01(float(point.get(channel, default)))
+        row[channel] = _clamp01(finite(channel, default))
     for channel in _SIGNED_CHANNELS:
-        row[channel] = _clamp_signed(float(point.get(channel, 0.0)))
+        row[channel] = _clamp_signed(finite(channel, 0.0))
     return row
 
 

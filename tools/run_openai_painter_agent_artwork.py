@@ -420,8 +420,10 @@ Build the work in deliberate passes:
 
 When an approved reference path exists, prefer the deterministic paint.study.* workflow:
 analyze with semantic focus regions, segment, underpaint, forms/detail/accent, contours,
-compare, refine measured error, and stop only when quality_report returns ready. Do not
-replace this workflow with hand-authored coordinate guesses.
+compare, and refine observed pixel error within the configured tool-call/pass budget.
+Treat quality_report as diagnostic evidence only: it does not define a release threshold
+or return a measured-quality ready decision. Do not replace this workflow with
+hand-authored coordinate guesses.
 
 Inspect tool results for layer ids before targeting new layers. Finish only after a
 complete first-pass painting exists. This is pass 1.

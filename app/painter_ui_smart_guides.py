@@ -251,6 +251,17 @@ def plan_ui_move_guides(
                 priority.get(str(row["kind"]), 9),
             ),
         )
+        target_id = str(chosen.get("target_object_id") or "")
+        if target_id in resolved:
+            target_rect = _rect(resolved[target_id])
+            if axis == "horizontal":
+                chosen["extent_start"] = min(moving_rect["top"], target_rect["top"])
+                chosen["extent_end"] = max(moving_rect["bottom"], target_rect["bottom"])
+                chosen["markers"] = [moving_rect["center_y"], target_rect["center_y"]]
+            else:
+                chosen["extent_start"] = min(moving_rect["left"], target_rect["left"])
+                chosen["extent_end"] = max(moving_rect["right"], target_rect["right"])
+                chosen["markers"] = [moving_rect["center_x"], target_rect["center_x"]]
         guides.append(chosen)
         if axis == "horizontal":
             next_x += float(chosen["delta"])
@@ -277,6 +288,7 @@ def plan_ui_resize_guides(
     excluded_object_ids: Sequence[str] = (),
     tolerance: float = 6.0,
     geometry: Mapping[str, Mapping[str, float]] | None = None,
+    active_handle: str = "se",
 ) -> dict[str, Any]:
     """Snap resize dimensions to visible peers on the same artboard."""
     by_id = {str(row["id"]): row for row in document.get("objects", [])}
@@ -362,6 +374,108 @@ def plan_ui_resize_guides(
                 "target_object_id": str(row["id"]),
             }
         )
+    # Figma Snap to objects also lets the actively resized edge land on a
+    # peer's left/center/right or top/center/bottom anchor.
+    handle = str(active_handle or "se").casefold()
+    moving_rect = _rect(
+        {
+            "x": float(report["x"]), "y": float(report["y"]),
+            "width": float(report["width"]), "height": float(report["height"]),
+        }
+    )
+    axis_candidates: dict[str, list[dict[str, Any]]] = {
+        "horizontal": [], "vertical": [],
+    }
+    for other in others:
+        other_rect = _rect(resolved[str(other["id"])])
+        if "w" in handle or "e" in handle:
+            anchor = moving_rect["left"] if "w" in handle else moving_rect["right"]
+            for target_kind, target in (
+                ("edge", other_rect["left"]),
+                ("center", other_rect["center_x"]),
+                ("edge", other_rect["right"]),
+            ):
+                delta = target - anchor
+                if abs(delta) <= float(tolerance):
+                    axis_candidates["horizontal"].append(
+                        {
+                            "axis": "horizontal", "kind": target_kind,
+                            "delta": delta, "position": target,
+                            "target_object_id": str(other["id"]),
+                            "extent_start": min(moving_rect["top"], other_rect["top"]),
+                            "extent_end": max(moving_rect["bottom"], other_rect["bottom"]),
+                            "markers": [moving_rect["center_y"], other_rect["center_y"]],
+                        }
+                    )
+        if "n" in handle or "s" in handle:
+            anchor = moving_rect["top"] if "n" in handle else moving_rect["bottom"]
+            for target_kind, target in (
+                ("edge", other_rect["top"]),
+                ("center", other_rect["center_y"]),
+                ("edge", other_rect["bottom"]),
+            ):
+                delta = target - anchor
+                if abs(delta) <= float(tolerance):
+                    axis_candidates["vertical"].append(
+                        {
+                            "axis": "vertical", "kind": target_kind,
+                            "delta": delta, "position": target,
+                            "target_object_id": str(other["id"]),
+                            "extent_start": min(moving_rect["left"], other_rect["left"]),
+                            "extent_end": max(moving_rect["right"], other_rect["right"]),
+                            "markers": [moving_rect["center_x"], other_rect["center_x"]],
+                        }
+                    )
+    for axis in ("horizontal", "vertical"):
+        if not axis_candidates[axis]:
+            continue
+        chosen = min(
+            axis_candidates[axis],
+            key=lambda item: (abs(float(item["delta"])), 0 if item["kind"] == "edge" else 1),
+        )
+        same_axis_guide = next(
+            (
+                guide for guide in report["guides"]
+                if str(guide.get("axis")) == axis
+            ),
+            None,
+        )
+        if (
+            same_axis_guide is not None
+            and abs(
+                float(same_axis_guide.get("position") or 0.0)
+                - float(chosen["position"])
+            ) < 0.001
+        ):
+            same_axis_guide.update(
+                {
+                    "target_object_id": chosen["target_object_id"],
+                    "extent_start": chosen["extent_start"],
+                    "extent_end": chosen["extent_end"],
+                    "markers": chosen["markers"],
+                }
+            )
+            continue
+        # Positional edge snaps are more specific than equal-size hints on the
+        # same axis, so replace the latter guide while preserving its sizing.
+        report["guides"] = [
+            guide for guide in report["guides"]
+            if str(guide.get("axis")) != axis
+        ]
+        report["guides"].append(chosen)
+        delta = float(chosen["delta"])
+        if axis == "horizontal":
+            if "w" in handle:
+                report["x"] = float(report["x"]) + delta
+                report["width"] = max(1.0, float(report["width"]) - delta)
+            else:
+                report["width"] = max(1.0, float(report["width"]) + delta)
+        else:
+            if "n" in handle:
+                report["y"] = float(report["y"]) + delta
+                report["height"] = max(1.0, float(report["height"]) - delta)
+            else:
+                report["height"] = max(1.0, float(report["height"]) + delta)
     return report
 
 

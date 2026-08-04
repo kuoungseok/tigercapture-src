@@ -22,9 +22,10 @@ class _FakeMediaPool:
 
 
 class _RoutingOwner:
-    def __init__(self, *, vrm=(), mmd=(), ar=(), perf=(), media=()) -> None:
+    def __init__(self, *, vrm=(), mmd=(), motion=(), ar=(), perf=(), media=()) -> None:
         self.vrm = tuple(Path(p) for p in vrm)
         self.mmd = tuple(Path(p) for p in mmd)
+        self.motion = tuple(Path(p) for p in motion)
         self.ar = tuple(Path(p) for p in ar)
         self.perf = tuple(Path(p) for p in perf)
         self.media = tuple(Path(p) for p in media)
@@ -34,6 +35,9 @@ class _RoutingOwner:
 
     def _mmd_paths_from_mime(self, _mime):
         return list(self.mmd)
+
+    def _motion_project_paths_from_mime(self, _mime):
+        return list(self.motion)
 
     def _ar_pbr_paths_from_mime(self, _mime):
         return list(self.ar)
@@ -98,6 +102,23 @@ def test_tracks_host_route_preserves_mmd_perf_ar_media_order(tmp_path):
 
     owner.perf = ()
     assert route_mime_drop(owner, _FakeMime(), target=TARGET_TRACKS_HOST).route == ROUTE_AR_PBR
+
+
+def test_tracks_host_routes_motion_project_as_actor(tmp_path):
+    from app.video_editor_media_import_controller import (
+        ROUTE_MOTION,
+        route_tracks_host_drop,
+    )
+
+    owner = _RoutingOwner(motion=(tmp_path / "title.tgmotion",))
+    owner._px_per_sec = 100.0
+    owner._timeline_content_margin = lambda: 180
+
+    decision = route_tracks_host_drop(owner, _FakeMime(), drop_x=680.0)
+
+    assert decision.route == ROUTE_MOTION
+    assert decision.path == tmp_path / "title.tgmotion"
+    assert decision.start_ms == 5000
 
 
 def test_video_row_route_prefers_ar_then_performance_then_media(tmp_path):

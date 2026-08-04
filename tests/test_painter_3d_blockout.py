@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -21,6 +23,8 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
 
     projection = project_blockout_scene(scene, 640, 360)
     assert projection["schema"] == "tigerstudio.painter.3d_blockout.projection.v1"
+    assert projection["model_contract"]["physical_camera_claim"] is False
+    assert projection["model_contract"]["external_3d_application_parity_claim"] is False
     assert projection["scene"]["primitive_count"] == 3
     assert projection["face_count"] > 0
     assert projection["edge_count"] > 0
@@ -67,7 +71,302 @@ def test_painter_opengl_status_is_remote_safe() -> None:
     assert status["default_policy"] == "auto_opengl_with_qpainter_fallback"
     assert status["remote_safe"] is True
     assert status["fallback_on_context_failure"] is True
+    assert status["available"] is False
+    assert status["active_backend"] == status["fallback_renderer"]
+    assert "dependency_ready" in status
+    assert "candidate_backend" in status
     assert status["surfaces"]["blockout_preview"] == "opengl_offscreen_if_available"
+
+
+def test_painter_opengl_import_failure_is_typed_and_selects_cpu(monkeypatch) -> None:
+    import builtins
+    from app.painter_opengl import (
+        PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+        painter_canvas_opengl_status,
+        painter_opengl_status,
+    )
+
+    original_import = builtins.__import__
+
+    def fail_opengl(name, *args, **kwargs):
+        if name == "OpenGL" or name.startswith("OpenGL."):
+            raise ModuleNotFoundError("injected PyOpenGL absence")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_opengl)
+    blockout = painter_opengl_status()
+    canvas = painter_canvas_opengl_status()
+    assert blockout["available"] is False
+    assert blockout["active_backend"] == blockout["fallback_renderer"]
+    assert blockout["pyopengl_error"] == (
+        "ModuleNotFoundError: injected PyOpenGL absence"
+    )
+    assert canvas["available"] is False
+    assert canvas["active_backend"] == PAINTER_CANVAS_FALLBACK_RENDERER_ID
+    assert canvas["pyopengl_error"] == (
+        "ModuleNotFoundError: injected PyOpenGL absence"
+    )
+
+
+def test_canvas_status_survives_capability_probe_failure(monkeypatch) -> None:
+    from app import painter_opengl
+
+    def fail_capabilities():
+        raise RuntimeError("injected capability implementation failure")
+
+    monkeypatch.setattr(
+        painter_opengl, "painter_canvas_gpu_capabilities", fail_capabilities
+    )
+    status = painter_opengl.painter_canvas_opengl_status()
+    assert status["available"] is False
+    assert status["active_backend"] == status["fallback_renderer"]
+    assert status["capabilities"]["persistent_stroke_atlas"]["enabled"] is False
+    assert status["supported_first_pass"] == {}
+    assert status["capabilities_error"] == (
+        "RuntimeError: injected capability implementation failure"
+    )
+
+
+def test_gl_cleanup_failure_is_typed_and_preserves_primary_error() -> None:
+    from app import painter_opengl
+
+    painter_opengl._GL_CLEANUP_STATUS.update(
+        {
+            "failure_count": 0,
+            "last_operation": "",
+            "last_error": "",
+            "primary_error_preserved": False,
+        }
+    )
+
+    def fail_cleanup() -> None:
+        raise RuntimeError("injected FBO release failure")
+
+    primary = ValueError("injected render failure")
+    try:
+        raise primary
+    except ValueError:
+        assert painter_opengl._best_effort_gl_cleanup(
+            "canvas_framebuffer_release", fail_cleanup
+        ) is False
+
+    status = painter_opengl.painter_opengl_status()["cleanup"]
+    assert status == {
+        "failure_count": 1,
+        "last_operation": "canvas_framebuffer_release",
+        "last_error": "RuntimeError: injected FBO release failure",
+        "primary_error_preserved": True,
+    }
+    assert any(
+        "canvas_framebuffer_release" in note
+        and "RuntimeError: injected FBO release failure" in note
+        for note in getattr(primary, "__notes__", [])
+    )
+
+
+def test_retained_compositors_release_resources_when_rendering_fails() -> None:
+    from app import painter_opengl
+
+    class FakeFbo:
+        def __init__(self, *_args) -> None:
+            self.releases = 0
+
+        def isValid(self) -> bool:
+            return True
+
+        def bind(self) -> bool:
+            return True
+
+        def release(self) -> None:
+            self.releases += 1
+
+    class FakeUploader:
+        GL = SimpleNamespace(
+            GL_DEPTH_TEST=1,
+            GL_BLEND=2,
+            GL_SRC_ALPHA=3,
+            GL_ONE_MINUS_SRC_ALPHA=4,
+            GL_COLOR_BUFFER_BIT=5,
+            GL_PROJECTION=6,
+            GL_MODELVIEW=7,
+            GL_TEXTURE_2D=8,
+            GL_QUADS=9,
+        )
+
+        def __init__(self) -> None:
+            self.fbos: list[FakeFbo] = []
+            self.deleted: list[int] = []
+            self.next_handle = 40
+
+        def FBO(self, *_args):
+            fbo = FakeFbo()
+            self.fbos.append(fbo)
+            return fbo
+
+        def _current(self) -> None:
+            return None
+
+        def _clear_qt_boundary_errors(self) -> None:
+            return None
+
+        def _gl(self, *_args) -> None:
+            return None
+
+        def __call__(self, *_args) -> int:
+            self.next_handle += 1
+            return self.next_handle
+
+        def delete(self, handle: int) -> None:
+            self.deleted.append(handle)
+
+        def _read_rgba(self, *_args):
+            raise RuntimeError("injected retained readback failure")
+
+    normal = FakeUploader()
+    with pytest.raises(RuntimeError, match="retained readback failure"):
+        painter_opengl.PainterRetainedGLTileUploader.composite_normal_layers(
+            normal, [(object(), 1.0), (object(), 0.5)], 32, 24
+        )
+    assert normal.deleted == [41, 42]
+    assert normal.fbos[0].releases == 1
+
+    tiles = FakeUploader()
+    tiles.display_composites = 0
+    tiles.display_texture_reads = 0
+    tiles.display_readback_bytes = 0
+    missing = SimpleNamespace(gpu_handle=0, image=SimpleNamespace())
+    with pytest.raises(
+        painter_opengl.PainterOpenGLUnavailable,
+        match="no GPU texture handle",
+    ):
+        painter_opengl.PainterRetainedGLTileUploader.composite_tile_records(
+            tiles, [(0, 0, missing)], 32, 24, 16
+        )
+    assert tiles.fbos[0].releases == 1
+
+
+def test_retained_uploader_close_continues_after_texture_destroy_failure() -> None:
+    from app import painter_opengl
+
+    calls: list[str] = []
+
+    class Texture:
+        def __init__(self, name: str, fail: bool = False) -> None:
+            self.name = name
+            self.fail = fail
+
+        def destroy(self) -> None:
+            calls.append(self.name)
+            if self.fail:
+                raise RuntimeError("injected retained texture destroy failure")
+
+    uploader = object.__new__(painter_opengl.PainterRetainedGLTileUploader)
+    uploader.handles = {11, 12}
+    uploader.texture_objects = {
+        11: Texture("first", fail=True),
+        12: Texture("second"),
+    }
+    uploader.validation_fbo = object()
+    uploader.fbo = 1
+    uploader.surface = SimpleNamespace(destroy=lambda: calls.append("surface"))
+    uploader.context = SimpleNamespace(
+        makeCurrent=lambda _surface: True,
+        doneCurrent=lambda: calls.append("context"),
+    )
+
+    uploader.close()
+
+    assert calls == ["first", "second", "context", "surface"]
+    assert uploader.handles == set()
+    assert uploader.texture_objects == {}
+    assert uploader.validation_fbo is None
+    assert uploader.fbo == 0
+    status = painter_opengl.painter_opengl_cleanup_status()
+    assert status["last_operation"] == "retained_texture_destroy"
+    assert status["last_error"] == (
+        "RuntimeError: injected retained texture destroy failure"
+    )
+
+
+def test_canvas_session_close_destroys_surface_after_done_current_failure() -> None:
+    from app import painter_opengl
+
+    calls: list[str] = []
+    session = painter_opengl._PainterCanvasOffscreenSession()
+
+    def fail_done_current() -> None:
+        calls.append("context")
+        raise RuntimeError("injected doneCurrent failure")
+
+    session.context = SimpleNamespace(doneCurrent=fail_done_current)
+    session.surface = SimpleNamespace(destroy=lambda: calls.append("surface"))
+    session.close()
+
+    assert calls == ["context", "surface"]
+    assert session.closed is True
+    assert session.context is None
+    assert session.surface is None
+    status = painter_opengl.painter_opengl_cleanup_status()
+    assert status["last_operation"] == "canvas_session_context_done_current"
+    assert status["last_error"] == "RuntimeError: injected doneCurrent failure"
+
+
+def test_context_create_failure_preserves_product_error_when_surface_destroy_fails(
+    monkeypatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app import painter_3d_blockout, painter_opengl
+
+    assert QApplication.instance() or QApplication([])
+    destroyed: list[str] = []
+
+    class Surface:
+        def setFormat(self, _format) -> None:
+            return None
+
+        def create(self) -> None:
+            return None
+
+        def isValid(self) -> bool:
+            return True
+
+        def destroy(self) -> None:
+            destroyed.append("surface")
+            raise RuntimeError("injected surface destroy failure")
+
+    class Context:
+        def setFormat(self, _format) -> None:
+            return None
+
+        def create(self) -> bool:
+            return False
+
+    monkeypatch.setattr(painter_opengl, "QOffscreenSurface", Surface)
+    monkeypatch.setattr(painter_opengl, "QOpenGLContext", Context)
+
+    with pytest.raises(
+        painter_opengl.PainterOpenGLUnavailable,
+        match="could not create a context",
+    ):
+        painter_opengl._make_offscreen_context()
+    assert destroyed == ["surface"]
+
+    destroyed.clear()
+    monkeypatch.setattr(
+        painter_3d_blockout,
+        "project_blockout_scene",
+        lambda *_args, **_kwargs: {},
+    )
+    with pytest.raises(
+        painter_opengl.PainterOpenGLUnavailable,
+        match="could not create a context",
+    ):
+        painter_opengl.render_blockout_scene_opengl_qimage({}, 2, 2)
+    assert destroyed == ["surface"]
+    status = painter_opengl.painter_opengl_cleanup_status()
+    assert status["last_error"] == "RuntimeError: injected surface destroy failure"
 
 
 def test_painter_canvas_gpu_path_reports_remote_safe_renderer() -> None:
@@ -222,6 +521,21 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
 
     scene = delete_blockout_primitive(scene, "blockout:room")
     assert scene.to_dict()["primitive_count"] == 1
+
+
+def test_malformed_custom_blockout_ids_do_not_claim_generated_index() -> None:
+    from app.painter_3d_blockout import BlockoutPrimitive, BlockoutScene
+
+    scene = BlockoutScene(
+        primitives=(
+            BlockoutPrimitive(id="blockout:room"),
+            BlockoutPrimitive(id="custom:999999"),
+            BlockoutPrimitive(id="blockout:-4"),
+            BlockoutPrimitive(id="blockout:7"),
+        ),
+        next_index=2,
+    ).normalized()
+    assert scene.next_index == 8
 
 
 def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:

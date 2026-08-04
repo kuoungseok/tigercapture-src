@@ -16,6 +16,7 @@ class PainterUIBooleanContextBar(QFrame):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setObjectName("PainterUIBooleanContextBar")
+        self.setAccessibleName(painter_text("Boolean operations"))
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._state: dict[str, Any] = {}
         layout = QHBoxLayout(self)
@@ -23,26 +24,37 @@ class PainterUIBooleanContextBar(QFrame):
         layout.setSpacing(3)
         self.summary_label = QLabel("")
         self.summary_label.setObjectName("PainterUIVectorContextSummary")
+        self.summary_label.setAccessibleName(painter_text("Boolean selection"))
         layout.addWidget(self.summary_label)
         layout.addWidget(self._separator())
         self.operation_buttons: dict[str, QPushButton] = {}
-        for label, command, icon_name in (
-            ("Union selection", "union", "boolean-union"),
-            ("Subtract selection", "subtract", "boolean-subtract"),
-            ("Intersect selection", "intersect", "boolean-intersect"),
-            ("Exclude selection", "exclude", "boolean-exclude"),
+        for label, command, icon_name, shortcut in (
+            ("Union selection", "union", "boolean-union", "Alt+Shift+U"),
+            ("Subtract selection", "subtract", "boolean-subtract", "Alt+Shift+S"),
+            ("Intersect selection", "intersect", "boolean-intersect", "Alt+Shift+I"),
+            ("Exclude selection", "exclude", "boolean-exclude", "Alt+Shift+E"),
         ):
             button = self._button(label, command, icon_name)
+            button.setToolTip(f"{painter_text(label)}  {shortcut}")
             button.setCheckable(True)
             self.operation_buttons[command] = button
             layout.addWidget(button)
         layout.addWidget(self._separator())
         self.release_button = self._button(
-            "Release Boolean group",
+            "Ungroup Boolean group",
             "release",
             "scissors",
         )
         layout.addWidget(self.release_button)
+        self.flatten_button = self._button(
+            "Flatten",
+            "flatten",
+            "flatten",
+        )
+        self.flatten_button.setToolTip(
+            f"{painter_text('Flatten')}  Alt+Shift+F"
+        )
+        layout.addWidget(self.flatten_button)
         self.hide()
 
     def _button(self, label: str, command: str, icon_name: str) -> QPushButton:
@@ -84,10 +96,12 @@ class PainterUIBooleanContextBar(QFrame):
             self.summary_label.setText(
                 f"{count}  {painter_text('selected')}"
             )
+        self.setAccessibleDescription(self.summary_label.text())
         active = str(self._state.get("operation") or "")
         for operation, button in self.operation_buttons.items():
             button.setChecked(mode == "group" and operation == active)
         self.release_button.setVisible(mode == "group")
+        self.flatten_button.setVisible(mode == "group")
         self.show()
         self.raise_()
 

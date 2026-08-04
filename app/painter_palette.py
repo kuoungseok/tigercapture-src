@@ -3,15 +3,36 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 from typing import Iterable
 
 
 PAINTER_PALETTE_SCHEMA = "tigerstudio.painter.palette-library.v1"
-PAINTER_BRUSH_BUNDLE_SCHEMA = "tigerstudio.painter.brush-bundle.v1"
+PAINTER_BRUSH_BUNDLE_SCHEMA = "tigerstudio.painter.brush-bundle.v2"
+OKLCH_POWERLESS_CHROMA_EPSILON = 0.000004
 MAX_RECENT_COLORS = 32
 MAX_DOCUMENT_COLORS = 32
 MAX_RECENT_BRUSHES = 16
+MAX_BRUSH_PRESET_WIDTH_PX = 5000
+
+PALETTE_CAPACITY_CONTRACT = {
+    "schema": "tigerstudio.painter.palette_capacity.v1",
+    "source": "tiger_authored_history_and_document_palette_capacity",
+    "recent_colors": MAX_RECENT_COLORS,
+    "document_colors": MAX_DOCUMENT_COLORS,
+    "recent_brushes": MAX_RECENT_BRUSHES,
+    "color_quality_threshold_claim": False,
+    "external_palette_capacity_parity_claim": False,
+}
+BRUSH_PRESET_WIDTH_CONTRACT = {
+    "schema": "tigerstudio.painter.brush_size_limit.v1",
+    "maximum_px": MAX_BRUSH_PRESET_WIDTH_PX,
+    "reference": "adobe_photoshop_official_5000px_maximum_brush_size",
+    "url": "https://helpx.adobe.com/pdf/cs6/photoshop_reference.pdf",
+    "performance_at_maximum_claim": False,
+    "physical_brush_claim": False,
+}
 HARMONY_MODES = {
     "full",
     "monochrome",
@@ -96,11 +117,16 @@ def normalize_brush_preset(payload: dict, *, fallback_name: str = "Custom Brush"
         tags = [str(part).strip() for part in tags if str(part).strip()]
     else:
         tags = []
+    from app.painter_brush_dynamics import normalize_brush_dynamics
+
     return {
         "name": name,
         "category": category,
         "style": str(row.get("style") or "round"),
-        "width": max(1, min(2048, int(round(float(row.get("width") or 6))))),
+        "width": max(
+            1,
+            min(MAX_BRUSH_PRESET_WIDTH_PX, int(round(float(row.get("width") or 6)))),
+        ),
         "opacity": max(1, min(100, int(round(float(row.get("opacity") or 100))))),
         "hardness": max(1, min(100, int(round(float(row.get("hardness") or 100))))),
         "spacing": max(1, min(200, int(round(float(row.get("spacing") or 25))))),
@@ -112,6 +138,7 @@ def normalize_brush_preset(payload: dict, *, fallback_name: str = "Custom Brush"
         ),
         "flip_x": bool(row.get("flip_x", False)),
         "flip_y": bool(row.get("flip_y", False)),
+        "dynamics": normalize_brush_dynamics(dict(row.get("dynamics") or {})),
         "tags": list(dict.fromkeys(tags)),
         "custom": True,
     }
@@ -141,47 +168,124 @@ def normalize_palette_library(payload: dict | None) -> dict:
     return result
 
 
-def load_palette_library(path: Path | None = None) -> dict:
+def load_palette_library_with_report(path: Path | None = None) -> tuple[dict, dict]:
     resolved = palette_library_path() if path is None else Path(path)
-    if resolved is None or not resolved.exists():
-        return default_palette_library()
+    if resolved is None:
+        return default_palette_library(), {
+            "status": "disabled",
+            "fallback_used": True,
+            "path": "",
+            "error": {},
+        }
+    if not resolved.exists():
+        return default_palette_library(), {
+            "status": "missing",
+            "fallback_used": True,
+            "path": str(resolved),
+            "error": {},
+        }
     try:
-        return normalize_palette_library(
+        library = normalize_palette_library(
             json.loads(resolved.read_text(encoding="utf-8"))
         )
-    except (OSError, ValueError, TypeError):
-        return default_palette_library()
+    except (OSError, ValueError, TypeError) as exc:
+        return default_palette_library(), {
+            "status": "corrupt",
+            "fallback_used": True,
+            "path": str(resolved),
+            "error": {"type": type(exc).__name__, "message": str(exc)},
+        }
+    return library, {
+        "status": "loaded",
+        "fallback_used": False,
+        "path": str(resolved),
+        "error": {},
+    }
+
+
+def load_palette_library(path: Path | None = None) -> dict:
+    library, _report = load_palette_library_with_report(path)
+    return library
+
+
+def save_palette_library_with_report(payload: dict, path: Path | None = None) -> dict:
+    resolved = palette_library_path() if path is None else Path(path)
+    if resolved is None:
+        return {"status": "disabled", "path": "", "corrupt_backup_path": ""}
+    normalized = normalize_palette_library(payload)
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_backup_path = ""
+    if resolved.exists():
+        _existing, load_report = load_palette_library_with_report(resolved)
+        if load_report["status"] == "corrupt":
+            backup = resolved.with_suffix(resolved.suffix + ".corrupt.bak")
+            serial = 1
+            while backup.exists():
+                backup = resolved.with_suffix(resolved.suffix + f".corrupt.{serial}.bak")
+                serial += 1
+            shutil.copy2(resolved, backup)
+            corrupt_backup_path = str(backup.resolve())
+    temporary = resolved.with_suffix(resolved.suffix + ".tmp")
+    try:
+        temporary.write_text(
+            json.dumps(normalized, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(resolved)
+    finally:
+        if temporary.exists():
+            temporary.unlink(missing_ok=True)
+    return {
+        "status": "saved",
+        "path": str(resolved.resolve()),
+        "corrupt_backup_path": corrupt_backup_path,
+    }
 
 
 def save_palette_library(payload: dict, path: Path | None = None) -> Path | None:
-    resolved = palette_library_path() if path is None else Path(path)
-    if resolved is None:
-        return None
-    normalized = normalize_palette_library(payload)
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    temporary = resolved.with_suffix(resolved.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(normalized, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary.replace(resolved)
-    return resolved
+    report = save_palette_library_with_report(payload, path)
+    return Path(report["path"]) if report["path"] else None
 
 
 def export_brush_bundle(presets: Iterable[dict], path: Path) -> Path:
-    payload = {
-        "schema": PAINTER_BRUSH_BUNDLE_SCHEMA,
-        "brushes": [normalize_brush_preset(row) for row in presets],
-    }
+    import base64
+
+    from app.painter_export_transaction import transactional_file_export
+
+    brushes = [normalize_brush_preset(row) for row in presets]
+    for brush in brushes:
+        dynamics = dict(brush.get("dynamics") or {})
+        dab_path = Path(str(dynamics.get("dab_image_path") or ""))
+        if str(dab_path) and dab_path.is_file() and not dynamics.get("dab_png_base64"):
+            dynamics["dab_png_base64"] = base64.b64encode(dab_path.read_bytes()).decode("ascii")
+            dynamics["dab_image_path"] = ""
+        brush["dynamics"] = dynamics
+    payload = {"schema": PAINTER_BRUSH_BUNDLE_SCHEMA, "brushes": brushes}
     resolved = Path(path)
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def write_bundle(staging_path: Path) -> dict[str, str]:
+        staging_path.write_text(serialized, encoding="utf-8")
+        return {"path": str(staging_path)}
+
+    transactional_file_export(resolved, write_bundle)
     return resolved
 
 
 def import_brush_bundle(path: Path) -> list[dict]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("schema") != PAINTER_BRUSH_BUNDLE_SCHEMA:
+    source = Path(path)
+    if source.suffix.casefold() == ".abr":
+        data = source.read_bytes()[:4]
+        version = int.from_bytes(data[:2], "big") if len(data) >= 2 else 0
+        raise ValueError(
+            f"ABR v{version} proprietary dab decoding is not bundled; "
+            "use a Tiger brush bundle with licensed PNG dabs"
+        )
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema") not in {
+        "tigerstudio.painter.brush-bundle.v1",
+        PAINTER_BRUSH_BUNDLE_SCHEMA,
+    }:
         raise ValueError("Unsupported Painter brush bundle")
     return [
         normalize_brush_preset(row)
@@ -213,11 +317,17 @@ def rgb_to_oklch(rgb: tuple[int, int, int]) -> tuple[float, float, float]:
     a_value = 1.9779984951 * l_root - 2.4285922050 * m_root + 0.4505937099 * s_root
     b_value = 0.0259040371 * l_root + 0.7827717662 * m_root - 0.8086757660 * s_root
     chroma = math.hypot(a_value, b_value)
-    hue = (math.degrees(math.atan2(b_value, a_value)) + 360.0) % 360.0
+    hue = (
+        math.nan
+        if chroma <= OKLCH_POWERLESS_CHROMA_EPSILON
+        else (math.degrees(math.atan2(b_value, a_value)) + 360.0) % 360.0
+    )
     return lightness, chroma, hue
 
 
 def _oklch_linear_rgb(lightness: float, chroma: float, hue: float) -> tuple[float, float, float]:
+    if chroma <= OKLCH_POWERLESS_CHROMA_EPSILON:
+        hue = 0.0
     radians = math.radians(hue)
     a_value = chroma * math.cos(radians)
     b_value = chroma * math.sin(radians)
@@ -258,7 +368,25 @@ def oklch_harmony_colors(
 ) -> list[tuple[tuple[int, int, int], str]]:
     normalized = normalize_rgb(rgb) or (0, 0, 0)
     lightness, chroma, hue = rgb_to_oklch(normalized)
-    chroma = max(0.025, chroma)
+    if not math.isfinite(hue):
+        # CSS Color 4 marks the hue missing at powerless chroma. Do not turn
+        # numerical noise around the neutral axis into an invented harmony.
+        return [
+            (normalized if label == "Current color" else oklch_to_rgb(level, 0.0, 0.0), label)
+            for level, label in (
+                (0.20, "Deep shade"),
+                (0.32, "Dark"),
+                (0.45, "Mid shadow"),
+                (lightness, "Current color"),
+                (0.70, "Light"),
+                (0.80, "Tint"),
+                (0.89, "Pale"),
+                (0.96, "Near white"),
+            )
+        ]
+    # Preserve measured chroma. A former 0.025 floor amplified barely
+    # chromatic inputs into an authored saturation that was not requested.
+    chroma = max(0.0, chroma)
     tonal = [
         (oklch_to_rgb(max(0.18, lightness * 0.48), chroma * 0.78, hue), "Deep shade"),
         (oklch_to_rgb(max(0.26, lightness * 0.72), chroma * 0.90, hue), "Shadow"),

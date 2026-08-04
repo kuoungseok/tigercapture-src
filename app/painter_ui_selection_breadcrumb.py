@@ -86,6 +86,13 @@ class PainterUISelectionBreadcrumb(QFrame):
         parent = self.parentWidget()
         if parent is None or not self.isVisible():
             return
+        parent_layout = parent.layout()
+        if parent_layout is not None and parent_layout.indexOf(self) >= 0:
+            # The canvas mode bar owns this widget in normal UI Design mode.
+            # Let its layout reserve real chrome space instead of covering the
+            # top edge of the artboard.
+            self.raise_()
+            return
         self.move(
             max(8, min(28, parent.width() - self.width() - 8)),
             27,

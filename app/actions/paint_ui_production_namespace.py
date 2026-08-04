@@ -520,6 +520,13 @@ def register_paint_ui_production_actions(registry: Any) -> None:
     )
 
     read_action(
+        "paint.ui.umg.widget_view.set",
+        "Show or hide the non-destructive Painter and UMG widget comparison",
+        "paint_ui_umg_widget_view_set",
+        {"visible": {"type": "boolean"}},
+        required=("visible",),
+    )
+    read_action(
         "paint.ui.umg.preflight",
         "Classify Painter objects for the shared TigerStudioUMG backend",
         "paint_ui_umg_preflight",

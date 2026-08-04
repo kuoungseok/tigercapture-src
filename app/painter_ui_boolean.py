@@ -19,11 +19,80 @@ UI_BOOLEAN_OPERAND_KINDS = {
     "rectangle",
     "ellipse",
     "path",
-    "frame",
     "polygon",
     "star",
     "arc",
+    "text",
 }
+
+
+def is_ui_boolean_operand(row: Mapping[str, Any]) -> bool:
+    """Return whether a normalized Painter object can enter a Boolean group."""
+    return str(row.get("kind") or "") in UI_BOOLEAN_OPERAND_KINDS
+
+
+def is_ui_boolean_group(row: Mapping[str, Any]) -> bool:
+    boolean = normalize_ui_boolean((row.get("content") or {}).get("boolean"))
+    return bool(boolean["enabled"] and boolean["group"])
+
+
+def _validate_ui_boolean_operand(
+    row: Mapping[str, Any],
+    *,
+    context: str = "",
+) -> None:
+    if is_ui_boolean_operand(row):
+        return
+    suffix = f": {context}" if context else ""
+    raise PainterUIDocumentError(
+        f"Unsupported UI Boolean operand kind: {row.get('kind')}{suffix}"
+    )
+
+
+def _boolean_reaches_object(
+    by_id: Mapping[str, Mapping[str, Any]],
+    start_id: str,
+    target_id: str,
+    visited: set[str] | None = None,
+) -> bool:
+    """Return whether Boolean operand references can reach ``target_id``."""
+    current_id = str(start_id or "")
+    target = str(target_id or "")
+    if not current_id or not target:
+        return False
+    if current_id == target:
+        return True
+    seen = set(visited or ())
+    if current_id in seen:
+        return False
+    seen.add(current_id)
+    row = by_id.get(current_id)
+    if row is None:
+        return False
+    boolean = normalize_ui_boolean((row.get("content") or {}).get("boolean"))
+    if not boolean["enabled"] or not boolean["group"]:
+        return False
+    return any(
+        _boolean_reaches_object(by_id, operand_id, target, seen)
+        for operand_id in boolean["operand_ids"]
+    )
+
+
+def _boolean_group_style(row: Mapping[str, Any]) -> dict[str, Any]:
+    style = copy.deepcopy(dict(row.get("style") or {}))
+    if row.get("kind") == "text":
+        text_fill = style.get("text_color") or "#000000FF"
+        style["fill"] = text_fill
+        style["fills"] = [
+            {
+                "type": "solid",
+                "visible": True,
+                "opacity": 1.0,
+                "color": text_fill,
+                "blend_mode": "normal",
+            }
+        ]
+    return style
 
 
 def normalize_ui_boolean(value: object) -> dict[str, Any]:
@@ -99,7 +168,7 @@ def inspect_ui_boolean_selection(
         reason = "mixed_artboard"
     elif len({row["parent_id"] for row in rows}) != 1:
         reason = "mixed_parent"
-    elif any(row["kind"] not in UI_BOOLEAN_OPERAND_KINDS for row in rows):
+    elif any(not is_ui_boolean_operand(row) for row in rows):
         reason = "unsupported_kind"
     return {
         "mode": "selection",
@@ -139,19 +208,15 @@ def set_ui_boolean(
             )
         if operand["id"] == row["id"]:
             raise PainterUIDocumentError("Boolean group cannot contain itself")
+        if _boolean_reaches_object(by_id, operand["id"], row["id"]):
+            raise PainterUIDocumentError(
+                "Boolean operand cycle is not allowed"
+            )
         if operand["artboard_id"] != row["artboard_id"]:
             raise PainterUIDocumentError(
                 f"UI Boolean operand artboard mismatch: {candidate}"
             )
-        if operand["kind"] not in {
-            "rectangle",
-            "ellipse",
-            "path",
-            "frame",
-        }:
-            raise PainterUIDocumentError(
-                f"Unsupported UI Boolean operand kind: {operand['kind']}"
-            )
+        _validate_ui_boolean_operand(operand, context=operand["id"])
         if operand["id"] not in operands:
             operands.append(operand["id"])
     if len(operands) < 2:
@@ -207,7 +272,7 @@ def compose_ui_boolean(
     invalid = [
         row["id"]
         for row in rows
-        if row["kind"] not in UI_BOOLEAN_OPERAND_KINDS
+        if not is_ui_boolean_operand(row)
     ]
     if invalid:
         raise PainterUIDocumentError(
@@ -218,15 +283,16 @@ def compose_ui_boolean(
     top = min(float(row["y"]) for row in ordered)
     right = max(float(row["x"]) + float(row["width"]) for row in ordered)
     bottom = max(float(row["y"]) + float(row["height"]) for row in ordered)
-    style_source = max(
-        ordered,
-        key=lambda row: (int(row["z_index"]), row["id"]),
-    )
     operation_value = str(operation or "union").strip().casefold()
     if operation_value not in UI_BOOLEAN_OPERATIONS:
         raise PainterUIDocumentError(
             f"Unsupported UI Boolean operation: {operation}"
         )
+    style_source = (
+        ordered[0]
+        if operation_value == "subtract"
+        else ordered[-1]
+    )
     document, group_row = add_ui_object(
         document,
         kind="path",
@@ -237,7 +303,7 @@ def compose_ui_boolean(
         y=top,
         width=max(1.0, right - left),
         height=max(1.0, bottom - top),
-        style=copy.deepcopy(dict(style_source.get("style") or {})),
+        style=_boolean_group_style(style_source),
         content={
             "boolean": {
                 "enabled": True,
@@ -247,6 +313,10 @@ def compose_ui_boolean(
             }
         },
     )
+    operand_set = {row["id"] for row in ordered}
+    for row in document["objects"]:
+        if row["id"] in operand_set:
+            row["parent_id"] = group_row["id"]
     return document, group_row
 
 
@@ -264,6 +334,41 @@ def release_ui_boolean(
     boolean = normalize_ui_boolean((row.get("content") or {}).get("boolean"))
     if boolean["enabled"] and boolean["group"]:
         operands = list(boolean["operand_ids"])
+        parent_id = str(row.get("parent_id") or "")
+        parent = next(
+            (
+                candidate
+                for candidate in document["objects"]
+                if candidate["id"] == parent_id
+            ),
+            None,
+        )
+        parent_boolean = (
+            normalize_ui_boolean((parent.get("content") or {}).get("boolean"))
+            if parent is not None
+            else normalize_ui_boolean(None)
+        )
+        if (
+            parent is not None
+            and parent_boolean["enabled"]
+            and parent_boolean["group"]
+            and row["id"] in parent_boolean["operand_ids"]
+        ):
+            expanded: list[str] = []
+            for candidate_id in parent_boolean["operand_ids"]:
+                if candidate_id == row["id"]:
+                    expanded.extend(operands)
+                else:
+                    expanded.append(candidate_id)
+            parent_content = copy.deepcopy(dict(parent.get("content") or {}))
+            parent_content["boolean"] = {
+                **parent_boolean,
+                "operand_ids": expanded,
+            }
+            parent["content"] = parent_content
+        for candidate in document["objects"]:
+            if candidate["id"] in operands:
+                candidate["parent_id"] = parent_id
         document, _report = remove_ui_object(document, row["id"])
         document = select_ui_objects(
             document,
@@ -281,12 +386,82 @@ def release_ui_boolean(
     return document
 
 
+def flatten_ui_boolean(
+    value: Mapping[str, Any] | None,
+    object_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Destructively replace one Boolean group with one editable vector path."""
+    from PySide6.QtCore import QRectF
+
+    from app.painter_ui_boolean_geometry import (
+        qpath_to_vector_network,
+        resolve_ui_boolean_path,
+    )
+
+    document = normalize_ui_document(value)
+    by_id = {row["id"]: row for row in document["objects"]}
+    row = by_id.get(str(object_id))
+    if row is None:
+        raise PainterUIDocumentError(f"UI object not found: {object_id}")
+    if not is_ui_boolean_group(row):
+        raise PainterUIDocumentError("UI object is not a Boolean group")
+    rect_for = lambda candidate: QRectF(
+        float(candidate["x"]),
+        float(candidate["y"]),
+        float(candidate["width"]),
+        float(candidate["height"]),
+    )
+    path = resolve_ui_boolean_path(document["objects"], row, rect_for)
+    if path is None or path.isEmpty():
+        raise PainterUIDocumentError(
+            "Cannot flatten an empty Boolean result"
+        )
+    bounds = path.boundingRect()
+    content = copy.deepcopy(dict(row.get("content") or {}))
+    content.pop("boolean", None)
+    content["vector_network"] = qpath_to_vector_network(path, bounds)
+    content["converted_from_kind"] = "boolean"
+
+    boolean = normalize_ui_boolean((row.get("content") or {}).get("boolean"))
+    # Delete each direct operand through the document API.  Besides deleting
+    # its descendants, this also cleans masks, sections, interactions,
+    # component records, and linked-target references.  A raw objects-list
+    # filter would leave those records dangling after Flatten.
+    for operand_id in list(boolean["operand_ids"]):
+        if any(candidate["id"] == operand_id for candidate in document["objects"]):
+            document, _removed = remove_ui_object(document, operand_id)
+
+    document, flattened = update_ui_object(
+        document,
+        row["id"],
+        {
+            "name": str(row.get("name") or "Vector"),
+            "kind": "path",
+            "x": float(bounds.left()),
+            "y": float(bounds.top()),
+            "width": max(1e-6, float(bounds.width())),
+            "height": max(1e-6, float(bounds.height())),
+            "rotation": 0.0,
+            "content": content,
+        },
+    )
+    flattened = next(
+        candidate
+        for candidate in document["objects"]
+        if candidate["id"] == row["id"]
+    )
+    return document, flattened
+
+
 __all__ = [
     "UI_BOOLEAN_OPERATIONS",
     "UI_BOOLEAN_OPERAND_KINDS",
     "compose_ui_boolean",
+    "flatten_ui_boolean",
     "inspect_ui_boolean",
     "inspect_ui_boolean_selection",
+    "is_ui_boolean_group",
+    "is_ui_boolean_operand",
     "normalize_ui_boolean",
     "release_ui_boolean",
     "set_ui_boolean",

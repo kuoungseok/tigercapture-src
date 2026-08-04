@@ -12,6 +12,61 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
+def test_prototype_panel_switches_between_settings_and_authoring() -> None:
+    app = _app()
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+    )
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    panel = PainterUIPrototypePanel()
+    document = create_ui_document(390, 844)
+    panel.set_document(document)
+    assert not panel.settings_host.isHidden()
+    assert panel.authoring_host.isHidden()
+    labels = [
+        panel.device_combo.itemText(index)
+        for index in range(panel.device_combo.count())
+    ]
+    assert labels[0] == "기기 없음"
+    assert any("iPhone 17" in label and "402×874" in label for label in labels)
+    assert any("Android 컴팩트" in label for label in labels)
+    assert any("iPad mini 8.3" in label for label in labels)
+
+    emitted: list[dict] = []
+    panel.device_changed.connect(emitted.append)
+    iphone_index = next(
+        index
+        for index, label in enumerate(labels)
+        if label.startswith("iPhone 17    ")
+    )
+    panel.device_combo.setCurrentIndex(iphone_index)
+    app.processEvents()
+    assert emitted[-1]["width"] == 402
+    assert emitted[-1]["height"] == 874
+    assert emitted[-1]["orientation"] == "portrait"
+    panel.landscape_button.click()
+    assert emitted[-1]["width"] == 874
+    assert emitted[-1]["height"] == 402
+    assert emitted[-1]["orientation"] == "landscape"
+
+    colors: list[str] = []
+    panel.background_changed.connect(colors.append)
+    panel.background_edit.setText("1a2b3c")
+    panel._emit_background()
+    assert colors[-1] == "#1A2B3C"
+
+    document, button = add_ui_object(document, kind="button", name="Go")
+    document = select_ui_object(document, button["id"])
+    panel.set_document(document)
+    assert panel.settings_host.isHidden()
+    assert not panel.authoring_host.isHidden()
+    panel.deleteLater()
+    app.processEvents()
+
+
 def test_prototype_flow_and_transition_round_trip() -> None:
     from app.painter_ui_document import (
         add_ui_interaction,
@@ -385,4 +440,106 @@ def test_inline_preview_runs_scoped_delay_interaction() -> None:
     assert len(dialog._painter_ui_prototype_state["events"]) == 1
     dialog.close()
     dialog.deleteLater()
+    app.processEvents()
+
+
+def test_prototype_panel_offers_change_to_targets_from_same_component_set() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        define_ui_component_variant_property,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    document = create_ui_document(390, 844)
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Button",
+        width=120,
+        height=40,
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Button",
+    )
+    document, _inspection = define_ui_component_variant_property(
+        document,
+        component_id=component["id"],
+        property_name="State",
+        values=["Default", "Hover"],
+        default_value="Default",
+    )
+    document, hover = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Button / Hover",
+        variant_properties={"State": "Hover"},
+    )
+    document["selection"] = {
+        "object_id": component["root_object_id"],
+        "object_ids": [component["root_object_id"]],
+    }
+    panel = PainterUIPrototypePanel()
+    panel.set_document(document)
+    panel.action_combo.setCurrentIndex(
+        panel.action_combo.findData("change_variant")
+    )
+    app.processEvents()
+    assert panel.target_combo.count() == 1
+    assert panel.target_combo.currentData() == hover["id"]
+    assert panel.target_combo.currentText() == "State=Hover"
+    emitted: list[dict] = []
+    panel.connection_add_requested.connect(emitted.append)
+    panel.add_button.click()
+    assert emitted == [
+        {
+            "source_object_id": component["root_object_id"],
+            "trigger": str(panel.trigger_combo.currentData()),
+            "action": "change_variant",
+            "target_artboard_id": "",
+            "target_object_id": component["root_object_id"],
+            "component_id": hover["id"],
+            "parameters": {"preserve_overrides": True},
+        }
+    ]
+    panel.close()
+    panel.deleteLater()
+    app.processEvents()
+
+
+def test_prototype_panel_emits_reset_component_state_for_navigation() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    document = create_ui_document(390, 844)
+    document, source = add_ui_object(
+        document,
+        kind="frame",
+        name="Next",
+        width=120,
+        height=40,
+    )
+    document["selection"] = {
+        "object_id": source["id"],
+        "object_ids": [source["id"]],
+    }
+    panel = PainterUIPrototypePanel()
+    panel.set_document(document)
+    panel.show()
+    panel.action_combo.setCurrentIndex(panel.action_combo.findData("navigate"))
+    app.processEvents()
+    assert panel.reset_component_state_check.isVisible() is True
+    panel.reset_component_state_check.setChecked(True)
+    emitted: list[dict] = []
+    panel.connection_add_requested.connect(emitted.append)
+    panel.add_button.click()
+
+    assert emitted[-1]["parameters"] == {"reset_component_state": True}
+    panel.close()
+    panel.deleteLater()
     app.processEvents()

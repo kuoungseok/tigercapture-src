@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 import os
+import ctypes
+import operator
+import sys
 from typing import Any
 
 import numpy as np
@@ -33,10 +36,248 @@ _TEXTURED_CANVAS_STYLES = frozenset(
         "textured_chalk",
     }
 )
+_GL_CLEANUP_STATUS: dict[str, Any] = {
+    "failure_count": 0,
+    "last_operation": "",
+    "last_error": "",
+    "primary_error_preserved": False,
+}
+
+
+def _best_effort_gl_cleanup(operation: str, callback: Any) -> bool:
+    """Run one teardown operation without replacing an active render error."""
+
+    primary_error = sys.exc_info()[1]
+    try:
+        callback()
+        return True
+    except Exception as exc:
+        _GL_CLEANUP_STATUS["failure_count"] = int(
+            _GL_CLEANUP_STATUS.get("failure_count", 0)
+        ) + 1
+        _GL_CLEANUP_STATUS["last_operation"] = str(operation)
+        _GL_CLEANUP_STATUS["last_error"] = f"{type(exc).__name__}: {exc}"
+        _GL_CLEANUP_STATUS["primary_error_preserved"] = primary_error is not None
+        if primary_error is not None and hasattr(primary_error, "add_note"):
+            primary_error.add_note(
+                f"Painter OpenGL cleanup failed during {operation}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        return False
+
+
+def painter_opengl_cleanup_status() -> dict[str, Any]:
+    return dict(_GL_CLEANUP_STATUS)
 
 
 class PainterOpenGLUnavailable(RuntimeError):
     """Raised when the optional Painter OpenGL path cannot be used."""
+
+
+class PainterRetainedGLTileUploader:
+    """Keep document tiles as real GL textures in one persistent offscreen context."""
+
+    def __init__(self) -> None:
+        if not painter_canvas_opengl_enabled() or QGuiApplication.instance() is None:
+            raise PainterOpenGLUnavailable("Retained Painter GL tiles require an enabled Qt GUI application.")
+        try:
+            from OpenGL import GL
+            from PySide6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLTexture
+        except Exception as exc:
+            raise PainterOpenGLUnavailable(f"PyOpenGL unavailable: {exc}") from exc
+        fmt = QSurfaceFormat(); fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+        # The retained path uses core framebuffer entry points plus legacy
+        # immediate-mode quads. Request a compatibility context new enough to
+        # expose glGenFramebuffers; 2.1 succeeded as a Qt context on the native
+        # QA host but PyOpenGL correctly reported that FBO entry point missing.
+        fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile); fmt.setVersion(3, 3)
+        self.surface = QOffscreenSurface(); self.surface.setFormat(fmt); self.surface.create()
+        self.context = QOpenGLContext(); self.context.setFormat(fmt)
+        if not self.surface.isValid() or not self.context.create() or not self.context.makeCurrent(self.surface):
+            _best_effort_gl_cleanup("retained_surface_destroy", self.surface.destroy)
+            raise PainterOpenGLUnavailable("Could not create a persistent Painter tile OpenGL context.")
+        self.GL = GL; self.FBO = QOpenGLFramebufferObject; self.Texture = QOpenGLTexture
+        self.qt_gl = self.context.functions()
+        self.raw_gl = {}
+        signatures = {
+            "glViewport": (None, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int),
+            "glDisable": (None, ctypes.c_uint), "glEnable": (None, ctypes.c_uint),
+            "glBlendFunc": (None, ctypes.c_uint, ctypes.c_uint),
+            "glClearColor": (None, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float),
+            "glClear": (None, ctypes.c_uint), "glMatrixMode": (None, ctypes.c_uint),
+            "glLoadIdentity": (None,),
+            "glOrtho": (None, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double),
+            "glBindTexture": (None, ctypes.c_uint, ctypes.c_uint),
+            "glTexParameteri": (None, ctypes.c_uint, ctypes.c_uint, ctypes.c_int),
+            "glPixelStorei": (None, ctypes.c_uint, ctypes.c_int),
+            "glTexImage2D": (None, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p),
+            "glReadPixels": (None, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p),
+            "glColor4f": (None, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float),
+            "glBegin": (None, ctypes.c_uint), "glTexCoord2f": (None, ctypes.c_float, ctypes.c_float),
+            "glVertex2f": (None, ctypes.c_float, ctypes.c_float), "glEnd": (None,), "glFlush": (None,),
+        }
+        for name, signature in signatures.items():
+            address = int(self.context.getProcAddress(name.encode("ascii")) or 0)
+            if not address:
+                raise PainterOpenGLUnavailable(f"OpenGL entry point unavailable: {name}")
+            restype, *argtypes = signature
+            self.raw_gl[name] = ctypes.CFUNCTYPE(restype, *argtypes)(address)
+        self.validation_fbo = QOpenGLFramebufferObject(1, 1)
+        if not self.validation_fbo.isValid():
+            raise PainterOpenGLUnavailable("Qt retained Painter tile FBO is invalid.")
+        # Qt's Windows FBO wrapper can leave a driver diagnostic in the shared
+        # error slot even though the object is valid. Clear that boundary once
+        # so PyOpenGL does not attribute the stale code to the next texture call.
+        while int(self.qt_gl.glGetError()) != int(GL.GL_NO_ERROR):
+            pass
+        self.fbo = 1; self.handles: set[int] = set(); self.texture_objects: dict[int, Any] = {}
+        self.created = 0; self.updated = 0; self.uploaded_bytes = 0
+        self.display_composites = 0; self.display_texture_reads = 0; self.display_readback_bytes = 0
+
+    def _current(self) -> None:
+        if not self.context.makeCurrent(self.surface):
+            raise PainterOpenGLUnavailable("Could not activate retained Painter tile context.")
+
+    def _clear_qt_boundary_errors(self) -> None:
+        while int(self.qt_gl.glGetError()) != int(self.GL.GL_NO_ERROR):
+            pass
+
+    def _gl(self, name: str, *args) -> None:
+        self.raw_gl[name](*args)
+
+    def _read_rgba(self, width: int, height: int) -> QImage:
+        payload = (ctypes.c_ubyte * (width * height * 4))()
+        self._gl(
+            "glReadPixels", 0, 0, width, height,
+            self.GL.GL_RGBA, self.GL.GL_UNSIGNED_BYTE,
+            ctypes.cast(payload, ctypes.c_void_p),
+        )
+        pixels = np.ctypeslib.as_array(payload).reshape((height, width, 4))
+        flipped = np.ascontiguousarray(np.flipud(pixels))
+        return QImage(flipped.data, width, height, width * 4, QImage.Format.Format_RGBA8888).copy()
+
+    def __call__(self, _key, image: QImage, existing_handle: int = 0) -> int:
+        self._current(); GL = self.GL
+        converted = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        handle = int(existing_handle or 0)
+        if not handle:
+            texture = self.Texture(self.Texture.Target.Target2D)
+            texture.create()
+            if not texture.isCreated():
+                raise PainterOpenGLUnavailable("Qt could not create retained Painter tile texture.")
+            handle = int(texture.textureId()); self.texture_objects[handle] = texture
+            self.handles.add(handle); self.created += 1
+        else:
+            texture = self.texture_objects.get(handle)
+            if texture is None:
+                raise PainterOpenGLUnavailable("Retained Painter tile texture owner is missing.")
+            self.updated += 1
+        raw = bytes(converted.constBits())
+        payload = ctypes.create_string_buffer(raw)
+        self._gl("glBindTexture", GL.GL_TEXTURE_2D, handle)
+        self._gl("glTexParameteri", GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_NEAREST)
+        self._gl("glTexParameteri", GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_NEAREST)
+        self._gl("glTexParameteri", GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        self._gl("glTexParameteri", GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+        self._gl("glPixelStorei", GL.GL_UNPACK_ALIGNMENT, 4)
+        self._gl(
+            "glTexImage2D", GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8,
+            converted.width(), converted.height(), 0,
+            GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, ctypes.cast(payload, ctypes.c_void_p),
+        )
+        self.uploaded_bytes += converted.width() * converted.height() * 4
+        return handle
+
+    def delete(self, handle: int) -> None:
+        if not int(handle or 0): return
+        self._current(); texture = self.texture_objects.pop(int(handle), None)
+        self.handles.discard(int(handle))
+        if texture is not None:
+            texture.destroy()
+
+    def composite_normal_layers(self, layers: list[tuple[QImage, float]], width: int, height: int) -> tuple[QImage, dict[str, Any]]:
+        """Composite pre-masked normal-blend layers in the retained GL FBO."""
+        self._current(); GL = self.GL; width = max(1, int(width)); height = max(1, int(height))
+        output_fbo = self.FBO(width, height)
+        temporary: list[int] = []
+        try:
+            if not output_fbo.isValid() or not output_fbo.bind():
+                raise PainterOpenGLUnavailable("Painter compositor FBO is incomplete.")
+            self._clear_qt_boundary_errors()
+            self._gl("glViewport", 0, 0, width, height); self._gl("glDisable", GL.GL_DEPTH_TEST); self._gl("glEnable", GL.GL_BLEND)
+            self._gl("glBlendFunc", GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+            self._gl("glClearColor", 0.0, 0.0, 0.0, 0.0); self._gl("glClear", GL.GL_COLOR_BUFFER_BIT)
+            self._gl("glMatrixMode", GL.GL_PROJECTION); self._gl("glLoadIdentity"); self._gl("glOrtho", 0, width, height, 0, -1, 1)
+            self._gl("glMatrixMode", GL.GL_MODELVIEW); self._gl("glLoadIdentity"); self._gl("glEnable", GL.GL_TEXTURE_2D)
+            for index, (image, opacity) in enumerate(layers):
+                handle = self((f"compose:{index}", 0, 0), image, 0); temporary.append(handle)
+                output_fbo.bind()
+                self._clear_qt_boundary_errors()
+                self._gl("glBindTexture", GL.GL_TEXTURE_2D, handle); self._gl("glColor4f", 1.0, 1.0, 1.0, max(0.0, min(1.0, float(opacity))))
+                self._gl("glBegin", GL.GL_QUADS)
+                self._gl("glTexCoord2f", 0, 0); self._gl("glVertex2f", 0, 0)
+                self._gl("glTexCoord2f", 1, 0); self._gl("glVertex2f", width, 0)
+                self._gl("glTexCoord2f", 1, 1); self._gl("glVertex2f", width, height)
+                self._gl("glTexCoord2f", 0, 1); self._gl("glVertex2f", 0, height)
+                self._gl("glEnd")
+            self._gl("glFlush"); result = self._read_rgba(width, height)
+        finally:
+            for handle in temporary:
+                _best_effort_gl_cleanup(
+                    "retained_compositor_texture_delete",
+                    lambda handle=handle: self.delete(handle),
+                )
+            _best_effort_gl_cleanup(
+                "retained_compositor_framebuffer_release", output_fbo.release
+            )
+        return result, {"renderer": "painter_retained_gl_normal_compositor_v1", "layers": len(layers), "mask_policy": "preapplied_alpha", "readback": True}
+
+    def composite_tile_records(self, records, width: int, height: int, tile_size: int) -> tuple[QImage, dict[str, Any]]:
+        """Consume retained texture handles into the actual Canvas display image."""
+        self._current(); GL = self.GL
+        width = max(1, int(width)); height = max(1, int(height)); tile_size = max(1, int(tile_size))
+        output_fbo = self.FBO(width, height)
+        reads = 0
+        try:
+            if not output_fbo.isValid() or not output_fbo.bind():
+                raise PainterOpenGLUnavailable("Painter tile display FBO is incomplete.")
+            self._clear_qt_boundary_errors()
+            self._gl("glViewport", 0, 0, width, height); self._gl("glDisable", GL.GL_DEPTH_TEST); self._gl("glDisable", GL.GL_BLEND)
+            self._gl("glClearColor", 0.0, 0.0, 0.0, 0.0); self._gl("glClear", GL.GL_COLOR_BUFFER_BIT)
+            self._gl("glMatrixMode", GL.GL_PROJECTION); self._gl("glLoadIdentity"); self._gl("glOrtho", 0, width, height, 0, -1, 1)
+            self._gl("glMatrixMode", GL.GL_MODELVIEW); self._gl("glLoadIdentity"); self._gl("glEnable", GL.GL_TEXTURE_2D)
+            for tx, ty, record in records:
+                if not int(record.gpu_handle or 0):
+                    raise PainterOpenGLUnavailable("Retained tile has no GPU texture handle.")
+                x0 = int(tx) * tile_size; y0 = int(ty) * tile_size
+                x1 = min(width, x0 + record.image.width()); y1 = min(height, y0 + record.image.height())
+                self._gl("glBindTexture", GL.GL_TEXTURE_2D, int(record.gpu_handle)); self._gl("glColor4f", 1.0, 1.0, 1.0, 1.0)
+                self._gl("glBegin", GL.GL_QUADS)
+                self._gl("glTexCoord2f", 0, 0); self._gl("glVertex2f", x0, y0)
+                self._gl("glTexCoord2f", 1, 0); self._gl("glVertex2f", x1, y0)
+                self._gl("glTexCoord2f", 1, 1); self._gl("glVertex2f", x1, y1)
+                self._gl("glTexCoord2f", 0, 1); self._gl("glVertex2f", x0, y1)
+                self._gl("glEnd"); reads += 1
+            self._gl("glFlush"); result = self._read_rgba(width, height)
+        finally:
+            _best_effort_gl_cleanup(
+                "retained_tile_framebuffer_release", output_fbo.release
+            )
+        self.display_composites += 1; self.display_texture_reads += reads; self.display_readback_bytes += width * height * 4
+        return result, {"renderer": "painter_retained_gl_tile_display_v1", "tile_texture_reads": reads, "readback": True}
+
+    def close(self) -> None:
+        textures = list(self.texture_objects.values())
+        self.handles.clear(); self.texture_objects.clear(); self.validation_fbo = None; self.fbo = 0
+        if not _best_effort_gl_cleanup("retained_context_make_current", self._current):
+            textures = []
+        for texture in textures:
+            _best_effort_gl_cleanup("retained_texture_destroy", texture.destroy)
+        _best_effort_gl_cleanup("retained_context_done_current", self.context.doneCurrent)
+        _best_effort_gl_cleanup("retained_surface_destroy", self.surface.destroy)
+
+    def telemetry(self) -> dict[str, Any]:
+        return {"schema": "tigerstudio.painter.gl-tile-uploader.v1", "active": True, "textures": len(self.handles), "fbo": bool(self.fbo), "created": self.created, "updated": self.updated, "uploaded_bytes": self.uploaded_bytes, "display_composites": self.display_composites, "display_texture_reads": self.display_texture_reads, "display_readback_bytes": self.display_readback_bytes}
 
 
 def painter_opengl_enabled() -> bool:
@@ -62,13 +303,16 @@ def painter_opengl_status() -> dict[str, Any]:
         pyopengl_error = ""
     except Exception as exc:
         pyopengl_ready = False
-        pyopengl_error = str(exc)
+        pyopengl_error = f"{type(exc).__name__}: {exc}"
     enabled = painter_opengl_enabled()
+    dependency_ready = bool(enabled and app_ready and pyopengl_ready)
     return {
         "schema": "tigerstudio.painter.opengl.status.v1",
         "renderer": PAINTER_OPENGL_RENDERER_ID,
         "enabled": bool(enabled),
-        "available": bool(enabled and app_ready and pyopengl_ready),
+        "available": False,
+        "dependency_ready": dependency_ready,
+        "candidate_backend": PAINTER_OPENGL_RENDERER_ID if dependency_ready else "",
         "context_probe": "not_created_by_status_call",
         "fallback_on_context_failure": True,
         "remote_safe": True,
@@ -76,6 +320,7 @@ def painter_opengl_status() -> dict[str, Any]:
         "pyopengl": bool(pyopengl_ready),
         "pyopengl_error": pyopengl_error,
         "fallback_renderer": "painter_blockout_qpainter_v1",
+        "active_backend": "painter_blockout_qpainter_v1",
         "default_policy": "auto_opengl_with_qpainter_fallback",
         "environment": {
             "TIGERCAPTURE_PAINTER_OPENGL": str(os.environ.get("TIGERCAPTURE_PAINTER_OPENGL", "auto")),
@@ -87,6 +332,7 @@ def painter_opengl_status() -> dict[str, Any]:
             "blockout_canvas_overlay": "opengl_offscreen_if_available",
             "paint_canvas": "opengl_persistent_stroke_atlas_if_supported",
         },
+        "cleanup": painter_opengl_cleanup_status(),
         "canvas": painter_canvas_opengl_status(),
     }
 
@@ -101,26 +347,46 @@ def painter_canvas_opengl_status() -> dict[str, Any]:
         pyopengl_error = ""
     except Exception as exc:
         pyopengl_ready = False
-        pyopengl_error = str(exc)
+        pyopengl_error = f"{type(exc).__name__}: {exc}"
+    dependency_ready = bool(enabled and app_ready and pyopengl_ready)
+    try:
+        capabilities = painter_canvas_gpu_capabilities()
+        capabilities_error = ""
+    except Exception as exc:
+        capabilities = {
+            "remote_safe": True,
+            "persistent_stroke_atlas": {
+                "enabled": False,
+                "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+            },
+        }
+        capabilities_error = f"{type(exc).__name__}: {exc}"
     return {
         "schema": "tigerstudio.painter.canvas.opengl.status.v1",
         "renderer": PAINTER_CANVAS_ATLAS_RENDERER_ID,
         "base_renderer": PAINTER_CANVAS_OPENGL_RENDERER_ID,
         "enabled": bool(enabled),
-        "available": bool(enabled and app_ready and pyopengl_ready),
+        "available": False,
+        "dependency_ready": dependency_ready,
+        "candidate_backend": PAINTER_CANVAS_ATLAS_RENDERER_ID if dependency_ready else "",
         "remote_safe": True,
         "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+        "active_backend": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
         "fallback_on_context_failure": True,
-        "capabilities": painter_canvas_gpu_capabilities(),
-        "supported_first_pass": painter_canvas_gpu_capabilities()["basic_strokes"],
+        "capabilities": capabilities,
+        "capabilities_error": capabilities_error,
+        "supported_first_pass": dict(capabilities.get("basic_strokes") or {}),
         "next_gpu_target": "retained_gl_texture_display_and_textured_brush_shader_parity",
         "pyopengl": bool(pyopengl_ready),
         "pyopengl_error": pyopengl_error,
+        "cleanup": painter_opengl_cleanup_status(),
     }
 
 
 def painter_canvas_gpu_capabilities() -> dict[str, Any]:
     """Return the Painter canvas GPU contract visible to UI and automation."""
+
+    from app.painter_large_canvas import DEFAULT_TILE_SIZE, MAX_TILE_SIZE, MIN_TILE_SIZE
 
     return {
         "schema": "tigerstudio.painter.canvas.gpu.capabilities.v1",
@@ -132,7 +398,19 @@ def painter_canvas_gpu_capabilities() -> dict[str, Any]:
             "readback_policy": "only_when_stroke_signature_changes",
             "cache_scope": "active_canvas_session",
             "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
-            "next": "retained_gl_context_texture_display",
+            "next": "widget-native_zero-readback_texture_display",
+        },
+        "retained_document_tiles": {
+            "enabled": True,
+            "implementation": "PainterRetainedGLTileUploader",
+            "tile_size": DEFAULT_TILE_SIZE,
+            "default_tile_size": DEFAULT_TILE_SIZE,
+            "supported_tile_size": [MIN_TILE_SIZE, MAX_TILE_SIZE],
+            "runtime_tile_size_forwarded_to_compositor": True,
+            "upload_policy": "dirty_tiles_only",
+            "fbo_validation": True,
+            "bounded_lru_cpu_mirror": True,
+            "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
         },
         "basic_strokes": {
             "stroke_styles": sorted(_BASIC_CANVAS_STYLES),
@@ -158,9 +436,70 @@ def painter_canvas_gpu_capabilities() -> dict[str, Any]:
             "max_zoom_percent": 800,
             "pixel_grid": "dirty_region_qpainter_overlay",
             "stroke_cache": "signature_atlas_cache",
-            "next": "gpu_texture_display_dirty_region_upload",
+            "next": "widget-native_zero-readback_texture_display",
         },
     }
+
+
+def _validated_render_dimensions(width: int, height: int) -> tuple[int, int]:
+    try:
+        if isinstance(width, bool) or isinstance(height, bool):
+            raise TypeError
+        target_w = operator.index(width)
+        target_h = operator.index(height)
+    except TypeError as exc:
+        raise TypeError("Painter render dimensions must be finite integers") from exc
+    if target_w <= 0 or target_h <= 0:
+        raise ValueError("Painter render dimensions must be positive")
+    return target_w, target_h
+
+
+class _PainterCanvasOffscreenSession:
+    """Own one Qt offscreen surface/context for a canvas atlas lifetime."""
+
+    def __init__(self) -> None:
+        self.surface: QOffscreenSurface | None = None
+        self.context: QOpenGLContext | None = None
+        self.context_creations = 0
+        self.closed = False
+
+    def make_current(self) -> tuple[QOffscreenSurface, QOpenGLContext]:
+        if self.closed:
+            raise PainterOpenGLUnavailable("Painter canvas OpenGL session is closed.")
+        if self.surface is None or self.context is None:
+            self.surface, self.context = _make_offscreen_context()
+            self.context_creations += 1
+        elif not self.context.makeCurrent(self.surface):
+            raise PainterOpenGLUnavailable("Painter canvas OpenGL session could not reactivate its context.")
+        return self.surface, self.context
+
+    def done_current(self) -> None:
+        if self.context is not None:
+            self.context.doneCurrent()
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        context, surface = self.context, self.surface
+        self.context = None
+        self.surface = None
+        self.closed = True
+        if context is not None:
+            _best_effort_gl_cleanup(
+                "canvas_session_context_done_current", context.doneCurrent
+            )
+        if surface is not None:
+            _best_effort_gl_cleanup(
+                "canvas_session_surface_destroy", surface.destroy
+            )
+
+    def telemetry(self) -> dict[str, Any]:
+        return {
+            "closed": bool(self.closed),
+            "context_creations": int(self.context_creations),
+            "context_retained": self.context is not None,
+            "surface_retained": self.surface is not None,
+        }
 
 
 class PainterCanvasStrokeAtlas:
@@ -176,12 +515,24 @@ class PainterCanvasStrokeAtlas:
         self.image: QImage | None = None
         self.report: dict[str, Any] = {}
         self.failed_signature: str | None = None
+        self._session = _PainterCanvasOffscreenSession()
 
     def clear(self) -> None:
         self.signature = None
         self.image = None
         self.report = {}
         self.failed_signature = None
+
+    def close(self) -> None:
+        self.clear()
+        self._session.close()
+
+    def telemetry(self) -> dict[str, Any]:
+        return {
+            **self._session.telemetry(),
+            "has_cached_image": isinstance(self.image, QImage) and not self.image.isNull(),
+            "failed_signature": str(self.failed_signature or ""),
+        }
 
     def render(
         self,
@@ -236,6 +587,7 @@ class PainterCanvasStrokeAtlas:
                 layer_visibility=layer_visibility,
                 layer_opacity=layer_opacity,
                 layer_masks=layer_masks,
+                _session=self._session,
             )
         except Exception:
             self.failed_signature = signature
@@ -276,8 +628,7 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
 
     from app.painter_3d_blockout import project_blockout_scene
 
-    target_w = max(1, int(width or 1))
-    target_h = max(1, int(height or 1))
+    target_w, target_h = _validated_render_dimensions(width, height)
     projection = project_blockout_scene(scene, target_w, target_h)
 
     fmt = QSurfaceFormat()
@@ -294,10 +645,16 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
     context = QOpenGLContext()
     context.setFormat(fmt)
     if not context.create():
-        surface.destroy()
+        _best_effort_gl_cleanup(
+            "blockout_surface_destroy_after_context_create_failure",
+            surface.destroy,
+        )
         raise PainterOpenGLUnavailable("Painter OpenGL could not create a context.")
     if not context.makeCurrent(surface):
-        surface.destroy()
+        _best_effort_gl_cleanup(
+            "blockout_surface_destroy_after_context_activation_failure",
+            surface.destroy,
+        )
         raise PainterOpenGLUnavailable("Painter OpenGL could not activate the context.")
 
     fbo = 0
@@ -360,18 +717,27 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         flipped = np.ascontiguousarray(np.flipud(pixels))
         image = QImage(flipped.data, target_w, target_h, 4 * target_w, QImage.Format.Format_RGBA8888).copy()
     finally:
-        try:
-            if color_texture:
-                GL.glDeleteTextures(1, [int(color_texture)])
-            if depth_buffer:
-                GL.glDeleteRenderbuffers(1, [int(depth_buffer)])
-            if fbo:
-                GL.glDeleteFramebuffers(1, [int(fbo)])
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-        except Exception:
-            pass
-        context.doneCurrent()
-        surface.destroy()
+        if color_texture:
+            _best_effort_gl_cleanup(
+                "blockout_color_texture_delete",
+                lambda: GL.glDeleteTextures(1, [int(color_texture)]),
+            )
+        if depth_buffer:
+            _best_effort_gl_cleanup(
+                "blockout_depth_buffer_delete",
+                lambda: GL.glDeleteRenderbuffers(1, [int(depth_buffer)]),
+            )
+        if fbo:
+            _best_effort_gl_cleanup(
+                "blockout_framebuffer_delete",
+                lambda: GL.glDeleteFramebuffers(1, [int(fbo)]),
+            )
+        _best_effort_gl_cleanup(
+            "blockout_default_framebuffer_bind",
+            lambda: GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0),
+        )
+        _best_effort_gl_cleanup("blockout_context_done_current", context.doneCurrent)
+        _best_effort_gl_cleanup("blockout_surface_destroy", surface.destroy)
     return image
 
 
@@ -437,6 +803,7 @@ def render_canvas_strokes_opengl_qimage(
     layer_visibility: dict[str, bool] | None = None,
     layer_opacity: dict[str, int] | None = None,
     layer_masks: dict[str, list[tuple[float, float]]] | None = None,
+    _session: _PainterCanvasOffscreenSession | None = None,
 ) -> tuple[QImage, dict[str, Any]]:
     """Render GL-supported Painter strokes into a transparent QImage.
 
@@ -446,17 +813,11 @@ def render_canvas_strokes_opengl_qimage(
     QPainter stroke path preserves exact artwork.
     """
 
+    target_w, target_h = _validated_render_dimensions(width, height)
     if not painter_canvas_opengl_enabled():
         raise PainterOpenGLUnavailable("Painter canvas OpenGL is disabled.")
     if QGuiApplication.instance() is None:
         raise PainterOpenGLUnavailable("Painter canvas OpenGL requires a running Qt application.")
-    try:
-        from OpenGL import GL
-    except Exception as exc:
-        raise PainterOpenGLUnavailable(f"Painter canvas OpenGL requires PyOpenGL: {exc}") from exc
-
-    target_w = max(1, int(width or 1))
-    target_h = max(1, int(height or 1))
     visible = _collect_canvas_gpu_strokes(
         list(strokes or []),
         width=target_w,
@@ -467,42 +828,56 @@ def render_canvas_strokes_opengl_qimage(
         layer_masks=dict(layer_masks or {}),
     )
 
-    surface, context = _make_offscreen_context()
-    fbo = 0
-    color_texture = 0
+    owns_session = _session is None
+    session = _session or _PainterCanvasOffscreenSession()
+    _surface, context = session.make_current()
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QColor, QPainter, QPen
+    from PySide6.QtOpenGL import QOpenGLFramebufferObject, QOpenGLPaintDevice
+
+    fbo = None
     try:
-        fbo = int(GL.glGenFramebuffers(1))
-        color_texture = int(GL.glGenTextures(1))
-        GL.glBindTexture(GL.GL_TEXTURE_2D, color_texture)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
-        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
-        GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, target_w, target_h, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
-        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
-        GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, color_texture, 0)
-        if int(GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)) != int(GL.GL_FRAMEBUFFER_COMPLETE):
+        # Qt resolves framebuffer entry points against the QOpenGLContext. This
+        # avoids PyOpenGL's platform loader returning a null glGenFramebuffers
+        # even while the Qt context itself supports FBOs.
+        fbo = QOpenGLFramebufferObject(target_w, target_h)
+        if not fbo.isValid() or not fbo.bind():
             raise PainterOpenGLUnavailable("Painter canvas OpenGL framebuffer is incomplete.")
 
-        GL.glViewport(0, 0, target_w, target_h)
-        GL.glDisable(GL.GL_DEPTH_TEST)
-        GL.glEnable(GL.GL_BLEND)
-        GL.glEnable(GL.GL_LINE_SMOOTH)
-        GL.glEnable(GL.GL_POINT_SMOOTH)
-        GL.glHint(GL.GL_LINE_SMOOTH_HINT, GL.GL_NICEST)
-        GL.glHint(GL.GL_POINT_SMOOTH_HINT, GL.GL_NICEST)
-        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
-        GL.glClearColor(0.0, 0.0, 0.0, 0.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-
+        device = QOpenGLPaintDevice(target_w, target_h)
+        painter = QPainter(device)
+        if not painter.isActive():
+            raise PainterOpenGLUnavailable("Painter canvas could not activate the Qt OpenGL paint engine.")
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(QRectF(0, 0, target_w, target_h), QColor(0, 0, 0, 0))
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         for row in visible:
-            _draw_canvas_stroke(GL, row, target_w, target_h)
-        GL.glFlush()
-
-        raw = GL.glReadPixels(0, 0, target_w, target_h, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE)
-        pixels = np.frombuffer(raw, dtype=np.uint8).reshape((target_h, target_w, 4))
-        flipped = np.ascontiguousarray(np.flipud(pixels))
-        image = QImage(flipped.data, target_w, target_h, 4 * target_w, QImage.Format.Format_RGBA8888).copy()
+            points = [QPointF(float(x), float(y)) for x, y in row.get("points", [])]
+            if not points:
+                continue
+            rgba = tuple(row.get("color") or (1.0, 1.0, 1.0, 1.0))
+            color = QColor.fromRgbF(*rgba)
+            widths = list(row.get("dynamic_widths", []) or [])
+            base_width = max(1.0, float(row.get("width", 1.0) or 1.0))
+            if len(points) == 1:
+                painter.setPen(QPen(color, widths[0] if widths else base_width))
+                painter.drawPoint(points[0])
+                continue
+            pairs = list(zip(range(len(points) - 1), range(1, len(points))))
+            if bool(row.get("closed", False)) and len(points) >= 3:
+                pairs.append((len(points) - 1, 0))
+            for first, second in pairs:
+                width = base_width
+                if widths:
+                    width = max(1.0, (widths[first] + widths[second]) * 0.5)
+                pen = QPen(color, width)
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.drawLine(points[first], points[second])
+        painter.end()
+        image = fbo.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
         report = {
             "renderer": PAINTER_CANVAS_OPENGL_RENDERER_ID,
             "active": "opengl",
@@ -511,18 +886,16 @@ def render_canvas_strokes_opengl_qimage(
             "size": [target_w, target_h],
             "stroke_count": len(visible),
             "supported_first_pass": True,
+            "backend": "qt_opengl_paint_device",
         }
     finally:
-        try:
-            if color_texture:
-                GL.glDeleteTextures(1, [int(color_texture)])
-            if fbo:
-                GL.glDeleteFramebuffers(1, [int(fbo)])
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
-        except Exception:
-            pass
-        context.doneCurrent()
-        surface.destroy()
+        if fbo is not None:
+            _best_effort_gl_cleanup("canvas_framebuffer_release", fbo.release)
+            fbo = None
+        if owns_session:
+            _best_effort_gl_cleanup("canvas_session_close", session.close)
+        else:
+            _best_effort_gl_cleanup("canvas_context_done_current", session.done_current)
     return image, report
 
 
@@ -541,10 +914,16 @@ def _make_offscreen_context() -> tuple[QOffscreenSurface, QOpenGLContext]:
     context = QOpenGLContext()
     context.setFormat(fmt)
     if not context.create():
-        surface.destroy()
+        _best_effort_gl_cleanup(
+            "canvas_surface_destroy_after_context_create_failure",
+            surface.destroy,
+        )
         raise PainterOpenGLUnavailable("Painter OpenGL could not create a context.")
     if not context.makeCurrent(surface):
-        surface.destroy()
+        _best_effort_gl_cleanup(
+            "canvas_surface_destroy_after_context_activation_failure",
+            surface.destroy,
+        )
         raise PainterOpenGLUnavailable("Painter OpenGL could not activate the context.")
     return surface, context
 
@@ -725,7 +1104,7 @@ def _hex_to_rgba(value: str, opacity: float) -> tuple[float, float, float, float
         r = int(text[1:3], 16) / 255.0
         g = int(text[3:5], 16) / 255.0
         b = int(text[5:7], 16) / 255.0
-    except Exception:
+    except ValueError:
         r, g, b = (242 / 255.0, 242 / 255.0, 242 / 255.0)
     a = max(0.05, min(1.0, float(opacity)))
     return (r, g, b, a)
@@ -915,6 +1294,7 @@ __all__ = [
     "PAINTER_OPENGL_RENDERER_ID",
     "PainterCanvasStrokeAtlas",
     "PainterOpenGLUnavailable",
+    "PainterRetainedGLTileUploader",
     "canvas_stroke_gpu_signature",
     "painter_canvas_opengl_enabled",
     "painter_canvas_gpu_capabilities",

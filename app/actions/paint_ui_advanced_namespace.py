@@ -341,6 +341,15 @@ def register_paint_ui_advanced_actions(registry: Any) -> None:
     )
     _register(
         registry,
+        "paint.ui.vector.boolean.flatten",
+        "Destructively convert a Painter UI Boolean group to one editable vector path.",
+        "paint_ui_vector_boolean_flatten",
+        {"object_id": _ID},
+        required=("object_id",),
+        undo_label="Flatten UI Boolean",
+    )
+    _register(
+        registry,
         "paint.ui.section.inspect",
         "Inspect imported or authored Figma-style sections.",
         "paint_ui_section_inspect",

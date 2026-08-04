@@ -6,7 +6,7 @@ import math
 from typing import Any, Mapping
 
 
-_MODES = {"none", "horizontal", "vertical"}
+_MODES = {"none", "horizontal", "vertical", "grid"}
 _MAIN_ALIGNMENTS = {"start", "center", "end", "space_between"}
 _CROSS_ALIGNMENTS = {"start", "center", "end", "stretch"}
 _POSITIONING = {"auto", "absolute"}
@@ -119,6 +119,33 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
             "height_sizing": (
                 height_sizing if height_sizing in _SIZING_MODES else "fixed"
             ),
+            "grid_columns": max(1, int(_number(source.get("grid_columns"), 2))),
+            "grid_column_span": max(
+                1, int(_number(source.get("grid_column_span"), 1))
+            ),
+            "grid_row_span": max(
+                1, int(_number(source.get("grid_row_span"), 1))
+            ),
+            "cell_horizontal_alignment": (
+                str(source.get("cell_horizontal_alignment") or "stretch")
+                .strip()
+                .casefold()
+                if str(source.get("cell_horizontal_alignment") or "stretch")
+                .strip()
+                .casefold()
+                in {"start", "center", "end", "stretch"}
+                else "stretch"
+            ),
+            "cell_vertical_alignment": (
+                str(source.get("cell_vertical_alignment") or "stretch")
+                .strip()
+                .casefold()
+                if str(source.get("cell_vertical_alignment") or "stretch")
+                .strip()
+                .casefold()
+                in {"start", "center", "end", "stretch"}
+                else "stretch"
+            ),
         }
     )
     for legacy_key in (
@@ -132,6 +159,50 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
     ):
         source.pop(legacy_key, None)
     return source
+
+
+def grid_auto_layout_placements(
+    rows: list[Mapping[str, Any]],
+    columns: int,
+) -> tuple[dict[str, tuple[int, int, int, int]], int]:
+    columns = max(1, int(columns))
+    occupied: set[tuple[int, int]] = set()
+    result: dict[str, tuple[int, int, int, int]] = {}
+    cursor_row = 0
+    cursor_column = 0
+    for child in rows:
+        layout = normalize_ui_auto_layout(child.get("layout"))
+        column_span = min(columns, max(1, int(layout["grid_column_span"])))
+        row_span = max(1, int(layout["grid_row_span"]))
+        while True:
+            if cursor_column + column_span > columns:
+                cursor_row += 1
+                cursor_column = 0
+                continue
+            cells = {
+                (row_index, column_index)
+                for row_index in range(cursor_row, cursor_row + row_span)
+                for column_index in range(
+                    cursor_column,
+                    cursor_column + column_span,
+                )
+            }
+            if not cells.intersection(occupied):
+                occupied.update(cells)
+                result[str(child["id"])] = (
+                    cursor_row,
+                    cursor_column,
+                    row_span,
+                    column_span,
+                )
+                cursor_column += column_span
+                break
+            cursor_column += 1
+            if cursor_column >= columns:
+                cursor_row += 1
+                cursor_column = 0
+    row_count = max((row + span for row, _col, span, _cspan in result.values()), default=0)
+    return result, row_count
 
 
 def _bounded_axis_size(
@@ -221,6 +292,36 @@ def _line_content_size(
     return main, cross
 
 
+def _distribute_fill_sizes(
+    rows: list[Mapping[str, Any]],
+    available: float,
+    *,
+    axis: str,
+) -> dict[str, float]:
+    """Distribute flex space while honoring per-child min/max constraints."""
+    pending = list(rows)
+    remaining = max(0.0, float(available))
+    result: dict[str, float] = {}
+    while pending:
+        share = remaining / len(pending)
+        clamped: list[tuple[Mapping[str, Any], float]] = []
+        for row in pending:
+            size = _bounded_axis_size(share, row.get("constraints"), axis=axis)
+            if abs(size - share) > 0.001:
+                clamped.append((row, size))
+        if not clamped:
+            for row in pending:
+                result[str(row["id"])] = share
+            break
+        clamped_ids = {str(row["id"]) for row, _size in clamped}
+        for row, size in clamped:
+            result[str(row["id"])] = size
+            remaining -= size
+        remaining = max(0.0, remaining)
+        pending = [row for row in pending if str(row["id"]) not in clamped_ids]
+    return result
+
+
 def resolve_ui_auto_layout(
     document: Mapping[str, Any],
     geometry: Mapping[str, Mapping[str, float]],
@@ -276,7 +377,36 @@ def resolve_ui_auto_layout(
         layout = normalize_ui_auto_layout(row.get("layout"))
         mode = layout["mode"]
         rows = flow_children(object_id)
-        if mode in {"horizontal", "vertical"} and rows:
+        if mode == "grid" and rows:
+            padding = layout["padding"]
+            columns = int(layout["grid_columns"])
+            placements, row_count = grid_auto_layout_placements(rows, columns)
+            column_widths = [0.0] * columns
+            row_heights = [0.0] * row_count
+            for child in rows:
+                child_id = str(child["id"])
+                row_index, column_index, row_span, column_span = placements[child_id]
+                share_width = resolved[child_id]["width"] / column_span
+                share_height = resolved[child_id]["height"] / row_span
+                for index in range(column_index, column_index + column_span):
+                    column_widths[index] = max(column_widths[index], share_width)
+                for index in range(row_index, row_index + row_span):
+                    row_heights[index] = max(row_heights[index], share_height)
+            desired_width = sum(column_widths) + layout["gap"] * max(0, columns - 1)
+            desired_height = sum(row_heights) + layout["cross_gap"] * max(0, row_count - 1)
+            if layout["width_sizing"] == "hug":
+                rect["width"] = _bounded_axis_size(
+                    desired_width + padding["left"] + padding["right"],
+                    row.get("constraints"),
+                    axis="width",
+                )
+            if layout["height_sizing"] == "hug":
+                rect["height"] = _bounded_axis_size(
+                    desired_height + padding["top"] + padding["bottom"],
+                    row.get("constraints"),
+                    axis="height",
+                )
+        elif mode in {"horizontal", "vertical"} and rows:
             padding = layout["padding"]
             main_axis = "width" if mode == "horizontal" else "height"
             cross_axis = "height" if mode == "horizontal" else "width"
@@ -343,7 +473,57 @@ def resolve_ui_auto_layout(
         layout = normalize_ui_auto_layout(parent.get("layout"))
         mode = layout["mode"]
         rows = flow_children(parent_id)
-        if mode in {"horizontal", "vertical"} and rows:
+        if mode == "grid" and rows:
+            padding = layout["padding"]
+            columns = int(layout["grid_columns"])
+            placements, row_count = grid_auto_layout_placements(rows, columns)
+            content_x = parent_rect["x"] + padding["left"]
+            content_y = parent_rect["y"] + padding["top"]
+            content_width = max(
+                0.0,
+                parent_rect["width"] - padding["left"] - padding["right"],
+            )
+            content_height = max(
+                0.0,
+                parent_rect["height"] - padding["top"] - padding["bottom"],
+            )
+            column_width = max(
+                0.0,
+                (content_width - layout["gap"] * max(0, columns - 1)) / columns,
+            )
+            row_height = max(
+                0.0,
+                (content_height - layout["cross_gap"] * max(0, row_count - 1))
+                / max(1, row_count),
+            )
+            for child in rows:
+                child_id = str(child["id"])
+                rect = resolved[child_id]
+                child_layout = normalize_ui_auto_layout(child.get("layout"))
+                row_index, column_index, row_span, column_span = placements[child_id]
+                cell_x = content_x + column_index * (column_width + layout["gap"])
+                cell_y = content_y + row_index * (row_height + layout["cross_gap"])
+                cell_width = column_width * column_span + layout["gap"] * (column_span - 1)
+                cell_height = row_height * row_span + layout["cross_gap"] * (row_span - 1)
+                horizontal = str(child_layout["cell_horizontal_alignment"])
+                vertical = str(child_layout["cell_vertical_alignment"])
+                if horizontal == "stretch" or child_layout["width_sizing"] == "fill":
+                    rect["width"] = _bounded_axis_size(
+                        cell_width, child.get("constraints"), axis="width"
+                    )
+                if vertical == "stretch" or child_layout["height_sizing"] == "fill":
+                    rect["height"] = _bounded_axis_size(
+                        cell_height, child.get("constraints"), axis="height"
+                    )
+                rect["x"] = cell_x + {
+                    "center": max(0.0, cell_width - rect["width"]) * 0.5,
+                    "end": max(0.0, cell_width - rect["width"]),
+                }.get(horizontal, 0.0)
+                rect["y"] = cell_y + {
+                    "center": max(0.0, cell_height - rect["height"]) * 0.5,
+                    "end": max(0.0, cell_height - rect["height"]),
+                }.get(vertical, 0.0)
+        elif mode in {"horizontal", "vertical"} and rows:
             padding = layout["padding"]
             content_x = parent_rect["x"] + padding["left"]
             content_y = parent_rect["y"] + padding["top"]
@@ -392,13 +572,15 @@ def resolve_ui_auto_layout(
                     - fixed_total
                     - layout["gap"] * max(0, len(line) - 1),
                 )
-                fill_size = remaining / len(fill_rows) if fill_rows else 0.0
+                fill_sizes = _distribute_fill_sizes(
+                    fill_rows,
+                    remaining,
+                    axis=main_axis,
+                )
                 for child in fill_rows:
-                    resolved[str(child["id"])][main_axis] = _bounded_axis_size(
-                        fill_size,
-                        child.get("constraints"),
-                        axis=main_axis,
-                    )
+                    resolved[str(child["id"])][main_axis] = fill_sizes[
+                        str(child["id"])
+                    ]
                 line_cross = max(
                     resolved[str(row["id"])][cross_axis] for row in line
                 )
@@ -453,6 +635,7 @@ def resolve_ui_auto_layout(
 
 
 __all__ = [
+    "grid_auto_layout_placements",
     "normalize_ui_auto_layout",
     "resolve_ui_auto_layout",
 ]

@@ -1810,6 +1810,16 @@ workflow is production-ready.
 - Desktop/compact evidence and report regenerate through
   `tools/qa_painter_ui_boolean_authoring.py`.
 
+## 4.5 M1 Boolean Figma-Parity Follow-up
+
+The schema 18 checkpoint proves the bounded four-operation baseline only.
+The remaining official-behavior parity work is planned as M1B.1-M1B.8 in
+`docs/PAINTER_UI_BOOLEAN_PARITY_MILESTONES_KO.md`. M1B.1 operand/style
+correctness and M1B.2 full fill+stroke geometry are mandatory correctness
+gates before direct-edit polish, nested Boolean, Flatten, or delivery claims.
+The focused roadmap records evidence requirements and must remain aligned with
+this canonical M1 roadmap.
+
 ## 5. Main Risks
 
 - Feature breadth can hide weak day-to-day UX. Measure task completion, not

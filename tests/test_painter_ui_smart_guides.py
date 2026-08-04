@@ -172,6 +172,36 @@ def test_smart_resize_guides_snap_equal_width_and_height() -> None:
     }
 
 
+def test_smart_resize_guides_snap_active_edge_to_peer_center() -> None:
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_smart_guides import plan_ui_resize_guides
+
+    document = create_ui_document(800, 600)
+    document, target = add_ui_object(
+        document, kind="ellipse", x=400, y=100, width=200, height=200
+    )
+    document, moving = add_ui_object(
+        document, kind="ellipse", x=100, y=120, width=100, height=80
+    )
+    report = plan_ui_resize_guides(
+        document,
+        object_id=moving["id"],
+        x=100,
+        y=120,
+        width=399,
+        height=80,
+        tolerance=2,
+        active_handle="e",
+    )
+
+    assert report["x"] + report["width"] == 500.0
+    guide = next(row for row in report["guides"] if row["axis"] == "horizontal")
+    assert guide["kind"] == "center"
+    assert guide["target_object_id"] == target["id"]
+    assert guide["extent_start"] == 100.0
+    assert guide["extent_end"] == 300.0
+
+
 def test_smart_guide_action_is_read_only() -> None:
     app = _app()
     from app.actions.registry import ActionRegistry

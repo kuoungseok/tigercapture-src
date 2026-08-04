@@ -116,3 +116,39 @@ def test_ui_canvas_context_menu_omits_selection_only_commands(
     assert painter_text("Fit selection") not in texts
     dialog.close()
     dialog.deleteLater()
+
+
+def test_ui_canvas_context_menu_exposes_auto_layout_entry_and_remove() -> None:
+    _app()
+    from PySide6.QtCore import QPoint
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_i18n import painter_text
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 480, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._add_default_painter_ui_object("rectangle")
+    menu = dialog._show_canvas_context_menu(QPoint(10, 10), execute=False)
+    visible = {
+        action.text(): action
+        for action in menu.actions()
+        if action.isVisible() and not action.isSeparator()
+    }
+    assert painter_text("Add auto layout") in visible
+    assert painter_text("Remove auto layout") not in visible
+
+    assert dialog._apply_painter_ui_auto_layout_entry("add")["ok"] is True
+    menu = dialog._show_canvas_context_menu(QPoint(10, 10), execute=False)
+    visible = {
+        action.text(): action
+        for action in menu.actions()
+        if action.isVisible() and not action.isSeparator()
+    }
+    assert painter_text("Add auto layout") not in visible
+    assert painter_text("Remove auto layout") in visible
+    dialog.close()
+    dialog.deleteLater()

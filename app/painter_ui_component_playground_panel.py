@@ -187,7 +187,18 @@ class PainterUIComponentPlaygroundPanel(QDialog):
                 choices = (
                     list(definition.get("values") or [])
                     if property_type == "enum"
-                    else list(components)
+                    else [
+                        *[
+                            item
+                            for item in definition.get("preferred_values", [])
+                            if item in components
+                        ],
+                        *[
+                            item
+                            for item in components
+                            if item not in definition.get("preferred_values", [])
+                        ],
+                    ]
                 )
                 for choice in choices:
                     control.addItem(

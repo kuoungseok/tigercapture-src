@@ -7885,7 +7885,7 @@ AI Script Edit MVP integration:
   Live Smudge/Mixer/Pickup preview now samples a separately rendered committed
   current-layer image while keeping the live overlay transparent; pen-down and
   pen-up output are bounded to one 8-bit premultiplied-alpha rounding step.
-  The current full automated gate passes 207 Painting tests and 5 architecture/
+  The current full automated gate passes 376 Painting tests and 5 architecture/
   debug-boundary tests, but remains `automated_baseline_only` and
   `release_ready=false`.
 - The 2026-08-04 R6 interchange pass separates promoted 8-bit data from native
@@ -7948,7 +7948,7 @@ AI Script Edit MVP integration:
   and independent human visual review. An independent QA agent
   review cannot satisfy the `independent_manual` evidence kind.
   The current UI-Design-excluded Painter plus architecture/debug-boundary gate
-  passes 244 tests; this is automated regression evidence, not a substitute for
+  passes 381 tests; this is automated regression evidence, not a substitute for
   any missing release evidence class above.
 - Painter numeric and capacity limits must expose their provenance and claim
   boundary. The current 16,384-pixel canvas dimension is a Tiger runtime policy,
@@ -7965,10 +7965,63 @@ AI Script Edit MVP integration:
   [Adobe Photoshop brush maximum](https://helpx.adobe.com/pdf/cs6/photoshop_reference.pdf),
   [Qt QImage](https://doc.qt.io/qt-6/qimage.html), and
   [W3C PNG 3](https://www.w3.org/TR/png-3/).
+- Action Catmull-Rom smoothing uses Tiger-authored defaults of eight samples per
+  segment and a 512 generated-point budget. The corrected allocator always keeps
+  every source control in order, even when source count exceeds 512, and spreads
+  only the remaining budget across the complete path. Fractional sampling controls
+  and non-finite point channels are rejected. These defaults do not describe tablet
+  sampling, document capacity, or another painter's brush engine.
+- Retained-canvas tiles use a shared configurable 32–1,024-pixel policy with 256 as
+  the Tiger default. GPU capability metadata now reports the default and supported
+  range rather than presenting 256 as fixed. A 64-pixel regression proves the same
+  configured value reaches all retained caches, the GPU compositor call, and
+  telemetry; this is consistency evidence, not a universal performance claim.
+- Stroke-history and saved-path indices are strict integers. Negative, fractional,
+  empty-list, and past-end values are rejected before any canvas mutation or Undo
+  push; they are never clamped to the first or last unrelated item. History-list
+  selection is separately frozen as a structural list-index invariant.
+- Qt defines alpha 0 as fully transparent. Painter artwork, bristle detail, and brush
+  preview paths now preserve zero rather than forcing a nonzero alpha. A direct
+  raster regression proves zero-alpha tip and bristle strokes leave every output
+  pixel transparent. The only retained alpha floor is restricted to the 58×30
+  Layers/Channels panel icon and cannot mutate, serialize, or export artwork.
+- Wet Canvas drying time has one named document/UI conversion contract. The saved
+  domain remains 1..86,400 seconds and the material menu exposes the complete
+  corresponding 1..1,440-minute range. Seconds map by explicit positive half-up
+  rounding; UI minutes map back exactly by multiplication by 60. Values outside
+  the UI domain, booleans, and fractional minute inputs are rejected. Exhaustive
+  testing over every integer saved second proves a maximum 59-second round-trip
+  error, caused only by the one-minute UI minimum, while the live menu test proves
+  1,440 minutes is visible and 721 minutes commits as 43,260 seconds. These are
+  Tiger document controls, not a physical-paint drying claim.
+- Painting combo-box state is selected by semantic item data, never by assuming
+  visual row zero is the default. The shared selector follows Qt's documented
+  `findData()` sentinel contract: a missing requested value searches only the
+  caller-declared fallback and a missing fallback raises. Output kind declares
+  `color`, palette harmony declares `complementary`, and layer blend declares
+  `normal`. Reordered-row tests prove exact selection, named fallback, and
+  fail-closed behavior. Reference:
+  [Qt for Python QComboBox](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QComboBox.html).
+- Painter color input geometry is measured through real floating-point mouse
+  events, not only by comparing internal formulas. Tests cover both color-wheel
+  sizes near all three triangle vertices and at the centroid; SV-field four
+  corners, outside clamping, hue-strip input, and the 8-DIP structural floor;
+  and identical logical geometry/event results in separate 1x and 2x Qt
+  processes. The wheel radius rule and field margins are explicit Tiger input
+  policy, not Adobe picker parity. Qt QMouseEvent local-position and High-DPI
+  logical-coordinate documentation are the platform basis.
+- Print-guide geometry consumes normalized output settings. `include_bleed=false`
+  produces a trim rectangle covering the complete trim-only raster and excludes
+  configured bleed from both physical-size fallback and guide scaling. Safe
+  margins are capped per axis at half the trim extent, so over-constrained values
+  collapse at the center without creating a negative/inverted QRectF. A4
+  bleed/safe coordinates, trim-only A4 ~300 PPI, oversized-safe, and screen-mode
+  absence are directly tested. This is a guide-consistency contract, not a
+  printer-acceptance or print-quality claim.
 - The Painting evidence audit includes the Paint Actions namespace/adapter and
   inventories numeric `min`/`max` clamps with class/function context; a
-  path-wide catch-all classification is invalid. The corrected scan covers 45
-  Painting app modules and currently 251 test functions. It exposed and removed a hidden
+  path-wide catch-all classification is invalid. The corrected scan covers 49
+  Painting app modules and currently 380 test functions. It exposed and removed a hidden
   256-dab per-segment cap: dynamic dabs are now placed by whole-polyline arc
   length, so collinear paths with 2 and 33 input controls produce the same dab
   count. `.tspaint` archive entries reject POSIX traversal, Windows backslash
@@ -7982,15 +8035,224 @@ AI Script Edit MVP integration:
   hundreds of numeric literals to `reviewed_*` without an explicit source or
   policy ledger. Those matches are now unresolved
   `candidate_explicit_ledger_*` rows. The current Painting-only inventory
-  contains 1,710 decisions; 368 remain unresolved and therefore block product
-  reapproval. Of these, 335 require an explicit source/invariant/Tiger-policy
-  ledger link and 33 are hidden pressure/rotation and canvas-size fabrication,
-  suppressed operational failures, sample-count-based paint depletion, or a
-  36-vs-64 explicit bristle-capacity mismatch. The visible
-  and canvas-size fabrication plus suppressed operational failures. The visible
+  includes 197 Painting Action-schema `minimum`/`maximum`/item-bound rows,
+  linked by AST to their registered Action IDs; `paint.ui.*` rows are excluded.
+  This avoids scanning only executable comparisons and clamps.
+  The earlier comparison/clamp-only inventory of 1,921 rows was not exhaustive:
+  it missed numeric defaults, assignments, tuple/schema values, and expressions
+  with the literal on the left side of a comparison. The corrected AST coverage
+  inventory finds 6,603 unique Painting numeric-literal source lines. Existing
+  routed scanners currently leave 5,024 explicit
+  scanner-gap rows. Two PSD signature/version rows are now routed and approved
+  against Adobe's official header specification; after all currently approved
+  exact contracts, 4,813 AST literal sites remain unresolved. Seven additional
+  PSD header field-extent guards are approved separately
+  against the same Adobe File Header table. Ten PNG signature/chunk/CRC/IHDR/IEND
+  parser sites are approved against W3C PNG 3. Four TIFF header/IFD sites are
+  approved against TIFF Revision 6.0 Section 2. Twenty-eight TIFF writer IFD,
+  packing, alignment, baseline-tag, and ICC UNDEFINED-field rows are approved
+  against TIFF 6.0 and the ICC tag contract. Four PNG16 IHDR/pHYs rows are approved against W3C PNG 3,
+  and three flat-image bit-depth metadata rows are approved against PNG 3/TIFF
+  6.0. The exact 25.4 mm/in conversion and two ICC v2/v4 inspection rows are
+  approved separately against NIST/ICC sources. Three `.tspaint` v1/v2/v3 rows
+  are approved only as a tested Tiger migration contract. Thirteen uint16 channel-domain
+  and array-shape invariants are approved separately after exact uint8 expansion,
+  uint16 preservation, and unsupported-integer rejection tests. Two PNG16 zlib level rows
+  are approved only as an explicit Tiger encoding policy, and four flat-writer
+  array-shape operations are approved as structural invariants. Eight 8/16-bit
+  flat-export rows are approved only as Tiger's supported product scope. Six
+  8-bit premultiplication rows are approved as comparison math. Three intent-1
+  color-management defaults are approved only as Tiger policy, and the internal
+  `asset://` prefix slice is approved as an exact string invariant. Fifty-five
+  Advanced Brush rows are approved as an explicit Tiger-authored product model:
+  `dynamic_dabs` reaches all four primitives through the AST-proven
+  `advanced_dab_alphas` entry point, while DrawingCanvas uses that path for live
+  and committed rendering. The audit verifies import provenance and rejects
+  unrelated imports, local shadows, arbitrary methods, comments, strings, and
+  import-only references. Disabled byte identity, deterministic replay,
+  Protect Texture document precedence and scale response, malformed nested
+  setting diagnostics, rendered-pixel change, Undo/Redo, and document restore
+  are directly tested; no physical-media or Adobe/Corel parity is claimed. The
+  singleton texture interpolation guard is separately approved as a structural
+  invariant. The 8,192-dab materialization budget is approved only as a measured
+  Tiger runtime guard: a 228,304-dab estimate is uniformly resampled over the full
+  path, degradation is exposed in Painter Action state, and rendering does not
+  mutate authored brush settings. Corrected-source target-machine measurement was
+  26.0007 ms median generation, 54.7404 ms median QImage rendering, and 4,432,465
+  bytes traced peak; these values are not universal latency guarantees. Three
+  repeated-soak aggregation rows are approved only as an
+  operational baseline structure. Ten three-run retention-review rows are
+  approved only as Tiger's scoped evidence policy. Sixteen runtime-statistics
+  and Windows resource-selector rows are approved as reporting math/API
+  contracts. The external-evidence SHA-256 1 MiB read chunk is approved only as
+  bounded Tiger I/O policy. Four readiness-matrix rows mirror only Tiger's
+  tested flat-export scope. The ARGB32 alpha-byte row is approved only for the
+  supported little-endian Windows runtime. Eight reapproval aggregation rows
+  are approved only as fail-closed operational structure, leaving 4,813 AST literal
+  sites unresolved. The audit currently contains 6,975 classified rows;
+  5,934 remain unresolved and therefore block product reapproval. All 5,934 are
+  candidates requiring exact-row tests plus an explicit source, invariant,
+  Tiger-policy, or operational-failure ledger link. Suppressed-exception sites
+  are now routed into concrete contracts;
+  routing is not approval.
+  The previously separated pressure/rotation, dimension/color fabrication,
+  one-pixel substitution, Action brush truncation, paint depletion, bristle
+  capacity, TIFF ICC field type, uint8-to-uint16 expansion, decoder diagnostics,
+  and history snapshot validation defects now have direct regression coverage.
+  Clipboard failures expose bounded operational state, interaction-hook failure is
+  fail-closed, and video export aborts rather than silently omitting a failed
+  stroke, speech-bubble, or sticker overlay.
+  The visible
   New Canvas `Full HD 16:9` preset is an explicit Tiger starting policy; resize,
   compositor, export, automation, and document-load paths must not silently
   substitute that preset for missing or invalid dimensions.
+- Exception handling follows the Python language guidance to catch intended
+  exception types specifically and let unexpected exceptions propagate. Every
+  Painting catch site must be classified as caller propagation, bounded
+  structured worker telemetry, optional-feature isolation with an exposed
+  operational error, or cleanup-only preservation of an already-active
+  exception. A Python Qt wrapper is not treated as a live dialog until
+  `Shiboken.isValid()` confirms the wrapped C++ object. Empty broad catches that
+  fabricate success, time, dimensions, colors, or document state block
+  reapproval. References: [Python Errors and Exceptions](https://docs.python.org/3/tutorial/errors.html)
+  and [Shiboken module](https://doc.qt.io/qtforpython-6.8/shiboken6/shibokenmodule.html).
+  The exact review gate is stored in
+  `docs/PAINTER_EXCEPTION_DECISION_LEDGER.json`. All 20 currently routed contract
+  groups are approved by exact-row hashes and failure injection. Across 117
+  exception/cleanup contract rows, all 117 exact rows are approved and none remain
+  pending. Four formerly broad catches for default-directory
+  fallback or menu-index validation now catch only their expected exception
+  types and are no longer counted as suppressed-operation failures. The eight
+  Painter Action post-commit handlers now keep
+  sticker, 3D blockout, or reference-board data committed while returning a
+  structured `ui_refresh` status with the failed operation, exception type, and
+  message; the audit explicitly scans the adapter even after telemetry replaces
+  an empty `pass` body. Nine optional-feature handlers now expose the originating
+  type and full message through their feature report, explicit fallback status,
+  operational-errors state, or recovery detail; failure injection covers Wet
+  Canvas, retained layers, references, blockout, PBR, brush profiles, and recovery.
+  Eleven optional canvas-extension callbacks now fail closed with a bounded
+  interaction or context-menu diagnostic and preserve committed strokes. A
+  double-click failure no longer falls through into a second press callback that
+  can replace the originating error.
+  Seven parent/window/resource handlers now keep cleanup diagnostics separate
+  from the primary operation error. Failed cutout generation cleans both source
+  and partial output targets before returning without a sticker commit.
+  The 12-row user-operation contract is now approved: save/import/export failures
+  expose exact operational diagnostics, return no success claim, and preserve
+  document state. PBR maps, flat/document PNG, and brush bundles generate into
+  staging beside the destination. Commit and rollback use same-filesystem
+  `os.replace`; failure injection covers generation, backup, install, removal,
+  restore, created-directory cleanup, and staging cleanup. Successful rollback
+  restores prior files; incomplete rollback reports exact diagnostics and retains
+  a recovery staging path. This follows the documented Python `os.replace` and
+  temporary-file/directory contracts. It claims per-file atomic replacement and
+  tested multi-file rollback, not a filesystem-wide atomic transaction, power-loss
+  durability, or recovery after process termination. References:
+  [Python os.replace](https://docs.python.org/3/library/os.html#os.replace) and
+  [Python tempfile](https://docs.python.org/3/library/tempfile.html).
+  The approved set includes bounded async telemetry, typed ICC/decode/clipboard
+  failures, overlay abort behavior, Wet Canvas and OpenCV/Pillow fallback state,
+  OpenGL availability, canvas/retained GPU fallback and cleanup, Qt capability
+  fallback, and fail-closed reapproval decoding. GL teardown is restricted to one
+  named operation per call, records type/message and operation in status, and adds
+  a note without replacing an active render exception. This follows Qt's
+  `doneCurrent()` and offscreen-surface lifetime rules, Khronos deletion entry
+  points, and Python exception-note behavior. References:
+  [Qt QOpenGLContext](https://doc.qt.io/qt-6/qopenglcontext.html),
+  [Qt QOffscreenSurface](https://doc.qt.io/qt-6.8/qoffscreensurface.html),
+  [Khronos OpenGL reference](https://registry.khronos.org/OpenGL-Refpages/gl4/html/),
+  and [Python Errors and Exceptions](https://docs.python.org/3/tutorial/errors.html).
+  The audit freezes the helper handler, all 23 named cleanup delegates, and two
+  caller-propagated cleanup primitives as 26 exact AST rows. Any new direct
+  `destroy`, `release`, `doneCurrent`, or GL-delete call outside those explicit
+  propagation boundaries is an unreviewed defect, so helper-only approval cannot
+  conceal a future teardown bypass.
+  No exception catch is approved from its function name.
+- The formerly stale `ui_layout_or_preview_only_policy_not_artwork_claim` was
+  re-audited row by row. Twenty-three exact rows are now frozen as Painting
+  window/panel/popup/icon/preview-only geometry that cannot write document
+  state or committed stroke pixels. Two color-input geometry rows, one
+  wet-canvas drying-value conversion, and one palette-harmony enum selection
+  were removed from that scope and remain pending under separate contracts.
+- The 8-bit channel bucket was also split before approval. Fifty-one exact
+  rows are genuine 0..255 RGB/RGBA/Alpha8/tone-curve channels, channel-difference
+  tolerance, or `/255` OpenGL/ASE conversion and are frozen as format/math
+  invariants. Six rows with minimum alpha 1 or 32 are not format invariants;
+  they remain pending as authored visible-alpha policy.
+- The generic normalized/signed-unit bucket is not accepted as one semantic
+  contract. Three exact direct Qt calls were separated and approved: one
+  `QColor.setAlphaF`, one `QColor.fromRgbF`, and one `QPainter.setOpacity`, each
+  with a visible 0.0..1.0 clamp. This follows Qt's documented floating QColor
+  component and painter-opacity domains. The remaining 141 rows stay pending;
+  Qt evidence does not certify sensor normalization, authored brush response,
+  geometry, or OpenGL policy. References: [Qt QColor](https://doc.qt.io/qt-6/qcolor.html)
+  and [Qt QPainter](https://doc.qt.io/qt-6.8/qpainter.html).
+- Seven ICC payload-length guards are frozen as a separate external-standard
+  contract. They correspond exactly to ICC.1:2022 Table 17's 128-byte header
+  and the size, version, device class, data colour space, PCS, and `acsp`
+  signature fields at their specified byte offsets. Rendering-intent policy
+  and LittleCMS behavior are excluded from this approval. Reference:
+  [ICC.1:2022](https://www.color.org/specifications/ICC.1-2022-05.pdf).
+- Ten AST-only PNG parser/encoder helper sites are frozen against the W3C PNG
+  signature and chunk structure: four-byte length, four-byte type, data,
+  four-byte CRC over type and data, `IHDR` first, and `IEND` final without
+  trailing bytes. Pixel encoding, compression level, profiles, and `pHYs`
+  policy remain outside this approval. Reference: [W3C PNG 3](https://www.w3.org/TR/png-3/).
+- Four PNG16 writer rows are separately frozen against W3C PNG 3: IHDR encodes
+  16-bit RGBA type 6 or RGB type 2 with method values 0, and pHYs uses equal
+  axes with unit specifier 1 metre. The two zlib level-6 rows are intentionally
+  excluded as implementation policy, not format law.
+- Three flat-image inspection rows are separately frozen to the format-defined
+  PNG IHDR bit-depth byte at file offset 24 and TIFF BitsPerSample tag 258.
+  Decoder success and fallback precision inference remain outside this approval.
+- The sole 25.4 millimetres-per-inch constant is frozen to NIST's exact
+  international-inch definition. Two ICC inspection branches are separately
+  frozen to supported v2/v4 major-version handling. Print/PPI defaults,
+  rendering-intent defaults, and CMM behavior do not inherit these approvals.
+- Three `.tspaint` version rows are frozen as an internal Tiger compatibility
+  contract because the format spec declares v3 plus v1/v2 migration and the
+  document-I/O regressions exercise all three. This is not an external-standard
+  or third-party parity claim; archive/hash/capacity values remain outside it.
+- Four AST-only TIFF integrity sites are frozen against TIFF Revision 6.0
+  Section 2: the 8-byte header, endian-aware 42 identifier, first-IFD offset,
+  2-byte entry count, 12-byte entries, and 4-byte next-IFD offset. TIFF tag
+  semantics, image payload, compression, ICC, and decoder success remain outside
+  this approval. Reference: [TIFF Revision 6.0](https://printtechnologies.org/standards/files/tiff-v6.pdf).
+- Twenty-seven AST-only TIFF writer rows are separately frozen against TIFF
+  Revision 6.0 for IFD layout, field packing, word alignment, and the exact
+  baseline RGB/strip/resolution/alpha tags emitted by the two 16-bit writers.
+  The two ICC tag rows are excluded and remain explicit defects because ICC
+  requires tag 34675 to use type 7 UNDEFINED, while the current code emits type
+  1 BYTE. PPI policy, invented precision, decoder success, and quality claims
+  remain outside this approval.
+- Evidence-audit reports include a UTC generation timestamp, per-file byte
+  count and SHA-256, and one combined inventory SHA-256 covering every scanned
+  app/test/tool/document, both decision ledgers, and the auditor itself. A
+  report cannot be treated as current evidence after any covered input changes.
+  Product reapproval recomputes that inventory against the current workspace;
+  missing provenance or any file/size/hash mismatch invalidates aggregation and
+  `numeric_control_audit_complete` rather than merely displaying a warning.
+- The pre-correction RED baseline for the focused Painter evidence suite is
+  50 passed and 26 failed across 76 tests. The failures are grouped as tablet
+  input (3), canvas validation (2), Actions (4), document I/O (3), bristle
+  contracts (3), OpenGL lifecycle (2), surfaced operational errors (4),
+  autosave error structure (1), and Advanced Brush implementation (4). This is
+  diagnostic scope evidence, not a completion percentage or release score.
+- The corrected focused suite passes 83/83 tests using the nine explicitly
+  listed modules in the Korean audit milestone. The broader repository
+  selection containing `painter`/`paint_` tests passes 1,069/1,076; six failures
+  are UI Design tests outside this Painting milestone, and the sole Painting
+  failure exposed a contract error where the New Canvas UI's 64-pixel minimum
+  was incorrectly applied to a valid 19-by-13 PSD import. Import now accepts
+  any positive document size while the New Canvas dialog keeps its explicit
+  64-pixel product minimum. The file-exchange and new-canvas regression set
+  passes 34/34.
+- Canvas, OpenGL render, and v3 document dimensions use strict integer input;
+  they reject fractional numbers and booleans instead of silently applying
+  Python `int()` truncation/coercion. Independent read-only QA exposed this
+  after passing 126 related tests, and the added 19.9/`True`/13.5 corruption
+  cases pass in the current 83-test focused suite.
 - Painter Magic Select exposes and accepts the documented RGB tolerance domain
   directly as 0-255. The former 0-100 UI plus 2.55 conversion was an
   unsupported local scale and is removed. Current Tiger max-channel RGBA
@@ -8098,6 +8360,22 @@ AI Script Edit MVP integration:
   `tools/run_painter_long_soak_series.py` waits for the active first report,
   runs two additional sessions sequentially, then performs series acceptance
   and R8 reaggregation without user intervention.
+- Three pre-correction native 7,200-second runs completed, but their aggregate
+  remains `evidence_incomplete`: runs one and three retain positive late-half
+  working-set and private-usage trends. The third run recorded 118,406
+  operations, 986 cycles, 1,432 samples, and zero operation errors. A targeted
+  diagnostic then found 300 OpenGL context creations for 300 canvas renders.
+  A canvas-lifetime offscreen session reduces the same diagnostic to one
+  context creation for 300 renders and explicitly closes it with the canvas.
+  These short before/after diagnostics do not prove leak freedom. A fresh
+  corrected-source soak started at 15:26 KST, but was intentionally stopped
+  after independent QA found strict-integer validation defects. A replacement
+  7,200-second run containing that fix completed under
+  `debugCapture/painter/soak/20260804-154034-4349048a` and passed the duration,
+  termination, sampling, and operation-error acceptance gate. It remains a
+  pre-file-exchange/history-fix baseline: the subsequent uint16, TIFF ICC,
+  decoder-diagnostic, and history-restore changes require a fresh 7,200-second
+  corrected-source run and cannot inherit this result.
 - The 2026-07-26 standalone Painter persistence pass adds the versioned
   `.tspaint` single-file format (`tigerstudio.painter.document.v1`). It stores
   background pixels, ordered layers/masks, editable strokes and tablet
@@ -8139,7 +8417,10 @@ AI Script Edit MVP integration:
   Texture as shared texture settings; Corel grain/water documentation is the
   parameter-response reference for texture and wet-media separation. Until
   those contracts pass persistence, replay, and export tests the buttons stay
-  disabled and no parity claim is made.
+  disabled and no parity claim is made. The four deterministic primitives now
+  have unit contracts, but the evidence audit separately requires non-test app
+  references for each primitive. All four product-reference rows are currently
+  empty, so unit-test existence cannot be mistaken for product integration.
   The initial library is `Tiger Studio Brushes`; external Painter libraries,
   Painter brush packs, and ABR/captured-dab import remain separate future
   ingestion work and must not be simulated as installed content.

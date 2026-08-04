@@ -4,7 +4,23 @@ from __future__ import annotations
 from typing import Any
 
 from app.actions.schema import schema_object
+from app.painter_action_contract import (
+    PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+    PAINT_ACTION_MAX_POINTS_PER_STROKE,
+    PAINT_ACTION_MAX_REFERENCE_COLORS,
+    PAINT_ACTION_MAX_STROKES_PER_REQUEST,
+    PAINT_ACTION_MAX_STUDY_STROKES,
+)
+from app.painter_large_canvas import (
+    MAX_TILE_BUDGET_MB,
+    MAX_TILE_SIZE,
+    MAX_UNDO_BUDGET_MB,
+    MIN_TILE_BUDGET_MB,
+    MIN_TILE_SIZE,
+    MIN_UNDO_BUDGET_MB,
+)
 from app.painter_brush_catalog import DESIGNER_BRUSH_STYLE_IDS
+from app.painter_layer_compositor import BLEND_MODES
 from app.painter_ui_document import (
     UI_DELIVERY_TARGETS,
     UI_INTERACTION_ACTIONS,
@@ -74,6 +90,25 @@ def register_paint_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
         dry_summary="Painter GPU/OpenGL status would be read",
+    )
+    registry.register_adapter_action(
+        "paint.performance.status",
+        "Report Painter retained tiles, GPU uploads, async material tasks, and Undo memory budget.",
+        "paint", "paint_performance_status",
+        params_schema=schema_object({}), mutating=False, changed=False,
+        dry_summary="Painter large-canvas telemetry would be read",
+    )
+    registry.register_adapter_action(
+        "paint.performance.configure",
+        "Configure bounded Painter tile and Undo memory budgets.",
+        "paint", "paint_performance_configure",
+        params_schema=schema_object({
+            "tile_size": {"type": "integer", "minimum": MIN_TILE_SIZE, "maximum": MAX_TILE_SIZE},
+            "tile_budget_mb": {"type": "integer", "minimum": MIN_TILE_BUDGET_MB, "maximum": MAX_TILE_BUDGET_MB},
+            "undo_budget_mb": {"type": "integer", "minimum": MIN_UNDO_BUDGET_MB, "maximum": MAX_UNDO_BUDGET_MB},
+        }),
+        undo_label="Configure Painter performance budgets",
+        dry_summary="Painter large-canvas budgets would change",
     )
     registry.register_adapter_action(
         "paint.document.new",
@@ -2202,6 +2237,104 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a component property would control a definition sublayer",
     )
     registry.register_adapter_action(
+        "paint.ui.component.instance_swap.preferred.set",
+        "Curate preferred Instance Swap choices without restricting other components.",
+        "paint",
+        "paint_ui_component_instance_swap_preferred_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "preferred_component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            required=(
+                "component_id",
+                "property_name",
+                "preferred_component_ids",
+            ),
+        ),
+        required=("component_id", "property_name", "preferred_component_ids"),
+        undo_label="Set preferred Instance Swap values",
+        dry_summary="preferred Instance Swap choices would be curated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.define",
+        "Define a Figma-compatible Slot on a nested component frame.",
+        "paint",
+        "paint_ui_component_slot_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "description": {"type": "string"},
+                "preferred_component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "slot_settings": any_object,
+            },
+            required=("component_id", "source_object_id", "property_name"),
+        ),
+        required=("component_id", "source_object_id", "property_name"),
+        undo_label="Define UI component Slot",
+        dry_summary="a nested frame would become a component Slot",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.inspect",
+        "Inspect Slot contents and non-blocking limit violations.",
+        "paint",
+        "paint_ui_component_slot_inspect",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+            },
+            required=("instance_root_id", "property_name"),
+        ),
+        required=("instance_root_id", "property_name"),
+        mutating=False,
+        changed=False,
+        dry_summary="Slot contents and limit violations would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.insert",
+        "Insert an existing layer into an instance Slot without detaching it.",
+        "paint",
+        "paint_ui_component_slot_insert",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "object_id": {"type": "string"},
+                "index": {"type": "integer"},
+            },
+            required=("instance_root_id", "property_name", "object_id"),
+        ),
+        required=("instance_root_id", "property_name", "object_id"),
+        undo_label="Insert UI component Slot content",
+        dry_summary="a layer would be inserted into an instance Slot",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.reset",
+        "Reset one instance Slot to its main-component contents.",
+        "paint",
+        "paint_ui_component_slot_reset",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+            },
+            required=("instance_root_id", "property_name"),
+        ),
+        required=("instance_root_id", "property_name"),
+        undo_label="Reset UI component Slot",
+        dry_summary="an instance Slot would reset to its definition contents",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.state.override.set",
         "Set visual overrides for one interactive component state.",
         "paint",
@@ -2252,6 +2385,20 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a component instance property would be changed",
     )
     registry.register_adapter_action(
+        "paint.ui.component.set.inspect",
+        "Inspect a Component Set's multidimensional Variant combinations and conflicts.",
+        "paint",
+        "paint_ui_component_set_inspect",
+        params_schema=schema_object(
+            {"component_id": {"type": "string"}},
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a Component Set's Variant combinations would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.variant.create",
         "Duplicate a component definition as a linked family Variant.",
         "paint",
@@ -2261,6 +2408,7 @@ def register_paint_actions(registry: Any) -> None:
                 "component_id": {"type": "string"},
                 "name": {"type": "string"},
                 "variant_key": {"type": "string"},
+                "variant_properties": any_object,
                 "offset_x": {"type": "number"},
             },
             required=("component_id",),
@@ -2268,6 +2416,60 @@ def register_paint_actions(registry: Any) -> None:
         required=("component_id",),
         undo_label="Create UI component variant",
         dry_summary="a linked component Variant would be created",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variants.combine",
+        "Combine selected independent components into one Component Set.",
+        "paint",
+        "paint_ui_component_variants_combine",
+        params_schema=schema_object(
+            {
+                "component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                }
+            },
+            required=("component_ids",),
+        ),
+        required=("component_ids",),
+        undo_label="Combine UI components as variants",
+        dry_summary="independent components would be combined as variants",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variant.property.define",
+        "Define one shared Variant property and its values on a Component Set.",
+        "paint",
+        "paint_ui_component_variant_property_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "values": {"type": "array", "items": {"type": "string"}},
+                "default_value": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            required=("component_id", "property_name", "values"),
+        ),
+        required=("component_id", "property_name", "values"),
+        undo_label="Define UI component Variant property",
+        dry_summary="a Component Set Variant property would be defined",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variant.values.set",
+        "Set one Component Set member's property/value combination.",
+        "paint",
+        "paint_ui_component_variant_values_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "properties": any_object,
+            },
+            required=("component_id", "properties"),
+        ),
+        required=("component_id", "properties"),
+        undo_label="Set UI component Variant values",
+        dry_summary="a Component Set member's Variant values would be changed",
     )
     registry.register_adapter_action(
         "paint.ui.component.instance.variant.set",
@@ -2284,6 +2486,40 @@ def register_paint_actions(registry: Any) -> None:
         required=("instance_root_id", "component_id"),
         undo_label="Switch UI component variant",
         dry_summary="a component Instance would switch Variant",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.variant_values.set",
+        "Switch an Instance by a multidimensional Variant property combination.",
+        "paint",
+        "paint_ui_component_instance_variant_values_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "properties": any_object,
+            },
+            required=("instance_root_id", "properties"),
+        ),
+        required=("instance_root_id", "properties"),
+        undo_label="Switch UI component Variant properties",
+        dry_summary="a component Instance would switch by Variant properties",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.change_to.add",
+        "Add a Figma-style Change to interaction between variants in one Component Set.",
+        "paint",
+        "paint_ui_component_change_to_add",
+        params_schema=schema_object(
+            {
+                "source_component_id": {"type": "string"},
+                "target_component_id": {"type": "string"},
+                "trigger": {"type": "string", "default": "click"},
+                "transition": {"type": "object", "default": {}},
+            },
+            required=("source_component_id", "target_component_id"),
+        ),
+        required=("source_component_id", "target_component_id"),
+        undo_label="Add UI component Change to",
+        dry_summary="an interactive component Change to would be added",
     )
     registry.register_adapter_action(
         "paint.ui.component.instance.detach",
@@ -3066,6 +3302,49 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter document would be exported as PNG",
     )
     registry.register_adapter_action(
+        "paint.document.exchange.preflight",
+        "Preflight Painter image or layered PSD export without dropping unsupported content.",
+        "paint", "paint_document_exchange_preflight",
+        params_schema=schema_object(
+            {
+                "format": {"type": "string", "enum": ["png", "jpeg", "webp", "tiff", "psd"]},
+                "bit_depth": {"type": "integer", "enum": [8, 16]},
+                "bake_unsupported": {"type": "boolean"},
+                "color_mode": {"type": "string", "enum": ["RGB", "RGBA", "sRGB", "CMYK"]},
+            }, required=("format",),
+        ),
+        mutating=False, changed=False,
+        dry_summary="Painter exchange compatibility would be checked",
+    )
+    registry.register_adapter_action(
+        "paint.document.export",
+        "Export Painter artwork as JPEG, WebP, PNG, TIFF, or layered PSD with preflight.",
+        "paint", "paint_document_export",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "format": {"type": "string", "enum": ["", "png", "jpeg", "webp", "tiff", "psd"]},
+                "include_background": {"type": "boolean"},
+                "bit_depth": {"type": "integer", "enum": [8, 16]},
+                "bake_unsupported": {"type": "boolean"},
+                "quality": {"type": "integer", "minimum": 1, "maximum": 100},
+                "source_icc": {"type": "string"},
+                "output_icc": {"type": "string"},
+                "rendering_intent": {"type": "integer", "minimum": 0, "maximum": 3},
+            }, required=("path",),
+        ),
+        mutating=False, changed=False,
+        dry_summary="active Painter document would be exported with production metadata",
+    )
+    registry.register_adapter_action(
+        "paint.document.import_psd",
+        "Import a layered PSD as a Painter document while preserving supported layer properties.",
+        "paint", "paint_document_import_psd",
+        params_schema=schema_object({"path": {"type": "string"}}, required=("path",)),
+        required=("path",), undo_label="Import layered PSD",
+        dry_summary="a layered PSD would replace the active Painter document",
+    )
+    registry.register_adapter_action(
         "paint.view.zoom",
         "Set the active Painter canvas zoom percentage.",
         "paint",
@@ -3125,17 +3404,23 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.guide.perspective",
-        "Set Painter perspective ruler overlay with horizon and two vanishing points.",
+        "Set a 1/2/3-point Painter perspective ruler and stroke snapping.",
         "paint",
         "paint_guide_perspective",
         params_schema=schema_object(
             {
                 "enabled": {"type": "boolean"},
+                "snap": {"type": "boolean"},
+                "mode": {"type": "integer", "minimum": 1, "maximum": 3},
                 "horizon": {"type": "number", "minimum": 0.02, "maximum": 0.98},
-                "left_x": {"type": "number", "minimum": -1.5, "maximum": 2.5},
-                "left_y": {"type": "number", "minimum": 0.02, "maximum": 0.98},
-                "right_x": {"type": "number", "minimum": -1.5, "maximum": 2.5},
-                "right_y": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+                "center_x": {"type": "number"},
+                "center_y": {"type": "number"},
+                "left_x": {"type": "number"},
+                "left_y": {"type": "number"},
+                "right_x": {"type": "number"},
+                "right_y": {"type": "number"},
+                "vertical_x": {"type": "number"},
+                "vertical_y": {"type": "number"},
             }
         ),
         undo_label="Set Painter perspective guide",
@@ -3190,6 +3475,10 @@ def register_paint_actions(registry: Any) -> None:
                         "magic_select",
                         "magic_wand",
                         "select_color",
+                        "lasso",
+                        "lasso_select",
+                        "polygon_lasso",
+                        "polygonal_lasso",
                         "crop",
                         "zoom_in",
                         "zoom_out",
@@ -3214,7 +3503,11 @@ def register_paint_actions(registry: Any) -> None:
                     "type": "string",
                     "enum": list(PAINT_ACTION_BRUSH_STYLES),
                 },
-                "width": {"type": "integer", "minimum": 1, "maximum": 60},
+                "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+                },
                 "opacity": {"type": "integer", "minimum": 10, "maximum": 100},
                 "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
                 "spacing": {"type": "integer", "minimum": 1, "maximum": 200},
@@ -3222,11 +3515,111 @@ def register_paint_actions(registry: Any) -> None:
                 "roundness": {"type": "integer", "minimum": 10, "maximum": 100},
                 "flip_x": {"type": "boolean"},
                 "flip_y": {"type": "boolean"},
+                "dynamics": {"type": "object"},
             }
         ),
         undo_label="Set Painter brush",
         dry_summary="active Painter brush preset or brush parameters would change",
     )
+    registry.register_adapter_action(
+        "paint.brush.calibration.set",
+        "Set and persist the pressure calibration curve for a Painter input device.",
+        "paint",
+        "paint_brush_calibration_set",
+        params_schema=schema_object(
+            {
+                "device_id": {"type": "string"},
+                "minimum": {"type": "number", "minimum": 0.0, "maximum": 0.99},
+                "maximum": {"type": "number", "minimum": 0.01, "maximum": 1.0},
+                "curve": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                },
+            }
+        ),
+        undo_label="Set Painter pressure calibration",
+        dry_summary="Painter device pressure calibration would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.resources.diagnose",
+        "Diagnose missing captured-dab and texture resources for a Painter brush.",
+        "paint",
+        "paint_brush_resources_diagnose",
+        params_schema=schema_object({"preset": {"type": "string"}}),
+        undo_label="Diagnose Painter brush resources",
+        dry_summary="Painter brush resources would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.color.numeric.set",
+        "Set the Painter foreground or background color with RGB or HSB numbers and report sRGB gamut clipping.",
+        "paint", "paint_color_numeric_set",
+        params_schema=schema_object(
+            {
+                "space": {"type": "string", "enum": ["rgb", "hsb", "hsv"]},
+                "values": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "target": {"type": "string", "enum": ["foreground", "background"]},
+            }, required=("space", "values")
+        ),
+        undo_label="Set Painter numeric color",
+        dry_summary="Painter numeric color would change",
+    )
+    adjustment_type_schema = {
+        "type": "string",
+        "enum": ["levels", "curves", "brightness_contrast", "hue_saturation", "color_balance", "blur", "sharpen"],
+    }
+    for action_id, method, description in (
+        ("paint.adjustment.preview", "paint_adjustment_preview", "Preview a destructive Painter layer adjustment or filter."),
+        ("paint.adjustment.apply", "paint_adjustment_apply", "Apply a Painter layer adjustment or filter with one-step Undo."),
+    ):
+        registry.register_adapter_action(
+            action_id, description, "paint", method,
+            params_schema=schema_object({"type": adjustment_type_schema, "settings": {"type": "object"}}, required=("type",)),
+            undo_label="Painter adjustment", dry_summary="Painter adjustment pixels would change",
+        )
+    for action_id, method, label in (
+        ("paint.adjustment.commit", "paint_adjustment_commit", "Commit Painter adjustment preview"),
+        ("paint.adjustment.cancel", "paint_adjustment_cancel", "Cancel Painter adjustment preview"),
+    ):
+        registry.register_adapter_action(
+            action_id, label, "paint", method,
+            params_schema=schema_object({}), undo_label=label,
+            dry_summary=label.lower(),
+        )
+    registry.register_adapter_action(
+        "paint.adjustment.layer.create",
+        "Create a non-destructive Painter adjustment layer.",
+        "paint", "paint_adjustment_layer_create",
+        params_schema=schema_object({
+            "type": adjustment_type_schema, "settings": {"type": "object"},
+            "name": {"type": "string"}, "use_selection": {"type": "boolean"},
+        }, required=("type",)),
+        undo_label="Create Painter adjustment layer",
+        dry_summary="a non-destructive Painter adjustment layer would be created",
+    )
+    registry.register_adapter_action(
+        "paint.adjustment.layer.update",
+        "Update a non-destructive Painter adjustment layer.",
+        "paint", "paint_adjustment_layer_update",
+        params_schema=schema_object({
+            "layer_id": {"type": "string"}, "settings": {"type": "object"},
+        }, required=("layer_id", "settings")),
+        undo_label="Update Painter adjustment layer",
+        dry_summary="a Painter adjustment layer would change",
+    )
+    for action_id, method, label in (
+        ("paint.palette.file.import", "paint_palette_file_import", "Import a named GPL or ASE Painter palette."),
+        ("paint.palette.file.export", "paint_palette_file_export", "Export named Painter swatch groups to GPL or ASE."),
+    ):
+        registry.register_adapter_action(
+            action_id, label, "paint", method,
+            params_schema=schema_object({"path": {"type": "string"}}, required=("path",)),
+            undo_label=label, dry_summary=label.lower(),
+        )
     registry.register_adapter_action(
         "paint.brush.library.view",
         "Show and filter the Corel-style Painter brush library or advanced controls.",
@@ -3310,11 +3703,15 @@ def register_paint_actions(registry: Any) -> None:
                 "type": "array",
                 "items": point_schema,
                 "minItems": 2,
-                "maxItems": 2048,
+                "maxItems": PAINT_ACTION_MAX_POINTS_PER_STROKE,
             },
             "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
             "opacity": {"type": "integer", "minimum": 1, "maximum": 100},
-            "width": {"type": "number", "minimum": 0.25, "maximum": 512.0},
+            "width": {
+                "type": "number",
+                "minimum": 0.25,
+                "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+            },
             "style": {
                 "type": "string",
                 "enum": list(PAINT_ACTION_BRUSH_STYLES),
@@ -3351,7 +3748,7 @@ def register_paint_actions(registry: Any) -> None:
                     "type": "array",
                     "items": stroke_schema,
                     "minItems": 1,
-                    "maxItems": 512,
+                    "maxItems": PAINT_ACTION_MAX_STROKES_PER_REQUEST,
                 },
                 "undo_label": {"type": "string"},
             },
@@ -3403,6 +3800,87 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a Painter layer would be added",
     )
     registry.register_adapter_action(
+        "paint.layer.import_image",
+        "Import an image file into a regular raster Paint Layer.",
+        "paint",
+        "paint_layer_import_image",
+        params_schema=schema_object(
+            {"path": {"type": "string"}, "name": {"type": "string"}},
+            required=("path",),
+        ),
+        undo_label="Import image as Painter layer",
+        dry_summary="an image would be imported as a raster Paint Layer",
+    )
+    registry.register_adapter_action(
+        "paint.layer.group.create",
+        "Create a Painter layer group and optionally parent layers into it.",
+        "paint",
+        "paint_layer_group_create",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "layer_ids": {"type": "array", "items": {"type": "string"}},
+            }
+        ),
+        undo_label="Create Painter layer group",
+        dry_summary="a Painter layer group would be created",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_clipping",
+        "Enable or disable clipping to the previous sibling layer alpha.",
+        "paint",
+        "paint_layer_set_clipping",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string"}, "clipping": {"type": "boolean"}},
+            required=("clipping",),
+        ),
+        undo_label="Set Painter clipping mask",
+        dry_summary="Painter clipping state would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.group.set_expanded",
+        "Expand or collapse a Painter layer group in the Layers panel.",
+        "paint",
+        "paint_layer_group_set_expanded",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string"}, "expanded": {"type": "boolean"}},
+            required=("layer_id", "expanded"),
+        ),
+        undo_label="Set Painter group disclosure",
+        dry_summary="Painter layer group disclosure would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_locks",
+        "Set independent pixel, transparency, position, or all-layer locks.",
+        "paint",
+        "paint_layer_set_locks",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "pixels": {"type": "boolean"},
+                "transparency": {"type": "boolean"},
+                "position": {"type": "boolean"},
+                "all_locked": {"type": "boolean"},
+            }
+        ),
+        undo_label="Set Painter layer locks",
+        dry_summary="Painter layer lock channels would change",
+    )
+    for action_id, description, method, label in (
+        ("paint.layer.merge_down", "Merge a Painter layer into the sibling below.", "paint_layer_merge_down", "Merge Painter layer down"),
+        ("paint.layer.merge_visible", "Merge all visible Painter layers.", "paint_layer_merge_visible", "Merge visible Painter layers"),
+        ("paint.layer.flatten", "Flatten the Painter layer stack into one editable raster layer.", "paint_layer_flatten", "Flatten Painter layers"),
+    ):
+        registry.register_adapter_action(
+            action_id,
+            description,
+            "paint",
+            method,
+            params_schema=schema_object({"layer_id": {"type": "string"}}),
+            undo_label=label,
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
         "paint.layer.set_type",
         "Convert a Painter layer between standard color paint and stroke-native Material Paint.",
         "paint",
@@ -3419,8 +3897,12 @@ def register_paint_actions(registry: Any) -> None:
     )
     material_properties = {
         key: {"type": "number", "minimum": 0.0, "maximum": 1.0}
-        for key in ("load", "thickness", "wetness", "gloss", "roughness")
+        for key in (
+            "load", "thickness", "wetness", "gloss", "roughness", "plow",
+            "resaturation",
+        )
     }
+    material_properties["negative_depth"] = {"type": "boolean"}
     registry.register_adapter_action(
         "paint.material.settings.set",
         "Set native Material Paint deposition and surface response for the active material layer.",
@@ -3583,7 +4065,7 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "layer_id": {"type": "string"},
-                "blend_mode": {"type": "string", "enum": ["normal", "multiply", "screen", "overlay"]},
+                "blend_mode": {"type": "string", "enum": list(BLEND_MODES)},
             },
             required=("blend_mode",),
         ),
@@ -3745,6 +4227,46 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter marquee aspect mode would change",
     )
     registry.register_adapter_action(
+        "paint.selection.lasso",
+        "Create a freehand or polygonal Painter selection from normalized points.",
+        "paint",
+        "paint_selection_lasso",
+        params_schema=schema_object(
+            {
+                "points": {
+                    "type": "array",
+                    "minItems": 3,
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                },
+                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
+                "polygonal": {"type": "boolean"},
+            },
+            required=("points",),
+        ),
+        undo_label="Painter lasso selection",
+        dry_summary="Painter lasso selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.modify",
+        "Feather, expand, contract, or border the active Painter selection mask.",
+        "paint",
+        "paint_selection_modify",
+        params_schema=schema_object(
+            {
+                "operation": {"type": "string", "enum": ["feather", "expand", "contract", "border"]},
+                "radius_px": {"type": "number", "minimum": 0.1, "maximum": 4096.0},
+            },
+            required=("operation",),
+        ),
+        undo_label="Modify Painter selection",
+        dry_summary="Painter selection mask would be modified",
+    )
+    registry.register_adapter_action(
         "paint.selection.set_mode",
         "Set how the next Painter selection combines with the current selection.",
         "paint",
@@ -3765,7 +4287,9 @@ def register_paint_actions(registry: Any) -> None:
             {
                 "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "tolerance": {"type": "integer", "minimum": 0, "maximum": 100},
+                "tolerance": {"type": "integer", "minimum": 0, "maximum": 255},
+                "contiguous": {"type": "boolean"},
+                "phase": {"type": "string", "enum": ["preview", "commit", "cancel"]},
             },
             required=("x", "y"),
         ),
@@ -3780,6 +4304,50 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object({}),
         undo_label="Crop Painter document",
         dry_summary="Painter document would be cropped to selection",
+    )
+    for action_name, method_name, description in (
+        ("paint.crop.preview", "paint_crop_preview", "Preview cropping to the active Painter selection bounds."),
+        ("paint.crop.commit", "paint_crop_commit", "Commit the active Painter crop preview."),
+        ("paint.crop.cancel", "paint_crop_cancel", "Cancel the active Painter crop preview."),
+    ):
+        crop_schema = schema_object({})
+        if action_name == "paint.crop.preview":
+            crop_schema = schema_object({
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "straighten_degrees": {"type": "number", "minimum": -45.0, "maximum": 45.0},
+            })
+        registry.register_adapter_action(
+            action_name,
+            description,
+            "paint",
+            method_name,
+            params_schema=crop_schema,
+            undo_label="Painter crop",
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.selection.transform",
+        "Preview, commit, or cancel a pixel selection move/free transform.",
+        "paint",
+        "paint_selection_transform",
+        params_schema=schema_object(
+            {
+                "translate_x": {"type": "number"}, "translate_y": {"type": "number"},
+                "scale_x": {"type": "number"}, "scale_y": {"type": "number"},
+                "rotation_degrees": {"type": "number"},
+                "skew_x_degrees": {"type": "number"}, "skew_y_degrees": {"type": "number"},
+                "pivot_x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "pivot_y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "flip_x": {"type": "boolean"}, "flip_y": {"type": "boolean"},
+                "phase": {"type": "string", "enum": ["preview", "commit", "cancel"]},
+                "target": {"type": "string", "enum": ["selected_pixels", "raster", "strokes", "layer_mask", "layer_all"]},
+            }
+        ),
+        undo_label="Free transform Painter selection",
+        dry_summary="Painter selection pixels would be transformed",
     )
     registry.register_adapter_action(
         "paint.image.resize",
@@ -3906,6 +4474,67 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter layer mask would be created",
     )
     registry.register_adapter_action(
+        "paint.layer.mask_state.set",
+        "Enable, link, unlink, or delete a Painter layer mask.",
+        "paint",
+        "paint_layer_mask_state_set",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "linked": {"type": "boolean"},
+                "delete": {"type": "boolean"},
+            }
+        ),
+        undo_label="Set Painter layer mask state",
+        dry_summary="Painter layer mask state would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.paint",
+        "Paint an 8-bit hide/reveal value into a Painter raster layer mask.",
+        "paint",
+        "paint_layer_mask_paint",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "radius_px": {"type": "number"},
+                "value": {"type": "integer"},
+            },
+            required=("x", "y", "radius_px", "value"),
+        ),
+        undo_label="Paint Painter layer mask",
+        dry_summary="Painter raster layer mask would be painted",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.gradient",
+        "Replace a Painter layer mask with a continuous 8-bit linear gradient.",
+        "paint",
+        "paint_layer_mask_gradient",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "start": {"type": "array"},
+                "end": {"type": "array"},
+                "start_value": {"type": "integer"},
+                "end_value": {"type": "integer"},
+            },
+            required=("start", "end"),
+        ),
+        undo_label="Painter layer mask gradient",
+        dry_summary="Painter raster layer mask gradient would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.apply",
+        "Bake the selected Painter layer mask into its pixels and remove the mask.",
+        "paint",
+        "paint_layer_mask_apply",
+        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        undo_label="Apply Painter layer mask",
+        dry_summary="Painter layer mask would be applied",
+    )
+    registry.register_adapter_action(
         "paint.path.to_selection",
         "Convert the active or specified Painter path to a marching-ants selection.",
         "paint",
@@ -3949,6 +4578,29 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Clear Painter work path",
         dry_summary="Painter work path preview would be cleared",
     )
+    registry.register_adapter_action(
+        "paint.path.anchor.edit",
+        "Add, delete, move, or convert a Painter path anchor and its Bezier handles.",
+        "paint", "paint_path_anchor_edit",
+        params_schema=schema_object(
+            {
+                "path_id": {"type": "string"}, "index": {"type": "integer", "minimum": 0},
+                "operation": {"type": "string", "enum": ["add", "delete", "move", "corner", "smooth"]},
+                "point": {"type": "array"}, "in_handle": {"type": "array"}, "out_handle": {"type": "array"},
+            }, required=("index", "operation"), additional_properties=True,
+        ), undo_label="Edit Painter path anchor", dry_summary="Painter path anchor would be edited",
+    )
+    for action_name, method_name, description, schema in (
+        ("paint.path.duplicate", "paint_path_duplicate", "Duplicate a saved Painter path.", schema_object({"path_id": {"type": "string"}})),
+        ("paint.path.rename", "paint_path_rename", "Rename a saved Painter path.", schema_object({"path_id": {"type": "string"}, "name": {"type": "string", "minLength": 1}}, required=("name",))),
+        ("paint.path.reorder", "paint_path_reorder", "Move a saved Painter path to a new path-stack index.", schema_object({"path_id": {"type": "string"}, "index": {"type": "integer", "minimum": 0}}, required=("index",))),
+        ("paint.path.fill", "paint_path_fill", "Fill a closed saved Painter path on the active raster layer.", schema_object({"path_id": {"type": "string"}, "color": {"type": "string"}})),
+        ("paint.path.stroke", "paint_path_stroke", "Stroke a saved Painter path onto the active raster layer.", schema_object({"path_id": {"type": "string"}, "color": {"type": "string"}, "width_px": {"type": "number", "minimum": 0.1, "maximum": 4096.0}})),
+    ):
+        registry.register_adapter_action(
+            action_name, description, "paint", method_name,
+            params_schema=schema, undo_label=description, dry_summary=description,
+        )
     registry.register_adapter_action(
         "paint.path.commit",
         "Commit the active Painter work path as an editable path stroke.",
@@ -4143,7 +4795,11 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "reference_id": {"type": "string"},
-                "max_colors": {"type": "integer", "minimum": 1, "maximum": 12},
+                "max_colors": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": PAINT_ACTION_MAX_REFERENCE_COLORS,
+                },
                 "apply": {"type": "boolean"},
             }
         ),
@@ -4196,7 +4852,11 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter study regions would be reported",
     )
     study_generate_params = {
-        "max_strokes": {"type": "integer", "minimum": 1, "maximum": 50000},
+        "max_strokes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": PAINT_ACTION_MAX_STUDY_STROKES,
+        },
         "layer_name": {"type": "string"},
         "seed_offset": {"type": "integer"},
     }
@@ -4608,6 +5268,11 @@ def register_paint_actions(registry: Any) -> None:
     )
 
     register_paint_ui_advanced_actions(registry)
+    from app.actions.paint_ui_figma_plugin_namespace import (
+        register_paint_ui_figma_plugin_actions,
+    )
+
+    register_paint_ui_figma_plugin_actions(registry)
 
 
 __all__ = ["register_paint_actions"]

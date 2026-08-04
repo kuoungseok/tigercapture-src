@@ -49,6 +49,20 @@ def build_painter_ui_release_document() -> dict[str, Any]:
         y=80,
         width=342,
         height=220,
+    )
+    # Containers remain structural in the provider-neutral UMG contract.
+    # Keep the card appearance on an editable leaf rectangle so the corpus
+    # exercises rounded/stroked material conversion without silently asking a
+    # Group widget to render appearance that TigerStudioUMG cannot preserve.
+    document, _card_surface = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Release Card Surface",
+        parent_id=card["id"],
+        x=0,
+        y=0,
+        width=342,
+        height=220,
         style={
             "fill": "#17212D",
             "stroke": "#40536A",
@@ -78,7 +92,7 @@ def build_painter_ui_release_document() -> dict[str, Any]:
         width=180,
         height=48,
         content={"text": "Continue"},
-        style={"fill": "#437BB6", "radius": 8},
+        style={"fill": "#437BB6"},
     )
     document, _component = convert_ui_object_to_component(
         document,

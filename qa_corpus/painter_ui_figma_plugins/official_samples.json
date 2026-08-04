@@ -1,0 +1,29 @@
+{
+  "schema": "tigercapture.painter.figma_plugin_official_corpus.v1",
+  "source": {
+    "repository": "https://github.com/figma/plugin-samples",
+    "license": "MIT",
+    "commit": "03131bef561eb25ee2b704e3b39e40acc70330e0",
+    "local_root": "external/tools/figma-plugin-samples"
+  },
+  "cases": [
+    {
+      "id": "official.sierpinski",
+      "source": "sierpinski/code.ts",
+      "expected_kind": "ellipse",
+      "expected_count": 485
+    },
+    {
+      "id": "official.conditional_rectangles",
+      "source": "create-rects-shapes/code.ts",
+      "expected_kind": "rectangle",
+      "expected_count": 5
+    },
+    {
+      "id": "official.vector_path",
+      "source": "vector-path/code.ts",
+      "expected_kind": "path",
+      "expected_count": 1
+    }
+  ]
+}

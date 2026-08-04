@@ -704,32 +704,44 @@ The lab must provide:
 - Plane material preview rendered from the generated maps.
 - Slider controls for normal strength/radius, height contrast/blur, AO
   strength/radius, cavity/curvature, roughness bias/contrast/detail,
-  metallic value, optional Base Color de-light/albedo recovery, optional
+  metallic value, optional heuristic Base Color de-light estimate, optional
   Substrate reflectance/F90 mask strength, Substrate Slab mode, preview
   light/environment, and animated-light preview.
-- `De-light Albedo` is an optional photographic albedo recovery pass for
-  internet/photo sources such as grass, asphalt, fabric, or walls where sunlight
-  and contact shadows are already baked into the image. It estimates a
-  low-frequency illumination/shading field from BaseColor luminance, removes it
-  with a user strength/radius/detail-preservation control, and exposes the
-  diagnostic `base_color_source` and `delight_shading` preview maps. The main
-  window must expose an explicit `Intrinsic` control showing
-  `Input / Albedo / Normal / Roughness / Irradiance` together as the primary
-  RGB-to-X channel-estimation view. The main preview must identify the current
-  channel above the texture, and the Intrinsic view must place each tile label
-  above its corresponding texture so thumbnails are not the only channel
-  labels. It must also expose an explicit `Albedo` control that shows the
-  de-lighted BaseColor result directly instead of hiding it behind the generic
-  Base Color naming. Enabling the option in the UI must
-  switch to this visible Albedo preview when the user was in the broad
-  material/base-color view, and a separate `Compare` control must remain
-  available for source/result/difference inspection. `Irradiance` is the
-  estimated low-frequency lighting field used by de-lighting. This is a
-  practical de-lighting approximation, not a full inverse-rendering solve, so
-  the UI must present it as an adjustable cleanup option rather than a
-  physically guaranteed albedo.
+- `Generate De-lit Estimate` is an optional heuristic photographic-lighting
+  cleanup for sources such as grass, asphalt, fabric, or walls. It estimates a
+  low-frequency lighting field from input luminance and exposes separate
+  `base_color_source`, `base_color_estimate`, and `delight_shading` diagnostics.
+  It is not a measured albedo, a calibrated intrinsic-image solve, or a result
+  with a physical confidence score. Enabling generation must not replace
+  exported Base Color. A second explicit `Apply Estimate to Base Color` control
+  is required for that destructive interpretation and remains off by default.
+  Height, Normal, AO, Roughness, and Metallic must always use the adjusted input
+  RGB rather than the optional estimate. The manifest records method,
+  validation status, confidence=`null`, export provenance, and whether the
+  estimate was explicitly applied. The Analysis view labels the panels
+  `Input / De-lit Estimate / Normal / Roughness / Estimated Light`; Compare
+  remains source/estimate/difference inspection.
+
+Research audit and implementation boundary:
+
+- The fast estimate is not the Jobson/Rahman/Woodell Multiscale Retinex
+  reference algorithm: it does not use the paper's log-domain per-channel
+  center/surround sum or color-restoration stage.
+- It is not Marigold IID or IntrinsicDiffusion and must not claim their learned
+  albedo/shading benchmark results.
+- Its limited operation is two-scale low-frequency luminance division in
+  IEC 61966-2-1 linear-light sRGB. CPU and CUDA share a discrete 3-sigma
+  Gaussian, replicate boundary condition, median normalization, and sRGB
+  encode/decode contract.
+- Primary references: NASA NTRS `19990005051` (Multiscale Retinex), ICC IEC
+  61966-2-1 sRGB registry, `prs-eth/Marigold` IID v1.1, and the SIGGRAPH 2024
+  IntrinsicDiffusion project. These references classify and constrain the
+  feature; they do not validate its output as measured reflectance.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
+- Height export includes both the compatibility 8-bit PNG and a 16-bit
+  grayscale PNG for Normal/POM workflows. The manifest records the precision
+  file and whether a user-selected export-size policy resampled the source.
 - Optional advanced Substrate export for `f0` and `f90_mask`; these are
   disabled by default and must be requested explicitly through the UI checkboxes
   or the `maps` parameter in normal Default Lit workflow. When Texture Lab

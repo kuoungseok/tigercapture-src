@@ -18,7 +18,15 @@ UI_OBJECT_BLEND_MODES = set(UI_EFFECT_BLEND_MODES) | {
     "linear_burn",
     "linear_dodge",
 }
-UI_PAINT_TYPES = {"solid", "linear", "radial"}
+UI_PAINT_TYPES = {
+    "solid",
+    "linear",
+    "radial",
+    "pattern",
+    "image",
+    "video",
+    "shader",
+}
 UI_STROKE_ALIGNS = {"inside", "center", "outside"}
 
 
@@ -40,6 +48,7 @@ def normalize_ui_paint(value: object, *, stroke: bool = False) -> dict[str, Any]
         "visible": bool(row.get("visible", True)),
         "opacity": max(0.0, min(1.0, _number(row.get("opacity"), 1.0))),
         "color": str(row.get("color") or "#FFFFFFFF"),
+        "blend_mode": str(row.get("blend_mode") or "normal").strip().casefold(),
     }
     if paint_type in {"linear", "radial"}:
         result["gradient"] = normalize_ui_gradient(
@@ -48,6 +57,58 @@ def normalize_ui_paint(value: object, *, stroke: bool = False) -> dict[str, Any]
                 "type": paint_type,
             }
         )
+    elif paint_type == "pattern":
+        pattern = row.get("pattern") if isinstance(row.get("pattern"), Mapping) else {}
+        result["pattern"] = {
+            "kind": str(pattern.get("kind") or "dots").strip().casefold(),
+            "foreground": str(pattern.get("foreground") or "#C8D2E0FF"),
+            "background": str(pattern.get("background") or "#FFFFFFFF"),
+            "scale": max(2.0, min(128.0, _number(pattern.get("scale"), 12.0))),
+            "scale_percent": max(1.0, min(1000.0, _number(
+                pattern.get("scale_percent"),
+                _number(pattern.get("scale"), 12.0) / 12.0 * 100.0,
+            ))),
+            "gap_x": max(-1000.0, min(1000.0, _number(pattern.get("gap_x"), 0.0))),
+            "gap_y": max(-1000.0, min(1000.0, _number(pattern.get("gap_y"), 0.0))),
+            "alignment": str(pattern.get("alignment") or "top_left").strip().casefold(),
+            "tile_type": str(pattern.get("tile_type") or "grid").strip().casefold(),
+            "source_id": str(pattern.get("source_id") or ""),
+        }
+    elif paint_type in {"image", "video"}:
+        result["source_path"] = str(row.get("source_path") or "")
+        fit = str(row.get("fit") or "fill").strip().casefold()
+        result["fit"] = fit if fit in {"fill", "fit", "crop", "stretch", "tile"} else "fill"
+        result["rotation"] = _number(row.get("rotation"), 0.0)
+        result["focal_x"] = max(0.0, min(1.0, _number(row.get("focal_x"), 0.5)))
+        result["focal_y"] = max(0.0, min(1.0, _number(row.get("focal_y"), 0.5)))
+        result["tile_scale"] = max(0.05, min(16.0, _number(row.get("tile_scale"), 1.0)))
+        result["original_width"] = max(0.0, _number(row.get("original_width"), 0.0))
+        result["original_height"] = max(0.0, _number(row.get("original_height"), 0.0))
+        if isinstance(row.get("crop"), (Mapping, list, tuple)):
+            result["crop"] = copy.deepcopy(row["crop"])
+        if isinstance(row.get("figma_image_transform"), list):
+            result["figma_image_transform"] = copy.deepcopy(
+                row["figma_image_transform"]
+            )
+        if paint_type == "image":
+            adjustments = row.get("adjustments") if isinstance(row.get("adjustments"), Mapping) else {}
+            result["adjustments"] = {
+                key: max(-100.0, min(100.0, _number(adjustments.get(key), 0.0)))
+                for key in (
+                    "exposure", "contrast", "saturation", "temperature",
+                    "tint", "highlights",
+                )
+            }
+        if paint_type == "video":
+            result["poster_path"] = str(row.get("poster_path") or "")
+            result["frame_time_ms"] = max(0.0, _number(row.get("frame_time_ms"), 0.0))
+            result["autoplay"] = bool(row.get("autoplay", True))
+            result["loop"] = bool(row.get("loop", True))
+            result["muted"] = bool(row.get("muted", True))
+    elif paint_type == "shader":
+        result["shader_preset"] = str(row.get("shader_preset") or "mesh_gradient").strip().casefold()
+        parameters = row.get("shader_parameters") if isinstance(row.get("shader_parameters"), Mapping) else {}
+        result["shader_parameters"] = copy.deepcopy(dict(parameters))
     if stroke:
         result["width"] = max(0.0, _number(row.get("width"), 1.0))
         align = str(row.get("align") or "center").strip().casefold()
@@ -108,6 +169,10 @@ def normalize_ui_advanced_style(value: object) -> dict[str, Any]:
         style.get("corner_radii"),
         fallback,
     )
+    style["corner_smoothing"] = max(
+        0.0,
+        min(1.0, _number(style.get("corner_smoothing"))),
+    )
     align = str(style.get("stroke_align") or "center").strip().casefold()
     style["stroke_align"] = align if align in UI_STROKE_ALIGNS else "center"
     return style
@@ -139,6 +204,7 @@ def inspect_ui_advanced_appearance(
         "fills": style["fills"],
         "strokes": style["strokes"],
         "corner_radii": style["corner_radii"],
+        "corner_smoothing": style["corner_smoothing"],
         "stroke_align": style["stroke_align"],
     }
 
@@ -216,11 +282,17 @@ def set_ui_corner_geometry(
     object_id: str,
     *,
     corner_radii: Mapping[str, Any] | None = None,
+    corner_smoothing: float | None = None,
     stroke_align: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     document, style = _style(value, object_id)
     if corner_radii is not None:
         style["corner_radii"] = normalize_ui_corner_radii(corner_radii)
+    if corner_smoothing is not None:
+        style["corner_smoothing"] = max(
+            0.0,
+            min(1.0, _number(corner_smoothing)),
+        )
     if stroke_align is not None:
         align = str(stroke_align).strip().casefold()
         if align not in UI_STROKE_ALIGNS:

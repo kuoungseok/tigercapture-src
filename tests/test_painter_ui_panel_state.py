@@ -84,6 +84,6 @@ def test_legacy_default_hidden_navigator_migrates_to_visible(tmp_path) -> None:
     settings.endGroup()
 
     state = load_painter_ui_panel_state(settings)
-    assert state["navigator_width"] == 168
+    assert state["navigator_width"] == 248
     assert state["navigator_collapsed"] is False
     assert state["navigator_auto_hide"] is False

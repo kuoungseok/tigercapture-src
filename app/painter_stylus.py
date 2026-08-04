@@ -8,16 +8,26 @@ from typing import Any
 
 def clamp01(value: Any, default: float = 0.0) -> float:
     try:
-        return max(0.0, min(1.0, float(value)))
+        number = float(value)
     except (TypeError, ValueError):
-        return max(0.0, min(1.0, float(default)))
+        number = float(default)
+    if not math.isfinite(number):
+        number = float(default)
+    if not math.isfinite(number):
+        number = 0.0
+    return max(0.0, min(1.0, number))
 
 
 def clamp_signed(value: Any, default: float = 0.0) -> float:
     try:
-        return max(-1.0, min(1.0, float(value)))
+        number = float(value)
     except (TypeError, ValueError):
-        return max(-1.0, min(1.0, float(default)))
+        number = float(default)
+    if not math.isfinite(number):
+        number = float(default)
+    if not math.isfinite(number):
+        number = 0.0
+    return max(-1.0, min(1.0, number))
 
 
 def _event_value(event: Any, name: str, default: float) -> float:
@@ -32,7 +42,7 @@ def _event_value(event: Any, name: str, default: float) -> float:
 
 @dataclass(frozen=True)
 class StylusSample:
-    pressure: float = 0.82
+    pressure: float = 0.0
     tilt: float = 0.0
     tilt_x: float = 0.0
     tilt_y: float = 0.0
@@ -50,12 +60,14 @@ def mouse_stylus_sample() -> StylusSample:
 def tablet_stylus_sample(event: Any) -> StylusSample:
     """Normalize a Qt tablet event without depending on a specific device."""
 
-    pressure = clamp01(_event_value(event, "pressure", 0.82), 0.82)
+    pressure = clamp01(_event_value(event, "pressure", 0.0), 0.0)
     tilt_x = clamp_signed(_event_value(event, "xTilt", 0.0) / 60.0)
     tilt_y = clamp_signed(_event_value(event, "yTilt", 0.0) / 60.0)
     tilt = clamp01(math.hypot(tilt_x, tilt_y) / math.sqrt(2.0))
-    rotation_degrees = _event_value(event, "rotation", 180.0) % 360.0
-    rotation = clamp01(rotation_degrees / 360.0, 0.5)
+    rotation_degrees = _event_value(event, "rotation", 0.0)
+    if not math.isfinite(rotation_degrees):
+        rotation_degrees = 0.0
+    rotation = ((rotation_degrees + 180.0) % 360.0) / 360.0
     tangential = clamp_signed(_event_value(event, "tangentialPressure", 0.0))
     return StylusSample(
         pressure=pressure,

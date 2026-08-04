@@ -29,10 +29,12 @@ _CROSS_ALIGNMENT_ORDER = ("start", "center", "end", "stretch")
 _TOOLTIPS = {
     "mode_horizontal": "Horizontal Auto Layout",
     "mode_vertical": "Vertical Auto Layout",
+    "mode_grid": "Grid Auto Layout (beta)",
     "main_alignment": "Cycle main-axis alignment",
     "cross_alignment": "Cycle cross-axis alignment",
     "gap": "Drag to adjust item gap",
-    "positioning": "Toggle flow or absolute positioning",
+    "cross_gap": "Drag to adjust wrapped row gap",
+    "positioning": "Toggle in-flow or Ignore auto layout positioning",
     "padding_left": "Drag to adjust left padding",
     "padding_top": "Drag to adjust top padding",
     "padding_right": "Drag to adjust right padding",
@@ -90,7 +92,7 @@ def _parent_auto_layout(
     if parent is None:
         return None
     layout = normalize_ui_auto_layout(parent.get("layout"))
-    return layout if layout["mode"] in {"horizontal", "vertical"} else None
+    return layout if layout["mode"] in {"horizontal", "vertical", "grid"} else None
 
 
 def build_auto_layout_canvas_controls(
@@ -115,9 +117,10 @@ def build_auto_layout_canvas_controls(
             (
                 ("mode_horizontal", 28.0, "H", layout["mode"] == "horizontal"),
                 ("mode_vertical", 28.0, "V", layout["mode"] == "vertical"),
+                ("mode_grid", 28.0, "#", layout["mode"] == "grid"),
             )
         )
-        if layout["mode"] in {"horizontal", "vertical"}:
+        if layout["mode"] in {"horizontal", "vertical", "grid"}:
             definitions.extend(
                 (
                     (
@@ -135,12 +138,20 @@ def build_auto_layout_canvas_controls(
                     ("gap", 54.0, f"G {layout['gap']:g}", False),
                 )
             )
+            if layout["mode"] == "horizontal" and layout["wrap"]:
+                definitions.append(
+                    ("cross_gap", 58.0, f"R {layout['cross_gap']:g}", False)
+                )
+            elif layout["mode"] == "grid":
+                definitions.append(
+                    ("cross_gap", 58.0, f"Y {layout['cross_gap']:g}", False)
+                )
     if parent_layout is not None:
         definitions.append(
             (
                 "positioning",
                 54.0,
-                "ABS" if layout["positioning"] == "absolute" else "FLOW",
+                "IGNORE" if layout["positioning"] == "absolute" else "FLOW",
                 layout["positioning"] == "absolute",
             )
         )
@@ -174,7 +185,7 @@ def build_auto_layout_canvas_controls(
         cursor_x += item_width + spacing
 
     padding_handles: list[AutoLayoutCanvasControl] = []
-    if is_container and layout["mode"] in {"horizontal", "vertical"}:
+    if is_container and layout["mode"] in {"horizontal", "vertical", "grid"}:
         padding = layout["padding"]
         scale = max(0.0001, float(scale))
         center = rect.center()
@@ -232,6 +243,10 @@ def apply_auto_layout_canvas_click(
         result["mode"] = "horizontal"
     elif target == "mode_vertical":
         result["mode"] = "vertical"
+        result["wrap"] = False
+    elif target == "mode_grid":
+        result["mode"] = "grid"
+        result["wrap"] = False
     elif target == "main_alignment":
         current = _MAIN_ALIGNMENT_ORDER.index(result["main_alignment"])
         result["main_alignment"] = _MAIN_ALIGNMENT_ORDER[
@@ -255,13 +270,25 @@ def apply_auto_layout_canvas_drag(
     delta: QPointF,
     *,
     scale: float,
+    big_nudge: bool = False,
+    opposite: bool = False,
+    all_sides: bool = False,
 ) -> dict[str, Any]:
     result = copy.deepcopy(normalize_ui_auto_layout(layout))
     scale = max(0.0001, float(scale))
     dx = float(delta.x()) / scale
     dy = float(delta.y()) / scale
+    if big_nudge:
+        dx = round(dx / 10.0) * 10.0
+        dy = round(dy / 10.0) * 10.0
     if target == "gap":
-        result["gap"] = max(0.0, round(float(result["gap"]) + dx))
+        delta = dx if result["mode"] in {"horizontal", "grid"} else dy
+        result["gap"] = max(0.0, round(float(result["gap"]) + delta))
+    elif target == "cross_gap":
+        result["cross_gap"] = max(
+            0.0,
+            round(float(result["cross_gap"]) + dy),
+        )
     elif target.startswith("padding_"):
         edge = target.removeprefix("padding_")
         signed_delta = {
@@ -270,10 +297,25 @@ def apply_auto_layout_canvas_drag(
             "top": dy,
             "bottom": -dy,
         }[edge]
-        result["padding"][edge] = max(
-            0.0,
-            round(float(result["padding"][edge]) + signed_delta),
-        )
+        edges = {edge}
+        if all_sides:
+            edges = {"left", "top", "right", "bottom"}
+        elif opposite:
+            edges.add(
+                {
+                    "left": "right",
+                    "right": "left",
+                    "top": "bottom",
+                    "bottom": "top",
+                }[edge]
+            )
+        for changed_edge in edges:
+            result["padding"][changed_edge] = max(
+                0.0,
+                round(
+                    float(result["padding"][changed_edge]) + signed_delta
+                ),
+            )
     return normalize_ui_auto_layout(result)
 
 

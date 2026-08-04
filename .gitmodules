@@ -1,0 +1,3 @@
+[submodule "external/tools/figma-plugin-samples"]
+	path = external/tools/figma-plugin-samples
+	url = https://github.com/figma/plugin-samples.git

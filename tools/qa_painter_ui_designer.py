@@ -20,6 +20,11 @@ def main() -> int:
         default=str(ROOT / "debugCapture" / "painter_ui_designer_m1"),
     )
     parser.add_argument("--show", action="store_true")
+    parser.add_argument(
+        "--sample",
+        action="store_true",
+        help="Populate the UI-design QA sample when opening an interactive window.",
+    )
     args = parser.parse_args()
     if not args.show:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -44,6 +49,17 @@ def main() -> int:
     dialog.resize(1360, 900)
     registry = ActionRegistry(owner=dialog)
     registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
+    if args.show and not args.sample:
+        # Interactive Painter startup is intentionally a clean document.
+        # The large seeded design below belongs only to reproducible QA (or an
+        # explicitly requested --sample launch), never to the product's first
+        # impression.
+        dialog._set_painter_ui_empty_page_mode(True)
+        dialog.show()
+        app.processEvents()
+        dialog.raise_()
+        dialog.activateWindow()
+        return app.exec()
     last_add = None
     phone_object_ids: dict[str, str] = {}
     for payload in (
@@ -735,7 +751,7 @@ def main() -> int:
         and dialog._paint_ui_inspector.design_group_visible("arrange")
         and not dialog._paint_ui_inspector.design_group_visible("geometry")
         and dialog._paint_ui_inspector.visible_context_tabs()
-        == ("design", "inspect")
+        == ("design", "prototype", "inspect")
         and dialog._paint_ui_inspector.artboard_bar.isHidden()
     )
     multi_properties_ok = (
@@ -784,8 +800,9 @@ def main() -> int:
     adaptive_context_ok = (
         dialog._paint_ui_inspector.design_context() == "artboard"
         and dialog._paint_ui_inspector.visible_context_tabs()
-        == ("design", "inspect")
-        and not dialog._paint_ui_inspector.artboard_bar.isHidden()
+        == ("design", "prototype")
+        and dialog._paint_ui_inspector.artboard_bar.isHidden()
+        and dialog._paint_ui_inspector.page_properties_panel.isVisible()
     )
     dialog._paint_ui_inspector.set_collapsed(True)
     registry.execute(

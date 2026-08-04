@@ -35,6 +35,7 @@ from app.i18n import tr
 from app.media_asset_routing import (
     ar_pbr_paths_from_mime as _shared_ar_pbr_paths_from_mime,
     mmd_paths_from_mime as _shared_mmd_paths_from_mime,
+    motion_project_paths_from_mime as _shared_motion_project_paths_from_mime,
     performance_source_paths_from_mime as _shared_performance_source_paths_from_mime,
     timeline_media_paths_from_mime as _shared_timeline_media_paths_from_mime,
 )

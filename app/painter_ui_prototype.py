@@ -41,6 +41,8 @@ def prototype_initial_state(value: Mapping[str, Any]) -> dict[str, Any]:
         "history": [],
         "overlay_artboard_ids": [],
         "object_states": {},
+        "component_variants": {},
+        "component_family_variants": {},
         "object_visibility": {
             row["id"]: bool(row["visible"]) for row in document["objects"]
         },
@@ -70,21 +72,71 @@ def execute_ui_prototype_trigger(
         runtime.get("overlay_artboard_ids") or []
     )
     runtime["object_states"] = dict(runtime.get("object_states") or {})
+    runtime["component_variants"] = dict(
+        runtime.get("component_variants") or {}
+    )
+    runtime["component_family_variants"] = dict(
+        runtime.get("component_family_variants") or {}
+    )
     runtime["object_visibility"] = dict(runtime.get("object_visibility") or {})
     runtime["object_opacity"] = dict(runtime.get("object_opacity") or {})
     runtime["material_scalars"] = dict(runtime.get("material_scalars") or {})
     runtime["variables"] = dict(runtime.get("variables") or {})
     runtime["variable_modes"] = dict(runtime.get("variable_modes") or {})
     runtime["events"] = list(runtime.get("events") or [])
+    objects = {row["id"]: row for row in document["objects"]}
+    source_object = objects.get(str(source_object_id))
+    source_candidates = {str(source_object_id)}
+    if source_object is not None:
+        source_definition_id = str(
+            source_object.get("component_source_object_id") or ""
+        )
+        if source_definition_id:
+            source_candidates.add(source_definition_id)
+        if str(source_object.get("component_role") or "") == "instance":
+            components = {row["id"]: row for row in document["components"]}
+            authored_component = components.get(
+                str(source_object.get("component_id") or "")
+            )
+            family_id = str(
+                (authored_component or {}).get("base_component_id")
+                or (authored_component or {}).get("id")
+                or ""
+            )
+            runtime_component_id = str(
+                runtime["component_variants"].get(str(source_object_id))
+                or runtime["component_family_variants"].get(family_id)
+                or ""
+            )
+            runtime_component = components.get(runtime_component_id)
+            if runtime_component is not None:
+                source_candidates.add(str(runtime_component["root_object_id"]))
+    requested_trigger = str(trigger).strip().casefold()
+    direct_instance_override = bool(
+        source_object is not None
+        and source_object.get("component_role") == "instance"
+        and any(
+            interaction["enabled"]
+            and interaction["source_object_id"] == str(source_object_id)
+            and interaction["trigger"] == requested_trigger
+            for interaction in document["interactions"]
+        )
+    )
     matched = []
     for interaction in document["interactions"]:
         if not interaction["enabled"]:
             continue
         if interaction_id and interaction["id"] != str(interaction_id):
             continue
-        if interaction["source_object_id"] != str(source_object_id):
+        if interaction["source_object_id"] not in source_candidates:
             continue
         if interaction["trigger"] != str(trigger).strip().casefold():
+            continue
+        if (
+            direct_instance_override
+            and interaction["source_object_id"] != str(source_object_id)
+            and interaction["action"] == "change_variant"
+        ):
             continue
         parameters = dict(interaction.get("parameters") or {})
         required_key = str(parameters.get("key") or "")
@@ -115,6 +167,33 @@ def execute_ui_prototype_trigger(
                 runtime["overlay_artboard_ids"][-1] = target_artboard
             else:
                 runtime["overlay_artboard_ids"].append(target_artboard)
+        elif action == "change_variant" and interaction.get("component_id"):
+            target_component_id = str(interaction["component_id"])
+            runtime["component_variants"][str(source_object_id)] = (
+                target_component_id
+            )
+            components = {
+                row["id"]: row for row in document["components"]
+            }
+            current_component = components.get(
+                str((source_object or {}).get("component_id") or "")
+            )
+            family_id = str(
+                (current_component or {}).get("base_component_id")
+                or (current_component or {}).get("id")
+                or ""
+            )
+            if family_id and not bool(
+                parameters.get("reset_component_state", False)
+            ):
+                runtime["component_family_variants"][family_id] = (
+                    target_component_id
+                )
+            runtime["object_states"][str(source_object_id)] = str(
+                parameters.get("variant")
+                or parameters.get("variant_key")
+                or target_component_id
+            )
         elif action in {"change_state", "change_variant"} and target_object:
             runtime["object_states"][target_object] = str(
                 parameters.get("state")
@@ -165,9 +244,69 @@ def execute_ui_prototype_trigger(
                     "parameters": parameters,
                 }
             )
+        if bool(parameters.get("reset_component_state", False)):
+            runtime["component_variants"] = {}
+            runtime["component_family_variants"] = {}
+            runtime["object_states"] = {}
         matched.append(interaction["id"])
     runtime["matched_interaction_ids"] = matched
     return runtime
+
+
+def resolve_ui_component_prototype_document(
+    value: Mapping[str, Any],
+    state: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Render runtime Change-to choices without mutating the authoring document."""
+
+    from app.painter_ui_components import switch_ui_component_instance_variant
+
+    document = normalize_ui_document(value)
+    runtime = dict(state or {})
+    components = {row["id"]: row for row in document["components"]}
+    targets: dict[str, str] = {}
+    for family_id, component_id in dict(
+        runtime.get("component_family_variants") or {}
+    ).items():
+        for row in document["objects"]:
+            if row.get("component_role") != "instance":
+                continue
+            component = components.get(str(row.get("component_id") or ""))
+            if component is None:
+                continue
+            component_family_id = str(
+                component.get("base_component_id") or component["id"]
+            )
+            if (
+                component_family_id == str(family_id)
+                and str(row.get("component_source_object_id") or "")
+                == str(component.get("root_object_id") or "")
+            ):
+                targets[str(row["id"])] = str(component_id)
+    targets.update(
+        {
+            str(instance_root_id): str(component_id)
+            for instance_root_id, component_id in dict(
+                runtime.get("component_variants") or {}
+            ).items()
+        }
+    )
+    for instance_root_id, component_id in targets.items():
+        objects = {row["id"]: row for row in document["objects"]}
+        root = objects.get(str(instance_root_id))
+        if root is None or root.get("component_role") != "instance":
+            continue
+        if str(root.get("component_id") or "") == str(component_id):
+            continue
+        try:
+            document, _result = switch_ui_component_instance_variant(
+                document,
+                instance_root_id=str(instance_root_id),
+                target_component_id=str(component_id),
+            )
+        except ValueError:
+            continue
+    return document
 
 
 def prototype_delay_schedule(
@@ -237,9 +376,16 @@ def inspect_ui_prototype(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _object_html(row: Mapping[str, Any]) -> str:
+def _object_html(
+    row: Mapping[str, Any],
+    *,
+    children_html: str = "",
+) -> str:
+    from app.painter_ui_scroll import normalize_ui_scroll
+
     style = dict(row.get("style") or {})
     content = dict(row.get("content") or {})
+    scroll = normalize_ui_scroll(row.get("scroll"))
     fill = html.escape(str(style.get("fill") or "transparent"))
     stroke = html.escape(str(style.get("stroke") or "transparent"))
     radius = float(style.get("radius", 0.0) or 0.0)
@@ -250,16 +396,32 @@ def _object_html(row: Mapping[str, Any]) -> str:
     label = html.escape(
         str((row.get("accessibility") or {}).get("label") or row["name"])
     )
+    overflow = {
+        "none": "hidden" if bool(row.get("clip_content", False)) else "visible",
+        "horizontal": "auto hidden",
+        "vertical": "hidden auto",
+        "both": "auto",
+    }[scroll["overflow"]]
+    position = "sticky" if scroll["position"] == "sticky" else "absolute"
+    classes = "ui-object kind-%s scroll-%s" % (
+        html.escape(str(row["kind"])),
+        html.escape(scroll["position"]),
+    )
+    own_text = text if row["kind"] in {"text", "button"} else ""
     return (
-        '<div class="ui-object kind-%s" id="%s" role="%s" aria-label="%s" '
+        '<div class="%s" id="%s" role="%s" aria-label="%s" '
+        'data-scroll-position="%s" '
         'tabindex="0" style="left:%spx;top:%spx;width:%spx;height:%spx;'
         'opacity:%s;display:%s;background:%s;border:%spx solid %s;'
-        'border-radius:%spx;transform:rotate(%sdeg)">%s</div>'
+        'border-radius:%spx;position:%s;overflow:%s;'
+        '--object-rotation:%sdeg;transform:translate(var(--scroll-x,0px),'
+        'var(--scroll-y,0px)) rotate(var(--object-rotation))">%s%s</div>'
         % (
-            html.escape(str(row["kind"])),
+            classes,
             html.escape(str(row["id"])),
             role,
             label,
+            html.escape(scroll["position"]),
             float(row["x"]),
             float(row["y"]),
             float(row["width"]),
@@ -270,8 +432,11 @@ def _object_html(row: Mapping[str, Any]) -> str:
             float(style.get("stroke_width", 0.0) or 0.0),
             stroke,
             radius,
+            position,
+            overflow,
             float(row["rotation"]),
-            text if row["kind"] in {"text", "button"} else "",
+            own_text,
+            children_html,
         )
     )
 
@@ -298,15 +463,51 @@ def export_ui_prototype(
         ensure_ascii=False,
         separators=(",", ":"),
     )
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_motion_bridge import resolved_ui_geometry
+
+    geometry = resolve_ui_constraints(
+        document,
+        resolved_ui_geometry(
+            document,
+            normalize=False,
+            resolve_responsive=False,
+        ),
+    )
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for source_row in document["objects"]:
+        row = dict(source_row)
+        row.update(geometry.get(str(row["id"]), {}))
+        rows_by_id[str(row["id"])] = row
+        children_by_parent.setdefault(str(row.get("parent_id") or ""), []).append(row)
+
+    def render_object(row: Mapping[str, Any]) -> str:
+        nested = sorted(
+            children_by_parent.get(str(row["id"]), []),
+            key=lambda item: (item["z_index"], item["id"]),
+        )
+        local_row = dict(row)
+        parent_id = str(row.get("parent_id") or "")
+        parent = rows_by_id.get(parent_id)
+        if parent is not None:
+            local_row["x"] = float(row["x"]) - float(parent["x"])
+            local_row["y"] = float(row["y"]) - float(parent["y"])
+        return _object_html(
+            local_row,
+            children_html="".join(render_object(child) for child in nested),
+        )
+
     artboards = []
     for artboard in document["artboards"]:
         children = "".join(
-            _object_html(row)
+            render_object(row)
             for row in sorted(
                 (
                     row
-                    for row in document["objects"]
+                    for row in rows_by_id.values()
                     if row["artboard_id"] == artboard["id"]
+                    and not str(row.get("parent_id") or "")
                 ),
                 key=lambda row: (row["z_index"], row["id"]),
             )
@@ -330,7 +531,7 @@ def export_ui_prototype(
 .artboard{display:none;position:relative;background:#fff;color:#111;overflow:hidden;
 box-shadow:0 16px 60px #0008;transform-origin:top left}
 .artboard.active{display:block}.artboard.overlay{display:block;position:absolute;z-index:100}
-.ui-object{position:absolute;overflow:hidden;display:grid;place-items:center}
+.ui-object{position:absolute;display:block}.ui-object.kind-text,.ui-object.kind-button{display:grid;place-items:center}
 .ui-object:focus{outline:3px solid #4da3ff;outline-offset:2px}
 </style></head><body><main id="stage">%s</main>
 <script id="tiger-data" type="application/json">%s</script>
@@ -340,6 +541,17 @@ let state=data.initial_state;
 const rows=data.document.interactions.filter(x=>x.enabled);
 const byId=id=>document.getElementById(id);
 const objectRows=Object.fromEntries(data.document.objects.map(x=>[x.id,x]));
+const componentRows=Object.fromEntries(data.document.components.map(x=>[x.id,x]));
+document.querySelectorAll('.ui-object').forEach(container=>{
+ if(!['auto','scroll'].includes(getComputedStyle(container).overflowY)&&
+    !['auto','scroll'].includes(getComputedStyle(container).overflowX))return;
+ container.addEventListener('scroll',()=>{
+  container.querySelectorAll(':scope > .scroll-fixed').forEach(el=>{
+   el.style.setProperty('--scroll-x',`${container.scrollLeft}px`);
+   el.style.setProperty('--scroll-y',`${container.scrollTop}px`);
+  });
+ });
+});
 function transitionFor(row){
  const t=(row.parameters||{}).transition||{};
  const easing={linear:"linear",ease_in:"ease-in",ease_out:"ease-out",
@@ -384,12 +596,49 @@ function animateSmart(row,captured,transition){
   target.animate([start,end],{duration:transition.duration,easing:transition.easing});
  });
 }
+function componentFamilyId(component){return component?(component.base_component_id||component.id):""}
+function currentComponentId(instanceRow){
+ const authored=componentRows[instanceRow.component_id];
+ const family=componentFamilyId(authored);
+ return state.component_variants[instanceRow.id]||state.component_family_variants[family]||instanceRow.component_id;
+}
+function instanceSubtree(rootId){
+ return data.document.objects.filter(row=>{
+  let cursor=row;while(cursor&&cursor.parent_id){if(cursor.parent_id===rootId)return true;cursor=objectRows[cursor.parent_id]}
+  return row.id===rootId;
+ });
+}
+function variantTargetRow(component,canonicalId){
+ const map=((component||{}).metadata||{}).variant_source_map||{};
+ return objectRows[map[canonicalId]||canonicalId]||null;
+}
+function applyInstanceVariant(instanceRow,componentId){
+ const component=componentRows[componentId],targetRoot=component&&objectRows[component.root_object_id];
+ if(!component||!targetRoot)return;
+ instanceSubtree(instanceRow.id).forEach(row=>{
+  const target=variantTargetRow(component,row.component_source_object_id||"");
+  const el=byId(row.id);if(!target||!el)return;
+  const style=target.style||{},overrides=row.instance_overrides||{};
+  if(row.id!==instanceRow.id){el.style.left=`${Number(target.x)-Number(targetRoot.x)}px`;el.style.top=`${Number(target.y)-Number(targetRoot.y)}px`}
+  el.style.width=`${Number(target.width)}px`;el.style.height=`${Number(target.height)}px`;
+  if(overrides["style.fill"]===undefined)el.style.background=style.fill||"transparent";
+  if(overrides["style.stroke"]===undefined)el.style.borderColor=style.stroke||"transparent";
+  if(overrides["style.stroke_width"]===undefined)el.style.borderWidth=`${Number(style.stroke_width||0)}px`;
+  if(overrides["style.radius"]===undefined)el.style.borderRadius=`${Number(style.radius||0)}px`;
+  if(overrides.opacity===undefined)el.style.opacity=Number(target.opacity??1);
+  if(["text","button"].includes(row.kind)&&overrides["content.text"]===undefined)el.textContent=String((target.content||{}).text||target.name||"");
+  el.dataset.componentId=componentId;
+ });
+}
 function render(){
  document.querySelectorAll(".artboard").forEach(el=>{
   const id=el.id.replace("artboard-","");
   el.classList.toggle("active",id===state.artboard_id);
   el.classList.toggle("overlay",state.overlay_artboard_ids.includes(id));
  });
+ data.document.objects.filter(row=>row.component_role==="instance"&&
+  (componentRows[row.component_id]||{}).root_object_id===row.component_source_object_id
+ ).forEach(row=>applyInstanceVariant(row,currentComponentId(row)));
  Object.entries(state.object_visibility).forEach(([id,v])=>{
   const el=document.getElementById(id);if(el)el.style.display=v?"grid":"none";
  });
@@ -400,8 +649,18 @@ function render(){
   const el=byId(id);if(el)el.dataset.componentState=v;
  });
 }
+function interactionCandidates(id){
+ const object=objectRows[id],result=new Set([id]);if(!object)return result;
+ if(object.component_source_object_id)result.add(object.component_source_object_id);
+ if(object.component_role==="instance"){
+  const component=componentRows[currentComponentId(object)];if(component)result.add(component.root_object_id);
+ }
+ return result;
+}
 function fire(id,trigger,key=""){
- rows.filter(x=>x.source_object_id===id&&x.trigger===trigger).forEach(x=>{
+ const candidates=interactionCandidates(id);
+ const direct=rows.some(x=>x.source_object_id===id&&x.trigger===trigger);
+ rows.filter(x=>candidates.has(x.source_object_id)&&x.trigger===trigger&&!(direct&&x.source_object_id!==id&&x.action==="change_variant")).forEach(x=>{
  const p=x.parameters||{};if(p.key&&p.key.toLowerCase()!==key.toLowerCase())return;
   const transition=transitionFor(x);
   const smart=transition.kind==="smart_animate"?captureSmart(x):[];
@@ -410,6 +669,12 @@ function fire(id,trigger,key=""){
   else if(x.action==="open_overlay"&&x.target_artboard_id&&!state.overlay_artboard_ids.includes(x.target_artboard_id))state.overlay_artboard_ids.push(x.target_artboard_id);
   else if(x.action==="close_overlay")state.overlay_artboard_ids.pop();
   else if(x.action==="swap_overlay"&&x.target_artboard_id){if(state.overlay_artboard_ids.length)state.overlay_artboard_ids[state.overlay_artboard_ids.length-1]=x.target_artboard_id;else state.overlay_artboard_ids.push(x.target_artboard_id)}
+  else if(x.action==="change_variant"&&x.component_id){
+   state.component_variants[id]=String(x.component_id);
+   const authored=componentRows[(objectRows[id]||{}).component_id],family=componentFamilyId(authored);
+   if(family&&!p.reset_component_state)state.component_family_variants[family]=String(x.component_id);
+   state.object_states[id]=String(p.variant||p.variant_key||x.component_id);
+  }
   else if(["change_state","change_variant"].includes(x.action)&&x.target_object_id)state.object_states[x.target_object_id]=String(p.state||p.variant||x.name||"");
   else if(x.action==="set_visibility"&&x.target_object_id)state.object_visibility[x.target_object_id]=p.visible!==false;
   else if(x.action==="set_opacity"&&x.target_object_id)state.object_opacity[x.target_object_id]=Number(p.opacity??1);
@@ -419,6 +684,7 @@ function fire(id,trigger,key=""){
   else if(x.action==="scroll_to"&&x.target_object_id){const el=byId(x.target_object_id);if(el)el.scrollIntoView({behavior:"smooth",block:"center"})}
   else if(x.action==="play_sound"&&p.uri)new Audio(p.uri).play();
   else if(x.action==="play_animation"&&x.target_object_id){const el=document.getElementById(x.target_object_id);if(el)el.animate([{opacity:.4,transform:"scale(.98)"},{opacity:1,transform:"scale(1)"}],{duration:Number(p.duration_ms||250)})}
+  if(p.reset_component_state){state.component_variants={};state.component_family_variants={};state.object_states={}}
   render();
   if(transition.kind==="smart_animate"&&smart.length)animateSmart(x,smart,transition);
   else if(x.target_artboard_id)animateTarget(x.target_artboard_id,transition);
@@ -467,6 +733,7 @@ __all__ = [
     "PROTOTYPE_PACKAGE_SCHEMA",
     "PROTOTYPE_SCHEMA",
     "execute_ui_prototype_trigger",
+    "resolve_ui_component_prototype_document",
     "export_ui_prototype",
     "inspect_ui_prototype",
     "prototype_delay_schedule",

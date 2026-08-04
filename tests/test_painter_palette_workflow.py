@@ -12,6 +12,7 @@ def _app():
 
 
 def _dialog():
+    _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap
 
     return PaintDialog(
@@ -46,6 +47,20 @@ def test_oklch_palette_is_gamut_mapped_and_perceptual() -> None:
             for mode_rgb, _label in mode_rows
             for channel in mode_rgb
         )
+
+
+def test_oklch_powerless_gray_hue_does_not_create_arbitrary_harmony() -> None:
+    import math
+    from app.painter_palette import oklch_harmony_colors, rgb_to_oklch
+
+    lightness, chroma, hue = rgb_to_oklch((128, 128, 128))
+    assert 0.0 < lightness < 1.0
+    assert chroma <= 0.000004
+    assert math.isnan(hue)
+    for mode in ("full", "analogous", "complementary", "split_complementary", "triadic"):
+        rows = oklch_harmony_colors((128, 128, 128), mode)
+        assert len(rows) == 8
+        assert all(red == green == blue for (red, green, blue), _label in rows)
 
 
 def test_palette_library_and_brush_bundle_round_trip(tmp_path: Path) -> None:
@@ -87,6 +102,50 @@ def test_palette_library_and_brush_bundle_round_trip(tmp_path: Path) -> None:
     assert imported == restored["custom_brushes"]
 
 
+def test_corrupt_palette_is_reported_and_preserved_before_replacement(tmp_path: Path) -> None:
+    from app.painter_palette import (
+        load_palette_library_with_report,
+        save_palette_library_with_report,
+    )
+
+    library_path = tmp_path / "palette.json"
+    corrupt_bytes = b'{"schema": "broken",'
+    library_path.write_bytes(corrupt_bytes)
+    library, load_report = load_palette_library_with_report(library_path)
+    assert library["favorites"] == []
+    assert load_report["status"] == "corrupt"
+    assert load_report["fallback_used"] is True
+    assert load_report["error"]["type"]
+
+    save_report = save_palette_library_with_report(
+        {"favorites": ["Drawing::Ink::round"]},
+        library_path,
+    )
+    backup = Path(save_report["corrupt_backup_path"])
+    assert backup.read_bytes() == corrupt_bytes
+    assert backup != library_path
+    restored, restored_report = load_palette_library_with_report(library_path)
+    assert restored["favorites"] == ["Drawing::Ink::round"]
+    assert restored_report["status"] == "loaded"
+
+
+def test_palette_save_failure_is_exposed_and_later_success_clears_it(monkeypatch) -> None:
+    dialog = _dialog()
+    import app.drawing as drawing
+
+    def fail_save(_payload):
+        raise OSError("palette volume is read-only")
+
+    monkeypatch.setattr(drawing, "save_palette_library", fail_save)
+    dialog._save_palette_library_state()
+    assert "read-only" in dialog.painter_action_state()["operational_errors"]["palette_library"]
+
+    monkeypatch.setattr(drawing, "save_palette_library", lambda _payload: None)
+    dialog._save_palette_library_state()
+    assert dialog.painter_action_state()["operational_errors"]["palette_library"] == ""
+    dialog.close()
+
+
 def test_quick_palette_large_brush_custom_preset_and_document_colors() -> None:
     app = _app()
     dialog = _dialog()
@@ -96,11 +155,11 @@ def test_quick_palette_large_brush_custom_preset_and_document_colors() -> None:
     dialog._on_width_changed(1400)
     assert dialog._pen_width == 1400
     assert dialog.canvas._pen_width == 1400
-    assert dialog._top_brush_size_spin.maximum() == 2048
+    assert dialog._top_brush_size_spin.maximum() == 5000
 
     before_hardness = int(dialog._brush_detail_settings["hardness"])
-    dialog._adjust_brush_from_hud(150.0, 20.0, False)
-    assert dialog._pen_width == 2048
+    dialog._adjust_brush_from_hud(1000.0, 20.0, False)
+    assert dialog._pen_width == 5000
     assert int(dialog._brush_detail_settings["hardness"]) < before_hardness
 
     custom = dialog._create_custom_brush_preset(
@@ -108,7 +167,7 @@ def test_quick_palette_large_brush_custom_preset_and_document_colors() -> None:
         ["storyboard", "ink"],
         category="Comics",
     )
-    assert custom["width"] == 2048
+    assert custom["width"] == 5000
     assert custom["pressure_response"] == dialog._brush_detail_settings["pressure_response"]
     assert dialog._brush_presets_catalog()[-1]["name"] == "Storyboard Giant"
     assert dialog._palette_library_state["custom_brushes"][-1]["category"] == "Comics"
@@ -125,7 +184,8 @@ def test_quick_palette_large_brush_custom_preset_and_document_colors() -> None:
     assert len(payload["palette"]["colors"]) == 32
     state = dialog.painter_action_state()
     assert state["palette"]["engine"] == "oklch_srgb_gamut_mapped_v1"
-    assert state["brush"]["library"]["max_brush_size_px"] == 2048
+    assert state["brush"]["library"]["max_brush_size_px"] == 5000
+    assert state["brush"]["library"]["size_limit_contract"]["performance_at_maximum_claim"] is False
     triadic_index = dialog._palette_harmony_combo.findData("triadic")
     dialog._palette_harmony_combo.setCurrentIndex(triadic_index)
     assert dialog._palette_harmony_mode == "triadic"

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_painter_reference_board_crud_and_contract(tmp_path: Path) -> None:
     from app.painter_reference_board import (
@@ -77,8 +79,39 @@ def test_painter_reference_board_crud_and_contract(tmp_path: Path) -> None:
     assert palette["color_count"] >= 1
     assert palette["colors"][0]["hex"] in {"#184860", "#C09048"}
 
+    alpha_path = tmp_path / "reference_palette_alpha_one.png"
+    alpha_image = QImage(1, 1, QImage.Format.Format_ARGB32)
+    alpha_image.fill(QColor(240, 24, 12, 1))
+    assert alpha_image.save(str(alpha_path), "PNG")
+    alpha_palette = extract_reference_palette(str(alpha_path), max_colors=1)
+    assert alpha_palette["color_count"] == 1
+
     restored = reference_board_from_dict(board.to_dict())
     assert restored.to_dict()["reference_count"] == 2
 
     board = delete_reference_image(restored, "reference:key")
     assert board.to_dict()["reference_count"] == 1
+
+
+def test_reference_serialized_scalar_boundaries_reject_only_expected_input_errors() -> None:
+    from app.painter_reference_board import _normalize_rotation, _reference_index
+
+    assert _reference_index("missing-separator") == 0
+    assert _reference_index("reference:not-an-index") == 0
+    assert _normalize_rotation(True) == 0.0
+    assert _normalize_rotation("not-a-number") == 0.0
+    assert _normalize_rotation(float("inf")) == 0.0
+    assert _normalize_rotation(725) == 5.0
+
+    class BrokenString:
+        def __str__(self):
+            raise RuntimeError("identifier implementation failed")
+
+    class BrokenFloat:
+        def __float__(self):
+            raise RuntimeError("rotation implementation failed")
+
+    with pytest.raises(RuntimeError, match="identifier implementation failed"):
+        _reference_index(BrokenString())
+    with pytest.raises(RuntimeError, match="rotation implementation failed"):
+        _normalize_rotation(BrokenFloat())

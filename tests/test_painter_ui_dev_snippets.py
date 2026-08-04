@@ -87,7 +87,10 @@ def test_dev_snippets_use_real_web_and_umg_adapters() -> None:
     assert snippets["umg"]["adapter"] == PAINTER_UMG_ADAPTER_SCHEMA
     umg_layer = json.loads(snippets["umg"]["code"])
     assert umg_layer["Id"] == row["id"]
-    assert umg_layer["Disposition"] == "Native"
+    assert umg_layer["Disposition"] == "Blocked"
+    assert umg_layer["BlockReasons"] == [
+        "advanced_appearance_requires_leaf_rectangle"
+    ]
     assert snippets["ios"]["available"] is True
     assert snippets["ios"]["adapter"] == SWIFTUI_ADAPTER
     assert "import SwiftUI" in snippets["ios"]["code"]

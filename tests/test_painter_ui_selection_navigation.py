@@ -131,6 +131,45 @@ def test_breadcrumb_emits_requested_ancestor_and_hides_for_root() -> None:
     app.processEvents()
 
 
+def test_paint_dialog_places_selection_breadcrumb_in_canvas_chrome() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, QRect
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_ui_document import select_ui_object
+
+    document, _root, _group, text, _badge = _nested_document()
+    document = select_ui_object(document, text["id"])
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 480, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1200, 800)
+    dialog.show()
+    dialog._set_canvas_workspace_mode("ui_design")
+    breadcrumb = dialog._painter_ui_selection_breadcrumb
+    breadcrumb.set_document(document)
+    app.processEvents()
+
+    assert breadcrumb.parentWidget() is dialog._canvas_mode_bar
+    assert dialog._canvas_mode_bar.layout().indexOf(breadcrumb) >= 0
+    breadcrumb_rect = QRect(
+        breadcrumb.mapToGlobal(QPoint(0, 0)),
+        breadcrumb.size(),
+    )
+    canvas_rect = QRect(
+        dialog._canvas_host.mapToGlobal(QPoint(0, 0)),
+        dialog._canvas_host.size(),
+    )
+    assert not breadcrumb_rect.intersects(canvas_rect)
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_overlay_hit_stack_returns_topmost_then_ancestors() -> None:
     app = _app()
     from PySide6.QtCore import QPoint, QPointF, Qt

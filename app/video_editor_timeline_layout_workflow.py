@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.audio_tracks import is_audio_path, is_video_path
+from app.media_asset_routing import motion_project_paths_from_mime
 from app.video_editor_media_import_controller import (
     TARGET_WINDOW,
     dispatch_import_decision,
@@ -28,6 +29,14 @@ def dropEvent(self, event: QDropEvent) -> None:
     mmd_paths = self._mmd_paths_from_mime(md)
     if mmd_paths:
         self._add_mmd_asset_to_timeline(mmd_paths)
+        event.acceptProposedAction()
+        return
+    motion_paths = motion_project_paths_from_mime(md)
+    if motion_paths:
+        self._import_motion_actor_from_path(
+            motion_paths[0],
+            start_ms=int(getattr(self._player, "position", lambda: 0)()),
+        )
         event.acceptProposedAction()
         return
     if not md.hasUrls():

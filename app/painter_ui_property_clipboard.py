@@ -13,7 +13,7 @@ _CONTENT_PROPERTY_KEYS = {
     "nine_slice_enabled",
     "nine_slice",
 }
-_PROPERTY_KEYS = ("style", "opacity", "clip_content", "layout")
+_PROPERTY_KEYS = ("style", "opacity", "clip_content", "layout", "scroll")
 _REPLACE_KEYS = (
     "kind",
     "width",
@@ -26,6 +26,7 @@ _REPLACE_KEYS = (
     "content",
     "mask",
     "layout",
+    "scroll",
     "accessibility",
 )
 

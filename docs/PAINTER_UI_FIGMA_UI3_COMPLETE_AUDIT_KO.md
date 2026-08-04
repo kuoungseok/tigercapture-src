@@ -9,12 +9,18 @@ Non-goal: Figma의 브랜드, 색상, 아이콘을 복제하거나 협업 서비
 > 진입점·표시 조건·배치 계약은
 > [PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md](PAINTER_UI_FIGMA_MULTISOURCE_LAYOUT_RESEARCH_KO.md)를
 > 함께 따른다.
+>
+> 실제 구현 순서와 단계별 완료 게이트는
+> [PAINTER_UI_FIGMA_REPLACEMENT_MILESTONES_2026_KO.md](PAINTER_UI_FIGMA_REPLACEMENT_MILESTONES_2026_KO.md)가
+> 소유한다. 이 감사 문서는 gap 증거 목록이며 별도의 경쟁 실행 순서가 아니다.
 
 ## 1. 결론
 
 Tiger Studio Painter UI는 기능 기반이 빈약한 상태가 아니다.
 
-- UI 문서 모델은 `tigerstudio.painter.ui.v1`, version `22`다.
+- UI 문서 모델은 `tigerstudio.painter.ui.v1`, version `26`이다. Arc의
+  `sweep_angle`은 Figma와 같이 위쪽 드래그는 양수, 아래쪽 드래그는
+  음수인 signed degree 값으로 직렬화한다.
 - `paint.ui.*` Action은 현재 `267`개이며, Action family 감사 기준
   `15/15`가 covered다.
 - `test_painter_ui_*.py`에는 현재 `486`개의 테스트 함수가 있다.
@@ -233,10 +239,10 @@ Figma UI3 toolbar:
 - Actions
 - Mode 전환
 
-협업을 제외한 Tiger Studio 목표:
+Tiger Studio 목표:
 
 ```text
-[Move ▼] [Frame ▼] [Shape ▼] [Pen ▼] [Text] [Actions]
+[Move ▼] [Frame ▼] [Shape ▼] [Pen ▼] [Text] [Comments] [Actions]
 ```
 
 세부 그룹:
@@ -245,6 +251,9 @@ Figma UI3 toolbar:
 - Frame: Frame, Section, Slice/Export Region
 - Shape: Rectangle, Line, Arrow, Ellipse, Polygon, Star, Image
 - Pen: Pen/Vector, Pencil/Draw
+- Comments: `C` 모드, 객체·프레임 고정 핀, 작성, 답글, 해결/다시 열기,
+  삭제, 검색/필터. 댓글 모드에서는 디자인 객체 편집을 차단하고 `Esc`로
+  Move 도구로 돌아간다.
 - Actions: 검색, commands, components, templates, AI
 
 Toolbar에서 제거할 항목:

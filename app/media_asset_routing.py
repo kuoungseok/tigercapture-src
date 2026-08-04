@@ -104,6 +104,13 @@ def mmd_paths_from_mime(mime: Any) -> list[Path]:
     return _mmd_paths_from_mime(mime)
 
 
+def motion_project_paths_from_mime(mime: Any) -> list[Path]:
+    return [
+        path for path in mime_url_paths(mime)
+        if path.suffix.casefold() == ".tgmotion"
+    ]
+
+
 def timeline_media_paths_from_mime(mime: Any) -> list[Path]:
     return [
         path for path in mime_url_paths(mime)

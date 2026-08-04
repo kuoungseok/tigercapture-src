@@ -922,6 +922,14 @@ def load_project(editor, path: str | Path) -> None:
                     material_roughness=max(
                         0.0, min(1.0, float(sd.get("material_roughness", 0.56)))
                     ),
+                    material_plow=max(
+                        0.0, min(1.0, float(sd.get("material_plow", 0.0) or 0.0))
+                    ),
+                    material_resaturation=max(
+                        0.0,
+                        min(1.0, float(sd.get("material_resaturation", 0.0) or 0.0)),
+                    ),
+                    material_negative_depth=bool(sd.get("material_negative_depth", False)),
                     start_ms=int(sd.get("start_ms", 0)),
                     end_ms=sd.get("end_ms"),
                 ))

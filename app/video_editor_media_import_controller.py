@@ -22,6 +22,7 @@ from app.image_media import DEFAULT_IMAGE_DURATION_MS, is_image_path
 from app.media_asset_routing import (
     ar_pbr_paths_from_mime as _shared_ar_pbr_paths_from_mime,
     mmd_paths_from_mime as _shared_mmd_paths_from_mime,
+    motion_project_paths_from_mime as _shared_motion_project_paths_from_mime,
     performance_source_paths_from_mime as _shared_performance_source_paths_from_mime,
     timeline_media_paths_from_mime as _shared_timeline_media_paths_from_mime,
     vrm_avatar_paths_from_mime as _shared_vrm_avatar_paths_from_mime,
@@ -34,6 +35,7 @@ from app.video_track_legacy import VideoTrack, _ensure_video_clips
 ROUTE_NONE = "none"
 ROUTE_VRM_AVATAR = "vrm_avatar"
 ROUTE_MMD = "mmd"
+ROUTE_MOTION = "motion_actor"
 ROUTE_AR_PBR = "ar_pbr"
 ROUTE_PERFORMANCE_SOURCE = "performance_source"
 ROUTE_VIDEO = "video"
@@ -50,6 +52,7 @@ TARGET_AUDIO_ROW = "audio_row"
 _WINDOW_PRIORITY = (
     ROUTE_VRM_AVATAR,
     ROUTE_MMD,
+    ROUTE_MOTION,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_AR_PBR,
     ROUTE_VIDEO,
@@ -58,6 +61,7 @@ _WINDOW_PRIORITY = (
 )
 _TRACKS_HOST_PRIORITY = (
     ROUTE_MMD,
+    ROUTE_MOTION,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_AR_PBR,
     ROUTE_VIDEO,
@@ -67,10 +71,12 @@ _TRACKS_HOST_PRIORITY = (
 _PREVIEW_PRIORITY = (
     ROUTE_VRM_AVATAR,
     ROUTE_MMD,
+    ROUTE_MOTION,
     ROUTE_AR_PBR,
 )
 _VIDEO_ROW_PRIORITY = (
     ROUTE_MMD,
+    ROUTE_MOTION,
     ROUTE_AR_PBR,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_VIDEO,
@@ -79,6 +85,7 @@ _VIDEO_ROW_PRIORITY = (
 )
 _AUDIO_ROW_PRIORITY = (
     ROUTE_MMD,
+    ROUTE_MOTION,
     ROUTE_AR_PBR,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_VIDEO,
@@ -162,6 +169,15 @@ def mmd_paths_from_mime(owner: Any, mime: Any) -> tuple[Path, ...]:
     return _owner_paths(owner, "_mmd_paths_from_mime", _shared_mmd_paths_from_mime, mime)
 
 
+def motion_project_paths_from_mime(owner: Any, mime: Any) -> tuple[Path, ...]:
+    return _owner_paths(
+        owner,
+        "_motion_project_paths_from_mime",
+        _shared_motion_project_paths_from_mime,
+        mime,
+    )
+
+
 def ar_pbr_paths_from_mime(owner: Any, mime: Any) -> tuple[Path, ...]:
     return _owner_paths(owner, "_ar_pbr_paths_from_mime", _shared_ar_pbr_paths_from_mime, mime)
 
@@ -201,6 +217,7 @@ def route_mime_drop(
     route_paths = {
         ROUTE_VRM_AVATAR: vrm_avatar_paths_from_mime(owner, mime),
         ROUTE_MMD: mmd_paths_from_mime(owner, mime),
+        ROUTE_MOTION: motion_project_paths_from_mime(owner, mime),
         ROUTE_PERFORMANCE_SOURCE: performance_source_paths_from_mime(owner, mime),
         ROUTE_AR_PBR: ar_pbr_paths_from_mime(owner, mime),
     }
@@ -870,6 +887,12 @@ def dispatch_import_decision(owner: Any, decision: MediaImportDecision) -> bool:
         else:
             _safe_call(add, list(decision.paths) if len(decision.paths) > 1 else path, start_ms=int(decision.start_ms))
         return True
+    if decision.route == ROUTE_MOTION:
+        add = getattr(owner, "_import_motion_actor_from_path", None)
+        if callable(add):
+            result = _safe_call(add, path, start_ms=decision.start_ms)
+            return result is not False
+        return False
     if decision.route == ROUTE_AR_PBR:
         add = getattr(owner, "_add_ar_pbr_asset_to_preview", None)
         kwargs: dict[str, Any] = {}
@@ -931,6 +954,9 @@ def add_timeline_media_from_mime(owner: Any, mime: Any, *, open_audio_editor: bo
 def on_media_dropped_on_video_row(owner: Any, track_id: int, path: Path | str) -> bool:
     path = Path(path)
     _register_in_media_pool(owner, path)
+    if path.suffix.casefold() == ".tgmotion":
+        add = getattr(owner, "_import_motion_actor_from_path", None)
+        return bool(_safe_call(add, path, start_ms=_current_playhead_ms(owner))) if callable(add) else False
     try:
         from app.mmd.project_tracks import is_mmd_asset_path
 
@@ -1008,6 +1034,9 @@ def on_media_dropped_on_video_row(owner: Any, track_id: int, path: Path | str) -
 def on_media_dropped_on_audio_row(owner: Any, track_id: int, path: Path | str) -> bool:
     path = Path(path)
     _register_in_media_pool(owner, path)
+    if path.suffix.casefold() == ".tgmotion":
+        add = getattr(owner, "_import_motion_actor_from_path", None)
+        return bool(_safe_call(add, path, start_ms=_current_playhead_ms(owner))) if callable(add) else False
     try:
         from app.mmd.project_tracks import is_mmd_asset_path
 
@@ -1154,6 +1183,7 @@ __all__ = [
     "ROUTE_NONE",
     "ROUTE_VRM_AVATAR",
     "ROUTE_MMD",
+    "ROUTE_MOTION",
     "ROUTE_AR_PBR",
     "ROUTE_PERFORMANCE_SOURCE",
     "ROUTE_VIDEO",
@@ -1178,6 +1208,7 @@ __all__ = [
     "dispatch_import_decision",
     "ensure_performance_source_track",
     "mmd_paths_from_mime",
+    "motion_project_paths_from_mime",
     "on_media_dropped_on_audio_row",
     "on_media_dropped_on_video_row",
     "on_media_pool_item_added",

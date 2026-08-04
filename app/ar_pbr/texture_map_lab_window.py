@@ -12,7 +12,7 @@ import tempfile
 from typing import Any
 
 from PySide6.QtCore import QElapsedTimer, QProcess, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -63,8 +63,9 @@ _WM_EXITSIZEMOVE = 0x0232
 
 
 _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
-    ("Raw", "base_color_source"),
+    ("Input", "base_color_source"),
     ("Base", "base_color"),
+    ("Estimate", "base_color_estimate"),
     ("Height", "height"),
     ("Normal", "normal"),
     ("AO", "ao"),
@@ -564,6 +565,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
         self._delight_check: QCheckBox | None = None
+        self._delight_apply_check: QCheckBox | None = None
         self._height_invert_check: QCheckBox | None = None
         self._parallax_check: QCheckBox | None = None
         self._animated_light_azimuth = float(self._settings["preview_light_azimuth"])
@@ -587,6 +589,11 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             else bool(self._settings.get("delight_enabled", False))
         )
         values["delight_enabled"] = delight_checked
+        values["delight_apply_to_base_color"] = bool(
+            self._delight_apply_check.isChecked()
+            if self._delight_apply_check is not None
+            else self._settings.get("delight_apply_to_base_color", False)
+        )
         animate_light_checked = (
             bool(self._animate_light_check.isChecked())
             if self._animate_light_check is not None
@@ -720,6 +727,15 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if hasattr(self, "_status"):
             self._status.setText(message)
 
+    @staticmethod
+    def _pixmap_from_pil(image: Any) -> QPixmap:
+        if image is None:
+            return QPixmap()
+        rgb = image.convert("RGB")
+        raw = rgb.tobytes("raw", "RGB")
+        qimage = QImage(raw, rgb.width, rgb.height, rgb.width * 3, QImage.Format.Format_RGB888)
+        return QPixmap.fromImage(qimage.copy())
+
     def _copy_preview_to_clipboard_from_ui(self) -> None:
         try:
             self.copy_preview_to_clipboard()
@@ -769,17 +785,17 @@ class ArPbrTextureMapLabWindow(QMainWindow):
     def _preview_mode_label(self, mode: str) -> str:
         labels = {
             "material": "Material",
-            "intrinsic_channels": "Intrinsic Channels",
-            "albedo": "Albedo",
-            "delight_compare": "De-Light Compare",
+            "intrinsic_channels": "Analysis Channels",
+            "albedo": "De-lit Estimate (Heuristic)",
+            "delight_compare": "Input / Estimate Compare",
             "base_color_source": "Input BaseColor",
-            "base_color": "BaseColor / Albedo",
+            "base_color": "Export BaseColor",
             "normal": "Normal",
             "ao": "Ambient Occlusion",
             "roughness": "Roughness",
             "metallic": "Metallic",
-            "irradiance": "Irradiance",
-            "delight_shading": "De-light Shading Field",
+            "irradiance": "Estimated Illumination",
+            "delight_shading": "Estimated Lighting Field",
             "height": "Height",
             "cavity": "Cavity",
             "curvature": "Curvature",
@@ -861,7 +877,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview_mode_combo = QComboBox(central)
         self._preview_mode_combo.setObjectName("TextureLabCombo")
         for mode in PREVIEW_MODES:
-            self._preview_mode_combo.addItem(mode.replace("_", " ").title(), mode)
+            self._preview_mode_combo.addItem(self._preview_mode_label(mode), mode)
         self._preview_mode_combo.currentIndexChanged.connect(self.queue_preview)
         self._preview_shape_combo = QComboBox(central)
         self._preview_shape_combo.setObjectName("TextureLabShapeCombo")
@@ -871,17 +887,21 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             "Preview generated maps on a plane or UV-mapped sphere. Multi-panel diagnostics remain flat."
         )
         self._preview_shape_combo.currentIndexChanged.connect(self.queue_preview)
-        show_intrinsic = QPushButton("Intrinsic", central)
+        show_intrinsic = QPushButton("Analysis", central)
         show_intrinsic.setObjectName("TextureLabModeButton")
-        show_intrinsic.setToolTip("Show Input, Albedo, Normal, Roughness, and Irradiance together")
+        show_intrinsic.setToolTip(
+            "Show Input, heuristic De-lit Estimate, Normal, Roughness, and estimated lighting together"
+        )
         show_intrinsic.clicked.connect(self._show_intrinsic_channels_preview)
-        show_albedo = QPushButton("Albedo", central)
+        show_albedo = QPushButton("De-lit", central)
         show_albedo.setObjectName("TextureLabModeButton")
-        show_albedo.setToolTip("Show the de-lighted albedo/BaseColor result in the main preview")
+        show_albedo.setToolTip(
+            "Show the heuristic lighting-cleanup estimate. This is not a measured albedo."
+        )
         show_albedo.clicked.connect(self._show_albedo_preview)
         show_compare = QPushButton("Compare", central)
         show_compare.setObjectName("TextureLabModeButton")
-        show_compare.setToolTip("Compare source BaseColor, de-lighted albedo, and amplified difference")
+        show_compare.setToolTip("Compare input BaseColor, heuristic estimate, and amplified difference")
         show_compare.clicked.connect(self._show_delight_compare_preview)
         paste_image = QPushButton("Paste Image", central)
         paste_image.setIcon(app_icon("paste", size=16))
@@ -907,6 +927,18 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         export_packed.setIcon(app_icon("save", size=16))
         export_packed.setIconSize(icon_size(16))
         export_packed.clicked.connect(self.export_packed)
+        export_size_label = QLabel("Export Size", central)
+        export_size_label.setObjectName("TextureLabControlLabel")
+        self._export_size_combo = QComboBox(central)
+        self._export_size_combo.setObjectName("TextureLabCombo")
+        self._export_size_combo.addItem("Auto / max 4K", 4096)
+        self._export_size_combo.addItem("Original", 0)
+        self._export_size_combo.addItem("Max 2K", 2048)
+        self._export_size_combo.addItem("Max 1K", 1024)
+        self._export_size_combo.setToolTip(
+            "Auto keeps large sources within a practical GPU-memory budget. "
+            "Choose Original only when full source resolution is required."
+        )
         toolbar = QWidget(central)
         toolbar.setObjectName("TextureLabTopToolbar")
         toolbar_layout = QGridLayout(toolbar)
@@ -923,6 +955,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         toolbar_layout.addWidget(gpu_setup, 1, 2)
         toolbar_layout.addWidget(export_maps, 1, 3)
         toolbar_layout.addWidget(export_packed, 1, 4, 1, 2)
+        toolbar_layout.addWidget(export_size_label, 2, 0)
+        toolbar_layout.addWidget(self._export_size_combo, 2, 1, 1, 2)
         top.addWidget(toolbar, 0, Qt.AlignmentFlag.AlignLeft)
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
         copy_shortcut.activated.connect(self._copy_preview_to_clipboard_from_ui)
@@ -944,6 +978,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview = _TextureLabPreviewCanvas(preview_panel)
         self._status = QLabel("", preview_panel)
         self._status.setObjectName("TextureLabStatus")
+        self._status.setMinimumWidth(0)
+        self._status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         preview_layout.addWidget(preview_label)
         preview_layout.addWidget(self._preview, 1)
         preview_layout.addWidget(self._status)
@@ -961,13 +997,33 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._normal_format_combo.addItem("Unreal / DirectX Normal", "unreal_directx")
         self._normal_format_combo.addItem("OpenGL Normal", "opengl")
         self._normal_format_combo.currentIndexChanged.connect(self.queue_preview)
-        controls_layout.addWidget(_section_label("Base Color / Albedo", controls))
-        self._delight_check = QCheckBox("De-light Albedo", controls)
+        controls_layout.addWidget(_section_label("Base Color / De-lit Estimate", controls))
+        self._delight_check = QCheckBox("Generate De-lit Estimate", controls)
         self._delight_check.setObjectName("TextureLabCheck")
         self._delight_check.setChecked(bool(self._settings.get("delight_enabled", False)))
-        self._delight_check.setToolTip("Remove broad photographic lighting and shadow from BaseColor.")
+        self._delight_check.setToolTip(
+            "Estimate broad photographic lighting with a heuristic cleanup. "
+            "It is not a measured or physically guaranteed albedo."
+        )
         self._delight_check.toggled.connect(self._on_delight_toggled)
         controls_layout.addWidget(self._delight_check)
+        self._delight_apply_check = QCheckBox("Apply Estimate to Base Color", controls)
+        self._delight_apply_check.setObjectName("TextureLabCheck")
+        self._delight_apply_check.setChecked(
+            bool(self._settings.get("delight_apply_to_base_color", False))
+        )
+        self._delight_apply_check.setToolTip(
+            "Explicitly replace exported Base Color with the heuristic estimate. "
+            "Height, Normal, AO, Roughness, and Metallic still use the input image."
+        )
+        self._delight_apply_check.toggled.connect(self.queue_preview)
+        controls_layout.addWidget(self._delight_apply_check)
+        self._add_advanced_map_check(
+            controls_layout,
+            controls,
+            "Export Estimate Separately",
+            "base_color_estimate",
+        )
         self._add_slider(controls_layout, "De-light Strength", "delight_strength", 0.0, 1.0, 0.01)
         self._add_slider(controls_layout, "Shading Radius", "delight_radius_px", 1.0, 256.0, 1.0)
         self._add_slider(controls_layout, "Detail Preserve", "delight_contrast_preservation", 0.0, 1.0, 0.01)
@@ -1119,14 +1175,20 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _sync_delight_controls(self) -> None:
         enabled = bool(self._delight_check.isChecked()) if self._delight_check else False
+        if self._delight_apply_check is not None:
+            if not enabled and self._delight_apply_check.isChecked():
+                self._delight_apply_check.blockSignals(True)
+                self._delight_apply_check.setChecked(False)
+                self._delight_apply_check.blockSignals(False)
+            self._delight_apply_check.setEnabled(enabled)
         for key in ("delight_strength", "delight_radius_px", "delight_contrast_preservation"):
             slider = self._sliders.get(key)
             if slider is not None:
                 slider.setEnabled(enabled)
                 slider.setToolTip(
-                    "Controls estimated illumination removal for de-lighted BaseColor."
+                    "Controls a heuristic lighting-cleanup estimate; it is not measured albedo."
                     if enabled
-                    else "Enable De-light Albedo to edit this value."
+                    else "Enable Generate De-lit Estimate to edit this value."
                 )
 
     def _sync_parallax_controls(self) -> None:
@@ -1207,26 +1269,21 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 self._preview_heading.setText(
                     f"{effective_shape.title()} Preview - {self._preview_mode_label(mode)}"
                 )
-            out = (
-                Path(tempfile.gettempdir())
-                / "tiger_ar_pbr_texture_lab"
-                / f"{self.image_path.stem}_{effective_shape}_{mode}.png"
-            )
             generated, cache_hit = self._cached_generated_maps(max_size=preview_size)
             payload = render_plane_preview_from_generated(
                 generated,
                 self.settings(),
                 preview_mode=mode,
                 preview_shape=requested_shape,
-                output_path=out,
                 width=preview_size,
                 source_path=self.image_path,
                 allow_cpu_preview=self._allow_cpu_fallback,
+                write_output=False,
             )
             if hasattr(self, "_backend_status"):
                 self._backend_status.setText(self._backend_status_text())
-            self._last_preview_path = Path(payload["preview_path"])
-            pix = QPixmap(str(payload["preview_path"]))
+            self._last_preview_path = None
+            pix = self._pixmap_from_pil(payload.get("preview_image"))
             self._preview.set_preview_pixmap(pix)
             if not animating_light:
                 self._preview.set_thumbnail_pixmaps(self._thumbnail_pixmaps(active_mode=mode, generated=generated))
@@ -1234,8 +1291,15 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             cache = "cached" if cache_hit else "rendered"
             shape = str(payload.get("preview_shape", effective_shape))
             cadence = " | live light" if animating_light else ""
+            provenance = dict(payload.get("base_color_provenance") or {})
+            base_source = (
+                "heuristic estimate explicitly applied"
+                if provenance.get("estimate_applied")
+                else "input Base Color preserved"
+            )
             self._status.setText(
-                f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | {backend} | {cache}{cadence}"
+                f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | "
+                f"{backend} | {cache} | {base_source}{cadence}"
             )
         except TextureMapGpuRequiredError as exc:
             if hasattr(self, "_backend_status"):
@@ -1260,8 +1324,6 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if generated is None:
             generated, _cache_hit = self._cached_generated_maps(max_size=192)
         maps = generated["maps"]
-        root = Path(tempfile.gettempdir()) / "tiger_ar_pbr_texture_lab"
-        root.mkdir(parents=True, exist_ok=True)
         thumbnails: list[tuple[str, QPixmap, bool]] = []
         for label, mode in _TEXTURE_THUMBNAILS:
             if mode in maps:
@@ -1270,9 +1332,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 image = texture_map_to_image(mode, pack_texture_channels(maps, mode))
             else:
                 continue
-            path = root / f"{self.image_path.stem}_thumb_{mode}.png"
-            image.save(path)
-            pix = QPixmap(str(path))
+            pix = self._pixmap_from_pil(image)
             if not pix.isNull():
                 thumbnails.append((label, pix, active_mode == mode))
         return thumbnails
@@ -1347,6 +1407,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 self.settings(),
                 maps=map_names,
                 packed_layouts=packed_layouts,
+                max_size=self._export_max_size(),
                 allow_cpu=self._allow_cpu_fallback,
             )
         except TextureMapGpuRequiredError as exc:
@@ -1361,7 +1422,20 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "Texture Lab", f"Export failed.\n\n{type(exc).__name__}: {exc}")
             return
-        self._status.setText(f"Exported: {payload['output_dir']}")
+        size = payload.get("processing_size", payload.get("size", [0, 0]))
+        source_size = payload.get("source_size", size)
+        resized = (
+            " | resized from " + " x ".join(map(str, source_size))
+            if payload.get("resampled")
+            else ""
+        )
+        self._status.setText(
+            f"Exported: {payload['output_dir']} | {size[0]} x {size[1]}{resized} | Height 16-bit"
+        )
+
+    def _export_max_size(self) -> int | None:
+        value = int(self._export_size_combo.currentData() or 0)
+        return value if value > 0 else None
 
     def _selected_export_maps(self) -> list[str]:
         names = list(DEFAULT_SEPARATE_MAPS)

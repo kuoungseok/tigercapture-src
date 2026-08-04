@@ -1,0 +1,33 @@
+{
+  "schema": "tigercapture.painter.figma_plugin_official_ui_corpus.v1",
+  "source": {
+    "repository": "https://github.com/figma/plugin-samples",
+    "revision": "03131bef561eb25ee2b704e3b39e40acc70330e0",
+    "local_root": "external/tools/figma-plugin-samples"
+  },
+  "cases": [
+    {
+      "id": "official.post_message",
+      "source": "post-message/code.js",
+      "ui": "post-message/ui.html",
+      "expected": "supported_message_ui",
+      "ui_message": "official-corpus"
+    },
+    {
+      "id": "official.webpack_react",
+      "source": "webpack-react/src/code.ts",
+      "ui": "webpack-react/src/ui.html",
+      "expected": "supported_document_ui",
+      "ui_message": {"type": "create-rectangles", "count": 3},
+      "expected_node_count": 3
+    },
+    {
+      "id": "official.icon_drag_and_drop",
+      "source": "icon-drag-and-drop/code.ts",
+      "ui": "icon-drag-and-drop/ui.html",
+      "expected": "supported_drop_svg_ui",
+      "drop_payload": "first_svg_file",
+      "expected_node_count": 2
+    }
+  ]
+}

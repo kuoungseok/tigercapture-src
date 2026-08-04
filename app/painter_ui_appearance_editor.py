@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.color_picker_widget import color_edit_with_picker
 from app.painter_ui_appearance import (
     UI_EFFECT_BLEND_MODES,
     merge_ui_appearance_style,
@@ -122,6 +123,15 @@ class PainterUIAppearanceDialog(QDialog):
             self.corner_spins[key] = spin
             corner_layout.addWidget(spin)
         form.addRow("Corners", corner_row)
+        self.corner_smoothing_spin = QDoubleSpinBox()
+        self.corner_smoothing_spin.setRange(0.0, 100.0)
+        self.corner_smoothing_spin.setDecimals(0)
+        self.corner_smoothing_spin.setSingleStep(5.0)
+        self.corner_smoothing_spin.setSuffix(" %")
+        self.corner_smoothing_spin.setToolTip(
+            "Continuous rounded corners used by the UMG Rounded Card material"
+        )
+        form.addRow("Corner smoothing", self.corner_smoothing_spin)
         layout.addLayout(form)
 
         stacks = QFrame()
@@ -155,10 +165,14 @@ class PainterUIAppearanceDialog(QDialog):
         self.paint_color_edit.editingFinished.connect(self._commit_paint_color)
         self.paint_visible_check = QCheckBox("Visible")
         self.paint_visible_check.toggled.connect(self._commit_paint_color)
+        paint_color_field, self.paint_color_picker = color_edit_with_picker(
+            self.paint_color_edit,
+            title="Choose appearance color",
+        )
         paint_row = QFrame()
         paint_layout = QHBoxLayout(paint_row)
         paint_layout.setContentsMargins(0, 0, 0, 0)
-        paint_layout.addWidget(self.paint_color_edit, 1)
+        paint_layout.addWidget(paint_color_field, 1)
         paint_layout.addWidget(self.paint_visible_check)
         layout.addWidget(paint_row)
         self.fills_list.currentRowChanged.connect(
@@ -191,6 +205,9 @@ class PainterUIAppearanceDialog(QDialog):
         )
         for key, spin in self.corner_spins.items():
             spin.setValue(float(self._advanced_style["corner_radii"][key]))
+        self.corner_smoothing_spin.setValue(
+            float(self._advanced_style.get("corner_smoothing", 0.0)) * 100.0
+        )
         for key in ("fills", "strokes"):
             widget = getattr(self, f"{key}_list")
             widget.clear()
@@ -330,8 +347,15 @@ class PainterUIAppearanceDialog(QDialog):
         self.gradient_stop_color_edit.editingFinished.connect(
             self._commit_gradient_stop
         )
+        (
+            gradient_stop_color_field,
+            self.gradient_stop_color_picker,
+        ) = color_edit_with_picker(
+            self.gradient_stop_color_edit,
+            title="Choose gradient stop color",
+        )
         stop_form.addRow("Position", self.gradient_stop_position_spin)
-        stop_form.addRow("Color", self.gradient_stop_color_edit)
+        stop_form.addRow("Color", gradient_stop_color_field)
         layout.addLayout(stop_form)
         return panel
 
@@ -366,6 +390,10 @@ class PainterUIAppearanceDialog(QDialog):
         self.effect_type_combo.addItem("Background Blur", "background_blur")
         self.effect_color_edit = QLineEdit()
         self.effect_color_edit.setPlaceholderText("#00000066")
+        effect_color_field, self.effect_color_picker = color_edit_with_picker(
+            self.effect_color_edit,
+            title="Choose effect color",
+        )
         metrics = QFrame()
         metrics_layout = QHBoxLayout(metrics)
         metrics_layout.setContentsMargins(0, 0, 0, 0)
@@ -389,7 +417,7 @@ class PainterUIAppearanceDialog(QDialog):
                 mode,
             )
         form.addRow("Type", self.effect_type_combo)
-        form.addRow("Color", self.effect_color_edit)
+        form.addRow("Color", effect_color_field)
         form.addRow("Geometry", metrics)
         form.addRow("Blur radius", self.effect_radius_spin)
         form.addRow("Blend", self.effect_blend_combo)
@@ -750,6 +778,10 @@ class PainterUIAppearanceDialog(QDialog):
             key: float(spin.value())
             for key, spin in self.corner_spins.items()
         }
+        result["corner_smoothing"] = max(
+            0.0,
+            min(1.0, float(self.corner_smoothing_spin.value()) / 100.0),
+        )
         result["fills"] = copy.deepcopy(self._advanced_style["fills"])
         result["strokes"] = copy.deepcopy(self._advanced_style["strokes"])
         for row in result["strokes"]:

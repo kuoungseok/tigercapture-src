@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -35,8 +37,88 @@ def test_tablet_sample_normalizes_pressure_tilt_rotation_and_barrel() -> None:
     assert sample.tilt_x == 0.5
     assert sample.tilt_y == -0.25
     assert 0.39 < sample.tilt < 0.40
-    assert sample.rotation == 0.75
+    assert sample.rotation == 0.25
     assert sample.tangential_pressure == -0.42
+
+
+def test_qt_rotation_uses_signed_centered_contract_and_missing_channels_are_neutral() -> None:
+    from app.painter_stylus import StylusSample, tablet_stylus_sample
+
+    class RotationEvent:
+        def __init__(self, degrees: float) -> None:
+            self.degrees = degrees
+
+        def pressure(self):
+            return 0.0
+
+        def rotation(self):
+            return self.degrees
+
+    assert StylusSample().pressure == 0.0
+    assert StylusSample().rotation == 0.5
+    assert tablet_stylus_sample(RotationEvent(0.0)).rotation == 0.5
+    assert tablet_stylus_sample(RotationEvent(90.0)).rotation == 0.75
+    assert tablet_stylus_sample(RotationEvent(-90.0)).rotation == 0.25
+    missing = tablet_stylus_sample(object())
+    assert missing.pressure == 0.0
+    assert missing.rotation == 0.5
+
+    class NonFiniteEvent:
+        def pressure(self):
+            return float("nan")
+
+        def rotation(self):
+            return float("inf")
+
+    nonfinite = tablet_stylus_sample(NonFiniteEvent())
+    assert nonfinite.pressure == 0.0
+    assert nonfinite.rotation == 0.5
+
+
+def test_real_qtablet_event_object_follows_qt_channel_contract() -> None:
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QInputDevice, QPointingDevice, QTabletEvent
+
+    from app.painter_stylus import tablet_stylus_sample
+
+    capabilities = (
+        QInputDevice.Capability.Position
+        | QInputDevice.Capability.Pressure
+        | QInputDevice.Capability.XTilt
+        | QInputDevice.Capability.YTilt
+        | QInputDevice.Capability.Rotation
+        | QInputDevice.Capability.TangentialPressure
+    )
+    device = QPointingDevice(
+        "Tiger QA Stylus",
+        701,
+        QInputDevice.DeviceType.Stylus,
+        QPointingDevice.PointerType.Pen,
+        capabilities,
+        1,
+        3,
+    )
+    event = QTabletEvent(
+        QEvent.Type.TabletMove,
+        device,
+        QPointF(10.0, 20.0),
+        QPointF(30.0, 40.0),
+        0.6,
+        30.0,
+        -15.0,
+        0.2,
+        90.0,
+        0.0,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+    )
+    sample = tablet_stylus_sample(event)
+    assert sample.pressure == pytest.approx(0.6)
+    assert sample.tilt_x == pytest.approx(0.5)
+    assert sample.tilt_y == pytest.approx(-0.25)
+    assert sample.rotation == pytest.approx(0.75)
+    assert sample.tangential_pressure == pytest.approx(0.2)
 
 
 def test_canvas_stroke_keeps_stylus_channels_until_signal() -> None:
@@ -86,7 +168,13 @@ def test_canvas_stroke_keeps_stylus_channels_until_signal() -> None:
 
 
 def test_action_smoothing_interpolates_signed_stylus_channels() -> None:
-    from app.painter_stroke_geometry import smooth_action_points
+    from app.painter_stroke_geometry import (
+        ACTION_STROKE_SAMPLING_MODEL_CONTRACT,
+        smooth_action_points,
+    )
+
+    assert ACTION_STROKE_SAMPLING_MODEL_CONTRACT["tablet_input_model_claim"] is False
+    assert ACTION_STROKE_SAMPLING_MODEL_CONTRACT["external_brush_path_parity_claim"] is False
 
     points = smooth_action_points(
         [
@@ -100,6 +188,84 @@ def test_action_smoothing_interpolates_signed_stylus_channels() -> None:
     assert points[0]["tilt_x"] == -1.0
     assert points[-1]["tilt_x"] == 1.0
     assert all(-1.0 <= row["tilt_x"] <= 1.0 for row in points)
+
+
+def test_action_smoothing_preserves_caller_budget_above_legacy_hidden_cap() -> None:
+    from app.painter_stroke_geometry import smooth_action_points
+
+    controls = [
+        {"x": index / 99.0, "y": 0.25 if index % 2 else 0.75}
+        for index in range(100)
+    ]
+    points = smooth_action_points(
+        controls,
+        samples_per_segment=24,
+        max_points=2300,
+    )
+    assert 2048 < len(points) <= 2300
+
+
+def test_action_smoothing_preserves_every_source_control_when_inputs_exceed_default_budget() -> None:
+    from app.painter_stroke_geometry import smooth_action_points
+
+    controls = [
+        {
+            "x": index / 699.0,
+            "y": (index % 17) / 16.0,
+            "pressure": (index % 11) / 10.0,
+        }
+        for index in range(700)
+    ]
+
+    points = smooth_action_points(controls)
+
+    assert len(points) == len(controls)
+    assert [row["x"] for row in points] == [row["x"] for row in controls]
+    assert [row["y"] for row in points] == [row["y"] for row in controls]
+    assert [row["pressure"] for row in points] == [row["pressure"] for row in controls]
+
+
+def test_action_smoothing_uses_remaining_default_budget_across_complete_path() -> None:
+    from app.painter_stroke_geometry import smooth_action_points
+
+    controls = [
+        {"x": index / 99.0, "y": (index % 13) / 12.0}
+        for index in range(100)
+    ]
+
+    points = smooth_action_points(controls)
+
+    assert len(points) == 512
+    cursor = 0
+    for control in controls:
+        while points[cursor]["x"] != control["x"] or points[cursor]["y"] != control["y"]:
+            cursor += 1
+        cursor += 1
+    assert cursor <= len(points)
+
+
+def test_action_smoothing_rejects_noninteger_sampling_controls() -> None:
+    import pytest
+
+    from app.painter_stroke_geometry import smooth_action_points
+
+    controls = [{"x": 0.0, "y": 0.0}, {"x": 0.5, "y": 1.0}, {"x": 1.0, "y": 0.0}]
+
+    with pytest.raises(
+        ValueError,
+        match="samples_per_segment and max_points must be integers",
+    ):
+        smooth_action_points(controls, samples_per_segment=8.5)
+    with pytest.raises(
+        ValueError,
+        match="samples_per_segment and max_points must be integers",
+    ):
+        smooth_action_points(controls, max_points=512.5)
+    with pytest.raises(
+        ValueError,
+        match="samples_per_segment and max_points must be integers",
+    ):
+        smooth_action_points(controls[:2], samples_per_segment=8.5)
 
 
 def test_gpu_canvas_payload_and_signature_retain_stylus_dynamics() -> None:

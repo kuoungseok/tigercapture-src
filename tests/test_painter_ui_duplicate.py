@@ -269,6 +269,7 @@ def test_alt_drag_duplicates_then_moves_the_copy() -> None:
         Qt.KeyboardModifier.AltModifier,
         start,
     )
+    assert overlay._interaction == "alt_duplicate_pending"
     QTest.mouseMove(overlay, end)
     QTest.mouseRelease(
         overlay,

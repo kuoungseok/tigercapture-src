@@ -70,7 +70,6 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
     overlay.resize(640, 420)
     overlay.show()
     app.processEvents()
-
     pixel = overlay.grab().toImage().pixelColor(2, 2)
     assert pixel.alpha() == 255
     assert pixel == QColor("#171B21")
@@ -79,7 +78,58 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
     app.processEvents()
 
 
-def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
+def test_component_set_renders_dashed_purple_no_fill_container() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor
+
+    from app.painter_ui_components import (
+        combine_ui_components_as_variants,
+        convert_ui_object_to_component,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document = create_ui_document(800, 600)
+    component_ids = []
+    for index, name in enumerate(("Button/Default", "Button/Hover")):
+        document, root = add_ui_object(
+            document,
+            kind="frame",
+            name=name,
+            x=140 + index * 220,
+            y=180,
+            width=160,
+            height=64,
+        )
+        document, component = convert_ui_object_to_component(
+            document, root_object_id=root["id"], name=name
+        )
+        component_ids.append(component["id"])
+    document, _ = combine_ui_components_as_variants(
+        document, component_ids=component_ids
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1000, 720)
+    overlay.set_document(document)
+    overlay.fit_all()
+    overlay.show()
+    app.processEvents()
+    image = overlay.grab().toImage()
+    purple = QColor("#9747FF")
+    purple_pixels = sum(
+        1
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).red() == purple.red()
+        and image.pixelColor(x, y).blue() == purple.blue()
+    )
+    assert purple_pixels > 20
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_ui_design_mode_shows_inspector_and_has_one_fit_tool_set() -> None:
     app = _app()
     from PySide6.QtWidgets import QAbstractSpinBox, QFrame
 
@@ -101,15 +151,30 @@ def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
     assert len(dialog._ui_design_view_buttons) == 3
     assert dialog._paint_inspector_controls_scroll.maximumHeight() == 16777215
     assert dialog._paint_ui_inspector.isVisible()
-    assert dialog._painter_ui_template_strip.isVisible()
-    assert dialog._painter_ui_template_strip.y() >= dialog._painter_menu_bar.height()
+    assert dialog._painter_ui_template_strip is None
+    assert dialog._painter_ui_templates_action.isVisible()
+    assert dialog._painter_ui_templates_action.text() == painter_text(
+        "Painter UI Template Gallery",
+        current_language(),
+    )
     assert dialog.property("canvasWorkspaceMode") == "ui_design"
     assert not dialog._paint_top_bar.isVisible()
     assert not dialog._tool_rail.isVisible()
     assert not dialog._paint_ui_inspector.artboard_layout_frame.isVisible()
-    dialog._paint_ui_inspector.artboard_settings_toggle.click()
-    app.processEvents()
-    assert dialog._paint_ui_inspector.artboard_layout_frame.isVisible()
+    assert not dialog._paint_ui_inspector.artboard_settings_toggle.isVisible()
+    assert dialog._paint_ui_inspector.page_properties_panel.isVisible()
+    assert dialog._paint_ui_inspector.page_properties_panel.height() <= 160
+    assert (
+        dialog._paint_ui_inspector.page_background_value.parentWidget().height()
+        == 36
+    )
+    assert not dialog._paint_ui_inspector.object_properties_host.isVisible()
+    assert not dialog._paint_ui_inspector.fill_edit.isVisible()
+    assert dialog._paint_ui_inspector.zoom_button.text() == "100%"
+    assert dialog._paint_ui_inspector.visible_context_tabs() == (
+        "design",
+        "prototype",
+    )
     assert (
         dialog._paint_ui_inspector.artboard_grid_count_spin.buttonSymbols()
         == QAbstractSpinBox.ButtonSymbols.NoButtons
@@ -117,11 +182,10 @@ def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
     inspector_width = dialog._paint_inspector_controls_scroll.parentWidget().width()
-    assert inspector_width == 0
-    assert dialog._paint_ui_inspector.is_auto_hide()
-    assert dialog._paint_ui_inspector.is_collapsed()
+    assert inspector_width >= 180
+    assert not dialog._paint_ui_inspector.is_auto_hide()
+    assert not dialog._paint_ui_inspector.is_collapsed()
     assert not dialog._paint_ui_inspector.dock_button.isVisible()
-    assert dialog._painter_ui_template_strip.height() <= 35
     assert dialog._painter_file_menu.menuAction().isVisible()
     assert dialog._painter_ui_menu.menuAction().isVisible()
     assert not dialog._painter_edit_menu.menuAction().isVisible()
@@ -142,11 +206,21 @@ def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
         for label in ("Design", "Prototype", "Inspect")
     ]
     assert dialog._painter_ui_navigator.isVisible()
+    assert dialog._painter_ui_navigator.active_section() == "file"
+    assert dialog._painter_ui_navigator.navigation_buttons["file"].isChecked()
     assert dialog._painter_ui_navigator.page_list.count() == 1
     assert (
         dialog._painter_ui_navigator._layer_list
         is dialog._paint_ui_inspector.layer_list
     )
+    dialog._painter_ui_navigator.logo_button.click()
+    app.processEvents()
+    main_menu = dialog._painter_navigation_main_menu
+    assert main_menu.actions()[0].shortcut().toString() == "Ctrl+K"
+    assert main_menu._painter_file_menu.actions()[1].menu() is (
+        main_menu._painter_new_menu
+    )
+    main_menu.hide()
     assert dialog._ui_design_tool_host.parentWidget() is dialog._canvas_host
     assert (
         dialog._ui_design_tool_host.y()
@@ -176,10 +250,156 @@ def test_ui_design_mode_auto_hides_inspector_and_has_one_fit_tool_set() -> None:
     app.processEvents()
     assert dialog._paint_top_bar.isVisible()
     assert dialog._tool_rail.isVisible()
-    assert not dialog._painter_ui_template_strip.isVisible()
+    assert dialog._painter_ui_template_strip is None
 
     dialog.close()
     dialog.deleteLater()
+    app.processEvents()
+
+
+def test_ui_focus_mode_keeps_page_title_and_toolbar_only() -> None:
+    app = _app()
+    from PySide6.QtCore import Qt
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_i18n import painter_text
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#F5F7FA"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1400, 900)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._set_painter_ui_empty_page_mode(True)
+    dialog.show()
+    app.processEvents()
+
+    assert dialog._paint_ui_inspector.isVisible()
+    assert dialog._painter_ui_navigator.isVisible()
+    dialog._ui_design_tool_host.focus_mode_button.click()
+    app.processEvents()
+
+    assert dialog._painter_ui_focus_mode is True
+    assert dialog._painter_ui_page_title_label.isVisible()
+    assert dialog._painter_ui_page_title_label.text() == "Page 1"
+    assert dialog._ui_design_tool_host.isVisible()
+    assert dialog._painter_ui_focus_island.isVisible()
+    assert not hasattr(dialog._painter_ui_focus_island, "plan_label")
+    assert dialog._painter_ui_focus_controls_island.isVisible()
+    assert not hasattr(
+        dialog._painter_ui_focus_controls_island,
+        "brand_button",
+    )
+    assert dialog._painter_ui_focus_controls_island.zoom_button.text() == "100%"
+    assert (
+        dialog._painter_ui_focus_island.title_label.text()
+        == painter_text("Untitled")
+    )
+    assert not dialog._paint_inspector_frame.isVisible()
+    assert not dialog._painter_ui_navigator.isVisible()
+    assert not dialog._canvas_mode_ui_btn.isVisible()
+    island_center = dialog._painter_ui_focus_island.geometry().center()
+    top_widget = dialog._canvas_host.childAt(island_center)
+    assert top_widget is dialog._painter_ui_focus_island or (
+        top_widget is not None
+        and dialog._painter_ui_focus_island.isAncestorOf(top_widget)
+    )
+    controls_center = (
+        dialog._painter_ui_focus_controls_island.geometry().center()
+    )
+    controls_top = dialog._canvas_host.childAt(controls_center)
+    assert controls_top is dialog._painter_ui_focus_controls_island or (
+        controls_top is not None
+        and dialog._painter_ui_focus_controls_island.isAncestorOf(
+            controls_top
+        )
+    )
+    dialog._painter_ui_focus_controls_island.zoom_button.click()
+    app.processEvents()
+    assert dialog._painter_ui_focus_controls_island.zoom_popover.isVisible()
+    assert not bool(
+        dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+    )
+
+    dialog._painter_ui_focus_island.exit_button.click()
+    app.processEvents()
+    assert not dialog._painter_ui_focus_island.isVisible()
+    assert not dialog._painter_ui_focus_controls_island.isVisible()
+    assert dialog._paint_ui_inspector.isVisible()
+    assert dialog._painter_ui_navigator.isVisible()
+    assert dialog._canvas_mode_ui_btn.isVisible()
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_focus_mode_does_not_resurrect_empty_redocked_inspector_window() -> None:
+    app = _app()
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#F5F7FA"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1400, 900)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog.show()
+    app.processEvents()
+
+    dialog._detach_painter_ui_inspector()
+    app.processEvents()
+    floating = dialog._painter_ui_inspector_dock_window
+    assert floating.isVisible()
+    assert dialog._painter_ui_inspector_detached
+
+    dialog._dock_painter_ui_inspector()
+    app.processEvents()
+    assert not dialog._painter_ui_inspector_detached
+    assert not floating.isVisible()
+    assert dialog._paint_ui_inspector.parentWidget() is not None
+
+    dialog._set_painter_ui_focus_mode(True)
+    dialog._set_painter_ui_focus_mode(False)
+    app.processEvents()
+
+    assert not floating.isVisible()
+    assert dialog._paint_ui_inspector.isVisible()
+    assert not dialog._painter_ui_inspector_detached
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_empty_page_mode_hides_internal_root_artboard() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(800, 600)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.set_empty_page_mode(True)
+    overlay.show()
+    app.processEvents()
+
+    image = overlay.grab().toImage()
+    assert image.pixelColor(400, 300) == QColor("#F5F5F5")
+
+    overlay.set_empty_page_mode(False)
+    app.processEvents()
+    visible_image = overlay.grab().toImage()
+    assert visible_image.pixelColor(400, 300) != QColor("#F5F5F5")
+    overlay.close()
+    overlay.deleteLater()
     app.processEvents()
 
 

@@ -8,8 +8,22 @@ from typing import Any, Mapping
 from PySide6.QtCore import QPointF, QRectF
 
 
-_HORIZONTAL = {"left", "center", "right", "stretch", "scale"}
-_VERTICAL = {"top", "center", "bottom", "stretch", "scale"}
+_HORIZONTAL = {"left", "center", "right", "stretch", "scale", "custom"}
+_VERTICAL = {"top", "center", "bottom", "stretch", "scale", "custom"}
+_ANCHOR_EPSILON = 0.000001
+
+_CUSTOM_HORIZONTAL_KEYS = (
+    "anchor_min_x",
+    "anchor_max_x",
+    "anchor_offset_left",
+    "anchor_offset_right",
+)
+_CUSTOM_VERTICAL_KEYS = (
+    "anchor_min_y",
+    "anchor_max_y",
+    "anchor_offset_top",
+    "anchor_offset_bottom",
+)
 
 
 def _number(value: object, default: float = 0.0) -> float:
@@ -50,6 +64,71 @@ def normalize_ui_constraints(
         0.0001,
         _number(source.get("aspect_ratio"), width / max(0.0001, height)),
     )
+    if source["horizontal"] == "custom":
+        anchor_min_x = max(
+            0.0,
+            min(1.0, _number(source.get("anchor_min_x"), 0.0)),
+        )
+        anchor_max_x = max(
+            0.0,
+            min(
+                1.0,
+                _number(source.get("anchor_max_x"), anchor_min_x),
+            ),
+        )
+        anchor_min_x, anchor_max_x = (
+            min(anchor_min_x, anchor_max_x),
+            max(anchor_min_x, anchor_max_x),
+        )
+        # Slate decides whether an anchor stretches with exact inequality.
+        # Canonicalize an effectively collapsed range so serialized data and
+        # Painter's preview cannot disagree at sub-pixel floating-point noise.
+        if abs(anchor_max_x - anchor_min_x) <= _ANCHOR_EPSILON:
+            anchor_max_x = anchor_min_x
+        source["anchor_min_x"] = anchor_min_x
+        source["anchor_max_x"] = anchor_max_x
+        source["anchor_offset_left"] = _number(
+            source.get("anchor_offset_left"),
+            0.0,
+        )
+        source["anchor_offset_right"] = _number(
+            source.get("anchor_offset_right"),
+            width,
+        )
+    else:
+        for key in _CUSTOM_HORIZONTAL_KEYS:
+            source.pop(key, None)
+    if source["vertical"] == "custom":
+        anchor_min_y = max(
+            0.0,
+            min(1.0, _number(source.get("anchor_min_y"), 0.0)),
+        )
+        anchor_max_y = max(
+            0.0,
+            min(
+                1.0,
+                _number(source.get("anchor_max_y"), anchor_min_y),
+            ),
+        )
+        anchor_min_y, anchor_max_y = (
+            min(anchor_min_y, anchor_max_y),
+            max(anchor_min_y, anchor_max_y),
+        )
+        if abs(anchor_max_y - anchor_min_y) <= _ANCHOR_EPSILON:
+            anchor_max_y = anchor_min_y
+        source["anchor_min_y"] = anchor_min_y
+        source["anchor_max_y"] = anchor_max_y
+        source["anchor_offset_top"] = _number(
+            source.get("anchor_offset_top"),
+            0.0,
+        )
+        source["anchor_offset_bottom"] = _number(
+            source.get("anchor_offset_bottom"),
+            height,
+        )
+    else:
+        for key in _CUSTOM_VERTICAL_KEYS:
+            source.pop(key, None)
     return source
 
 
@@ -161,6 +240,42 @@ def capture_ui_constraints(
             ),
         }
     )
+    if constraints["horizontal"] == "custom":
+        anchor_min_x = float(constraints["anchor_min_x"])
+        anchor_max_x = float(constraints["anchor_max_x"])
+        local_x = x - parent_x
+        if abs(anchor_max_x - anchor_min_x) <= _ANCHOR_EPSILON:
+            constraints["anchor_offset_left"] = (
+                local_x
+                + width * float(constraints["pivot_x"])
+                - anchor_min_x * parent_width
+            )
+            constraints["anchor_offset_right"] = width
+        else:
+            constraints["anchor_offset_left"] = (
+                local_x - anchor_min_x * parent_width
+            )
+            constraints["anchor_offset_right"] = (
+                anchor_max_x * parent_width - local_x - width
+            )
+    if constraints["vertical"] == "custom":
+        anchor_min_y = float(constraints["anchor_min_y"])
+        anchor_max_y = float(constraints["anchor_max_y"])
+        local_y = y - parent_y
+        if abs(anchor_max_y - anchor_min_y) <= _ANCHOR_EPSILON:
+            constraints["anchor_offset_top"] = (
+                local_y
+                + height * float(constraints["pivot_y"])
+                - anchor_min_y * parent_height
+            )
+            constraints["anchor_offset_bottom"] = height
+        else:
+            constraints["anchor_offset_top"] = (
+                local_y - anchor_min_y * parent_height
+            )
+            constraints["anchor_offset_bottom"] = (
+                anchor_max_y * parent_height - local_y - height
+            )
     if constraints["lock_aspect"]:
         constraints["aspect_ratio"] = width / max(0.0001, height)
     return constraints
@@ -220,7 +335,38 @@ def resolve_ui_constraints(
             constraints.get("bottom"),
             parent["y"] + parent["height"] - rect["y"] - rect["height"],
         )
-        if horizontal == "right":
+        if horizontal == "custom":
+            anchor_min_x = float(constraints["anchor_min_x"])
+            anchor_max_x = float(constraints["anchor_max_x"])
+            anchor_left = _number(
+                constraints.get("anchor_offset_left"),
+                0.0,
+            )
+            anchor_right = _number(
+                constraints.get("anchor_offset_right"),
+                rect["width"],
+            )
+            if abs(anchor_max_x - anchor_min_x) <= _ANCHOR_EPSILON:
+                rect["width"] = max(1.0, anchor_right)
+                rect["x"] = (
+                    parent["x"]
+                    + parent["width"] * anchor_min_x
+                    + anchor_left
+                    - rect["width"] * float(constraints["pivot_x"])
+                )
+            else:
+                rect["x"] = (
+                    parent["x"]
+                    + parent["width"] * anchor_min_x
+                    + anchor_left
+                )
+                rect["width"] = max(
+                    1.0,
+                    parent["width"] * (anchor_max_x - anchor_min_x)
+                    - anchor_left
+                    - anchor_right,
+                )
+        elif horizontal == "right":
             rect["x"] = parent["x"] + parent["width"] - right - rect["width"]
         elif horizontal == "center":
             rect["x"] = (
@@ -238,7 +384,38 @@ def resolve_ui_constraints(
             rect["width"] *= scale_x
         else:
             rect["x"] = parent["x"] + left
-        if vertical == "bottom":
+        if vertical == "custom":
+            anchor_min_y = float(constraints["anchor_min_y"])
+            anchor_max_y = float(constraints["anchor_max_y"])
+            anchor_top = _number(
+                constraints.get("anchor_offset_top"),
+                0.0,
+            )
+            anchor_bottom = _number(
+                constraints.get("anchor_offset_bottom"),
+                rect["height"],
+            )
+            if abs(anchor_max_y - anchor_min_y) <= _ANCHOR_EPSILON:
+                rect["height"] = max(1.0, anchor_bottom)
+                rect["y"] = (
+                    parent["y"]
+                    + parent["height"] * anchor_min_y
+                    + anchor_top
+                    - rect["height"] * float(constraints["pivot_y"])
+                )
+            else:
+                rect["y"] = (
+                    parent["y"]
+                    + parent["height"] * anchor_min_y
+                    + anchor_top
+                )
+                rect["height"] = max(
+                    1.0,
+                    parent["height"] * (anchor_max_y - anchor_min_y)
+                    - anchor_top
+                    - anchor_bottom,
+                )
+        elif vertical == "bottom":
             rect["y"] = parent["y"] + parent["height"] - bottom - rect["height"]
         elif vertical == "center":
             rect["y"] = (
@@ -265,9 +442,44 @@ def resolve_ui_constraints(
 
     for target_id in objects:
         resolve(target_id)
-    from app.painter_ui_auto_layout import resolve_ui_auto_layout
+    from app.painter_ui_auto_layout import (
+        normalize_ui_auto_layout,
+        resolve_ui_auto_layout,
+    )
 
-    return resolve_ui_auto_layout(document, geometry)
+    geometry = resolve_ui_auto_layout(document, geometry)
+    absolute_ids = {
+        object_id
+        for object_id, row in objects.items()
+        if normalize_ui_auto_layout(row.get("layout"))["positioning"]
+        == "absolute"
+    }
+    # Auto Layout can move a nested parent after the first constraint pass.
+    # Re-resolve only Ignore-auto-layout descendants against that final parent,
+    # then place any flow descendants they own. Iterate by hierarchy depth so
+    # nested absolute/flow combinations converge without moving in-flow rows
+    # through the regular constraint path.
+    if absolute_ids:
+        in_flow_ids = set(objects) - absolute_ids
+        for _iteration in range(max(1, len(objects))):
+            previous = {
+                object_id: dict(rect) for object_id, rect in geometry.items()
+            }
+            resolved.clear()
+            resolved.update(in_flow_ids)
+            for object_id in absolute_ids:
+                resolve(object_id)
+            geometry = resolve_ui_auto_layout(document, geometry)
+            if all(
+                all(
+                    abs(float(geometry[object_id][key]) - float(previous[object_id][key]))
+                    <= 0.000001
+                    for key in ("x", "y", "width", "height")
+                )
+                for object_id in geometry
+            ):
+                break
+    return geometry
 
 
 def ui_pivot_point(
@@ -302,12 +514,41 @@ def reanchor_resize_rect(
             width,
             height,
         )
+    handle = str(handle)
+    if handle == "n":
+        return QRectF(
+            original.center().x() - width * 0.5,
+            original.bottom() - height,
+            width,
+            height,
+        )
+    if handle == "s":
+        return QRectF(
+            original.center().x() - width * 0.5,
+            original.top(),
+            width,
+            height,
+        )
+    if handle == "w":
+        return QRectF(
+            original.right() - width,
+            original.center().y() - height * 0.5,
+            width,
+            height,
+        )
+    if handle == "e":
+        return QRectF(
+            original.left(),
+            original.center().y() - height * 0.5,
+            width,
+            height,
+        )
     anchor = {
         "nw": original.bottomRight(),
         "ne": original.bottomLeft(),
         "sw": original.topRight(),
         "se": original.topLeft(),
-    }[str(handle)]
+    }[handle]
     if handle == "nw":
         return QRectF(anchor.x() - width, anchor.y() - height, width, height)
     if handle == "ne":

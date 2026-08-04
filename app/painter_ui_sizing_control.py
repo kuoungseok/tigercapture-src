@@ -88,6 +88,15 @@ class PainterUISizingControl(QFrame):
         self._value = normalized
         self._buttons[normalized].setChecked(True)
 
+    def set_option_enabled(self, value: str, enabled: bool) -> None:
+        button = self._buttons.get(str(value))
+        if button is not None:
+            button.setEnabled(bool(enabled))
+
+    def option_enabled(self, value: str) -> bool:
+        button = self._buttons.get(str(value))
+        return bool(button is not None and button.isEnabled())
+
     def _choose(self, value: str, checked: bool) -> None:
         if not checked:
             self._buttons[self._value].setChecked(True)

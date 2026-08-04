@@ -5,11 +5,11 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from PySide6.QtCore import QRectF, QSizeF, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
 
 
-_IMAGE_MODES = {"fit", "fill", "stretch", "tile"}
+_IMAGE_MODES = {"fit", "fill", "stretch", "crop", "tile"}
 _IMAGE_CACHE: dict[str, tuple[int, int, QImage]] = {}
 _IMAGE_CACHE_LIMIT = 32
 
@@ -20,6 +20,23 @@ def _number(value: object, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return float(default)
     return result if math.isfinite(result) else float(default)
+
+
+def _ui_color(value: object, fallback: str = "#FFFFFFFF") -> QColor:
+    """Parse the Painter contract's CSS-style ``#RRGGBBAA`` colors."""
+    text = str(value or "").strip()
+    if text.startswith("#") and len(text) == 9:
+        try:
+            return QColor(
+                int(text[1:3], 16),
+                int(text[3:5], 16),
+                int(text[5:7], 16),
+                int(text[7:9], 16),
+            )
+        except ValueError:
+            pass
+    color = QColor(text)
+    return color if color.isValid() else _ui_color(fallback, "#FFFFFFFF")
 
 
 def normalize_ui_image_content(
@@ -60,6 +77,48 @@ def normalize_ui_image_content(
         edge: max(0.0, _number(margins.get(edge), 0.0))
         for edge in ("left", "top", "right", "bottom")
     }
+    crop = source.get("image_crop") or source.get("crop")
+    crop = crop if isinstance(crop, Mapping) else {}
+    crop_units = str(
+        crop.get("Units", crop.get("units", "normalized"))
+    ).strip().casefold()
+    if crop_units in {"normalized", "normalised", "relative", "uv"}:
+        crop_units = "normalized"
+    elif crop_units in {"pixel", "pixels", "px"}:
+        crop_units = "pixels"
+    else:
+        crop_units = "normalized"
+    source["image_crop"] = {
+        "enabled": bool(crop.get("Enabled", crop.get("enabled", False))),
+        "units": crop_units,
+        "x": _number(crop.get("X", crop.get("x", 0.0)), 0.0),
+        "y": _number(crop.get("Y", crop.get("y", 0.0)), 0.0),
+        "width": _number(crop.get("Width", crop.get("width", 1.0)), 1.0),
+        "height": _number(
+            crop.get("Height", crop.get("height", 1.0)),
+            1.0,
+        ),
+    }
+    source["image_opacity"] = max(
+        0.0,
+        min(1.0, _number(source.get("image_opacity"), 1.0)),
+    )
+    source["image_tint"] = str(
+        source.get("image_tint") or "#FFFFFFFF"
+    )
+    corner_radii = source.get("image_corner_radii")
+    corner_radii = (
+        corner_radii if isinstance(corner_radii, Mapping) else {}
+    )
+    source["image_corner_radii"] = {
+        key: max(0.0, _number(corner_radii.get(key), 0.0))
+        for key in (
+            "top_left",
+            "top_right",
+            "bottom_right",
+            "bottom_left",
+        )
+    }
     return source
 
 
@@ -75,6 +134,47 @@ def _bounded_pair(
         return first, second
     scale = max(0.0, available) / total
     return first * scale, second * scale
+
+
+def _image_corner_path(
+    rect: QRectF,
+    radii: Mapping[str, Any] | None,
+) -> QPainterPath:
+    source = radii if isinstance(radii, Mapping) else {}
+    maximum = max(0.0, min(rect.width(), rect.height()) * 0.5)
+    top_left, top_right, bottom_right, bottom_left = (
+        min(maximum, max(0.0, _number(source.get(key), 0.0)))
+        for key in (
+            "top_left",
+            "top_right",
+            "bottom_right",
+            "bottom_left",
+        )
+    )
+    path = QPainterPath()
+    path.moveTo(rect.left() + top_left, rect.top())
+    path.lineTo(rect.right() - top_right, rect.top())
+    path.quadTo(
+        rect.topRight(),
+        QPointF(rect.right(), rect.top() + top_right),
+    )
+    path.lineTo(rect.right(), rect.bottom() - bottom_right)
+    path.quadTo(
+        rect.bottomRight(),
+        QPointF(rect.right() - bottom_right, rect.bottom()),
+    )
+    path.lineTo(rect.left() + bottom_left, rect.bottom())
+    path.quadTo(
+        rect.bottomLeft(),
+        QPointF(rect.left(), rect.bottom() - bottom_left),
+    )
+    path.lineTo(rect.left(), rect.top() + top_left)
+    path.quadTo(
+        rect.topLeft(),
+        QPointF(rect.left() + top_left, rect.top()),
+    )
+    path.closeSubpath()
+    return path
 
 
 def image_draw_plan(
@@ -94,39 +194,62 @@ def image_draw_plan(
         return []
 
     source_rect = QRectF(0.0, 0.0, source_width, source_height)
+    crop = settings["image_crop"]
+    if crop["enabled"]:
+        if crop["units"] == "normalized":
+            crop_rect = QRectF(
+                crop["x"] * source_width,
+                crop["y"] * source_height,
+                crop["width"] * source_width,
+                crop["height"] * source_height,
+            )
+        else:
+            crop_rect = QRectF(
+                crop["x"],
+                crop["y"],
+                crop["width"],
+                crop["height"],
+            )
+        crop_rect = crop_rect.normalized().intersected(source_rect)
+        if crop_rect.width() > 0.0 and crop_rect.height() > 0.0:
+            source_rect = crop_rect
+    source_width = source_rect.width()
+    source_height = source_rect.height()
+    source_origin_x = source_rect.left()
+    source_origin_y = source_rect.top()
     if settings["nine_slice_enabled"]:
         margins = settings["nine_slice"]
-        source_left, source_right = _bounded_pair(
+        margin_left, margin_right = _bounded_pair(
             margins["left"],
             margins["right"],
             source_width,
         )
-        source_top, source_bottom = _bounded_pair(
+        margin_top, margin_bottom = _bounded_pair(
             margins["top"],
             margins["bottom"],
             source_height,
         )
         target_left, target_right = _bounded_pair(
-            source_left,
-            source_right,
+            margin_left,
+            margin_right,
             target.width(),
         )
         target_top, target_bottom = _bounded_pair(
-            source_top,
-            source_bottom,
+            margin_top,
+            margin_bottom,
             target.height(),
         )
         source_x = (
-            0.0,
-            source_left,
-            source_width - source_right,
-            source_width,
+            source_origin_x,
+            source_origin_x + margin_left,
+            source_rect.right() - margin_right,
+            source_rect.right(),
         )
         source_y = (
-            0.0,
-            source_top,
-            source_height - source_bottom,
-            source_height,
+            source_origin_y,
+            source_origin_y + margin_top,
+            source_rect.bottom() - margin_bottom,
+            source_rect.bottom(),
         )
         target_x = (
             target.left(),
@@ -161,7 +284,7 @@ def image_draw_plan(
         return plan
 
     mode = settings["image_fit"]
-    if mode == "stretch":
+    if mode in {"stretch", "crop"}:
         return [(QRectF(target), source_rect)]
     if mode == "tile":
         tile_width = source_width * float(settings["tile_scale"])
@@ -181,8 +304,8 @@ def image_draw_plan(
                     (
                         QRectF(x, y, width, height),
                         QRectF(
-                            0.0,
-                            0.0,
+                            source_origin_x,
+                            source_origin_y,
                             source_width * width / tile_width,
                             source_height * height / tile_height,
                         ),
@@ -196,16 +319,18 @@ def image_draw_plan(
         if source_aspect > target_aspect:
             crop_width = source_height * target_aspect
             source = QRectF(
-                (source_width - crop_width) * settings["focal_x"],
-                0.0,
+                source_origin_x
+                + (source_width - crop_width) * settings["focal_x"],
+                source_origin_y,
                 crop_width,
                 source_height,
             )
         else:
             crop_height = source_width / target_aspect
             source = QRectF(
-                0.0,
-                (source_height - crop_height) * settings["focal_y"],
+                source_origin_x,
+                source_origin_y
+                + (source_height - crop_height) * settings["focal_y"],
                 source_width,
                 crop_height,
             )
@@ -259,17 +384,69 @@ def draw_ui_image(
     image = load_ui_image(content)
     if image.isNull():
         return False
-    plan = image_draw_plan(QSizeF(image.size()), target, content)
+    settings = normalize_ui_image_content(content)
+    logical_width = float(settings["original_width"])
+    logical_height = float(settings["original_height"])
+    if logical_width <= 0.0 or logical_height <= 0.0:
+        logical_width = float(image.width())
+        logical_height = float(image.height())
+    plan = image_draw_plan(
+        QSizeF(logical_width, logical_height),
+        target,
+        settings,
+    )
     if not plan:
         return False
+    tint = _ui_color(settings["image_tint"])
+    draw_image = image
+    if (tint.red(), tint.green(), tint.blue()) != (255, 255, 255):
+        draw_image = image.convertToFormat(
+            QImage.Format.Format_ARGB32_Premultiplied
+        )
+        tint_painter = QPainter(draw_image)
+        tint_painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_Multiply
+        )
+        tint_painter.fillRect(
+            draw_image.rect(),
+            QColor(tint.red(), tint.green(), tint.blue(), 255),
+        )
+        tint_painter.end()
     painter.save()
+    painter.setOpacity(
+        painter.opacity()
+        * float(settings["image_opacity"])
+        * float(tint.alphaF())
+    )
     painter.setClipRect(
         target,
         Qt.ClipOperation.IntersectClip,
     )
+    corner_radii = settings["image_corner_radii"]
+    if any(float(value) > 0.0001 for value in corner_radii.values()):
+        corner_rect = (
+            plan[0][0]
+            if settings["image_fit"] == "fit" and len(plan) == 1
+            else target
+        )
+        painter.setClipPath(
+            _image_corner_path(corner_rect, corner_radii),
+            Qt.ClipOperation.IntersectClip,
+        )
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    source_scale_x = float(image.width()) / logical_width
+    source_scale_y = float(image.height()) / logical_height
     for destination, source in plan:
-        painter.drawImage(destination, image, source)
+        painter.drawImage(
+            destination,
+            draw_image,
+            QRectF(
+                source.left() * source_scale_x,
+                source.top() * source_scale_y,
+                source.width() * source_scale_x,
+                source.height() * source_scale_y,
+            ),
+        )
     painter.restore()
     return True
 

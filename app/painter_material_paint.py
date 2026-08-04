@@ -12,13 +12,21 @@ import numpy as np
 STANDARD_LAYER_TYPE = "standard"
 MATERIAL_LAYER_TYPE = "material"
 MATERIAL_PAINT_SCHEMA = "tigerstudio.painter.material_paint.v1"
+_MATERIAL_RASTER_BACKEND_STATUS: dict[str, Any] = {
+    "backend": "uninitialized",
+    "fallback_count": 0,
+    "last_fallback_error": "",
+}
 
-MATERIAL_PAINT_DEFAULTS: dict[str, float] = {
+MATERIAL_PAINT_DEFAULTS: dict[str, Any] = {
     "load": 0.78,
     "thickness": 0.62,
     "wetness": 0.34,
     "gloss": 0.28,
     "roughness": 0.56,
+    "plow": 0.0,
+    "resaturation": 0.0,
+    "negative_depth": False,
 }
 
 MATERIAL_COMPATIBLE_STYLES = frozenset(
@@ -71,10 +79,13 @@ def normalize_layer_type(value: Any) -> str:
 
 def normalize_material_settings(
     value: Mapping[str, Any] | None,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     source = dict(value or {})
-    out: dict[str, float] = {}
+    out: dict[str, Any] = {}
     for key, default in MATERIAL_PAINT_DEFAULTS.items():
+        if key == "negative_depth":
+            out[key] = bool(source.get(key, default))
+            continue
         try:
             number = float(source.get(key, default))
         except (TypeError, ValueError):
@@ -100,7 +111,11 @@ def brush_material_capability(style: Any) -> dict[str, Any]:
         "style": brush_style,
         "compatible": bool(compatible),
         "profile": profile,
-        "fallback": "simple_relief" if not compatible else "",
+        "relief_model": "tiger_authored_stylized_relief_v1",
+        "coefficient_source": "authored_style_preset_not_measured_physical_media",
+        "physical_media_claim": False,
+        "external_brush_parity_claim": False,
+        "fallback": "stylized_reduced_relief" if not compatible else "",
     }
 
 
@@ -186,6 +201,13 @@ def material_paint_signature(
                 "roughness": float(
                     _value(stroke, "material_roughness", layer["settings"]["roughness"])
                 ),
+                "plow": float(_value(stroke, "material_plow", layer["settings"]["plow"])),
+                "resaturation": float(
+                    _value(stroke, "material_resaturation", layer["settings"]["resaturation"])
+                ),
+                "negative_depth": bool(
+                    _value(stroke, "material_negative_depth", layer["settings"]["negative_depth"])
+                ),
             }
         )
     payload = {
@@ -199,6 +221,41 @@ def material_paint_signature(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
         digest_size=16,
     ).hexdigest()
+
+
+def _record_material_raster_backend(
+    backend: str, error: BaseException | None = None
+) -> None:
+    _MATERIAL_RASTER_BACKEND_STATUS["backend"] = str(backend)
+    if error is None:
+        _MATERIAL_RASTER_BACKEND_STATUS["last_fallback_error"] = ""
+        return
+    _MATERIAL_RASTER_BACKEND_STATUS["fallback_count"] = int(
+        _MATERIAL_RASTER_BACKEND_STATUS.get("fallback_count", 0)
+    ) + 1
+    _MATERIAL_RASTER_BACKEND_STATUS["last_fallback_error"] = (
+        f"{type(error).__name__}: {error}"
+    )
+
+
+def material_raster_backend_status() -> dict[str, Any]:
+    return dict(_MATERIAL_RASTER_BACKEND_STATUS)
+
+
+def _draw_polyline_pillow(
+    mask: np.ndarray, points: list[tuple[int, int]], width: int
+) -> None:
+    from PIL import Image, ImageDraw
+
+    image = Image.fromarray(np.uint8(np.clip(mask, 0.0, 1.0) * 255), mode="L")
+    draw = ImageDraw.Draw(image)
+    if len(points) == 1:
+        x, y = points[0]
+        radius = max(1, width // 2)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
+    else:
+        draw.line(points, fill=255, width=max(1, int(width)), joint="curve")
+    mask[:] = np.asarray(image, dtype=np.float32) / 255.0
 
 
 def _draw_polyline(mask: np.ndarray, points: list[tuple[int, int]], width: int) -> None:
@@ -218,20 +275,11 @@ def _draw_polyline(mask: np.ndarray, points: list[tuple[int, int]], width: int) 
                 max(1, int(width)),
                 lineType=cv2.LINE_AA,
             )
+        _record_material_raster_backend("opencv")
         return
-    except Exception:
-        pass
-    from PIL import Image, ImageDraw
-
-    image = Image.fromarray(np.uint8(np.clip(mask, 0.0, 1.0) * 255), mode="L")
-    draw = ImageDraw.Draw(image)
-    if len(points) == 1:
-        x, y = points[0]
-        radius = max(1, width // 2)
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=255)
-    else:
-        draw.line(points, fill=255, width=max(1, int(width)), joint="curve")
-    mask[:] = np.asarray(image, dtype=np.float32) / 255.0
+    except Exception as exc:
+        _record_material_raster_backend("pillow", exc)
+    _draw_polyline_pillow(mask, points, width)
 
 
 def _draw_weighted_segment(
@@ -253,11 +301,12 @@ def _draw_weighted_segment(
             max(1, int(width)),
             lineType=cv2.LINE_AA,
         )
+        _record_material_raster_backend("opencv")
         return
-    except Exception:
-        pass
+    except Exception as exc:
+        _record_material_raster_backend("pillow", exc)
     segment = np.zeros_like(mask)
-    _draw_polyline(segment, [first, second], width)
+    _draw_polyline_pillow(segment, [first, second], width)
     np.maximum(mask, segment * value, out=mask)
 
 
@@ -266,9 +315,28 @@ def _blur(values: np.ndarray, radius: float) -> np.ndarray:
         import cv2
 
         sigma = max(0.1, float(radius))
-        return cv2.GaussianBlur(values, (0, 0), sigmaX=sigma, sigmaY=sigma)
-    except Exception:
-        return values
+        blurred = cv2.GaussianBlur(values, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        _record_material_raster_backend("opencv")
+        return blurred
+    except Exception as exc:
+        _record_material_raster_backend("pillow", exc)
+        from PIL import Image, ImageFilter
+
+        source = np.asarray(values, dtype=np.float32)
+        if source.ndim != 2:
+            raise ValueError("Painter material blur expects a two-dimensional channel")
+        if not bool(np.isfinite(source).all()):
+            raise ValueError("Painter material blur input must be finite")
+        minimum = float(source.min())
+        maximum = float(source.max())
+        if maximum <= minimum:
+            return source.copy()
+        normalized = np.rint((source - minimum) * (255.0 / (maximum - minimum))).astype(np.uint8)
+        blurred = Image.fromarray(normalized, mode="L").filter(
+            ImageFilter.GaussianBlur(radius=max(0.1, float(radius)))
+        )
+        restored = np.asarray(blurred, dtype=np.float32) / 255.0
+        return (restored * (maximum - minimum) + minimum).astype(np.float32)
 
 
 def _shift_clamped(values: np.ndarray, dx: int, dy: int) -> np.ndarray:
@@ -290,11 +358,13 @@ def rasterize_material_channels(
     time_ms: int = 0,
     light_azimuth_deg: float = -38.0,
     light_elevation_deg: float = 48.0,
+    surface_settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     width = max(8, int(width))
     height = max(8, int(height))
     specs = material_layer_specs(layers)
     relief = np.zeros((height, width), dtype=np.float32)
+    excavation = np.zeros((height, width), dtype=np.float32)
     coverage = np.zeros_like(relief)
     roughness_sum = np.zeros_like(relief)
     roughness_weight = np.zeros_like(relief)
@@ -340,6 +410,26 @@ def rasterize_material_channels(
             0.04,
             min(1.0, float(_value(stroke, "material_roughness", settings["roughness"]))),
         )
+        plow = max(
+            0.0,
+            min(1.0, float(_value(stroke, "material_plow", settings["plow"]))),
+        )
+        resaturation = max(
+            0.0,
+            min(
+                1.0,
+                float(
+                    _value(
+                        stroke,
+                        "material_resaturation",
+                        settings["resaturation"],
+                    )
+                ),
+            ),
+        )
+        negative_depth = bool(
+            _value(stroke, "material_negative_depth", settings["negative_depth"])
+        )
         style = str(_value(stroke, "brush_style", "round") or "round").casefold()
         profile_counts[style] = int(profile_counts.get(style, 0)) + 1
         width_px = max(1, int(round(float(_value(stroke, "width_px", 1.0) or 1.0))))
@@ -378,6 +468,66 @@ def rasterize_material_channels(
             _value(stroke, "point_tilt_y", []) or [],
             point_count,
         )
+        load_curve = normalize_curve(
+            _value(stroke, "point_load", []) or [],
+            point_count,
+            1.0,
+        )
+        depletion = max(
+            0.0,
+            min(1.0, float(_value(stroke, "load_depletion", 0.28) or 0.0)),
+        )
+        if point_count:
+            load_curve = [
+                (
+                    max(
+                        0.04,
+                        value
+                        * (
+                            1.0
+                            - depletion
+                            * min(
+                                1.0,
+                                (
+                                    int(_value(stroke, "brush_sample_offset", 0) or 0)
+                                    + index
+                                )
+                                / 64.0,
+                            )
+                        ),
+                    )
+                    + (
+                        1.0
+                        - max(
+                            0.04,
+                            value
+                            * (
+                                1.0
+                                - depletion
+                                * min(
+                                    1.0,
+                                    (
+                                        int(_value(stroke, "brush_sample_offset", 0) or 0)
+                                        + index
+                                    )
+                                    / 64.0,
+                                )
+                            ),
+                        )
+                    )
+                    * resaturation
+                )
+                for index, value in enumerate(load_curve)
+            ]
+        rotation_curve = normalize_curve(
+            _value(stroke, "point_rotation", []) or [],
+            point_count,
+            0.5,
+        )
+        tangential_curve = normalize_signed_curve(
+            _value(stroke, "point_tangential_pressure", []) or [],
+            point_count,
+        )
         dynamic_points = [
             (
                 max(0, min(width - 1, int(round(point[0] + tilt_x_curve[index] * width_px * 0.10)))),
@@ -392,6 +542,7 @@ def rasterize_material_channels(
                     round(
                         width_px
                         * (0.18 + pressure_curve[index] * 0.82)
+                        * (0.72 + load_curve[index] * 0.28)
                         * (
                             1.0
                             + min(
@@ -431,7 +582,35 @@ def rasterize_material_channels(
                 )
             direction_written = True
         elif style in {"palette_knife", "knife_scrape_oil"}:
-            _draw_polyline(mask, points, max(2, int(round(width_px * 0.94))))
+            if len(dynamic_points) == 1:
+                _draw_weighted_segment(
+                    mask,
+                    dynamic_points[0],
+                    dynamic_points[0],
+                    dynamic_widths[0],
+                    max(0.08, pressure_curve[0] * load_curve[0]),
+                )
+            else:
+                for index, (first, second) in enumerate(
+                    zip(dynamic_points, dynamic_points[1:])
+                ):
+                    local_pressure = (pressure_curve[index] + pressure_curve[index + 1]) * 0.5
+                    local_load = (load_curve[index] + load_curve[index + 1]) * 0.5
+                    _draw_weighted_segment(
+                        mask,
+                        first,
+                        second,
+                        max(
+                            2,
+                            int(
+                                round(
+                                    (dynamic_widths[index] + dynamic_widths[index + 1])
+                                    * 0.47
+                                )
+                            ),
+                        ),
+                        max(0.06, local_pressure * local_load),
+                    )
         elif stroke_uses_bristle_v2(stroke):
             lanes = bristle_lane_paths(stroke, width=width - 1, height=height - 1)
             lane_width = max(1, int(round(width_px / max(5, len(lanes)) * 0.92)))
@@ -505,11 +684,58 @@ def rasterize_material_channels(
             )
         elif style in {"palette_knife", "knife_scrape_oil"}:
             body = np.zeros_like(relief)
-            _draw_polyline(body, points, max(2, int(round(width_px * 0.94))))
+            ridge = np.zeros_like(relief)
+            for index, (first, second) in enumerate(
+                zip(dynamic_points, dynamic_points[1:])
+            ):
+                local_pressure = (pressure_curve[index] + pressure_curve[index + 1]) * 0.5
+                local_load = (load_curve[index] + load_curve[index + 1]) * 0.5
+                segment_width = max(
+                    2,
+                    int(
+                        round(
+                            (dynamic_widths[index] + dynamic_widths[index + 1])
+                            * 0.47
+                        )
+                    ),
+                )
+                _draw_weighted_segment(
+                    body,
+                    first,
+                    second,
+                    segment_width,
+                    max(0.06, local_pressure * local_load),
+                )
+                dx = float(second[0] - first[0])
+                dy = float(second[1] - first[1])
+                length = max(1.0, math.hypot(dx, dy))
+                nx = -dy / length
+                ny = dx / length
+                rotation = (rotation_curve[index] + rotation_curve[index + 1]) * 0.5
+                tangential = (tangential_curve[index] + tangential_curve[index + 1]) * 0.5
+                blade_side = 0.20 + (rotation - 0.5) * 0.26 + tangential * 0.10
+                offset = float(segment_width) * blade_side
+                ridge_first = (
+                    max(0, min(width - 1, int(round(first[0] + nx * offset)))),
+                    max(0, min(height - 1, int(round(first[1] + ny * offset)))),
+                )
+                ridge_second = (
+                    max(0, min(width - 1, int(round(second[0] + nx * offset)))),
+                    max(0, min(height - 1, int(round(second[1] + ny * offset)))),
+                )
+                _draw_weighted_segment(
+                    ridge,
+                    ridge_first,
+                    ridge_second,
+                    max(1, int(round(segment_width * 0.13))),
+                    max(0.08, local_pressure * local_load),
+                )
+            if len(dynamic_points) == 1:
+                _draw_polyline(body, dynamic_points, dynamic_widths[0])
             plateau = _blur(body, max(0.55, width_px * 0.028))
             plateau = np.clip((plateau - 0.12) * 1.28, 0.0, 1.0)
             burial_mask = plateau
-            mask = np.clip(plateau + mask * 0.12, 0.0, 1.0)
+            mask = np.clip(plateau * 0.88 + mask * 0.12 + ridge * 0.62, 0.0, 1.0)
         elif (
             not stroke_uses_bristle_v2(stroke)
             and style in {"bristle_oil", "flat_hog_oil", "filbert_oil", "fan_bristle_oil"}
@@ -552,8 +778,25 @@ def rasterize_material_channels(
             0.0,
             0.97,
         )
+        if plow > 0.0 and len(dynamic_points) >= 2:
+            dx = float(dynamic_points[-1][0] - dynamic_points[0][0])
+            dy = float(dynamic_points[-1][1] - dynamic_points[0][1])
+            travel = max(1.0, math.hypot(dx, dy))
+            nx, ny = -dy / travel, dx / travel
+            shift = max(1, int(round(width_px * (0.08 + plow * 0.22))))
+            displaced = relief * np.clip(mask * plow, 0.0, 1.0)
+            relief -= displaced
+            relief += _shift_clamped(
+                displaced,
+                int(round(nx * shift)),
+                int(round(ny * shift)),
+            )
         relief *= 1.0 - burial
-        relief += mask * deposition * 0.24
+        deposit = mask * deposition * 0.24
+        if negative_depth:
+            excavation += deposit
+        else:
+            relief += deposit
         coverage = np.maximum(coverage, mask * opacity * layer["opacity"])
         style_roughness = {
             "impasto_oil": 0.04,
@@ -606,24 +849,32 @@ def rasterize_material_channels(
         stroke_count += 1
 
     relief = np.clip(1.0 - np.exp(-np.maximum(relief, 0.0) * 1.16), 0.0, 1.0)
+    excavation = np.clip(
+        1.0 - np.exp(-np.maximum(excavation, 0.0) * 1.16), 0.0, 1.0
+    )
+    signed_height = np.clip(relief - excavation, -1.0, 1.0).astype(np.float32)
     coverage = np.clip(coverage, 0.0, 1.0)
     roughness = np.where(
         roughness_weight > 1e-5,
         roughness_sum / np.maximum(roughness_weight, 1e-5),
         0.72,
     ).astype(np.float32)
-    grad_y, grad_x = np.gradient(relief)
-    normal_strength = 9.2
-    nx = -grad_x * normal_strength
-    ny = grad_y * normal_strength
-    nz = np.ones_like(relief)
-    norm = np.sqrt(nx * nx + ny * ny + nz * nz)
-    normal = np.stack((nx / norm, ny / norm, nz / norm), axis=2)
-    normal = np.clip(normal * 0.5 + 0.5, 0.0, 1.0).astype(np.float32)
+    from app.ar_pbr.texture_map_lab import ao_map_from_height, normal_map_from_height
 
-    local = _blur(relief, max(1.0, min(width, height) / 180.0))
-    concavity = np.clip(local - relief, 0.0, 1.0)
-    ao = np.clip(1.0 - concavity * 5.5, 0.0, 1.0).astype(np.float32)
+    shared_settings = {
+        "normal_strength": 9.2,
+        "normal_radius_px": 1.0,
+        "normal_format": "unreal_directx",
+        "normal_filter": "sobel",
+        "ao_strength": 1.0,
+        "ao_radius_px": max(1.0, min(width, height) / 180.0),
+        "edge_aware_smoothing": True,
+        "edge_aware_sensitivity": 9.0,
+    }
+    if surface_settings:
+        shared_settings.update(dict(surface_settings))
+    normal = normal_map_from_height(signed_height, shared_settings)
+    ao = ao_map_from_height(signed_height, shared_settings, realtime=True)
 
     azimuth = math.radians(float(light_azimuth_deg))
     elevation = math.radians(max(5.0, min(85.0, float(light_elevation_deg))))
@@ -636,6 +887,14 @@ def rasterize_material_channels(
         dtype=np.float32,
     )
     signed_normal = normal * 2.0 - 1.0
+    # The exported map follows the requested convention. Painter's 2D canvas
+    # lighting uses a y-down screen tangent basis, equivalent to DirectX.
+    # Convert OpenGL maps back to that canonical basis before N dot L.
+    if str(shared_settings.get("normal_format", "unreal_directx")).casefold() not in {
+        "unreal_directx",
+        "directx",
+    }:
+        signed_normal[..., 1] *= -1.0
     diffuse = np.clip(np.sum(signed_normal * light[None, None, :], axis=2), 0.0, 1.0)
     half_vector = light + np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
     half_vector /= max(0.0001, float(np.linalg.norm(half_vector)))
@@ -650,13 +909,28 @@ def rasterize_material_channels(
         * (1.0 - roughness)
         * 0.72
     )
+    # Painter needs relief to remain readable while the artist works, even
+    # when the movable key light approaches a front-facing direction. This
+    # fixed, low-energy rake light does not replace PBR lighting; it contributes
+    # only the signed normal delta from a flat surface.
+    studio_rake = np.asarray([-0.68, 0.36, 0.64], dtype=np.float32)
+    studio_rake /= max(0.0001, float(np.linalg.norm(studio_rake)))
+    studio_normal_delta = (
+        np.sum(signed_normal * studio_rake[None, None, :], axis=2)
+        - float(studio_rake[2])
+    )
+    local_height = _blur(signed_height, max(0.8, min(width, height) / 260.0))
+    height_detail = signed_height - local_height
+    normal_slope = np.sqrt(
+        np.square(signed_normal[..., 0]) + np.square(signed_normal[..., 1])
+    )
     soft_shadow = np.zeros_like(relief)
     for distance in (2, 4, 7, 11):
         dx = int(round(-float(light[0]) * distance))
         dy = int(round(-float(light[1]) * distance))
-        blocker = _shift_clamped(relief, dx, dy)
+        blocker = _shift_clamped(signed_height, dx, dy)
         clearance = float(distance) * 0.006 / max(0.18, float(light[2]))
-        soft_shadow = np.maximum(soft_shadow, blocker - relief - clearance)
+        soft_shadow = np.maximum(soft_shadow, blocker - signed_height - clearance)
     soft_shadow = np.clip(
         _blur(soft_shadow, max(0.8, min(width, height) / 360.0)) * 4.6,
         0.0,
@@ -666,6 +940,9 @@ def rasterize_material_channels(
         0.72
         + diffuse * 0.34
         + specular
+        + studio_normal_delta * 0.30
+        + height_detail * 0.90
+        + normal_slope * 0.025
         - soft_shadow * 0.43
         - (1.0 - ao) * 0.18,
         0.38,
@@ -674,17 +951,24 @@ def rasterize_material_channels(
 
     return {
         "schema": MATERIAL_PAINT_SCHEMA,
+        "model": "deterministic_stylized_relief_v1",
+        "physical_media_claim": False,
+        "negative_depth_supported": True,
+        "plow_supported": True,
         "size": [width, height],
         "stroke_count": int(stroke_count),
         "style_profiles": profile_counts,
         "active": bool(stroke_count),
         "height": relief,
+        "signed_height": signed_height,
+        "excavation": excavation,
         "coverage": coverage,
         "normal": normal,
         "roughness": roughness,
         "ao": ao,
         "direction": np.stack((direction_x, direction_y), axis=2),
         "shading": shading.astype(np.float32),
+        "shading_profile": "painter_artist_relief_readability_v1",
         "soft_shadow": soft_shadow.astype(np.float32),
         "light": {
             "azimuth_deg": float(light_azimuth_deg),
@@ -698,7 +982,10 @@ def material_preview_rgba(channels: Mapping[str, Any]) -> np.ndarray:
     coverage = np.asarray(channels.get("coverage"), dtype=np.float32)
     if shading.ndim != 2 or coverage.shape != shading.shape:
         return np.zeros((8, 8, 4), dtype=np.uint8)
-    delta = np.where(np.abs(shading - 1.0) < 0.025, 0.0, shading - 1.0)
+    # Differences below one output-code unit cannot survive the final 8-bit
+    # alpha conversion. Use that quantization boundary instead of an authored
+    # visual deadband.
+    delta = np.where(np.abs(shading - 1.0) < (1.0 / 255.0), 0.0, shading - 1.0)
     light = np.clip(delta, 0.0, 1.0)
     shadow = np.clip(-delta, 0.0, 1.0)
     rgba = np.zeros((shading.shape[0], shading.shape[1], 4), dtype=np.uint8)
@@ -712,6 +999,8 @@ def material_preview_rgba(channels: Mapping[str, Any]) -> np.ndarray:
 def merge_material_channels_into_generated(
     generated: Mapping[str, Any],
     channels: Mapping[str, Any],
+    *,
+    surface_settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = dict(generated)
     maps = dict(result.get("maps") or {})
@@ -720,15 +1009,34 @@ def merge_material_channels_into_generated(
     if material_height.ndim != 2 or coverage.shape != material_height.shape:
         return result
     mask = np.clip(coverage, 0.0, 1.0)
+    signed_height = np.asarray(channels.get("signed_height"), dtype=np.float32)
+    has_excavation = (
+        signed_height.shape == material_height.shape
+            and float(np.min(signed_height)) < 0.0
+    )
+    authored_height = (
+        np.clip(0.5 + signed_height * 0.5, 0.0, 1.0)
+        if has_excavation
+        else material_height
+    )
 
     existing_height = np.asarray(maps.get("height", np.zeros_like(material_height)), dtype=np.float32)
     if existing_height.shape == material_height.shape:
         maps["height"] = np.clip(
-            existing_height * (1.0 - mask * 0.72) + material_height * mask,
+            existing_height * (1.0 - mask * (1.0 if has_excavation else 0.72))
+            + authored_height * mask,
             0.0,
             1.0,
         )
     maps["normal"] = _blend_map(maps.get("normal"), channels.get("normal"), mask, channels=3)
+    merged_height = np.asarray(maps.get("height"), dtype=np.float32)
+    if merged_height.shape == material_height.shape and not has_excavation:
+        from app.ar_pbr.texture_map_lab import normal_map_from_height
+
+        normal_settings = dict(result.get("settings") or {})
+        if surface_settings:
+            normal_settings.update(dict(surface_settings))
+        maps["normal"] = normal_map_from_height(merged_height, normal_settings)
     maps["roughness"] = _blend_map(
         maps.get("roughness"), channels.get("roughness"), mask, channels=1
     )
@@ -742,6 +1050,9 @@ def merge_material_channels_into_generated(
         "native_channels": True,
         "stroke_count": int(channels.get("stroke_count", 0) or 0),
         "channels": ["height", "normal", "roughness", "ao", "direction"],
+        "height_encoding": (
+            "signed_neutral_0_5" if has_excavation else "positive_relief_zero_baseline"
+        ),
         "fallback_rgb_inference_preserved_outside_material_coverage": True,
     }
     return result

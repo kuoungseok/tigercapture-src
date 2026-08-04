@@ -1,5 +1,9 @@
 # Tiger Studio Painter: Photoshop Parity Audit
 
+> Historical workspace-gap snapshot. It is not the current release authority.
+> Current Painting evidence, limitations, and correction order live in
+> `PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md` and `SPEC.md`.
+
 Updated: 2026-07-25
 
 ## Objective
@@ -53,7 +57,7 @@ specification for future Painter passes.
 | New/Add/Subtract/Intersect selection modes | Implemented | Add lasso and polygonal lasso |
 | Normal/fixed-ratio marquee options | Implemented | Add fixed-size width/height and feather |
 | Marching ants and Quick Mask | Present | Add saved-selection alpha round-trip |
-| Magic tolerance | Present | Replace bounding-region approximation with contiguous pixel mask |
+| Magic tolerance | Implemented | Contiguous/non-contiguous Alpha8 pixel mask; documented 0-255 tolerance is passed directly |
 | Crop | Selection-based crop present | Add adjustable crop handles, cancel, straighten, overlay |
 | Brush options | Size and opacity in top options bar | Add mode, flow, smoothing, tablet pressure toggles |
 | Keyboard | V/W/C/B/E/G/P plus edit shortcuts | Add M/Shift+M, L/Shift+L, I, S, J, X/D |
@@ -110,7 +114,7 @@ specification for future Painter passes.
 | New transparent document | Implemented; checker is display-only | Keep export alpha tests |
 | Image Size/Canvas Size/Flip/Crop | Present | Add interpolation and anchor controls |
 | Copy/Cut/Paste | Present for current layer/channel contract | Complete raster selection clipboard behavior |
-| Open/Save editable document | Missing | Define `.tpaint` versioned document format |
+| Open/Save editable document | Implemented as `.tspaint` v1 | Maintain schema migration, embedded-asset integrity, autosave, and recovery tests |
 | Place/import as layer | Missing | Depends on per-layer raster storage |
 | PNG export | Present | Add JPEG/TIFF/PSD interchange only after format contract |
 | Undo/Redo | Present | Add History panel and transaction labels for continuous controls |
@@ -148,5 +152,5 @@ without waiting for the user to point out each missing control.
 4. Named alpha channels and full channel-selection round-trip.
 5. Pen/path editing and lasso family.
 6. Shared adjustment/filter adapters.
-7. Editable `.tpaint` document persistence and interchange formats.
+7. `.tspaint` schema migration, recovery hardening, and interchange formats.
 8. Shortcut, accessibility, performance, and multi-resolution visual QA.

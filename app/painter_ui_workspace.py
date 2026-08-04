@@ -45,19 +45,33 @@ from app.painter_ui_style_renderer import (
 
 _CREATE_TOOLS = {
     "frame",
+    "section",
+    "slice",
     "rectangle",
     "ellipse",
     "line",
+    "arrow",
     "polygon",
     "star",
     "arc",
     "path",
+    "pencil",
     "text",
     "image",
     "button",
     "progress",
 }
-_HANDLE_NAMES = ("nw", "ne", "sw", "se")
+
+_STICKY_SHAPE_TOOLS = {
+    "rectangle",
+    "ellipse",
+    "line",
+    "arrow",
+    "polygon",
+    "star",
+    "arc",
+}
+_HANDLE_NAMES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
 
 
 def _document_render_fingerprint(document: Mapping[str, Any]) -> str:
@@ -82,6 +96,8 @@ class PainterUIDesignOverlay(QWidget):
     objects_continuation_changes_requested = Signal(object)
     objects_duplicate_requested = Signal(object)
     object_create_requested = Signal(str, float, float, float, float)
+    pencil_create_requested = Signal(object)
+    section_create_requested = Signal(float, float, float, float)
     key_command = Signal(str, bool)
     artboard_activation_requested = Signal(str)
     artboard_geometry_requested = Signal(str, float, float)
@@ -99,8 +115,12 @@ class PainterUIDesignOverlay(QWidget):
     vector_edit_changed = Signal(object)
     image_focal_requested = Signal(str, float, float)
     objects_move_reparent_requested = Signal(object, str, object)
+    auto_layout_reorder_requested = Signal(str, int)
     prototype_connection_requested = Signal(str, str, str)
     prototype_trigger_requested = Signal(str, str, str)
+    comment_placement_requested = Signal(object)
+    comment_selected = Signal(str)
+    comment_move_requested = Signal(str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -113,6 +133,7 @@ class PainterUIDesignOverlay(QWidget):
             tuple[dict[str, Any], dict[str, Any]],
         ] = {}
         self._boolean_operand_id_cache: set[str] = set()
+        self._boolean_path_cache: dict[str, QPainterPath | None] = {}
         self._tool = "select"
         self._interaction = ""
         self._active_object_id = ""
@@ -120,6 +141,8 @@ class PainterUIDesignOverlay(QWidget):
         self._press_position = QPointF()
         self._original_rect = QRectF()
         self._preview_rect = QRectF()
+        self._preview_line_end = QPointF()
+        self._pencil_points: list[QPointF] = []
         self._drag_offset = QPointF()
         self._move_original_positions: dict[str, tuple[float, float]] = {}
         self._hierarchy_drop_preview_id = ""
@@ -132,7 +155,34 @@ class PainterUIDesignOverlay(QWidget):
         ] = {}
         self._original_rotation = 0.0
         self._rotation_start_angle = 0.0
+        self._rotation_label = ""
+        self._rotation_original_values: dict[str, float] = {}
+        self._radius_original = 0.0
+        self._radius_preview = 0.0
+        self._radius_active_corner = ""
+        self._radius_hover_corner = ""
+        self._arc_active_handle = ""
+        self._arc_hover_handle = ""
+        self._arc_label = ""
+        self._arc_drag_last_angle = 0.0
+        self._arc_drag_unwrapped_angle = 0.0
+        self._arc_drag_direction = 0
+        self._arc_original_content: dict[str, Any] = {}
+        self._shape_gizmo_active = ""
+        self._shape_gizmo_hover = ""
+        self._shape_gizmo_label = ""
+        self._shape_gizmo_original_content: dict[str, Any] = {}
+        self._shape_gizmo_original_style: dict[str, Any] = {}
+        self._shape_gizmo_original_geometry = (0.0, 0.0, 0.0, 0.0)
         self._snap_enabled = False
+        self._object_snap_enabled = True
+        self._pixel_grid_visible = False
+        self._layout_guides_visible = True
+        self._pixel_preview_enabled = False
+        self._layer_outlines_visible = False
+        self._outline_include_hidden = False
+        self._outline_include_bounds = False
+        self._empty_page_mode = False
         self._snap_size = 8.0
         self._view_scale: float | None = None
         self._view_offset = QPointF()
@@ -146,9 +196,27 @@ class PainterUIDesignOverlay(QWidget):
         self._pan_origin = QPointF()
         self._space_pan_active = False
         self._marquee_mode = "replace"
+        self._marquee_include_nested = False
         self._guide_x: float | None = None
         self._guide_y: float | None = None
         self._smart_guide_plan: dict[str, Any] = {}
+        self._smart_selection_hovered = False
+        self._smart_gap_axis = ""
+        self._smart_gap_label = ""
+        self._smart_gap_label_position = QPointF()
+        self._smart_gap_original_gap = 0.0
+        self._smart_gap_other_gap = 0.0
+        self._smart_gap_original_document: dict[str, Any] | None = None
+        self._smart_marked_ids: set[str] = set()
+        self._smart_reorder_original_document: dict[str, Any] | None = None
+        self._smart_reorder_axis = ""
+        self._smart_reorder_target_index = -1
+        self._smart_reorder_indicator = QRectF()
+        self._smart_reorder_indicator_mode = ""
+        self._auto_layout_reorder_context: dict[str, Any] = {}
+        self._auto_layout_reorder_target_index = -1
+        self._auto_layout_reorder_indicator = QRectF()
+        self._smart_resize_original_document: dict[str, Any] | None = None
         self._measurements_visible = False
         self._active_artboard_drag_id = ""
         self._artboard_drag_origin = QPointF()
@@ -176,7 +244,11 @@ class PainterUIDesignOverlay(QWidget):
         self._prototype_preview_state: dict[str, Any] = {}
         self._prototype_pressed_object_id = ""
         self._prototype_hover_object_id = ""
+        self._layer_hover_object_id = ""
         self._prototype_focus_object_id = ""
+        self._active_comment_id = ""
+        self._comment_drag_position: QPointF | None = None
+        self._comment_press_target: dict[str, Any] = {}
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -197,27 +269,24 @@ class PainterUIDesignOverlay(QWidget):
             and bool(self._effective_objects_by_id)
         )
         self._document = document
+        selected_ids = {
+            str(value)
+            for value in document["selection"]["object_ids"]
+        }
+        self._smart_marked_ids.intersection_update(selected_ids)
+        if self._layer_hover_object_id and not any(
+            str(row.get("id") or "") == self._layer_hover_object_id
+            and bool(row.get("visible", True))
+            for row in document.get("objects", [])
+        ):
+            self._layer_hover_object_id = ""
         if reuse_resolved:
             self._effective_document["selection"] = copy.deepcopy(
                 document["selection"]
             )
         else:
-            from app.painter_ui_themes import resolve_ui_theme_document
-
-            self._effective_document = resolve_ui_theme_document(
-                document,
-                normalize=False,
-            )
-            self._resolved_geometry = resolve_ui_constraints(
-                self._effective_document,
-                resolved_ui_geometry(
-                    self._effective_document,
-                    normalize=False,
-                    resolve_responsive=False,
-                ),
-            )
+            self._rebuild_effective_document()
             self._document_render_signature = signature
-            self._rebuild_document_indexes()
         if self._edit_scope_id not in {
             row["id"] for row in self._document["objects"]
         }:
@@ -248,6 +317,39 @@ class PainterUIDesignOverlay(QWidget):
             self._finish_text_edit(commit=False)
         else:
             self._position_text_editor()
+        self.update()
+
+    def _rebuild_effective_document(self) -> None:
+        from app.painter_ui_themes import resolve_ui_theme_document
+
+        source = self._document
+        if self._prototype_preview_enabled:
+            from app.painter_ui_prototype import (
+                resolve_ui_component_prototype_document,
+            )
+
+            source = resolve_ui_component_prototype_document(
+                source,
+                self._prototype_preview_state,
+            )
+        self._effective_document = resolve_ui_theme_document(
+            source,
+            normalize=False,
+        )
+        self._resolved_geometry = resolve_ui_constraints(
+            self._effective_document,
+            resolved_ui_geometry(
+                self._effective_document,
+                normalize=False,
+                resolve_responsive=False,
+            ),
+        )
+        self._rebuild_document_indexes()
+        self._boolean_path_cache.clear()
+
+    def set_empty_page_mode(self, enabled: bool) -> None:
+        """Hide the internal root artboard for a Figma-style empty page."""
+        self._empty_page_mode = bool(enabled)
         self.update()
 
     def _rebuild_document_indexes(self) -> None:
@@ -306,6 +408,7 @@ class PainterUIDesignOverlay(QWidget):
             editor.cancel_requested.connect(
                 lambda: self._finish_text_edit(commit=False)
             )
+            editor.textChanged.connect(self._resize_text_editor_to_content)
             self._text_editor = editor
         editor = self._text_editor
         self._text_edit_object_id = target
@@ -373,6 +476,46 @@ class PainterUIDesignOverlay(QWidget):
         self.update()
         return True
 
+    def _resize_text_editor_to_content(self) -> None:
+        editor = self._text_editor
+        target = self._text_edit_object_id
+        if editor is None or not target:
+            return
+        row = next(
+            (item for item in self._document["objects"] if item["id"] == target),
+            None,
+        )
+        if row is None:
+            return
+        from app.painter_ui_text_layout import (
+            normalize_text_resize_mode,
+            text_content_geometry,
+        )
+
+        mode = normalize_text_resize_mode(
+            (row.get("content") or {}).get("text_resize")
+        )
+        width, height = text_content_geometry(
+            editor.toPlainText(),
+            row.get("style"),
+            mode=mode,
+            width=float(row.get("width") or 1.0),
+            height=float(row.get("height") or 1.0),
+        )
+        _viewport, scale = self._artboard_viewport(
+            next(
+                artboard
+                for artboard in self._document["artboards"]
+                if artboard["id"] == row["artboard_id"]
+            )
+        )
+        geometry = editor.geometry()
+        if mode == "auto_width":
+            geometry.setWidth(max(80, round(width * scale) + 6))
+        if mode in {"auto_width", "auto_height"}:
+            geometry.setHeight(max(32, round(height * scale) + 6))
+        editor.setGeometry(geometry)
+
     def _position_text_editor(self) -> None:
         editor = self._text_editor
         target = self._text_edit_object_id
@@ -435,7 +578,12 @@ class PainterUIDesignOverlay(QWidget):
                 ),
                 None,
             )
-            if row is None or row["kind"] not in {"frame", "group"}:
+            from app.painter_ui_boolean import is_ui_boolean_group
+
+            if row is None or (
+                row["kind"] not in {"frame", "group"}
+                and not is_ui_boolean_group(row)
+            ):
                 target = ""
         self._edit_scope_id = target
         self.update()
@@ -470,6 +618,9 @@ class PainterUIDesignOverlay(QWidget):
         artboard: Mapping[str, Any],
         viewport: QRectF,
         scale: float,
+        *,
+        layout_guides_visible: bool = True,
+        pixel_grid_visible: bool = False,
     ) -> None:
         from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
 
@@ -480,7 +631,7 @@ class PainterUIDesignOverlay(QWidget):
         )
         painter.save()
         painter.setClipRect(viewport)
-        for grid in layout["layout_grids"]:
+        for grid in layout["layout_grids"] if layout_guides_visible else []:
             color = QColor(str(grid["color"]))
             line_color = QColor(color)
             line_color.setAlpha(max(48, line_color.alpha()))
@@ -533,6 +684,17 @@ class PainterUIDesignOverlay(QWidget):
                             )
                         painter.drawRect(rect)
                         position += cell_size + gutter
+        if pixel_grid_visible and scale >= 8.0:
+            pixel_pen = QPen(QColor("#8994A344"), 1.0)
+            painter.setPen(pixel_pen)
+            x = viewport.left() + scale
+            while x < viewport.right():
+                painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()))
+                x += scale
+            y = viewport.top() + scale
+            while y < viewport.bottom():
+                painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y))
+                y += scale
         guides = layout["guides"]
         if guides["visible"]:
             guide_pen = QPen(QColor("#35B9FFB8"), 1.0, Qt.PenStyle.DashLine)
@@ -560,6 +722,30 @@ class PainterUIDesignOverlay(QWidget):
                 painter.drawRect(safe_rect)
         painter.restore()
 
+    def set_view_options(
+        self,
+        *,
+        pixel_grid: bool | None = None,
+        layout_guides: bool | None = None,
+        pixel_preview: bool | None = None,
+        layer_outlines: bool | None = None,
+        outline_include_hidden: bool | None = None,
+        outline_include_bounds: bool | None = None,
+    ) -> None:
+        if pixel_grid is not None:
+            self._pixel_grid_visible = bool(pixel_grid)
+        if layout_guides is not None:
+            self._layout_guides_visible = bool(layout_guides)
+        if pixel_preview is not None:
+            self._pixel_preview_enabled = bool(pixel_preview)
+        if layer_outlines is not None:
+            self._layer_outlines_visible = bool(layer_outlines)
+        if outline_include_hidden is not None:
+            self._outline_include_hidden = bool(outline_include_hidden)
+        if outline_include_bounds is not None:
+            self._outline_include_bounds = bool(outline_include_bounds)
+        self.update()
+
     def set_motion_preview(
         self,
         states: Mapping[str, Mapping[str, Any]] | None,
@@ -569,6 +755,7 @@ class PainterUIDesignOverlay(QWidget):
             for object_id, state in (states or {}).items()
             if isinstance(state, Mapping)
         }
+        self._boolean_path_cache.clear()
         self.update()
 
     def set_motion_actor_sources(
@@ -610,7 +797,7 @@ class PainterUIDesignOverlay(QWidget):
         requested = str(tool or "select").strip().casefold()
         self._tool = (
             requested
-            if requested in _CREATE_TOOLS or requested in {"scale", "pan"}
+            if requested in _CREATE_TOOLS or requested in {"scale", "pan", "comment"}
             else "select"
         )
         self._cancel_interaction()
@@ -619,7 +806,7 @@ class PainterUIDesignOverlay(QWidget):
             if self._tool == "pan"
             else (
                 Qt.CursorShape.CrossCursor
-                if self._tool in _CREATE_TOOLS
+                if self._tool in _CREATE_TOOLS or self._tool == "comment"
                 else Qt.CursorShape.ArrowCursor
             )
         )
@@ -631,6 +818,17 @@ class PainterUIDesignOverlay(QWidget):
     def set_snap(self, enabled: bool, size: float = 8.0) -> None:
         self._snap_enabled = bool(enabled)
         self._snap_size = max(1.0, float(size))
+
+    def set_object_snap(self, enabled: bool) -> None:
+        self._object_snap_enabled = bool(enabled)
+        if not self._object_snap_enabled:
+            self._guide_x = None
+            self._guide_y = None
+            self._smart_guide_plan = {}
+            self.update()
+
+    def object_snap_enabled(self) -> bool:
+        return self._object_snap_enabled
 
     def snap_enabled(self) -> bool:
         return self._snap_enabled
@@ -669,6 +867,46 @@ class PainterUIDesignOverlay(QWidget):
         painter.setPen(QPen(QColor("#3A424D"), 1.0))
         painter.drawLine(QPointF(size, 0.0), QPointF(size, self.height()))
         painter.drawLine(QPointF(0.0, size), QPointF(self.width(), size))
+
+        selected_frame_rect = self._selected_frame_ruler_rect()
+        if selected_frame_rect is not None:
+            highlight = QColor("#2488D8")
+            highlight.setAlpha(72)
+            painter.fillRect(
+                QRectF(
+                    selected_frame_rect.left(),
+                    0.0,
+                    selected_frame_rect.width(),
+                    size,
+                ),
+                highlight,
+            )
+            painter.fillRect(
+                QRectF(
+                    0.0,
+                    selected_frame_rect.top(),
+                    size,
+                    selected_frame_rect.height(),
+                ),
+                highlight,
+            )
+            painter.setPen(QPen(QColor("#35A5FF"), 1.0))
+            for x_value in (
+                selected_frame_rect.left(),
+                selected_frame_rect.right(),
+            ):
+                painter.drawLine(
+                    QPointF(x_value, 0.0),
+                    QPointF(x_value, size),
+                )
+            for y_value in (
+                selected_frame_rect.top(),
+                selected_frame_rect.bottom(),
+            ):
+                painter.drawLine(
+                    QPointF(0.0, y_value),
+                    QPointF(size, y_value),
+                )
 
         step = self._ruler_step(scale)
         minor = step / 5.0
@@ -739,6 +977,48 @@ class PainterUIDesignOverlay(QWidget):
             guard += 1
         painter.restore()
 
+        if self._ruler_guide_preview is not None:
+            orientation, position = self._ruler_guide_preview
+            painter.setPen(QPen(QColor("#35B9FF"), 1.0))
+            if orientation == "vertical":
+                painter.drawLine(
+                    QPointF(position, size),
+                    QPointF(position, self.height()),
+                )
+            else:
+                painter.drawLine(
+                    QPointF(size, position),
+                    QPointF(self.width(), position),
+                )
+        if self._ruler_origin_preview is not None:
+            painter.setPen(QPen(QColor("#F1C66D"), 1.0))
+            painter.drawLine(
+                QPointF(self._ruler_origin_preview.x(), size),
+                QPointF(self._ruler_origin_preview.x(), self.height()),
+            )
+            painter.drawLine(
+                QPointF(size, self._ruler_origin_preview.y()),
+                QPointF(self.width(), self._ruler_origin_preview.y()),
+            )
+        painter.restore()
+
+    def _selected_frame_ruler_rect(self) -> QRectF | None:
+        selected_id = str(
+            self._document.get("selection", {}).get("object_id") or ""
+        )
+        if not selected_id:
+            return None
+        row = next(
+            (
+                item
+                for item in self._document.get("objects", [])
+                if str(item.get("id") or "") == selected_id
+                and str(item.get("kind") or "") == "frame"
+            ),
+            None,
+        )
+        return self._object_rect(row) if row is not None else None
+
     def _guide_at(self, position: QPointF) -> tuple[str, float] | None:
         from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
 
@@ -772,31 +1052,6 @@ class PainterUIDesignOverlay(QWidget):
             return None
         _distance, orientation, value = min(candidates, key=lambda item: item[0])
         return orientation, value
-
-        if self._ruler_guide_preview is not None:
-            orientation, position = self._ruler_guide_preview
-            painter.setPen(QPen(QColor("#35B9FF"), 1.0))
-            if orientation == "vertical":
-                painter.drawLine(
-                    QPointF(position, size),
-                    QPointF(position, self.height()),
-                )
-            else:
-                painter.drawLine(
-                    QPointF(size, position),
-                    QPointF(self.width(), position),
-                )
-        if self._ruler_origin_preview is not None:
-            painter.setPen(QPen(QColor("#F1C66D"), 1.0))
-            painter.drawLine(
-                QPointF(self._ruler_origin_preview.x(), size),
-                QPointF(self._ruler_origin_preview.x(), self.height()),
-            )
-            painter.drawLine(
-                QPointF(size, self._ruler_origin_preview.y()),
-                QPointF(self.width(), self._ruler_origin_preview.y()),
-            )
-        painter.restore()
 
     def _active_artboard(self) -> dict[str, Any]:
         active = self._document["active_artboard_id"]
@@ -1160,6 +1415,152 @@ class PainterUIDesignOverlay(QWidget):
             height * scale,
         )
 
+    def _review_comments(self) -> list[dict[str, Any]]:
+        linked = self._document.get("linked_targets") or {}
+        review = linked.get("review") if isinstance(linked, Mapping) else {}
+        comments = review.get("comments") if isinstance(review, Mapping) else []
+        return [dict(row) for row in comments or [] if isinstance(row, Mapping)]
+
+    def _comment_position(self, comment: Mapping[str, Any]) -> QPointF | None:
+        anchor = comment.get("anchor") or {}
+        ax = max(0.0, min(1.0, float(anchor.get("x", 0.5))))
+        ay = max(0.0, min(1.0, float(anchor.get("y", 0.5))))
+        object_id = str(comment.get("object_id") or "")
+        if object_id:
+            row = next(
+                (item for item in self._document["objects"] if item["id"] == object_id),
+                None,
+            )
+            if row is None:
+                return None
+            rect = self._object_rect(row)
+        else:
+            artboard_id = str(comment.get("artboard_id") or "")
+            artboard = next(
+                (item for item in self._document["artboards"] if item["id"] == artboard_id),
+                None,
+            )
+            if artboard is None:
+                return None
+            rect, _scale = self._artboard_viewport(artboard)
+        return QPointF(rect.left() + rect.width() * ax, rect.top() + rect.height() * ay)
+
+    def _comment_target_rect(self, comment: Mapping[str, Any]) -> QRectF | None:
+        object_id = str(comment.get("object_id") or "")
+        if object_id:
+            row = next(
+                (item for item in self._document["objects"] if item["id"] == object_id),
+                None,
+            )
+            return self._object_rect(row) if row is not None else None
+        artboard_id = str(comment.get("artboard_id") or "")
+        artboard = next(
+            (item for item in self._document["artboards"] if item["id"] == artboard_id),
+            None,
+        )
+        return self._artboard_viewport(artboard)[0] if artboard is not None else None
+
+    def _comment_region_rect(self, comment: Mapping[str, Any]) -> QRectF:
+        region = comment.get("region")
+        target = self._comment_target_rect(comment)
+        if not isinstance(region, Mapping) or target is None:
+            return QRectF()
+        return QRectF(
+            target.left() + float(region.get("x", 0.0)) * target.width(),
+            target.top() + float(region.get("y", 0.0)) * target.height(),
+            float(region.get("width", 0.0)) * target.width(),
+            float(region.get("height", 0.0)) * target.height(),
+        ).normalized()
+
+    def _comment_placement(self, point: QPointF, area: QRectF | None = None) -> dict[str, Any] | None:
+        artboard_point = self.artboard_point_at(point)
+        if artboard_point is None:
+            return None
+        artboard_id, local_point = artboard_point
+        object_ids = self.object_ids_at(float(point.x()), float(point.y()))
+        object_id = str(object_ids[0] if object_ids else "")
+        if object_id:
+            row = next(item for item in self._document["objects"] if item["id"] == object_id)
+            target_rect = self._object_rect(row)
+        else:
+            artboard = next(item for item in self._document["artboards"] if item["id"] == artboard_id)
+            target_rect = self._artboard_viewport(artboard)[0]
+        x = (point.x() - target_rect.left()) / max(1.0, target_rect.width())
+        y = (point.y() - target_rect.top()) / max(1.0, target_rect.height())
+        payload: dict[str, Any] = {
+            "object_id": object_id,
+            "artboard_id": artboard_id,
+            "x": max(0.0, min(1.0, float(x))),
+            "y": max(0.0, min(1.0, float(y))),
+            "screen_x": float(point.x()),
+            "screen_y": float(point.y()),
+        }
+        normalized = (area or QRectF()).normalized()
+        if normalized.width() >= 4.0 and normalized.height() >= 4.0:
+            left = (normalized.left() - target_rect.left()) / max(1.0, target_rect.width())
+            top = (normalized.top() - target_rect.top()) / max(1.0, target_rect.height())
+            right = (normalized.right() - target_rect.left()) / max(1.0, target_rect.width())
+            bottom = (normalized.bottom() - target_rect.top()) / max(1.0, target_rect.height())
+            payload["region"] = {
+                "x": max(0.0, min(1.0, left)),
+                "y": max(0.0, min(1.0, top)),
+                "width": max(0.0, min(1.0, right) - max(0.0, min(1.0, left))),
+                "height": max(0.0, min(1.0, bottom) - max(0.0, min(1.0, top))),
+            }
+            payload["x"] = payload["region"]["x"]
+            payload["y"] = payload["region"]["y"]
+        return payload
+
+    def _comment_at(self, point: QPointF) -> dict[str, Any] | None:
+        for comment in reversed(self._review_comments()):
+            position = self._comment_position(comment)
+            if position is not None and QRectF(
+                position.x() - 12.0, position.y() - 12.0, 24.0, 24.0
+            ).contains(point):
+                return comment
+        return None
+
+    def set_active_comment(self, comment_id: str) -> None:
+        self._active_comment_id = str(comment_id or "")
+        self.update()
+
+    def _paint_comments(self, painter: QPainter) -> None:
+        for index, comment in enumerate(self._review_comments(), 1):
+            position = self._comment_position(comment)
+            if position is None:
+                continue
+            active = str(comment.get("id") or "") == self._active_comment_id
+            resolved = bool(comment.get("resolved"))
+            region_rect = self._comment_region_rect(comment)
+            if not region_rect.isNull():
+                painter.save()
+                painter.setBrush(QColor(13, 153, 255, 26 if not resolved else 12))
+                painter.setPen(QPen(QColor("#0D99FF"), 1.0, Qt.PenStyle.DashLine))
+                painter.drawRoundedRect(region_rect, 3.0, 3.0)
+                painter.restore()
+            if (
+                self._interaction == "comment_move"
+                and str(comment.get("id") or "") == self._active_comment_id
+                and self._comment_drag_position is not None
+            ):
+                position = QPointF(self._comment_drag_position)
+            radius = 11.0 if active else 9.0
+            painter.save()
+            painter.setPen(QPen(QColor("#FFFFFF"), 2.0))
+            painter.setBrush(QColor("#8A8A8A") if resolved else QColor("#0D99FF"))
+            painter.drawEllipse(position, radius, radius)
+            painter.setPen(QColor("#FFFFFF"))
+            font = painter.font()
+            font.setPixelSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(
+                QRectF(position.x() - radius, position.y() - radius, radius * 2, radius * 2),
+                Qt.AlignmentFlag.AlignCenter,
+                str(index),
+            )
+            painter.restore()
+
     def prototype_connection_handle_rect(self) -> QRectF:
         if not self._prototype_authoring_visible:
             return QRectF()
@@ -1196,6 +1597,7 @@ class PainterUIDesignOverlay(QWidget):
         if self._prototype_preview_enabled:
             self._cancel_interaction()
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        self._rebuild_effective_document()
         self.update()
 
     def set_prototype_preview_state(
@@ -1207,6 +1609,7 @@ class PainterUIDesignOverlay(QWidget):
             if isinstance(state, Mapping)
             else {}
         )
+        self._rebuild_effective_document()
         self.update()
 
     def prototype_preview_enabled(self) -> bool:
@@ -1314,12 +1717,23 @@ class PainterUIDesignOverlay(QWidget):
         position = QPointF(float(x), float(y))
         hits: list[str] = []
         scope_ids = self._edit_scope_object_ids()
-        for row in self._visible_objects(reverse=True):
+        candidates = (
+            self._outline_objects(reverse=True)
+            if self._layer_outlines_visible
+            else self._visible_objects(reverse=True)
+        )
+        for row in candidates:
             if scope_ids and str(row["id"]) not in scope_ids:
                 continue
-            if not self._point_visible_in_parent_clips(row, position):
+            if (
+                not self._layer_outlines_visible
+                and not self._point_visible_in_parent_clips(row, position)
+            ):
                 continue
-            if not self._point_visible_in_object_mask(row, position):
+            if (
+                not self._layer_outlines_visible
+                and not self._point_visible_in_object_mask(row, position)
+            ):
                 continue
             rect = self._object_rect(row)
             local_position = self._unrotated_point(
@@ -1331,6 +1745,98 @@ class PainterUIDesignOverlay(QWidget):
             if rect.contains(local_position):
                 hits.append(str(row["id"]))
         return hits
+
+    def set_layer_hover_object(self, object_id: str = "") -> None:
+        target = str(object_id or "")
+        if target and not any(
+            str(row.get("id") or "") == target
+            and bool(row.get("visible", True))
+            for row in self._document.get("objects", [])
+        ):
+            target = ""
+        if target == self._layer_hover_object_id:
+            return
+        self._layer_hover_object_id = target
+        self.update()
+
+    def layer_hover_object_id(self) -> str:
+        return str(self._layer_hover_object_id)
+
+    def _selection_target_from_hits(
+        self,
+        hit_ids: list[str],
+        *,
+        deep: bool = False,
+    ) -> str:
+        """Resolve a canvas hit using Figma's documented nesting rules."""
+        by_id = {
+            str(row["id"]): row
+            for row in self._document["objects"]
+        }
+        for hit_id in hit_ids:
+            row = by_id.get(str(hit_id))
+            if row is None or bool(row.get("locked")):
+                continue
+            if deep:
+                return str(row["id"])
+            current = row
+            seen: set[str] = set()
+            while True:
+                parent_id = str(current.get("parent_id") or "")
+                if not parent_id or parent_id == self._edit_scope_id:
+                    break
+                if parent_id in seen:
+                    break
+                seen.add(parent_id)
+                parent = by_id.get(parent_id)
+                if parent is None:
+                    break
+                current = parent
+            if not bool(current.get("locked")):
+                return str(current["id"])
+        return ""
+
+    def _child_target_from_hits(
+        self,
+        parent_id: str,
+        hit_ids: list[str],
+    ) -> str:
+        """Return the hit object exactly one hierarchy level below parent."""
+        target_parent = str(parent_id or "")
+        if not target_parent:
+            return ""
+        by_id = {
+            str(row["id"]): row
+            for row in self._document["objects"]
+        }
+        for hit_id in hit_ids:
+            current = by_id.get(str(hit_id))
+            candidate = ""
+            seen: set[str] = set()
+            while current is not None and str(current["id"]) not in seen:
+                current_id = str(current["id"])
+                seen.add(current_id)
+                parent = str(current.get("parent_id") or "")
+                if parent == target_parent:
+                    candidate = current_id
+                    break
+                current = by_id.get(parent)
+            row = by_id.get(candidate)
+            if row is not None and not bool(row.get("locked")):
+                return candidate
+        return ""
+
+    def _top_child_id(self, parent_id: str) -> str:
+        children = [
+            row
+            for row in self._document["objects"]
+            if str(row.get("parent_id") or "") == str(parent_id or "")
+            and bool(row.get("visible", True))
+            and not bool(row.get("locked"))
+        ]
+        if not children:
+            return ""
+        return str(max(children, key=lambda row: int(row.get("z_index", 0)))["id"])
 
     def _display_rotation(self, row: Mapping[str, Any]) -> float:
         preview = self._motion_preview.get(str(row["id"]))
@@ -1353,15 +1859,324 @@ class PainterUIDesignOverlay(QWidget):
 
     @staticmethod
     def _handle_rects(rect: QRectF) -> dict[str, QRectF]:
+        extent = min(abs(float(rect.width())), abs(float(rect.height())))
+        radius = min(5.0, max(2.5, extent * 0.10))
         return {
-            name: QRectF(point.x() - 5.0, point.y() - 5.0, 10.0, 10.0)
+            name: QRectF(
+                point.x() - radius,
+                point.y() - radius,
+                radius * 2.0,
+                radius * 2.0,
+            )
             for name, point in (
                 ("nw", rect.topLeft()),
+                ("n", QPointF(rect.center().x(), rect.top())),
                 ("ne", rect.topRight()),
-                ("sw", rect.bottomLeft()),
+                ("e", QPointF(rect.right(), rect.center().y())),
                 ("se", rect.bottomRight()),
+                ("s", QPointF(rect.center().x(), rect.bottom())),
+                ("sw", rect.bottomLeft()),
+                ("w", QPointF(rect.left(), rect.center().y())),
             )
         }
+
+    @staticmethod
+    def _radius_eligible(row: Mapping[str, Any]) -> bool:
+        return str(row.get("kind") or "").casefold() in {
+            "rectangle", "button", "image",
+        }
+
+    def _radius_handle_centers(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> dict[str, QPointF]:
+        _viewport, scale = self._artboard_viewport()
+        radius = max(0.0, float((row.get("style") or {}).get("radius") or 0.0))
+        maximum = max(12.0, min(rect.width(), rect.height()) * 0.5 - 10.0)
+        inset = min(maximum, 18.0 + radius * max(0.0001, scale))
+        return {
+            "nw": QPointF(rect.left() + inset, rect.top() + inset),
+            "ne": QPointF(rect.right() - inset, rect.top() + inset),
+            "sw": QPointF(rect.left() + inset, rect.bottom() - inset),
+            "se": QPointF(rect.right() - inset, rect.bottom() - inset),
+        }
+
+    def _radius_handle_at(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+        point: QPointF,
+    ) -> str:
+        if not self._radius_eligible(row):
+            return ""
+        for corner, center in self._radius_handle_centers(row, rect).items():
+            if QRectF(center.x() - 8, center.y() - 8, 16, 16).contains(point):
+                return corner
+        return ""
+
+    def _paint_radius_controls(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> None:
+        if not self._radius_eligible(row):
+            return
+        centers = self._radius_handle_centers(row, rect)
+        painter.save()
+        painter.setPen(QPen(QColor("#168BFF"), 1.5))
+        painter.setBrush(QColor("#FFFFFF"))
+        for center in centers.values():
+            painter.drawEllipse(center, 6.0, 6.0)
+        if self._interaction == "radius" or self._radius_hover_corner:
+            radius = max(0.0, float((row.get("style") or {}).get("radius") or 0.0))
+            label = f"Radius {round(radius):g}"
+            metrics = painter.fontMetrics()
+            width = metrics.horizontalAdvance(label) + 12
+            height = metrics.height() + 5
+            if self._interaction == "radius":
+                anchor = centers.get(self._radius_active_corner, rect.center())
+                x = anchor.x() + 10
+                y = anchor.y() - height * 0.5
+            else:
+                x = rect.left() + 34
+                y = rect.top() - height - 2
+            badge = QRectF(x, y, width, height)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#168BFF"))
+            painter.drawRoundedRect(badge, 3.0, 3.0)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+        painter.restore()
+
+    @staticmethod
+    def _arc_point(rect: QRectF, angle: float, ratio: float = 1.0) -> QPointF:
+        radians = math.radians(float(angle))
+        return QPointF(
+            rect.center().x() + math.cos(radians) * rect.width() * 0.5 * ratio,
+            rect.center().y() + math.sin(radians) * rect.height() * 0.5 * ratio,
+        )
+
+    def _arc_handle_positions(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> dict[str, QPointF]:
+        kind = str(row.get("kind") or "").casefold()
+        if kind not in {"ellipse", "arc"}:
+            return {}
+        content = dict(row.get("content") or {})
+        start = float(content.get("start_angle", 0.0 if kind == "ellipse" else -90.0))
+        sweep = float(content.get("sweep_angle", 360.0 if kind == "ellipse" else 270.0))
+        inner = float(content.get("inner_radius", 0.0))
+        if kind == "ellipse":
+            edge = self._arc_point(rect, start)
+            center = rect.center()
+            vector = edge - center
+            length = max(0.0001, math.hypot(vector.x(), vector.y()))
+            extent = min(abs(float(rect.width())), abs(float(rect.height())))
+            inset = min(
+                min(28.0, max(14.0, extent * 0.16)),
+                max(4.0, extent * 0.30),
+            )
+            return {
+                "sweep": QPointF(
+                    edge.x() - vector.x() / length * inset,
+                    edge.y() - vector.y() / length * inset,
+                )
+            }
+        if abs(sweep) >= 359.999:
+            edge = self._arc_point(rect, start)
+            center = rect.center()
+            vector = edge - center
+            length = max(0.0001, math.hypot(vector.x(), vector.y()))
+            extent = min(abs(float(rect.width())), abs(float(rect.height())))
+            inset = min(
+                min(28.0, max(14.0, extent * 0.16)),
+                max(4.0, extent * 0.30),
+            )
+            return {
+                "start": edge,
+                "sweep": QPointF(
+                    edge.x() - vector.x() / length * inset,
+                    edge.y() - vector.y() / length * inset,
+                ),
+                "ratio": self._arc_point(rect, start + 180.0, inner),
+            }
+        middle = start + sweep * 0.5
+        return {
+            "start": self._arc_point(rect, start),
+            "sweep": self._arc_point(rect, start + sweep),
+            "ratio": self._arc_point(rect, middle, inner),
+        }
+
+    def _arc_handle_at(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+        point: QPointF,
+    ) -> str:
+        # Keep the interactive target comfortably larger than the painted
+        # handle at normal zoom, but do not let it consume most of a small
+        # ellipse.  A fixed 18 px box made compact ellipses almost impossible
+        # to move because every ordinary press started an arc edit.
+        extent = min(abs(float(rect.width())), abs(float(rect.height())))
+        hit_radius = min(9.0, max(4.0, extent * 0.12))
+        for name, center in self._arc_handle_positions(row, rect).items():
+            if QRectF(
+                center.x() - hit_radius,
+                center.y() - hit_radius,
+                hit_radius * 2.0,
+                hit_radius * 2.0,
+            ).contains(point):
+                return name
+        return ""
+
+    def _paint_arc_controls(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> None:
+        positions = self._arc_handle_positions(row, rect)
+        if not positions:
+            return
+        painter.save()
+        painter.setPen(QPen(QColor("#168BFF"), 1.5))
+        painter.setBrush(QColor("#FFFFFF"))
+        if len(positions) > 1:
+            for name in ("start", "sweep"):
+                if name in positions:
+                    painter.drawLine(rect.center(), positions[name])
+        for name, center in positions.items():
+            handle_radius = 7.0 if len(positions) == 1 else 6.0
+            painter.drawEllipse(center, handle_radius, handle_radius)
+            if name == "start":
+                painter.setBrush(QColor("#168BFF")); painter.drawEllipse(center, 2.2, 2.2); painter.setBrush(QColor("#FFFFFF"))
+        highlighted = self._arc_active_handle or self._arc_hover_handle
+        label = self._arc_label
+        content = dict(row.get("content") or {})
+        if highlighted == "sweep" and not label:
+            sweep = float(
+                content.get(
+                    "sweep_angle",
+                    360.0 if row.get("kind") == "ellipse" else 270.0,
+                )
+            )
+            label = f"Sweep {round(sweep / 360.0 * 100.0):g}%"
+        elif highlighted == "start" and not label:
+            label = f"Start {round(float(content.get('start_angle', 0.0))):g}°"
+        elif highlighted == "ratio" and not label:
+            label = f"Ratio {round(float(content.get('inner_radius', 0.0)) * 100.0):g}%"
+        if highlighted and label:
+            anchor = positions.get(highlighted, rect.center())
+            metrics = painter.fontMetrics()
+            badge = QRectF(
+                anchor.x() + 10, anchor.y() - 13,
+                metrics.horizontalAdvance(label) + 12,
+                metrics.height() + 5,
+            )
+            painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor("#168BFF"))
+            painter.drawRoundedRect(badge, 3, 3)
+            painter.setPen(QColor("#FFFFFF")); painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+        painter.restore()
+
+    def _shape_gizmo_positions(
+        self,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> dict[str, QPointF]:
+        kind = str(row.get("kind") or "").casefold()
+        content = dict(row.get("content") or {})
+        if kind == "line":
+            start_anchor = content.get("start_anchor", [0.0, 0.0])
+            end_anchor = content.get("end_anchor", [1.0, 1.0])
+            def anchor(value) -> QPointF:
+                values = list(value) if isinstance(value, (list, tuple)) else [0.0, 0.0]
+                return QPointF(
+                    rect.left() + float(values[0]) * rect.width(),
+                    rect.top() + float(values[1]) * rect.height(),
+                )
+            return {"line_start": anchor(start_anchor), "line_end": anchor(end_anchor)}
+        if kind not in {"polygon", "star"}:
+            return {}
+        count = max(3, int(content.get("point_count", 5)))
+        rotation = float(content.get("rotation_offset", -90.0))
+        radius = float(content.get("corner_radius", 0.0))
+        result: dict[str, QPointF] = {}
+        outer = self._arc_point(rect, rotation)
+        center = rect.center()
+        vector = outer - center
+        length = max(0.0001, math.hypot(vector.x(), vector.y()))
+        _viewport, scale = self._artboard_viewport()
+        radius_inset = min(length * 0.78, 14.0 + radius * scale)
+        result["shape_radius"] = QPointF(
+            outer.x() - vector.x() / length * radius_inset,
+            outer.y() - vector.y() / length * radius_inset,
+        )
+        if kind == "star":
+            inner = max(0.05, min(0.95, float(content.get("inner_radius", 0.45))))
+            result["shape_ratio"] = self._arc_point(
+                rect, rotation + 180.0 / count, inner
+            )
+            result["shape_count"] = self._arc_point(
+                rect, rotation + 360.0 / count, 0.82
+            )
+        return result
+
+    def _shape_gizmo_at(
+        self, row: Mapping[str, Any], rect: QRectF, point: QPointF
+    ) -> str:
+        for name, center in self._shape_gizmo_positions(row, rect).items():
+            if QRectF(center.x() - 9, center.y() - 9, 18, 18).contains(point):
+                return name
+        return ""
+
+    def _paint_shape_gizmos(
+        self, painter: QPainter, row: Mapping[str, Any], rect: QRectF
+    ) -> None:
+        positions = self._shape_gizmo_positions(row, rect)
+        if not positions:
+            return
+        painter.save()
+        painter.setPen(QPen(QColor("#168BFF"), 1.5))
+        painter.setBrush(QColor("#FFFFFF"))
+        for center in positions.values():
+            painter.drawEllipse(center, 6.0, 6.0)
+        highlighted = self._shape_gizmo_active or self._shape_gizmo_hover
+        label = self._shape_gizmo_label
+        if highlighted == "shape_radius":
+            outer = self._arc_point(
+                rect,
+                float((row.get("content") or {}).get("rotation_offset", -90.0)),
+            )
+            painter.drawLine(outer, positions["shape_radius"])
+            if not label:
+                label = (
+                    f"Radius {round(float((row.get('content') or {}).get('corner_radius', 0.0))):g}"
+                )
+        elif highlighted == "shape_ratio" and not label:
+            label = (
+                f"Ratio {round(float((row.get('content') or {}).get('inner_radius', 0.45)) * 100):g}%"
+            )
+        elif highlighted == "shape_count" and not label:
+            label = f"Count {int((row.get('content') or {}).get('point_count', 5))}"
+        if highlighted and label:
+            anchor = positions.get(highlighted, rect.center())
+            metrics = painter.fontMetrics()
+            badge = QRectF(
+                anchor.x() + 10,
+                anchor.y() - 13,
+                metrics.horizontalAdvance(label) + 12,
+                metrics.height() + 5,
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#168BFF"))
+            painter.drawRoundedRect(badge, 3, 3)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
+        painter.restore()
 
     def _vector_control_positions(
         self,
@@ -1636,7 +2451,11 @@ class PainterUIDesignOverlay(QWidget):
         pivot = ui_pivot_point(rect, constraints)
         transform = QTransform()
         transform.translate(pivot.x(), pivot.y())
-        transform.rotate(-float(angle))
+        # Stored rotation follows Figma's inspector convention: positive
+        # angles are counterclockwise. Qt's screen-space positive rotation is
+        # clockwise, so the visual transform uses the opposite sign and this
+        # inverse mapping uses the stored sign directly.
+        transform.rotate(float(angle))
         transform.translate(-pivot.x(), -pivot.y())
         return transform.map(point)
 
@@ -1654,7 +2473,7 @@ class PainterUIDesignOverlay(QWidget):
         self._guide_x = None
         self._guide_y = None
         self._smart_guide_plan = {}
-        if not self._snap_enabled:
+        if not self._object_snap_enabled:
             return x, y
         from app.painter_ui_smart_guides import plan_ui_move_guides
 
@@ -1689,7 +2508,7 @@ class PainterUIDesignOverlay(QWidget):
         self._guide_x = None
         self._guide_y = None
         self._smart_guide_plan = {}
-        if not self._snap_enabled:
+        if not self._object_snap_enabled:
             return rect
         from app.painter_ui_smart_guides import plan_ui_resize_guides
 
@@ -1708,23 +2527,22 @@ class PainterUIDesignOverlay(QWidget):
             excluded_object_ids=[str(row["id"])],
             tolerance=6.0 / max(0.0001, scale),
             geometry=self._resolved_geometry,
+            active_handle=self._active_handle,
         )
-        if any(
-            guide["kind"] == "equal_width" for guide in report["guides"]
-        ):
-            target_width = float(report["width"])
-            if "w" in self._active_handle:
-                x += width - target_width
-            width = target_width
-            self._guide_x = viewport.left() + (x + width) * scale
-        if any(
-            guide["kind"] == "equal_height" for guide in report["guides"]
-        ):
-            target_height = float(report["height"])
-            if "n" in self._active_handle:
-                y += height - target_height
-            height = target_height
-            self._guide_y = viewport.top() + (y + height) * scale
+        x = float(report["x"])
+        y = float(report["y"])
+        width = float(report["width"])
+        height = float(report["height"])
+        for guide in report["guides"]:
+            position = (
+                viewport.left() + float(guide["position"]) * scale
+                if guide["axis"] == "horizontal"
+                else viewport.top() + float(guide["position"]) * scale
+            )
+            if guide["axis"] == "horizontal":
+                self._guide_x = position
+            else:
+                self._guide_y = position
         self._smart_guide_plan = report
         return QRectF(
             viewport.x() + x * scale,
@@ -1732,6 +2550,78 @@ class PainterUIDesignOverlay(QWidget):
             width * scale,
             height * scale,
         )
+
+    def _smart_snap_create_rect(self, rect: QRectF) -> QRectF:
+        """Snap a newly drawn shape's active edges to peer edge/center anchors."""
+        self._guide_x = None
+        self._guide_y = None
+        self._smart_guide_plan = {}
+        if not self._object_snap_enabled or rect.isNull():
+            return rect
+        active = self._active_artboard()["id"]
+        dragging_left = self._press_position.x() > rect.center().x()
+        dragging_top = self._press_position.y() > rect.center().y()
+        x_anchor = rect.left() if dragging_left else rect.right()
+        y_anchor = rect.top() if dragging_top else rect.bottom()
+        x_options: list[tuple[float, float, QRectF]] = []
+        y_options: list[tuple[float, float, QRectF]] = []
+        for row in self._visible_objects():
+            if str(row.get("artboard_id")) != str(active):
+                continue
+            other = self._object_rect(row)
+            for target in (other.left(), other.center().x(), other.right()):
+                delta = target - x_anchor
+                if abs(delta) <= 6.0:
+                    x_options.append((abs(delta), delta, other))
+            for target in (other.top(), other.center().y(), other.bottom()):
+                delta = target - y_anchor
+                if abs(delta) <= 6.0:
+                    y_options.append((abs(delta), delta, other))
+        guides: list[dict[str, Any]] = []
+        snapped = QRectF(rect)
+        viewport, scale = self._artboard_viewport()
+        if x_options:
+            _distance, delta, other = min(x_options, key=lambda item: item[0])
+            if dragging_left:
+                snapped.setLeft(snapped.left() + delta)
+            else:
+                snapped.setRight(snapped.right() + delta)
+            position = (snapped.left() if dragging_left else snapped.right())
+            self._guide_x = position
+            guides.append({
+                "axis": "horizontal", "kind": "edge",
+                "position": (position - viewport.left()) / max(0.0001, scale),
+                "extent_start": (min(snapped.top(), other.top()) - viewport.top()) / max(0.0001, scale),
+                "extent_end": (max(snapped.bottom(), other.bottom()) - viewport.top()) / max(0.0001, scale),
+                "markers": [
+                    (snapped.center().y() - viewport.top()) / max(0.0001, scale),
+                    (other.center().y() - viewport.top()) / max(0.0001, scale),
+                ],
+            })
+        if y_options:
+            _distance, delta, other = min(y_options, key=lambda item: item[0])
+            if dragging_top:
+                snapped.setTop(snapped.top() + delta)
+            else:
+                snapped.setBottom(snapped.bottom() + delta)
+            position = (snapped.top() if dragging_top else snapped.bottom())
+            self._guide_y = position
+            guides.append({
+                "axis": "vertical", "kind": "edge",
+                "position": (position - viewport.top()) / max(0.0001, scale),
+                "extent_start": (min(snapped.left(), other.left()) - viewport.left()) / max(0.0001, scale),
+                "extent_end": (max(snapped.right(), other.right()) - viewport.left()) / max(0.0001, scale),
+                "markers": [
+                    (snapped.center().x() - viewport.left()) / max(0.0001, scale),
+                    (other.center().x() - viewport.left()) / max(0.0001, scale),
+                ],
+            })
+        self._smart_guide_plan = {
+            "schema": "tigerstudio.painter.ui.smart_guides.v1",
+            "operation": "create",
+            "guides": guides,
+        }
+        return snapped.normalized()
 
     def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
         original = QRectF(self._original_rect)
@@ -1755,8 +2645,16 @@ class PainterUIDesignOverlay(QWidget):
         constraints = row.get("constraints") if row is not None else None
         if center_based:
             center = original.center()
-            half_width = abs(point.x() - center.x())
-            half_height = abs(point.y() - center.y())
+            half_width = (
+                original.width() * 0.5
+                if self._active_handle in {"n", "s"}
+                else abs(point.x() - center.x())
+            )
+            half_height = (
+                original.height() * 0.5
+                if self._active_handle in {"e", "w"}
+                else abs(point.y() - center.y())
+            )
             raw = QRectF(
                 center.x() - half_width,
                 center.y() - half_height,
@@ -1764,13 +2662,42 @@ class PainterUIDesignOverlay(QWidget):
                 half_height * 2.0,
             )
         else:
-            anchor = {
-                "nw": original.bottomRight(),
-                "ne": original.bottomLeft(),
-                "sw": original.topRight(),
-                "se": original.topLeft(),
-            }[self._active_handle]
-            raw = QRectF(anchor, point).normalized()
+            if self._active_handle == "n":
+                raw = QRectF(
+                    original.left(),
+                    point.y(),
+                    original.width(),
+                    original.bottom() - point.y(),
+                ).normalized()
+            elif self._active_handle == "s":
+                raw = QRectF(
+                    original.left(),
+                    original.top(),
+                    original.width(),
+                    point.y() - original.top(),
+                ).normalized()
+            elif self._active_handle == "w":
+                raw = QRectF(
+                    point.x(),
+                    original.top(),
+                    original.right() - point.x(),
+                    original.height(),
+                ).normalized()
+            elif self._active_handle == "e":
+                raw = QRectF(
+                    original.left(),
+                    original.top(),
+                    point.x() - original.left(),
+                    original.height(),
+                ).normalized()
+            else:
+                anchor = {
+                    "nw": original.bottomRight(),
+                    "ne": original.bottomLeft(),
+                    "sw": original.topRight(),
+                    "se": original.topLeft(),
+                }[self._active_handle]
+                raw = QRectF(anchor, point).normalized()
         _viewport, scale = self._artboard_viewport()
         width, height = constrain_ui_size(
             raw.width() / max(0.0001, scale),
@@ -1849,7 +2776,7 @@ class PainterUIDesignOverlay(QWidget):
         pivot = ui_pivot_point(rect, row.get("constraints"))
         if abs(rotation) >= 0.001:
             painter.translate(pivot)
-            painter.rotate(rotation)
+            painter.rotate(-rotation)
             painter.translate(-pivot)
         painter.setBrush(QColor("#111923CC"))
         painter.setPen(QPen(QColor("#F5F8FC"), 1.5))
@@ -1870,6 +2797,17 @@ class PainterUIDesignOverlay(QWidget):
         row: Mapping[str, Any],
         position: QPointF,
     ) -> None:
+        from app.painter_ui_auto_layout_flow import inspect_auto_layout_child
+
+        flow = inspect_auto_layout_child(self._document, str(row["id"]))
+        if flow["eligible"] and len(flow["ordered_child_ids"]) > 1:
+            self._interaction = "auto_layout_reorder"
+            self._active_object_id = str(row["id"])
+            self._press_position = QPointF(position)
+            self._auto_layout_reorder_context = flow
+            self._auto_layout_reorder_target_index = int(flow["index"])
+            self._auto_layout_reorder_indicator = QRectF()
+            return
         self._interaction = "move"
         self._active_object_id = str(row["id"])
         self._original_rect = QRectF(self._object_rect(row))
@@ -1978,6 +2916,7 @@ class PainterUIDesignOverlay(QWidget):
             self._effective_document,
             resolved_ui_geometry(self._effective_document),
         )
+        self._boolean_path_cache.clear()
         self.update()
 
     def _multi_transform_rows(self) -> list[dict[str, Any]]:
@@ -2006,6 +2945,375 @@ class PainterUIDesignOverlay(QWidget):
             rect = self._object_rect(row)
             bounds = rect if bounds.isNull() else bounds.united(rect)
         return bounds
+
+    def _smart_selection_report(self) -> dict[str, Any] | None:
+        rows = self._multi_transform_rows()
+        if len(rows) < 2:
+            return None
+        from app.painter_ui_smart_selection import inspect_ui_selection_spacing
+
+        report = inspect_ui_selection_spacing(
+            self._document,
+            object_ids=[str(row["id"]) for row in rows],
+            axis="auto",
+        )
+        return report if report["eligible"] and report["uniform"] else None
+
+    def smart_marked_object_ids(self) -> list[str]:
+        """Return marked Smart-selection IDs in stable visual order."""
+
+        report = self._smart_selection_report()
+        if report is None:
+            return []
+        return [
+            str(object_id)
+            for object_id in report["ordered_object_ids"]
+            if str(object_id) in self._smart_marked_ids
+        ]
+
+    def _smart_selection_gap_handles(self) -> list[dict[str, Any]]:
+        report = self._smart_selection_report()
+        if report is None:
+            return []
+        by_id = {
+            str(row["id"]): row
+            for row in self._document["objects"]
+        }
+        handles: list[dict[str, Any]] = []
+
+        def add_horizontal(left_id: str, right_id: str) -> None:
+            left = self._object_rect(by_id[left_id])
+            right = self._object_rect(by_id[right_id])
+            center_x = (left.right() + right.left()) * 0.5
+            overlap_top = max(left.top(), right.top())
+            overlap_bottom = min(left.bottom(), right.bottom())
+            center_y = (
+                (overlap_top + overlap_bottom) * 0.5
+                if overlap_bottom > overlap_top
+                else (left.center().y() + right.center().y()) * 0.5
+            )
+            handles.append(
+                {
+                    "axis": "horizontal",
+                    "rect": QRectF(center_x - 5.0, center_y - 12.0, 10.0, 24.0),
+                }
+            )
+
+        def add_vertical(top_id: str, bottom_id: str) -> None:
+            top = self._object_rect(by_id[top_id])
+            bottom = self._object_rect(by_id[bottom_id])
+            center_y = (top.bottom() + bottom.top()) * 0.5
+            overlap_left = max(top.left(), bottom.left())
+            overlap_right = min(top.right(), bottom.right())
+            center_x = (
+                (overlap_left + overlap_right) * 0.5
+                if overlap_right > overlap_left
+                else (top.center().x() + bottom.center().x()) * 0.5
+            )
+            handles.append(
+                {
+                    "axis": "vertical",
+                    "rect": QRectF(center_x - 12.0, center_y - 5.0, 24.0, 10.0),
+                }
+            )
+
+        if report["axis"] == "horizontal":
+            ordered = report["ordered_object_ids"]
+            for left_id, right_id in zip(ordered, ordered[1:]):
+                add_horizontal(left_id, right_id)
+        elif report["axis"] == "vertical":
+            ordered = report["ordered_object_ids"]
+            for top_id, bottom_id in zip(ordered, ordered[1:]):
+                add_vertical(top_id, bottom_id)
+        else:
+            grid_rows = report["grid_rows"]
+            for group in grid_rows:
+                for left_id, right_id in zip(group, group[1:]):
+                    add_horizontal(left_id, right_id)
+            for upper, lower in zip(grid_rows, grid_rows[1:]):
+                for top_id, bottom_id in zip(upper, lower):
+                    add_vertical(top_id, bottom_id)
+        return handles
+
+    def _smart_selection_center_handles(self) -> list[dict[str, Any]]:
+        report = self._smart_selection_report()
+        if report is None:
+            return []
+        by_id = {
+            str(row["id"]): row
+            for row in self._document["objects"]
+        }
+        return [
+            {
+                "object_id": object_id,
+                "rect": QRectF(
+                    self._object_rect(by_id[object_id]).center().x() - 7.0,
+                    self._object_rect(by_id[object_id]).center().y() - 7.0,
+                    14.0,
+                    14.0,
+                ),
+            }
+            for object_id in report["ordered_object_ids"]
+            if object_id in by_id
+        ]
+
+    def _preview_smart_reorder(
+        self,
+        position: QPointF,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        original = self._smart_reorder_original_document
+        if original is None or self._smart_reorder_axis not in {
+            "horizontal",
+            "vertical",
+            "grid",
+        }:
+            return
+        from app.painter_ui_smart_selection import (
+            inspect_ui_selection_spacing,
+            plan_ui_smart_grid_reorder,
+            plan_ui_smart_reorder,
+        )
+
+        report = inspect_ui_selection_spacing(
+            original,
+            axis=(
+                "auto"
+                if self._smart_reorder_axis == "grid"
+                else self._smart_reorder_axis
+            ),
+        )
+        by_id = {str(row["id"]): row for row in original["objects"]}
+        document_point = self._document_point(position)
+        if self._smart_reorder_axis == "grid":
+            marked_id = next(iter(self._smart_marked_ids), "")
+            grid_rows = [list(group) for group in report["grid_rows"]]
+            swap_mode = bool(
+                modifiers & Qt.KeyboardModifier.ControlModifier
+            )
+            swap_target_id = ""
+            if swap_mode:
+                candidates = [
+                    object_id
+                    for group in grid_rows
+                    for object_id in group
+                    if object_id != marked_id
+                ]
+                if candidates:
+                    swap_target_id = min(
+                        candidates,
+                        key=lambda object_id: math.hypot(
+                            document_point.x()
+                            - (
+                                float(by_id[object_id]["x"])
+                                + float(by_id[object_id]["width"]) * 0.5
+                            ),
+                            document_point.y()
+                            - (
+                                float(by_id[object_id]["y"])
+                                + float(by_id[object_id]["height"]) * 0.5
+                            ),
+                        ),
+                    )
+                target_row = 0
+                target_column = 0
+            else:
+                target_row = min(
+                    range(len(grid_rows)),
+                    key=lambda index: abs(
+                        document_point.y()
+                        - sum(
+                            float(by_id[object_id]["y"])
+                            + float(by_id[object_id]["height"]) * 0.5
+                            for object_id in grid_rows[index]
+                        )
+                        / max(1, len(grid_rows[index]))
+                    ),
+                )
+                target_group = [
+                    object_id
+                    for object_id in grid_rows[target_row]
+                    if object_id != marked_id
+                ]
+                target_column = sum(
+                    1
+                    for object_id in target_group
+                    if document_point.x()
+                    > float(by_id[object_id]["x"])
+                    + float(by_id[object_id]["width"]) * 0.5
+                )
+            plan = plan_ui_smart_grid_reorder(
+                original,
+                marked_id=marked_id,
+                target_row=target_row,
+                target_column=target_column,
+                swap_target_id=swap_target_id,
+            )
+            changes = plan.get("changes_by_id") or {}
+            for document in (self._document, self._effective_document):
+                document_by_id = {
+                    str(row["id"]): row
+                    for row in document["objects"]
+                }
+                for object_id, geometry in changes.items():
+                    row = document_by_id.get(str(object_id))
+                    if row is None:
+                        continue
+                    row.update({key: float(value) for key, value in geometry.items()})
+                    if document is self._document:
+                        self._sync_preview_geometry(row)
+            viewport, scale = self._artboard_viewport()
+            if swap_target_id:
+                target = next(
+                    row
+                    for row in self._document["objects"]
+                    if str(row["id"]) == swap_target_id
+                )
+                self._smart_reorder_indicator = self._object_rect(target)
+                self._smart_reorder_indicator_mode = "swap"
+            else:
+                preview_by_id = {
+                    str(row["id"]): row
+                    for row in self._document["objects"]
+                }
+                planned_group = next(
+                    (
+                        list(group)
+                        for group in plan.get("grid_rows", [])
+                        if marked_id in group
+                    ),
+                    [marked_id],
+                )
+                marked = preview_by_id[marked_id]
+                value = float(marked["x"])
+                row_top = min(
+                    float(preview_by_id[object_id]["y"])
+                    for object_id in planned_group
+                )
+                row_bottom = max(
+                    float(preview_by_id[object_id]["y"])
+                    + float(preview_by_id[object_id]["height"])
+                    for object_id in planned_group
+                )
+                screen_x = viewport.left() + value * scale
+                self._smart_reorder_indicator = QRectF(
+                    screen_x - 1.0,
+                    viewport.top() + row_top * scale,
+                    2.0,
+                    max(2.0, (row_bottom - row_top) * scale),
+                )
+                self._smart_reorder_indicator_mode = "insert"
+            self.update()
+            return
+        remaining_ids = [
+            object_id
+            for object_id in report["ordered_object_ids"]
+            if object_id not in self._smart_marked_ids
+        ]
+        coordinate = (
+            document_point.x()
+            if self._smart_reorder_axis == "horizontal"
+            else document_point.y()
+        )
+        position_key = "x" if self._smart_reorder_axis == "horizontal" else "y"
+        size_key = "width" if self._smart_reorder_axis == "horizontal" else "height"
+        target_index = sum(
+            1
+            for object_id in remaining_ids
+            if coordinate
+            > float(by_id[object_id][position_key])
+            + float(by_id[object_id][size_key]) * 0.5
+        )
+        self._smart_reorder_target_index = target_index
+        plan = plan_ui_smart_reorder(
+            original,
+            marked_ids=list(self._smart_marked_ids),
+            target_index=target_index,
+            axis=self._smart_reorder_axis,
+        )
+        changes = plan.get("changes_by_id") or {}
+        for document in (self._document, self._effective_document):
+            document_by_id = {
+                str(row["id"]): row
+                for row in document["objects"]
+            }
+            for object_id, geometry in changes.items():
+                row = document_by_id.get(str(object_id))
+                if row is None:
+                    continue
+                row.update({key: float(value) for key, value in geometry.items()})
+                if document is self._document:
+                    self._sync_preview_geometry(row)
+        bounds = self._selection_bounds(self._multi_transform_rows())
+        viewport, scale = self._artboard_viewport()
+        if remaining_ids:
+            if target_index == 0:
+                value = float(by_id[remaining_ids[0]][position_key])
+            elif target_index >= len(remaining_ids):
+                last = by_id[remaining_ids[-1]]
+                value = float(last[position_key]) + float(last[size_key])
+            else:
+                previous = by_id[remaining_ids[target_index - 1]]
+                following = by_id[remaining_ids[target_index]]
+                value = (
+                    float(previous[position_key])
+                    + float(previous[size_key])
+                    + float(following[position_key])
+                ) * 0.5
+            screen_value = (
+                viewport.left() + value * scale
+                if self._smart_reorder_axis == "horizontal"
+                else viewport.top() + value * scale
+            )
+            self._smart_reorder_indicator = (
+                QRectF(screen_value - 1.0, bounds.top(), 2.0, bounds.height())
+                if self._smart_reorder_axis == "horizontal"
+                else QRectF(bounds.left(), screen_value - 1.0, bounds.width(), 2.0)
+            )
+            self._smart_reorder_indicator_mode = "insert"
+        self.update()
+
+    def _paint_smart_selection(self, painter: QPainter) -> None:
+        report = self._smart_selection_report()
+        if report is None:
+            return
+        painter.save()
+        pink = QColor("#F24E9C")
+        painter.setPen(QPen(pink, 1.5))
+        painter.setBrush(QColor("#FFFFFF"))
+        by_id = {
+            str(row["id"]): row
+            for row in self._document["objects"]
+        }
+        for object_id in report["ordered_object_ids"]:
+            row = by_id.get(object_id)
+            if row is not None:
+                painter.setBrush(
+                    pink
+                    if object_id in self._smart_marked_ids
+                    else QColor("#FFFFFF")
+                )
+                painter.drawEllipse(self._object_rect(row).center(), 4.0, 4.0)
+        if self._smart_selection_hovered or self._interaction.startswith(
+            "smart_gap_"
+        ):
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(pink)
+            for handle in self._smart_selection_gap_handles():
+                rect = handle["rect"]
+                if handle["axis"] == "horizontal":
+                    painter.drawRoundedRect(
+                        QRectF(rect.center().x() - 1.5, rect.top(), 3.0, rect.height()),
+                        1.5,
+                        1.5,
+                    )
+                else:
+                    painter.drawRoundedRect(
+                        QRectF(rect.left(), rect.center().y() - 1.5, rect.width(), 3.0),
+                        1.5,
+                        1.5,
+                    )
+        painter.restore()
 
     @staticmethod
     def _geometry_bounds(
@@ -2116,7 +3424,27 @@ class PainterUIDesignOverlay(QWidget):
         painter.restore()
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
-        boolean_operands = self._boolean_operand_id_cache
+        boolean_operands = set(self._boolean_operand_id_cache)
+        active_boolean_group = self._active_boolean_edit_group_id()
+        if active_boolean_group:
+            group = self._effective_objects_by_id.get(active_boolean_group) or {}
+            boolean = (group.get("content") or {}).get("boolean") or {}
+            boolean_operands.difference_update(
+                str(value)
+                for value in boolean.get("operand_ids", [])
+                if str(value or "")
+            )
+        hidden_boolean_hosts = {active_boolean_group} if active_boolean_group else set()
+        parent_id = active_boolean_group
+        while parent_id:
+            parent_row = self._effective_objects_by_id.get(parent_id) or {}
+            parent_id = str(parent_row.get("parent_id") or "")
+            if parent_id:
+                from app.painter_ui_boolean import is_ui_boolean_group
+
+                parent = self._effective_objects_by_id.get(parent_id) or {}
+                if is_ui_boolean_group(parent):
+                    hidden_boolean_hosts.add(parent_id)
         preview_artboards: set[str] | None = None
         preview_visibility: Mapping[str, Any] = {}
         if self._prototype_preview_enabled:
@@ -2141,6 +3469,7 @@ class PainterUIDesignOverlay(QWidget):
                 row
                 for row in self._effective_document["objects"]
                 if row["visible"] and row["id"] not in boolean_operands
+                and row["id"] not in hidden_boolean_hosts
                 and (
                     preview_artboards is None
                     or row["artboard_id"] in preview_artboards
@@ -2150,6 +3479,53 @@ class PainterUIDesignOverlay(QWidget):
             key=lambda row: row["z_index"],
             reverse=reverse,
         )
+
+    def _outline_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
+        """Expose nested Boolean and optionally hidden rows for x-ray outlines."""
+        preview_artboards: set[str] | None = None
+        if self._prototype_preview_enabled:
+            current = str(self._prototype_preview_state.get("artboard_id") or "")
+            preview_artboards = {current} if current else set()
+            preview_artboards.update(
+                str(value)
+                for value in self._prototype_preview_state.get(
+                    "overlay_artboard_ids", []
+                )
+            )
+        return sorted(
+            (
+                row
+                for row in self._effective_document["objects"]
+                if (bool(row["visible"]) or self._outline_include_hidden)
+                and (
+                    preview_artboards is None
+                    or row["artboard_id"] in preview_artboards
+                )
+            ),
+            key=lambda row: row["z_index"],
+            reverse=reverse,
+        )
+
+    def _active_boolean_edit_group_id(self) -> str:
+        from app.painter_ui_boolean import is_ui_boolean_group
+
+        scope = self._effective_objects_by_id.get(str(self._edit_scope_id or ""))
+        if scope is not None and is_ui_boolean_group(scope):
+            return str(scope["id"])
+        selected_ids = {
+            str(value)
+            for value in self._document["selection"].get("object_ids", [])
+            if str(value or "")
+        }
+        parents = {
+            str(self._effective_objects_by_id[object_id].get("parent_id") or "")
+            for object_id in selected_ids
+            if object_id in self._effective_objects_by_id
+        }
+        if len(parents) != 1:
+            return ""
+        parent = self._effective_objects_by_id.get(next(iter(parents)))
+        return str(parent["id"]) if parent is not None and is_ui_boolean_group(parent) else ""
 
     def _boolean_operand_ids(self) -> set[str]:
         from app.painter_ui_boolean_geometry import boolean_operand_ids
@@ -2195,7 +3571,7 @@ class PainterUIDesignOverlay(QWidget):
             pivot = ui_pivot_point(rect, row.get("constraints"))
             transform = QTransform()
             transform.translate(pivot.x(), pivot.y())
-            transform.rotate(rotation)
+            transform.rotate(-rotation)
             transform.translate(-pivot.x(), -pivot.y())
             path = transform.map(path)
         return path
@@ -2316,7 +3692,10 @@ class PainterUIDesignOverlay(QWidget):
     def _boolean_path(self, row: Mapping[str, Any]) -> QPainterPath | None:
         from app.painter_ui_boolean_geometry import resolve_ui_boolean_path
 
-        return resolve_ui_boolean_path(
+        object_id = str(row.get("id") or "")
+        if object_id in self._boolean_path_cache:
+            return self._boolean_path_cache[object_id]
+        path = resolve_ui_boolean_path(
             self._effective_document["objects"],
             row,
             self._object_rect,
@@ -2325,6 +3704,8 @@ class PainterUIDesignOverlay(QWidget):
                 / max(0.001, float(operand["width"]))
             ),
         )
+        self._boolean_path_cache[object_id] = path
+        return path
 
     @staticmethod
     def _composition_mode(blend_mode: object):
@@ -2469,7 +3850,31 @@ class PainterUIDesignOverlay(QWidget):
                     max(1.5, float(style.get("stroke_width") or 2.0) * scale),
                 )
             )
-            painter.drawLine(rect.topLeft(), rect.bottomRight())
+            start_anchor = content.get("start_anchor", [0.0, 0.0])
+            end_anchor = content.get("end_anchor", [1.0, 1.0])
+            start = QPointF(
+                rect.left() + float(start_anchor[0]) * rect.width(),
+                rect.top() + float(start_anchor[1]) * rect.height(),
+            )
+            end = QPointF(
+                rect.left() + float(end_anchor[0]) * rect.width(),
+                rect.top() + float(end_anchor[1]) * rect.height(),
+            )
+            painter.drawLine(start, end)
+            if bool(content.get("arrow_end", False)):
+                dx = end.x() - start.x()
+                dy = end.y() - start.y()
+                length = max(0.001, math.hypot(dx, dy))
+                ux, uy = dx / length, dy / length
+                size = max(8.0, 10.0 * scale)
+                base_x = end.x() - ux * size
+                base_y = end.y() - uy * size
+                wing = size * 0.52
+                arrow = QPainterPath(end)
+                arrow.lineTo(base_x - uy * wing, base_y + ux * wing)
+                arrow.lineTo(base_x + uy * wing, base_y - ux * wing)
+                arrow.closeSubpath()
+                painter.fillPath(arrow, fill)
         elif kind in {"polygon", "star", "arc"}:
             painter.drawPath(
                 self._object_shape_path(row)
@@ -2484,9 +3889,16 @@ class PainterUIDesignOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(ui_color(style.get("text_color"), "#F2F5F9"))
         elif kind == "image":
-            radius = max(0.0, float(style.get("radius") or 0.0) * scale)
-            painter.drawRoundedRect(rect, radius, radius)
-            if not draw_ui_image(painter, rect, row.get("content")):
+            image_shape = self._object_shape_path(row)
+            painter.drawPath(image_shape)
+            painter.save()
+            painter.setClipPath(
+                image_shape,
+                Qt.ClipOperation.IntersectClip,
+            )
+            image_drawn = draw_ui_image(painter, rect, row.get("content"))
+            painter.restore()
+            if not image_drawn:
                 painter.drawLine(rect.topLeft(), rect.bottomRight())
                 painter.drawLine(rect.topRight(), rect.bottomLeft())
                 content = row.get("content", {})
@@ -2497,7 +3909,7 @@ class PainterUIDesignOverlay(QWidget):
                         "Missing Figma image",
                     )
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(rect, radius, radius)
+            painter.drawPath(image_shape)
         elif kind == "path":
             draw_ui_vector_paths(painter, rect, content, style)
         else:
@@ -2554,6 +3966,7 @@ class PainterUIDesignOverlay(QWidget):
                 self.font(),
                 scale=scale,
                 text_ranges=row["content"].get("text_ranges"),
+                text_resize=str(row["content"].get("text_resize") or ""),
             )
         painter.restore()
 
@@ -2603,16 +4016,109 @@ class PainterUIDesignOverlay(QWidget):
             self._motion_actor_frame_cache.pop(oldest, None)
         return image
 
+    def _paint_creation_preview(self, painter: QPainter) -> None:
+        """Paint the geometry being created instead of a generic drag box."""
+        rect = self._preview_rect.normalized()
+        tool = str(self._tool or "").casefold()
+        if tool not in {"line", "arrow"} and rect.isNull():
+            return
+        outline = QColor("#168BFF")
+        fill = QColor(217, 217, 217, 190)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(outline, 1.5))
+        painter.setBrush(fill)
+        if tool in {"line", "arrow"}:
+            start = QPointF(self._press_position)
+            end = QPointF(self._preview_line_end)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(outline, 2.0))
+            painter.drawLine(start, end)
+            if tool == "arrow":
+                dx = end.x() - start.x()
+                dy = end.y() - start.y()
+                length = math.hypot(dx, dy)
+                if length > 0.001:
+                    ux, uy = dx / length, dy / length
+                    size = 10.0
+                    base_x = end.x() - ux * size
+                    base_y = end.y() - uy * size
+                    wing = size * 0.52
+                    head = QPainterPath(end)
+                    head.lineTo(base_x - uy * wing, base_y + ux * wing)
+                    head.lineTo(base_x + uy * wing, base_y - ux * wing)
+                    head.closeSubpath()
+                    painter.fillPath(head, outline)
+        elif tool in {"ellipse", "arc"}:
+            painter.drawEllipse(rect)
+        elif tool in {"polygon", "star"}:
+            from app.painter_ui_parametric_shapes import parametric_shape_path
+
+            painter.drawPath(parametric_shape_path(rect, tool, {}))
+        else:
+            painter.drawRect(rect)
+        painter.restore()
+
+    def _paint_object_outline(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        from app.painter_ui_boolean_geometry import (
+            ui_object_boolean_geometry_path,
+        )
+
+        rect = self._object_rect(row)
+        path = self._boolean_path(row)
+        if path is None:
+            scale = rect.width() / max(0.001, float(row["width"]))
+            outline_row = dict(row)
+            outline_row["rotation"] = 0.0
+            path = ui_object_boolean_geometry_path(
+                outline_row,
+                rect,
+                geometry_scale=scale,
+            )
+        selected = str(row["id"]) in set(
+            self._document.get("selection", {}).get("object_ids", [])
+        )
+        hidden = not bool(row.get("visible", True))
+        color = QColor(
+            "#168BFF" if selected else "#8A96A8" if hidden else "#37A4FF"
+        )
+        painter.save()
+        painter.setOpacity(0.72 if hidden else 1.0)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(
+                color,
+                1.5 if selected else 1.0,
+                Qt.PenStyle.DashLine if hidden else Qt.PenStyle.SolidLine,
+            )
+        )
+        if not path.isEmpty():
+            painter.drawPath(path)
+        if self._outline_include_bounds or path.isEmpty():
+            bounds_pen = QPen(color, 1.0, Qt.PenStyle.DotLine)
+            painter.setPen(bounds_pen)
+            painter.drawRect(rect)
+        painter.restore()
+
     def paintEvent(self, _event) -> None:
+        empty_page = bool(self._empty_page_mode and not self._document["objects"])
+        canvas_color = QColor("#F5F5F5" if empty_page else "#3F4145")
         surface = QImage(
             max(1, self.width()),
             max(1, self.height()),
             QImage.Format.Format_ARGB32_Premultiplied,
         )
-        surface.fill(QColor("#3F4145"))
+        surface.fill(canvas_color)
         scene_painter = QPainter(surface)
-        scene_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        scene_painter.fillRect(self.rect(), QColor("#3F4145"))
+        scene_painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            not self._pixel_preview_enabled,
+        )
+        scene_painter.fillRect(self.rect(), canvas_color)
         active_id = self._document["active_artboard_id"]
         preview_artboards: set[str] | None = None
         if self._prototype_preview_enabled:
@@ -2631,12 +4137,21 @@ class PainterUIDesignOverlay(QWidget):
             if current:
                 preview_artboards.add(current)
         for artboard in self._document["artboards"]:
+            if empty_page:
+                continue
             if (
                 preview_artboards is not None
                 and artboard["id"] not in preview_artboards
             ):
                 continue
             viewport, scale = self._artboard_viewport(artboard)
+            scaffold_artboard = bool(
+                str(artboard.get("id") or "") == "artboard-1"
+                and str(artboard.get("name") or "").strip().casefold()
+                == "main"
+            )
+            if scaffold_artboard and not self._prototype_preview_enabled:
+                continue
             scene_painter.fillRect(
                 viewport,
                 QColor(str(artboard.get("background") or "#FFFFFF")),
@@ -2647,6 +4162,8 @@ class PainterUIDesignOverlay(QWidget):
                     artboard,
                     viewport,
                     scale,
+                    layout_guides_visible=self._layout_guides_visible,
+                    pixel_grid_visible=self._pixel_grid_visible,
                 )
                 scene_painter.setBrush(Qt.BrushStyle.NoBrush)
                 scene_painter.setPen(
@@ -2680,32 +4197,104 @@ class PainterUIDesignOverlay(QWidget):
                 QPen(QColor("#8B93A7"), 1.0, Qt.PenStyle.DashLine)
             )
             scene_painter.drawRoundedRect(section_rect, 6.0, 6.0)
-            scene_painter.setPen(QColor("#C3CAD6"))
-            scene_painter.drawText(
-                section_rect.topLeft() + QPointF(4.0, -5.0),
-                str(section["name"]),
-            )
-        for row in self._visible_objects():
+            if self._artboard_labels_visible:
+                section_name = str(section["name"])
+                metrics = scene_painter.fontMetrics()
+                label_rect = QRectF(
+                    section_rect.left(),
+                    section_rect.top() - metrics.height() - 12.0,
+                    metrics.horizontalAdvance(section_name) + 18.0,
+                    metrics.height() + 8.0,
+                )
+                scene_painter.setPen(QPen(QColor("#D4D7DC"), 1.0))
+                scene_painter.setBrush(QColor("#FFFFFF"))
+                scene_painter.drawRoundedRect(label_rect, 6.0, 6.0)
+                scene_painter.setPen(QColor("#303238"))
+                scene_painter.drawText(
+                    label_rect,
+                    Qt.AlignmentFlag.AlignCenter,
+                    section_name,
+                )
+        if not self._prototype_preview_enabled:
+            from app.painter_ui_components import component_set_canvas_bounds
+
+            for component in self._document.get("components", []):
+                if component.get("base_component_id") or not component.get("variant_ids"):
+                    continue
+                bounds = component_set_canvas_bounds(
+                    self._document,
+                    component_id=str(component["id"]),
+                )
+                if not bounds:
+                    continue
+                rect = self._object_rect(bounds)
+                scene_painter.save()
+                scene_painter.setBrush(Qt.BrushStyle.NoBrush)
+                pen = QPen(QColor("#9747FF"), 1.5, Qt.PenStyle.DashLine)
+                pen.setDashPattern([6.0, 4.0])
+                scene_painter.setPen(pen)
+                scene_painter.drawRect(rect)
+                scene_painter.setPen(QColor("#9747FF"))
+                scene_painter.drawText(
+                    QPointF(rect.left(), rect.top() - 8.0),
+                    str(bounds.get("name") or "Component Set"),
+                )
+                scene_painter.restore()
+        paint_rows = (
+            self._outline_objects()
+            if self._layer_outlines_visible
+            else self._visible_objects()
+        )
+        for row in paint_rows:
             scene_painter.save()
-            self._apply_parent_clips(scene_painter, row)
-            self._apply_object_mask(scene_painter, row)
+            if not self._layer_outlines_visible:
+                self._apply_parent_clips(scene_painter, row)
+                self._apply_object_mask(scene_painter, row)
             rect = self._object_rect(row)
             rotation = self._display_rotation(row)
             pivot = ui_pivot_point(rect, row.get("constraints"))
             if abs(rotation) >= 0.001:
                 scene_painter.translate(pivot)
-                scene_painter.rotate(rotation)
+                scene_painter.rotate(-rotation)
+                scene_painter.translate(-pivot)
+            content = dict(row.get("content") or {})
+            flip_x = bool(content.get("flip_x", False))
+            flip_y = bool(content.get("flip_y", False))
+            if flip_x or flip_y:
+                scene_painter.translate(pivot)
+                scene_painter.scale(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0)
                 scene_painter.translate(-pivot)
             display_row = dict(row)
             display_row["opacity"] = self._display_opacity(row)
             if not self._row_in_edit_scope(row):
                 display_row["opacity"] *= 0.2
-            self._paint_object(
-                scene_painter,
-                display_row,
-                surface=surface,
-            )
+            if self._layer_outlines_visible:
+                self._paint_object_outline(scene_painter, display_row)
+            else:
+                self._paint_object(
+                    scene_painter,
+                    display_row,
+                    surface=surface,
+                )
             scene_painter.restore()
+        if self._artboard_labels_visible and not self._prototype_preview_enabled:
+            selected_ids = set(
+                self._document.get("selection", {}).get("object_ids", [])
+            )
+            for row in self._visible_objects():
+                if str(row.get("kind") or "") != "frame":
+                    continue
+                if bool((row.get("content") or {}).get("export_slice", False)):
+                    continue
+                rect = self._object_rect(row)
+                selected = str(row.get("id") or "") in selected_ids
+                scene_painter.setPen(
+                    QColor("#168BFF") if selected else QColor("#B8BABE")
+                )
+                scene_painter.drawText(
+                    QPointF(rect.left(), rect.top() - 9.0),
+                    str(row.get("name") or "Frame"),
+                )
         scene_painter.end()
 
         painter = QPainter(self)
@@ -2734,6 +4323,31 @@ class PainterUIDesignOverlay(QWidget):
                     )
                 )
                 painter.drawRect(self._object_rect(scope_row))
+                painter.restore()
+        if self._layer_hover_object_id:
+            hover_row = next(
+                (
+                    row
+                    for row in self._visible_objects()
+                    if str(row["id"]) == self._layer_hover_object_id
+                ),
+                None,
+            )
+            if hover_row is not None:
+                painter.save()
+                hover_rect = self._object_rect(hover_row)
+                hover_rotation = self._display_rotation(hover_row)
+                hover_pivot = ui_pivot_point(
+                    hover_rect,
+                    hover_row.get("constraints"),
+                )
+                if abs(hover_rotation) >= 0.001:
+                    painter.translate(hover_pivot)
+                    painter.rotate(-hover_rotation)
+                    painter.translate(-hover_pivot)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#168BFF"), 1.5))
+                painter.drawRect(hover_rect)
                 painter.restore()
         selected = (
             ""
@@ -2768,15 +4382,29 @@ class PainterUIDesignOverlay(QWidget):
             pivot = ui_pivot_point(rect, row.get("constraints"))
             if abs(rotation) >= 0.001:
                 painter.translate(pivot)
-                painter.rotate(rotation)
+                painter.rotate(-rotation)
                 painter.translate(-pivot)
             is_selected = row["id"] in selected_ids
             if is_selected:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor("#72A7FF"), 2.0))
                 painter.drawRect(rect)
+                if self._radius_eligible(row):
+                    _viewport, scale = self._artboard_viewport()
+                    radius = max(
+                        0.0,
+                        float((row.get("style") or {}).get("radius") or 0.0)
+                        * max(0.0001, scale),
+                    )
+                    if radius > 0.0:
+                        painter.drawRoundedRect(rect, radius, radius)
                 self._paint_clip_indicator(painter, row, rect)
                 self._paint_mask_indicator(painter, row)
+                if row["id"] in self._smart_marked_ids and len(selected_ids) > 1:
+                    painter.setBrush(QColor("#F4F7FC"))
+                    painter.setPen(QPen(QColor("#356FC7"), 1.0))
+                    for handle in self._handle_rects(rect).values():
+                        painter.drawRect(handle)
             if (
                 len(selected_ids) == 1
                 and row["id"] == selected
@@ -2792,6 +4420,9 @@ class PainterUIDesignOverlay(QWidget):
                     painter.setPen(QPen(QColor("#356FC7"), 1.0))
                     for handle in self._handle_rects(rect).values():
                         painter.drawRect(handle)
+                    self._paint_radius_controls(painter, row, rect)
+                    self._paint_arc_controls(painter, row, rect)
+                    self._paint_shape_gizmos(painter, row, rect)
                     rotate_handle = self._rotation_handle_rect(
                         rect,
                         row.get("constraints"),
@@ -2804,6 +4435,32 @@ class PainterUIDesignOverlay(QWidget):
                     painter.drawEllipse(rotate_handle)
                     painter.setBrush(QColor("#72A7FF"))
                     painter.drawEllipse(pivot, 3.0, 3.0)
+            painter.restore()
+        if len(selected_rows) == 1:
+            row = selected_rows[0]
+            rect = self._object_rect(row)
+            label = (
+                f"{float(row['width']):g} × {float(row['height']):g}"
+            )
+            metrics = painter.fontMetrics()
+            badge_width = metrics.horizontalAdvance(label) + 14
+            badge_height = metrics.height() + 6
+            badge_x = rect.center().x() - badge_width * 0.5
+            badge_y = rect.bottom() + 8.0
+            if badge_y + badge_height > self.height() - 4:
+                badge_y = max(4.0, rect.bottom() - badge_height - 8.0)
+            badge = QRectF(
+                badge_x,
+                badge_y,
+                float(badge_width),
+                float(badge_height),
+            )
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#168BFF"))
+            painter.drawRoundedRect(badge, 4.0, 4.0)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, label)
             painter.restore()
         from app.painter_ui_auto_layout_overlay import (
             paint_auto_layout_canvas_controls,
@@ -2824,6 +4481,107 @@ class PainterUIDesignOverlay(QWidget):
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
                 for handle in self._handle_rects(multi_bounds).values():
                     painter.drawRect(handle)
+                rotate_handle = self._rotation_handle_rect(multi_bounds)
+                painter.drawLine(
+                    multi_bounds.center(),
+                    QPointF(multi_bounds.center().x(), rotate_handle.bottom()),
+                )
+                painter.drawEllipse(rotate_handle)
+            painter.restore()
+            self._paint_smart_selection(painter)
+            smart_report = self._smart_selection_report()
+            marked_rows = [
+                row for row in multi_rows
+                if str(row["id"]) in self._smart_marked_ids
+            ]
+            if (
+                smart_report is not None
+                and smart_report["axis"] in {"horizontal", "vertical"}
+                and len(marked_rows) > 1
+            ):
+                marked_bounds = self._selection_bounds(marked_rows)
+                painter.save()
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#168BFF"), 2.0))
+                painter.drawRect(marked_bounds)
+                painter.setBrush(QColor("#F4F7FC"))
+                painter.setPen(QPen(QColor("#356FC7"), 1.0))
+                for handle in self._handle_rects(marked_bounds).values():
+                    painter.drawRect(handle)
+                painter.restore()
+        if not self._auto_layout_reorder_indicator.isNull():
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#0D99FF"), 3.0))
+            if self._auto_layout_reorder_context.get("mode") == "horizontal":
+                x = self._auto_layout_reorder_indicator.center().x()
+                painter.drawLine(
+                    QPointF(x, self._auto_layout_reorder_indicator.top()),
+                    QPointF(x, self._auto_layout_reorder_indicator.bottom()),
+                )
+            else:
+                y = self._auto_layout_reorder_indicator.center().y()
+                painter.drawLine(
+                    QPointF(self._auto_layout_reorder_indicator.left(), y),
+                    QPointF(self._auto_layout_reorder_indicator.right(), y),
+                )
+            painter.restore()
+        if not self._smart_reorder_indicator.isNull():
+            painter.save()
+            painter.setPen(QPen(QColor("#168BFF"), 3.0))
+            if self._smart_reorder_indicator_mode == "swap":
+                painter.setBrush(QColor(22, 139, 255, 24))
+                painter.drawRect(self._smart_reorder_indicator)
+            elif self._smart_reorder_axis == "horizontal":
+                x = self._smart_reorder_indicator.center().x()
+                painter.drawLine(
+                    QPointF(x, self._smart_reorder_indicator.top()),
+                    QPointF(x, self._smart_reorder_indicator.bottom()),
+                )
+            else:
+                y = self._smart_reorder_indicator.center().y()
+                painter.drawLine(
+                    QPointF(self._smart_reorder_indicator.left(), y),
+                    QPointF(self._smart_reorder_indicator.right(), y),
+                )
+            painter.restore()
+        if self._smart_gap_label and self._interaction.startswith("smart_gap_"):
+            metrics = painter.fontMetrics()
+            badge = QRectF(
+                self._smart_gap_label_position.x() + 12.0,
+                self._smart_gap_label_position.y() - metrics.height() - 12.0,
+                metrics.horizontalAdvance(self._smart_gap_label) + 14.0,
+                metrics.height() + 6.0,
+            )
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#F24E9C"))
+            painter.drawRoundedRect(badge, 4.0, 4.0)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(
+                badge,
+                Qt.AlignmentFlag.AlignCenter,
+                self._smart_gap_label,
+            )
+            painter.restore()
+        if self._rotation_label and self._interaction in {"rotate", "rotate_multi"}:
+            metrics = painter.fontMetrics()
+            badge = QRectF(
+                self._press_position.x() + 12.0,
+                self._press_position.y() - metrics.height() - 12.0,
+                metrics.horizontalAdvance(self._rotation_label) + 14.0,
+                metrics.height() + 6.0,
+            )
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#168BFF"))
+            painter.drawRoundedRect(badge, 4.0, 4.0)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(
+                badge,
+                Qt.AlignmentFlag.AlignCenter,
+                self._rotation_label,
+            )
             painter.restore()
         if not self._prototype_preview_enabled:
             self._paint_prototype_connections(painter)
@@ -2872,27 +4630,70 @@ class PainterUIDesignOverlay(QWidget):
                 )
                 painter.restore()
 
-        if self._interaction == "create" and not self._preview_rect.isNull():
-            painter.setBrush(QColor(80, 130, 210, 48))
-            painter.setPen(QPen(QColor("#79AFFF"), 1.5, Qt.PenStyle.DashLine))
-            painter.drawRect(self._preview_rect.normalized())
+        if self._interaction == "create" and (
+            not self._preview_rect.isNull()
+            or self._tool in {"line", "arrow"}
+        ):
+            self._paint_creation_preview(painter)
+        elif self._interaction == "pencil_draw" and len(self._pencil_points) >= 2:
+            preview = QPainterPath(self._pencil_points[0])
+            for point in self._pencil_points[1:]:
+                preview.lineTo(point)
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(
+                QPen(
+                    QColor("#168BFF"),
+                    2.0,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            painter.drawPath(preview)
+            painter.restore()
+        elif self._interaction == "comment_place" and not self._preview_rect.isNull():
+            painter.save()
+            painter.setBrush(QColor(13, 153, 255, 24))
+            painter.setPen(QPen(QColor("#0D99FF"), 1.0, Qt.PenStyle.DashLine))
+            painter.drawRoundedRect(self._preview_rect.normalized(), 3.0, 3.0)
+            painter.restore()
         elif self._interaction == "marquee" and not self._preview_rect.isNull():
             painter.setBrush(QColor(71, 124, 210, 34))
             painter.setPen(QPen(QColor("#6FA0F5"), 1.0, Qt.PenStyle.DashLine))
             painter.drawRect(self._preview_rect.normalized())
         if self._guide_x is not None or self._guide_y is not None:
-            viewport, _scale = self._artboard_viewport()
-            painter.setPen(QPen(QColor("#FF4FA3"), 1.0))
-            if self._guide_x is not None:
-                painter.drawLine(
-                    QPointF(self._guide_x, viewport.top()),
-                    QPointF(self._guide_x, viewport.bottom()),
-                )
-            if self._guide_y is not None:
-                painter.drawLine(
-                    QPointF(viewport.left(), self._guide_y),
-                    QPointF(viewport.right(), self._guide_y),
-                )
+            viewport, scale = self._artboard_viewport()
+            guide_color = QColor("#F2483D")
+            painter.setPen(QPen(guide_color, 1.0))
+            guides = list(self._smart_guide_plan.get("guides", []))
+            drawn_axes: set[str] = set()
+            for guide in guides:
+                axis = str(guide.get("axis") or "")
+                if "extent_start" not in guide or "extent_end" not in guide:
+                    continue
+                drawn_axes.add(axis)
+                if axis == "horizontal" and self._guide_x is not None:
+                    start = viewport.top() + float(guide["extent_start"]) * scale
+                    end = viewport.top() + float(guide["extent_end"]) * scale
+                    painter.drawLine(QPointF(self._guide_x, start), QPointF(self._guide_x, end))
+                    marker_points = [viewport.top() + float(value) * scale for value in guide.get("markers", [])]
+                    for marker in marker_points:
+                        painter.drawLine(QPointF(self._guide_x - 3, marker - 3), QPointF(self._guide_x + 3, marker + 3))
+                        painter.drawLine(QPointF(self._guide_x - 3, marker + 3), QPointF(self._guide_x + 3, marker - 3))
+                elif axis == "vertical" and self._guide_y is not None:
+                    start = viewport.left() + float(guide["extent_start"]) * scale
+                    end = viewport.left() + float(guide["extent_end"]) * scale
+                    painter.drawLine(QPointF(start, self._guide_y), QPointF(end, self._guide_y))
+                    marker_points = [viewport.left() + float(value) * scale for value in guide.get("markers", [])]
+                    for marker in marker_points:
+                        painter.drawLine(QPointF(marker - 3, self._guide_y - 3), QPointF(marker + 3, self._guide_y + 3))
+                        painter.drawLine(QPointF(marker - 3, self._guide_y + 3), QPointF(marker + 3, self._guide_y - 3))
+            if self._guide_x is not None and "horizontal" not in drawn_axes:
+                painter.drawLine(QPointF(self._guide_x, viewport.top()), QPointF(self._guide_x, viewport.bottom()))
+            if self._guide_y is not None and "vertical" not in drawn_axes:
+                painter.drawLine(QPointF(viewport.left(), self._guide_y), QPointF(viewport.right(), self._guide_y))
             label_names = {
                 "baseline": painter_text("Baseline"),
                 "padding": painter_text("Padding"),
@@ -2923,7 +4724,7 @@ class PainterUIDesignOverlay(QWidget):
                     metrics.height() + 6.0,
                 )
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor("#B83679"))
+                painter.setBrush(QColor("#D83B32"))
                 painter.drawRoundedRect(label_rect, 4.0, 4.0)
                 painter.setPen(QColor("#FFFFFF"))
                 painter.drawText(
@@ -2931,7 +4732,8 @@ class PainterUIDesignOverlay(QWidget):
                     Qt.AlignmentFlag.AlignCenter,
                     label,
                 )
-                painter.setPen(QPen(QColor("#FF4FA3"), 1.0))
+                painter.setPen(QPen(guide_color, 1.0))
+        self._paint_comments(painter)
         self._paint_measurements(painter)
         self._paint_rulers(painter)
 
@@ -2940,9 +4742,25 @@ class PainterUIDesignOverlay(QWidget):
         self._active_object_id = ""
         self._active_handle = ""
         self._preview_rect = QRectF()
+        self._preview_line_end = QPointF()
+        self._pencil_points = []
         self._guide_x = None
         self._guide_y = None
         self._smart_guide_plan = {}
+        self._smart_gap_axis = ""
+        self._smart_gap_label = ""
+        self._smart_gap_label_position = QPointF()
+        self._smart_gap_original_gap = 0.0
+        self._smart_gap_other_gap = 0.0
+        self._smart_gap_original_document = None
+        self._smart_reorder_original_document = None
+        self._smart_reorder_axis = ""
+        self._smart_reorder_target_index = -1
+        self._smart_reorder_indicator = QRectF()
+        self._smart_reorder_indicator_mode = ""
+        self._auto_layout_reorder_context = {}
+        self._auto_layout_reorder_target_index = -1
+        self._auto_layout_reorder_indicator = QRectF()
         self._ruler_guide_preview = None
         self._ruler_origin_preview = None
         self._active_guide_position = 0.0
@@ -2953,6 +4771,17 @@ class PainterUIDesignOverlay(QWidget):
         self._alt_duplicate_drag_active = False
         self._prototype_drag_position = None
         self._prototype_hover_artboard_id = ""
+        self._arc_active_handle = ""
+        self._arc_label = ""
+        self._arc_drag_last_angle = 0.0
+        self._arc_drag_unwrapped_angle = 0.0
+        self._arc_drag_direction = 0
+        self._arc_original_content = {}
+        self._shape_gizmo_active = ""
+        self._shape_gizmo_label = ""
+        self._rotation_label = ""
+        self._comment_drag_position = None
+        self._comment_press_target = {}
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -2994,7 +4823,48 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         viewport, _scale = self._artboard_viewport()
-        if self._rulers_visible:
+        # At very small zoom levels a selected object or one of its handles
+        # can visually overlap the ruler band. Canvas controls must retain
+        # pointer priority there; a ruler starts a guide only on otherwise
+        # empty ruler space.
+        ruler_control_override = bool(
+            self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+        )
+        selected_for_ruler = self._selected_row()
+        if selected_for_ruler is not None and not selected_for_ruler.get(
+            "locked", False
+        ):
+            selected_rect_for_ruler = self._object_rect(selected_for_ruler)
+            local_for_ruler = self._unrotated_point(
+                event.position(),
+                selected_rect_for_ruler,
+                float(selected_for_ruler.get("rotation", 0.0)),
+                selected_for_ruler.get("constraints"),
+            )
+            ruler_control_override = ruler_control_override or any(
+                handle.contains(local_for_ruler)
+                for handle in self._handle_rects(
+                    selected_rect_for_ruler
+                ).values()
+            ) or self._rotation_handle_rect(
+                selected_rect_for_ruler,
+                selected_for_ruler.get("constraints"),
+            ).contains(local_for_ruler)
+        multi_for_ruler = self._multi_transform_rows()
+        multi_bounds_for_ruler = self._selection_bounds(multi_for_ruler)
+        if not multi_bounds_for_ruler.isNull():
+            ruler_control_override = ruler_control_override or any(
+                handle.contains(event.position())
+                for handle in self._handle_rects(
+                    multi_bounds_for_ruler
+                ).values()
+            ) or self._rotation_handle_rect(
+                multi_bounds_for_ruler
+            ).contains(event.position())
+        if self._rulers_visible and not ruler_control_override:
             if (
                 event.position().x() <= self._ruler_size
                 and event.position().y() <= self._ruler_size
@@ -3048,6 +4918,25 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
 
+        if self._tool == "comment":
+            existing = self._comment_at(QPointF(event.position()))
+            if existing is not None:
+                comment_id = str(existing.get("id") or "")
+                self.set_active_comment(comment_id)
+                self._interaction = "comment_move"
+                self._comment_drag_position = QPointF(event.position())
+                event.accept()
+                return
+            placement = self._comment_placement(QPointF(event.position()))
+            if placement is None:
+                event.accept()
+                return
+            self._interaction = "comment_place"
+            self._comment_press_target = placement
+            self._preview_rect = QRectF(event.position(), event.position())
+            event.accept()
+            return
+
         image_control = self._image_focal_control()
         if image_control is not None:
             row, rect, focal = image_control
@@ -3083,7 +4972,7 @@ class PainterUIDesignOverlay(QWidget):
             self._active_object_id = controls.object_id
             self._auto_layout_active_target = auto_layout_target
             self._auto_layout_drag_original = copy.deepcopy(controls.layout)
-            if auto_layout_target == "gap" or auto_layout_target.startswith(
+            if auto_layout_target in {"gap", "cross_gap"} or auto_layout_target.startswith(
                 "padding_"
             ):
                 self._interaction = "auto_layout_drag"
@@ -3131,6 +5020,115 @@ class PainterUIDesignOverlay(QWidget):
         multi_rows = self._multi_transform_rows()
         multi_bounds = self._selection_bounds(multi_rows)
         if not multi_bounds.isNull():
+            if self._tool == "select":
+                smart_report = self._smart_selection_report()
+                for center_handle in self._smart_selection_center_handles():
+                    if center_handle["rect"].contains(event.position()):
+                        object_id = str(center_handle["object_id"])
+                        add_mark = bool(
+                            smart_report is not None
+                            and smart_report["axis"] in {"horizontal", "vertical"}
+                            and event.modifiers()
+                            & Qt.KeyboardModifier.ShiftModifier
+                        )
+                        if add_mark:
+                            self._smart_marked_ids.add(object_id)
+                        else:
+                            self._smart_marked_ids = {object_id}
+                        if smart_report is not None and smart_report["axis"] in {
+                            "horizontal",
+                            "vertical",
+                            "grid",
+                        }:
+                            self._interaction = "smart_reorder_pending"
+                            self._smart_reorder_axis = str(smart_report["axis"])
+                            self._smart_reorder_original_document = copy.deepcopy(
+                                self._document
+                            )
+                            self._smart_reorder_target_index = -1
+                        self.update()
+                        event.accept()
+                        return
+                for smart_handle in self._smart_selection_gap_handles():
+                    if smart_handle["rect"].contains(event.position()):
+                        axis = str(smart_handle["axis"])
+                        self._interaction = f"smart_gap_{axis}"
+                        self._smart_gap_axis = axis
+                        self._smart_gap_original_document = copy.deepcopy(
+                            self._document
+                        )
+                        if smart_report is not None and smart_report["axis"] == "grid":
+                            self._smart_gap_original_gap = float(
+                                smart_report[f"{axis}_gap"]
+                            )
+                            other_axis = (
+                                "vertical" if axis == "horizontal" else "horizontal"
+                            )
+                            self._smart_gap_other_gap = float(
+                                smart_report[f"{other_axis}_gap"]
+                            )
+                        elif smart_report is not None:
+                            self._smart_gap_original_gap = float(
+                                smart_report["gap"] or 0.0
+                            )
+                            self._smart_gap_other_gap = 0.0
+                        self._smart_gap_label = (
+                            f"{self._smart_gap_original_gap:g}px"
+                        )
+                        self._smart_gap_label_position = QPointF(
+                            event.position()
+                        )
+                        self.setCursor(
+                            Qt.CursorShape.SizeHorCursor
+                            if axis == "horizontal"
+                            else Qt.CursorShape.SizeVerCursor
+                        )
+                        event.accept()
+                        return
+                marked_rows = [
+                    row for row in multi_rows
+                    if str(row["id"]) in self._smart_marked_ids
+                ]
+                if (
+                    smart_report is not None
+                    and smart_report["axis"] in {"horizontal", "vertical"}
+                    and len(marked_rows) > 1
+                ):
+                    marked_bounds = self._selection_bounds(marked_rows)
+                    for name, handle in self._handle_rects(marked_bounds).items():
+                        if handle.contains(event.position()):
+                            self._interaction = "smart_resize_multi"
+                            self._active_object_id = str(marked_rows[-1]["id"])
+                            self._active_handle = name
+                            self._original_rect = QRectF(marked_bounds)
+                            self._resize_original_geometries = {
+                                str(row["id"]): (
+                                    float(row["x"]), float(row["y"]),
+                                    float(row["width"]), float(row["height"]),
+                                )
+                                for row in marked_rows
+                            }
+                            self._smart_resize_original_document = copy.deepcopy(self._document)
+                            event.accept()
+                            return
+                if len(marked_rows) == 1:
+                    marked_row = marked_rows[0]
+                    marked_rect = self._object_rect(marked_row)
+                    for name, handle in self._handle_rects(marked_rect).items():
+                        if handle.contains(event.position()):
+                            self._interaction = "smart_resize"
+                            self._active_object_id = str(marked_row["id"])
+                            self._active_handle = name
+                            self._original_rect = QRectF(marked_rect)
+                            self._resize_original_geometries = {
+                                str(marked_row["id"]): (
+                                    float(marked_row["x"]), float(marked_row["y"]),
+                                    float(marked_row["width"]), float(marked_row["height"]),
+                                )
+                            }
+                            self._smart_resize_original_document = copy.deepcopy(self._document)
+                            event.accept()
+                            return
             for name in _HANDLE_NAMES:
                 if self._handle_rects(multi_bounds)[name].contains(
                     event.position()
@@ -3157,13 +5155,68 @@ class PainterUIDesignOverlay(QWidget):
                     }
                     event.accept()
                     return
+            rotate_handle = self._rotation_handle_rect(multi_bounds)
+            if rotate_handle.contains(event.position()):
+                self._interaction = "rotate_multi"
+                self._active_object_id = str(
+                    self._document["selection"]["object_id"]
+                    or multi_rows[0]["id"]
+                )
+                self._original_rect = QRectF(multi_bounds)
+                delta = event.position() - multi_bounds.center()
+                self._rotation_start_angle = math.degrees(
+                    math.atan2(delta.y(), delta.x())
+                )
+                self._resize_original_geometries = {
+                    str(row["id"]): (
+                        float(row["x"]),
+                        float(row["y"]),
+                        float(row["width"]),
+                        float(row["height"]),
+                    )
+                    for row in multi_rows
+                }
+                self._rotation_original_values = {
+                    str(row["id"]): float(row.get("rotation", 0.0))
+                    for row in multi_rows
+                }
+                self._rotation_label = "0°"
+                event.accept()
+                return
 
-        if self._tool in _CREATE_TOOLS:
-            if not viewport.contains(self._press_position):
+        if self._tool == "pencil":
+            if (
+                self._rulers_visible
+                and (
+                    self._press_position.x() <= self._ruler_size
+                    or self._press_position.y() <= self._ruler_size
+                )
+            ):
                 event.ignore()
                 return
+            self._interaction = "pencil_draw"
+            self._pencil_points = [QPointF(self._press_position)]
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            event.accept()
+            return
+
+        if self._tool in _CREATE_TOOLS - _STICKY_SHAPE_TOOLS:
+            if (
+                self._rulers_visible
+                and (
+                    self._press_position.x() <= self._ruler_size
+                    or self._press_position.y() <= self._ruler_size
+                )
+            ):
+                event.ignore()
+                return
+            # Structural/content tools are one-shot and must be able to draw
+            # over existing objects (notably a new frame around a selection).
             self._interaction = "create"
-            self._preview_rect = QRectF(self._press_position, self._press_position)
+            self._preview_rect = QRectF(
+                self._press_position, self._press_position
+            )
+            self._preview_line_end = QPointF(self._press_position)
             event.accept()
             return
 
@@ -3185,6 +5238,22 @@ class PainterUIDesignOverlay(QWidget):
                 float(selected_row.get("rotation", 0.0)),
                 selected_row.get("constraints"),
             )
+            if (
+                event.modifiers() & Qt.KeyboardModifier.AltModifier
+                and selected_rect.contains(local_position)
+            ):
+                # At very small zoom levels every resize handle can overlap
+                # the object's center. Alt-drag remains an unambiguous
+                # duplicate gesture and takes priority over those handles.
+                self._interaction = "alt_duplicate_pending"
+                self._active_object_id = str(selected_row["id"])
+                self._original_rect = QRectF(selected_rect)
+                self._drag_offset = event.position() - selected_rect.topLeft()
+                self._alt_duplicate_source_ids = list(
+                    self._document["selection"]["object_ids"]
+                ) or [str(selected_row["id"])]
+                event.accept()
+                return
             if (
                 selected_row["kind"] == "path"
                 and selected_row["id"] == self._vector_edit_object_id
@@ -3225,6 +5294,67 @@ class PainterUIDesignOverlay(QWidget):
                     self.update()
                     event.accept()
                     return
+            radius_corner = self._radius_handle_at(
+                selected_row,
+                selected_rect,
+                local_position,
+            )
+            if radius_corner:
+                self._interaction = "radius"
+                self._active_object_id = str(selected_row["id"])
+                self._radius_active_corner = radius_corner
+                self._radius_hover_corner = radius_corner
+                self._radius_original = max(
+                    0.0,
+                    float((selected_row.get("style") or {}).get("radius") or 0.0),
+                )
+                self._radius_preview = self._radius_original
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                event.accept()
+                return
+            arc_handle = self._arc_handle_at(
+                selected_row,
+                selected_rect,
+                local_position,
+            )
+            if arc_handle:
+                self._interaction = f"arc_{arc_handle}"
+                self._active_object_id = str(selected_row["id"])
+                self._arc_active_handle = arc_handle
+                self._arc_hover_handle = arc_handle
+                self._arc_label = ""
+                self._arc_original_content = copy.deepcopy(
+                    dict(selected_row.get("content") or {})
+                )
+                if arc_handle == "sweep":
+                    self._arc_drag_last_angle = 0.0
+                    self._arc_drag_unwrapped_angle = 0.0
+                    self._arc_drag_direction = 0
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                event.accept()
+                return
+            shape_gizmo = self._shape_gizmo_at(
+                selected_row, selected_rect, local_position
+            )
+            if shape_gizmo:
+                self._interaction = shape_gizmo
+                self._active_object_id = str(selected_row["id"])
+                self._shape_gizmo_active = shape_gizmo
+                self._shape_gizmo_hover = shape_gizmo
+                self._shape_gizmo_label = ""
+                self._shape_gizmo_original_content = copy.deepcopy(
+                    dict(selected_row.get("content") or {})
+                )
+                self._shape_gizmo_original_style = copy.deepcopy(
+                    dict(selected_row.get("style") or {})
+                )
+                self._shape_gizmo_original_geometry = (
+                    float(selected_row["x"]), float(selected_row["y"]),
+                    float(selected_row["width"]), float(selected_row["height"]),
+                )
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                event.accept()
+                return
             if self._rotation_handle_rect(
                 selected_rect,
                 selected_row.get("constraints"),
@@ -3240,6 +5370,7 @@ class PainterUIDesignOverlay(QWidget):
                 self._rotation_start_angle = math.degrees(
                     math.atan2(delta.y(), delta.x())
                 )
+                self._rotation_label = f"{self._original_rotation:g}°"
                 event.accept()
                 return
             for name in _HANDLE_NAMES:
@@ -3263,11 +5394,56 @@ class PainterUIDesignOverlay(QWidget):
                     event.accept()
                     return
 
+        if self._tool in _STICKY_SHAPE_TOOLS:
+            if (
+                self._rulers_visible
+                and (
+                    self._press_position.x() <= self._ruler_size
+                    or self._press_position.y() <= self._ruler_size
+                )
+            ):
+                event.ignore()
+                return
+            # Shape tools stay active. Existing objects and their gizmos keep
+            # pointer priority; only a drag that starts on empty canvas creates
+            # another shape of the active kind.
+            creation_hits = self.object_ids_at(
+                float(event.position().x()),
+                float(event.position().y()),
+            )
+            hit_rows = [
+                row
+                for object_id in creation_hits
+                for row in self._document["objects"]
+                if row["id"] == object_id
+            ]
+            # A frame is a container surface, not a blocking shape. Dragging
+            # on an otherwise empty part of a frame creates a child inside it.
+            frame_surface_only = bool(hit_rows) and all(
+                str(row.get("kind") or "") == "frame"
+                for row in hit_rows
+            )
+            if not creation_hits or frame_surface_only:
+                self._interaction = "create"
+                self._preview_rect = QRectF(
+                    self._press_position, self._press_position
+                )
+                self._preview_line_end = QPointF(self._press_position)
+                event.accept()
+                return
+
         hit_ids = self.object_ids_at(
             float(event.position().x()),
             float(event.position().y()),
         )
-        selected = hit_ids[0] if hit_ids else ""
+        modifiers = event.modifiers()
+        deep_select = bool(
+            modifiers & Qt.KeyboardModifier.ControlModifier
+        )
+        selected = self._selection_target_from_hits(
+            hit_ids,
+            deep=deep_select,
+        )
         alt_pressed = bool(
             event.modifiers() & Qt.KeyboardModifier.AltModifier
         )
@@ -3296,14 +5472,13 @@ class PainterUIDesignOverlay(QWidget):
             target_artboard = str(selected_row["artboard_id"])
             if target_artboard != self._document["active_artboard_id"]:
                 self.artboard_activation_requested.emit(target_artboard)
-        modifiers = event.modifiers()
-        if selected and modifiers & Qt.KeyboardModifier.ControlModifier:
-            self.object_selection_requested.emit(selected, "toggle")
+        if selected and deep_select:
+            self.object_selection_requested.emit(selected, "replace")
             self._cancel_interaction()
             event.accept()
             return
         if selected and modifiers & Qt.KeyboardModifier.ShiftModifier:
-            self.object_selection_requested.emit(selected, "add")
+            self.object_selection_requested.emit(selected, "toggle")
             self._cancel_interaction()
             event.accept()
             return
@@ -3313,10 +5488,9 @@ class PainterUIDesignOverlay(QWidget):
                 self._press_position,
                 self._press_position,
             )
+            self._marquee_include_nested = deep_select
             self._marquee_mode = (
                 "toggle"
-                if modifiers & Qt.KeyboardModifier.ControlModifier
-                else "add"
                 if modifiers & Qt.KeyboardModifier.ShiftModifier
                 else "replace"
             )
@@ -3379,6 +5553,92 @@ class PainterUIDesignOverlay(QWidget):
                 if target
                 else Qt.CursorShape.ArrowCursor
             )
+            event.accept()
+            return
+        if self._interaction in {"smart_reorder_pending", "smart_reorder"}:
+            if self._interaction == "smart_reorder_pending":
+                delta = event.position() - self._press_position
+                if abs(delta.x()) + abs(delta.y()) < 4.0:
+                    event.accept()
+                    return
+                self._interaction = "smart_reorder"
+            self._preview_smart_reorder(
+                QPointF(event.position()),
+                event.modifiers(),
+            )
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        if self._interaction.startswith("smart_gap_"):
+            original_document = self._smart_gap_original_document
+            if original_document is not None:
+                _viewport, scale = self._artboard_viewport()
+                delta = (
+                    event.position().x() - self._press_position.x()
+                    if self._smart_gap_axis == "horizontal"
+                    else event.position().y() - self._press_position.y()
+                ) / max(0.0001, scale)
+                target_gap = self._smart_gap_original_gap + float(delta)
+                from app.painter_ui_smart_selection import (
+                    inspect_ui_selection_spacing,
+                    plan_ui_selection_tidy,
+                )
+
+                original_report = inspect_ui_selection_spacing(
+                    original_document,
+                    axis="auto",
+                )
+                if original_report["axis"] == "grid":
+                    other_axis = (
+                        "vertical"
+                        if self._smart_gap_axis == "horizontal"
+                        else "horizontal"
+                    )
+                    gap: object = {
+                        self._smart_gap_axis: target_gap,
+                        other_axis: self._smart_gap_other_gap,
+                    }
+                    plan_axis = "auto"
+                else:
+                    gap = target_gap
+                    plan_axis = self._smart_gap_axis
+                plan = plan_ui_selection_tidy(
+                    original_document,
+                    axis=plan_axis,
+                    gap=gap,
+                )
+                changes = plan.get("changes_by_id") or {}
+                for document in (self._document, self._effective_document):
+                    by_id = {
+                        str(row["id"]): row
+                        for row in document["objects"]
+                    }
+                    for object_id, geometry in changes.items():
+                        row = by_id.get(str(object_id))
+                        if row is None:
+                            continue
+                        row.update(
+                            {
+                                key: float(value)
+                                for key, value in geometry.items()
+                                if key in {"x", "y"}
+                            }
+                        )
+                        if document is self._document:
+                            self._sync_preview_geometry(row)
+                self._smart_gap_label = f"{target_gap:g}px"
+                self._smart_gap_label_position = QPointF(event.position())
+                self.update()
+            event.accept()
+            return
+        if self._interaction == "comment_place":
+            self._preview_rect = QRectF(self._press_position, event.position()).normalized()
+            self.update()
+            event.accept()
+            return
+        if self._interaction == "comment_move":
+            self._comment_drag_position = QPointF(event.position())
+            self.update()
             event.accept()
             return
         if self._interaction == "prototype_connection":
@@ -3512,20 +5772,57 @@ class PainterUIDesignOverlay(QWidget):
                 self._auto_layout_active_target,
                 event.position() - self._press_position,
                 scale=scale,
+                big_nudge=bool(
+                    event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                ),
+                opposite=bool(
+                    event.modifiers() & Qt.KeyboardModifier.AltModifier
+                ),
+                all_sides=bool(
+                    event.modifiers() & Qt.KeyboardModifier.AltModifier
+                    and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                ),
             )
             self._preview_auto_layout(self._active_object_id, layout)
             event.accept()
             return
+        if self._interaction == "pencil_draw":
+            point = QPointF(event.position())
+            if (
+                not self._pencil_points
+                or math.hypot(
+                    point.x() - self._pencil_points[-1].x(),
+                    point.y() - self._pencil_points[-1].y(),
+                )
+                >= 1.5
+            ):
+                self._pencil_points.append(point)
+                self.update()
+            event.accept()
+            return
         if self._interaction == "create":
-            viewport, _scale = self._artboard_viewport()
-            position = QPointF(
-                max(viewport.left(), min(viewport.right(), event.position().x())),
-                max(viewport.top(), min(viewport.bottom(), event.position().y())),
-            )
+            raw_end = QPointF(event.position())
             self._preview_rect = QRectF(
                 self._press_position,
-                position,
+                raw_end,
             ).normalized()
+            if not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self._preview_rect = self._smart_snap_create_rect(
+                    self._preview_rect
+                )
+                self._preview_line_end = QPointF(
+                    self._preview_rect.right()
+                    if raw_end.x() >= self._press_position.x()
+                    else self._preview_rect.left(),
+                    self._preview_rect.bottom()
+                    if raw_end.y() >= self._press_position.y()
+                    else self._preview_rect.top(),
+                )
+            else:
+                self._preview_line_end = raw_end
+                self._guide_x = None
+                self._guide_y = None
+                self._smart_guide_plan = {}
             self.update()
             event.accept()
             return
@@ -3604,6 +5901,62 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
+        if self._interaction == "auto_layout_reorder":
+            context = self._auto_layout_reorder_context
+            active_id = self._active_object_id
+            by_id = {
+                str(row["id"]): row for row in self._document["objects"]
+            }
+            sibling_ids = [
+                object_id
+                for object_id in context.get("ordered_child_ids", [])
+                if object_id != active_id and object_id in by_id
+            ]
+            axis = "x" if context.get("mode") == "horizontal" else "y"
+            pointer = (
+                float(event.position().x())
+                if axis == "x"
+                else float(event.position().y())
+            )
+            centers = [
+                (
+                    float(self._object_rect(by_id[object_id]).center().x())
+                    if axis == "x"
+                    else float(self._object_rect(by_id[object_id]).center().y())
+                )
+                for object_id in sibling_ids
+            ]
+            target = sum(1 for center in centers if pointer > center)
+            self._auto_layout_reorder_target_index = target
+            parent = by_id.get(str(context.get("parent_id") or ""))
+            sibling_rects = [self._object_rect(by_id[object_id]) for object_id in sibling_ids]
+            if parent is not None and sibling_rects:
+                parent_rect = self._object_rect(parent)
+                if axis == "x":
+                    boundary = (
+                        sibling_rects[0].left()
+                        if target == 0
+                        else sibling_rects[-1].right()
+                        if target >= len(sibling_rects)
+                        else (sibling_rects[target - 1].right() + sibling_rects[target].left()) * 0.5
+                    )
+                    self._auto_layout_reorder_indicator = QRectF(
+                        boundary - 1.0, parent_rect.top(), 2.0, parent_rect.height()
+                    )
+                else:
+                    boundary = (
+                        sibling_rects[0].top()
+                        if target == 0
+                        else sibling_rects[-1].bottom()
+                        if target >= len(sibling_rects)
+                        else (sibling_rects[target - 1].bottom() + sibling_rects[target].top()) * 0.5
+                    )
+                    self._auto_layout_reorder_indicator = QRectF(
+                        parent_rect.left(), boundary - 1.0, parent_rect.width(), 2.0
+                    )
+            self.update()
+            event.accept()
+            return
         if self._interaction == "move":
             artboard = self._active_artboard()
             doc = self._document_point(event.position() - self._drag_offset)
@@ -3626,11 +5979,14 @@ class PainterUIDesignOverlay(QWidget):
                     self._snap(doc.y()),
                 ),
             )
-            next_x, next_y = self._smart_snap_position(
-                row,
-                next_x,
-                next_y,
-            )
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self._guide_x = None; self._guide_y = None; self._smart_guide_plan = {}
+            else:
+                next_x, next_y = self._smart_snap_position(
+                    row,
+                    next_x,
+                    next_y,
+                )
             original_primary = self._move_original_positions.get(
                 row["id"],
                 (float(row["x"]), float(row["y"])),
@@ -3678,7 +6034,256 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
-        if self._interaction in {"resize", "scale"}:
+        if self._interaction == "radius":
+            row = next(
+                (
+                    item for item in self._document["objects"]
+                    if item["id"] == self._active_object_id
+                ),
+                None,
+            )
+            if row is not None:
+                _viewport, scale = self._artboard_viewport()
+                delta = event.position() - self._press_position
+                sign_x = -1.0 if self._radius_active_corner in {"ne", "se"} else 1.0
+                sign_y = -1.0 if self._radius_active_corner in {"sw", "se"} else 1.0
+                inward = (delta.x() * sign_x + delta.y() * sign_y) * 0.5
+                maximum = max(0.0, min(float(row["width"]), float(row["height"])) * 0.5)
+                radius = max(
+                    0.0,
+                    min(maximum, self._radius_original + inward / max(0.0001, scale)),
+                )
+                self._radius_preview = radius
+                for document in (self._document, self._effective_document):
+                    target = next(
+                        (
+                            item for item in document["objects"]
+                            if item["id"] == self._active_object_id
+                        ),
+                        None,
+                    )
+                    if target is None:
+                        continue
+                    style = copy.deepcopy(dict(target.get("style") or {}))
+                    style["radius"] = radius
+                    style["corner_radii"] = {
+                        key: radius
+                        for key in (
+                            "top_left", "top_right",
+                            "bottom_right", "bottom_left",
+                        )
+                    }
+                    target["style"] = style
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                self.update()
+            event.accept()
+            return
+        if self._interaction.startswith("arc_"):
+            row = next(
+                (
+                    item for item in self._document["objects"]
+                    if item["id"] == self._active_object_id
+                ),
+                None,
+            )
+            if row is not None:
+                rect = self._object_rect(row)
+                local = self._unrotated_point(
+                    event.position(),
+                    rect,
+                    float(row.get("rotation", 0.0)),
+                    row.get("constraints"),
+                )
+                center = rect.center()
+                dx = (local.x() - center.x()) / max(0.0001, rect.width() * 0.5)
+                dy = (local.y() - center.y()) / max(0.0001, rect.height() * 0.5)
+                angle = math.degrees(math.atan2(dy, dx))
+                source = dict(row.get("content") or {})
+                start = float(source.get("start_angle", 0.0)) % 360.0
+                sweep = max(
+                    -360.0,
+                    min(360.0, float(source.get("sweep_angle", 360.0))),
+                )
+                if abs(sweep) < 1.0:
+                    sweep = -1.0 if sweep < 0.0 else 1.0
+                inner = max(0.0, min(0.95, float(source.get("inner_radius", 0.0))))
+                handle = self._arc_active_handle
+                if handle == "sweep":
+                    relative_angle = (
+                        (angle - start + 180.0) % 360.0
+                    ) - 180.0
+                    delta = (
+                        (
+                            relative_angle
+                            - self._arc_drag_last_angle
+                            + 180.0
+                        )
+                        % 360.0
+                    ) - 180.0
+                    self._arc_drag_last_angle = relative_angle
+                    self._arc_drag_unwrapped_angle += delta
+                    if self._arc_drag_direction == 0 and abs(delta) >= 0.05:
+                        # Screen Y grows downward. Figma reports upward as a
+                        # positive sweep and downward as a negative sweep.
+                        self._arc_drag_direction = 1 if delta > 0.0 else -1
+                    if self._arc_drag_direction > 0:
+                        sweep = max(
+                            -359.999,
+                            min(-1.0, self._arc_drag_unwrapped_angle - 360.0),
+                        )
+                    elif self._arc_drag_direction < 0:
+                        sweep = min(
+                            359.999,
+                            max(1.0, 360.0 + self._arc_drag_unwrapped_angle),
+                        )
+                    self._arc_label = f"Sweep {round(sweep / 360.0 * 100.0):g}%"
+                elif handle == "start":
+                    end = (start + sweep) % 360.0
+                    start = angle % 360.0
+                    remaining = (end - start) % 360.0
+                    sweep = remaining - 360.0 if sweep < 0.0 else remaining
+                    if abs(sweep) < 1.0:
+                        sweep = -1.0 if sweep < 0.0 else 1.0
+                    self._arc_label = f"Start {round(start):g}°"
+                elif handle == "ratio":
+                    original = (
+                        self._arc_original_content
+                        if self._arc_original_content
+                        else source
+                    )
+                    start = float(original.get("start_angle", start)) % 360.0
+                    original_sweep = max(
+                        -360.0,
+                        min(360.0, float(original.get("sweep_angle", sweep))),
+                    )
+                    inner = max(0.0, min(0.95, math.hypot(dx, dy)))
+                    if abs(original_sweep) < 359.999:
+                        middle = math.radians(start + original_sweep * 0.5)
+                        same_side = (
+                            dx * math.cos(middle) + dy * math.sin(middle)
+                        ) >= 0.0
+                        sweep = (
+                            original_sweep
+                            if same_side
+                            else original_sweep
+                            - math.copysign(360.0, original_sweep)
+                        )
+                    self._arc_label = f"Ratio {round(inner * 100.0):g}%"
+                content = copy.deepcopy(source)
+                content.update(
+                    {
+                        "start_angle": start,
+                        "sweep_angle": sweep,
+                        "inner_radius": inner,
+                    }
+                )
+                for document in (self._document, self._effective_document):
+                    target = next(
+                        (
+                            item for item in document["objects"]
+                            if item["id"] == self._active_object_id
+                        ),
+                        None,
+                    )
+                    if target is not None:
+                        target["kind"] = "arc"
+                        target["content"] = copy.deepcopy(content)
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                self.update()
+            event.accept()
+            return
+        if self._interaction in {
+            "shape_count", "shape_ratio", "shape_radius",
+            "line_start", "line_end",
+        }:
+            row = next(
+                (item for item in self._document["objects"] if item["id"] == self._active_object_id),
+                None,
+            )
+            if row is not None:
+                rect = self._object_rect(row)
+                local = self._unrotated_point(
+                    event.position(), rect, float(row.get("rotation", 0.0)), row.get("constraints")
+                )
+                content = copy.deepcopy(dict(row.get("content") or {}))
+                style = copy.deepcopy(dict(row.get("style") or {}))
+                if self._interaction == "shape_count":
+                    original = int(self._shape_gizmo_original_content.get("point_count", 5))
+                    count = max(3, min(60, original + round((local.x() - self._press_position.x()) / 12.0)))
+                    content["point_count"] = count
+                    self._shape_gizmo_label = f"Count {count}"
+                elif self._interaction == "shape_ratio":
+                    center = rect.center()
+                    dx = (local.x() - center.x()) / max(0.0001, rect.width() * 0.5)
+                    dy = (local.y() - center.y()) / max(0.0001, rect.height() * 0.5)
+                    ratio = max(0.05, min(0.95, math.hypot(dx, dy)))
+                    content["inner_radius"] = ratio
+                    self._shape_gizmo_label = f"Ratio {round(ratio * 100):g}%"
+                elif self._interaction == "shape_radius":
+                    outer = self._arc_point(
+                        rect, float(content.get("rotation_offset", -90.0))
+                    )
+                    center = rect.center()
+                    inward = center - outer
+                    inward_length = max(
+                        0.0001,
+                        math.hypot(inward.x(), inward.y()),
+                    )
+                    inward = QPointF(
+                        inward.x() / inward_length,
+                        inward.y() / inward_length,
+                    )
+                    offset = local - outer
+                    projected = (
+                        offset.x() * inward.x() + offset.y() * inward.y()
+                    )
+                    _viewport, scale = self._artboard_viewport()
+                    radius = max(
+                        0.0,
+                        min(
+                            min(float(row["width"]), float(row["height"])) * 0.45,
+                            (projected - 14.0) / max(0.0001, scale),
+                        ),
+                    )
+                    content["corner_radius"] = radius
+                    style["radius"] = radius
+                    self._shape_gizmo_label = f"Radius {round(radius):g}"
+                else:
+                    viewport, scale = self._artboard_viewport()
+                    point = QPointF(
+                        (local.x() - viewport.left()) / max(0.0001, scale),
+                        (local.y() - viewport.top()) / max(0.0001, scale),
+                    )
+                    x, y, width, height = self._shape_gizmo_original_geometry
+                    original_start = QPointF(x, y)
+                    original_end = QPointF(x + width, y + height)
+                    start = point if self._interaction == "line_start" else original_start
+                    end = point if self._interaction == "line_end" else original_end
+                    left, top = min(start.x(), end.x()), min(start.y(), end.y())
+                    next_width = max(1.0, abs(end.x() - start.x()))
+                    next_height = max(1.0, abs(end.y() - start.y()))
+                    content["start_anchor"] = [
+                        (start.x() - left) / next_width,
+                        (start.y() - top) / next_height,
+                    ]
+                    content["end_anchor"] = [
+                        (end.x() - left) / next_width,
+                        (end.y() - top) / next_height,
+                    ]
+                    row.update({"x": left, "y": top, "width": next_width, "height": next_height})
+                    self._shape_gizmo_label = f"{round(next_width):g} × {round(next_height):g}"
+                row["content"] = content
+                row["style"] = style
+                effective = next(
+                    (item for item in self._effective_document["objects"] if item["id"] == row["id"]),
+                    None,
+                )
+                if effective is not None:
+                    effective.update(copy.deepcopy(row))
+                self.update()
+            event.accept()
+            return
+        if self._interaction in {"resize", "scale", "smart_resize"}:
             row = next(
                 row
                 for row in self._document["objects"]
@@ -3691,7 +6296,10 @@ class PainterUIDesignOverlay(QWidget):
                 row.get("constraints"),
             )
             rect = self._resize_rect(point, event.modifiers())
-            if self._interaction == "resize":
+            if (
+                self._interaction in {"resize", "smart_resize"}
+                and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+            ):
                 rect = self._smart_snap_resize_rect(row, rect)
             if rect.width() >= 8.0 and rect.height() >= 8.0:
                 viewport, scale = self._artboard_viewport()
@@ -3713,7 +6321,7 @@ class PainterUIDesignOverlay(QWidget):
                 self.update()
             event.accept()
             return
-        if self._interaction in {"resize_multi", "scale_multi"}:
+        if self._interaction in {"resize_multi", "scale_multi", "smart_resize_multi"}:
             rect = self._resize_rect(
                 QPointF(event.position()),
                 event.modifiers(),
@@ -3763,24 +6371,155 @@ class PainterUIDesignOverlay(QWidget):
                 self.update()
             event.accept()
             return
-        if self._interaction == "rotate":
+        if self._interaction in {"rotate", "rotate_multi"}:
             row = next(
                 row
                 for row in self._document["objects"]
                 if row["id"] == self._active_object_id
             )
-            delta = event.position() - ui_pivot_point(
-                self._original_rect,
-                row.get("constraints"),
+            pivot = (
+                self._original_rect.center()
+                if self._interaction == "rotate_multi"
+                else ui_pivot_point(
+                    self._original_rect,
+                    row.get("constraints"),
+                )
             )
+            delta = event.position() - pivot
             angle = math.degrees(math.atan2(delta.y(), delta.x()))
-            rotation = self._original_rotation + angle - self._rotation_start_angle
-            if self._snap_enabled:
-                rotation = round(rotation / 15.0) * 15.0
-            row["rotation"] = ((rotation + 180.0) % 360.0) - 180.0
+            pointer_delta = (
+                (angle - self._rotation_start_angle + 180.0) % 360.0
+            ) - 180.0
+            rotation_delta = -pointer_delta
+            if self._interaction == "rotate_multi":
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    rotation_delta = round(rotation_delta / 15.0) * 15.0
+                viewport, scale = self._artboard_viewport()
+                pivot_doc = QPointF(
+                    (pivot.x() - viewport.x()) / max(0.0001, scale),
+                    (pivot.y() - viewport.y()) / max(0.0001, scale),
+                )
+                radians = math.radians(rotation_delta)
+                cosine = math.cos(radians)
+                sine = math.sin(radians)
+                for moving in self._document["objects"]:
+                    original = self._resize_original_geometries.get(
+                        str(moving["id"])
+                    )
+                    if original is None:
+                        continue
+                    x, y, width, height = original
+                    dx = x + width * 0.5 - pivot_doc.x()
+                    dy = y + height * 0.5 - pivot_doc.y()
+                    center_x = pivot_doc.x() + cosine * dx + sine * dy
+                    center_y = pivot_doc.y() - sine * dx + cosine * dy
+                    moving["x"] = center_x - width * 0.5
+                    moving["y"] = center_y - height * 0.5
+                    original_rotation = self._rotation_original_values.get(
+                        str(moving["id"]),
+                        float(moving.get("rotation", 0.0)),
+                    )
+                    moving["rotation"] = (
+                        (original_rotation + rotation_delta + 180.0) % 360.0
+                    ) - 180.0
+                    self._sync_preview_geometry(moving)
+                self._rotation_label = f"{rotation_delta:g}°"
+            else:
+                rotation = self._original_rotation + rotation_delta
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    rotation = round(rotation / 15.0) * 15.0
+                row["rotation"] = ((rotation + 180.0) % 360.0) - 180.0
+                self._rotation_label = f"{row['rotation']:g}°"
             self.update()
             event.accept()
             return
+        smart_report = self._smart_selection_report()
+        smart_bounds = self._selection_bounds(self._multi_transform_rows())
+        smart_hovered = bool(
+            smart_report is not None
+            and not smart_bounds.isNull()
+            and smart_bounds.adjusted(-8.0, -8.0, 8.0, 8.0).contains(
+                event.position()
+            )
+        )
+        if smart_hovered != self._smart_selection_hovered:
+            self._smart_selection_hovered = smart_hovered
+            self.update()
+        if smart_hovered:
+            for center_handle in self._smart_selection_center_handles():
+                if center_handle["rect"].contains(event.position()):
+                    self.setToolTip("Mark and reorder layer")
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                    event.accept()
+                    return
+            for smart_handle in self._smart_selection_gap_handles():
+                if smart_handle["rect"].contains(event.position()):
+                    self.setToolTip("Adjust space between")
+                    self.setCursor(
+                        Qt.CursorShape.SizeHorCursor
+                        if smart_handle["axis"] == "horizontal"
+                        else Qt.CursorShape.SizeVerCursor
+                    )
+                    event.accept()
+                    return
+        selected_row = self._selected_row()
+        hover_corner = ""
+        hover_arc = ""
+        hover_shape = ""
+        if selected_row is not None and not selected_row.get("locked", False):
+            rect = self._object_rect(selected_row)
+            local = self._unrotated_point(
+                event.position(),
+                rect,
+                float(selected_row.get("rotation", 0.0)),
+                selected_row.get("constraints"),
+            )
+            hover_corner = self._radius_handle_at(selected_row, rect, local)
+            hover_arc = self._arc_handle_at(selected_row, rect, local)
+            hover_shape = self._shape_gizmo_at(selected_row, rect, local)
+        if hover_shape:
+            self._shape_gizmo_hover = hover_shape
+            self.setToolTip(
+                {
+                    "shape_count": "Point count",
+                    "shape_ratio": "Inner ratio",
+                    "shape_radius": "Corner radius",
+                    "line_start": "Line start",
+                    "line_end": "Line end",
+                }.get(hover_shape, "Shape control")
+            )
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            event.accept()
+            return
+        self._shape_gizmo_hover = ""
+        if hover_arc:
+            if hover_arc != self._arc_hover_handle:
+                self._arc_hover_handle = hover_arc
+                self.update()
+            self.setToolTip(
+                {
+                    "start": "Arc start angle",
+                    "sweep": "Arc sweep",
+                    "ratio": "Inner radius",
+                }.get(hover_arc, "Arc")
+            )
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            event.accept()
+            return
+        if self._arc_hover_handle:
+            self._arc_hover_handle = ""
+            self.update()
+        if hover_corner:
+            if hover_corner != self._radius_hover_corner:
+                self._radius_hover_corner = hover_corner
+                self.update()
+            self.setToolTip("모서리 반경 드래그")
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            event.accept()
+            return
+        if self._radius_hover_corner:
+            self._radius_hover_corner = ""
+            self.update()
         controls = self._auto_layout_canvas_controls()
         target = (
             controls.hit_test(QPointF(event.position()))
@@ -3823,6 +6562,36 @@ class PainterUIDesignOverlay(QWidget):
             return
         interaction = self._interaction
         object_id = self._active_object_id
+        if interaction == "comment_place":
+            area = QRectF(self._press_position, event.position()).normalized()
+            placement = self._comment_placement(self._press_position, area)
+            self._cancel_interaction()
+            if placement is not None:
+                self.comment_placement_requested.emit(placement)
+            event.accept()
+            return
+        if interaction == "comment_move" and self._active_comment_id:
+            comment_id = self._active_comment_id
+            distance = event.position() - self._press_position
+            placement = self._comment_placement(QPointF(event.position()))
+            self._cancel_interaction()
+            self._active_comment_id = comment_id
+            self._comment_drag_position = None
+            if placement is not None and abs(distance.x()) + abs(distance.y()) >= 4.0:
+                self.comment_move_requested.emit(
+                    comment_id,
+                    {
+                        "object_id": placement["object_id"],
+                        "artboard_id": placement["artboard_id"],
+                        "anchor": {"x": placement["x"], "y": placement["y"]},
+                        "region": None,
+                    },
+                )
+            else:
+                self.comment_selected.emit(comment_id)
+            self.update()
+            event.accept()
+            return
         if interaction == "prototype_connection" and object_id:
             target_artboard_id = self._prototype_target_artboard(
                 event.position()
@@ -3978,28 +6747,94 @@ class PainterUIDesignOverlay(QWidget):
                     object_id,
                     {"layout": copy.deepcopy(row["layout"])},
                 )
+        elif interaction == "pencil_draw":
+            if len(self._pencil_points) >= 2:
+                viewport, scale = self._artboard_viewport()
+                logical_points = [
+                    (
+                        (point.x() - viewport.x()) / max(0.0001, scale),
+                        (point.y() - viewport.y()) / max(0.0001, scale),
+                    )
+                    for point in self._pencil_points
+                ]
+                if math.dist(logical_points[0], logical_points[-1]) >= 1.0:
+                    self.pencil_create_requested.emit(logical_points)
         elif interaction == "create":
             rect = self._preview_rect.normalized()
-            if rect.width() >= 6.0 and rect.height() >= 6.0:
+            line_like = self._tool in {"line", "arrow"}
+            text_click = (
+                self._tool == "text"
+                and rect.width() < 6.0
+                and rect.height() < 6.0
+            )
+            line_length = math.hypot(
+                self._preview_line_end.x() - self._press_position.x(),
+                self._preview_line_end.y() - self._press_position.y(),
+            )
+            if (
+                text_click
+                or line_like and line_length >= 6.0
+                or not line_like
+                and rect.width() >= 6.0
+                and rect.height() >= 6.0
+            ):
                 viewport, scale = self._artboard_viewport()
-                self.object_create_requested.emit(
-                    self._tool,
-                    self._snap(
-                        (rect.x() - viewport.x()) / max(0.0001, scale)
-                    ),
-                    self._snap(
-                        (rect.y() - viewport.y()) / max(0.0001, scale)
-                    ),
-                    max(1.0, self._snap(rect.width() / max(0.0001, scale))),
-                    max(1.0, self._snap(rect.height() / max(0.0001, scale))),
-                )
+                if line_like:
+                    values = (
+                        self._snap(
+                            (self._press_position.x() - viewport.x())
+                            / max(0.0001, scale)
+                        ),
+                        self._snap(
+                            (self._press_position.y() - viewport.y())
+                            / max(0.0001, scale)
+                        ),
+                        self._snap(
+                            (self._preview_line_end.x() - self._press_position.x())
+                            / max(0.0001, scale)
+                        ),
+                        self._snap(
+                            (self._preview_line_end.y() - self._press_position.y())
+                            / max(0.0001, scale)
+                        ),
+                    )
+                elif text_click:
+                    values = (
+                        self._snap(
+                            (self._press_position.x() - viewport.x())
+                            / max(0.0001, scale)
+                        ),
+                        self._snap(
+                            (self._press_position.y() - viewport.y())
+                            / max(0.0001, scale)
+                        ),
+                        1.0,
+                        1.0,
+                    )
+                else:
+                    values = (
+                        self._snap((rect.x() - viewport.x()) / max(0.0001, scale)),
+                        self._snap((rect.y() - viewport.y()) / max(0.0001, scale)),
+                        max(1.0, self._snap(rect.width() / max(0.0001, scale))),
+                        max(1.0, self._snap(rect.height() / max(0.0001, scale))),
+                    )
+                if self._tool == "section":
+                    self.section_create_requested.emit(*values)
+                else:
+                    self.object_create_requested.emit(self._tool, *values)
         elif interaction == "marquee":
             rect = self._preview_rect.normalized()
             active = self._document["active_artboard_id"]
+            scope_parent = str(self._edit_scope_id or "")
             selected_ids = [
                 row["id"]
                 for row in self._visible_objects()
                 if row["artboard_id"] == active
+                and not bool(row.get("locked"))
+                and (
+                    self._marquee_include_nested
+                    or str(row.get("parent_id") or "") == scope_parent
+                )
                 and rect.intersects(self._object_rect(row))
             ] if rect.width() >= 3.0 and rect.height() >= 3.0 else []
             if self._marquee_mode == "replace":
@@ -4025,6 +6860,36 @@ class PainterUIDesignOverlay(QWidget):
                 self._active_artboard_drag_id,
                 float(artboard["x"]),
                 float(artboard["y"]),
+            )
+        elif interaction == "smart_reorder":
+            selected_ids = set(
+                str(value)
+                for value in self._document["selection"]["object_ids"]
+            )
+            self.objects_changes_requested.emit(
+                {
+                    str(row["id"]): {
+                        "x": float(row["x"]),
+                        "y": float(row["y"]),
+                    }
+                    for row in self._document["objects"]
+                    if str(row["id"]) in selected_ids
+                }
+            )
+        elif interaction.startswith("smart_gap_"):
+            selected_ids = set(
+                str(value)
+                for value in self._document["selection"]["object_ids"]
+            )
+            self.objects_changes_requested.emit(
+                {
+                    str(row["id"]): {
+                        "x": float(row["x"]),
+                        "y": float(row["y"]),
+                    }
+                    for row in self._document["objects"]
+                    if str(row["id"]) in selected_ids
+                }
             )
         elif interaction in {"scale", "scale_multi"}:
             rows_by_id = {
@@ -4063,9 +6928,13 @@ class PainterUIDesignOverlay(QWidget):
                             & Qt.KeyboardModifier.AltModifier
                             else {
                                 "nw": "bottom_right",
+                                "n": "bottom_center",
                                 "ne": "bottom_left",
-                                "sw": "top_right",
+                                "e": "left_center",
                                 "se": "top_left",
+                                "s": "top_center",
+                                "sw": "top_right",
+                                "w": "right_center",
                             }[self._active_handle]
                         ),
                         "scale_visuals": True,
@@ -4083,6 +6952,90 @@ class PainterUIDesignOverlay(QWidget):
                     for object_id in self._resize_original_geometries
                     for row in self._document["objects"]
                     if row["id"] == object_id
+                }
+            )
+        elif interaction in {"smart_resize", "smart_resize_multi"} and object_id:
+            from app.painter_ui_smart_selection import (
+                capture_ui_smart_layout,
+                plan_ui_smart_mutation_reflow,
+            )
+
+            layout = capture_ui_smart_layout(self._smart_resize_original_document)
+            plan = plan_ui_smart_mutation_reflow(
+                self._document, layout=layout, resize=True
+            )
+            by_id = {str(row["id"]): row for row in self._document["objects"]}
+            changes = dict(plan.get("changes_by_id") or {})
+            for resized_id in self._resize_original_geometries:
+                resized = by_id[resized_id]
+                changes[resized_id] = {
+                    **changes.get(resized_id, {}),
+                    "width": float(resized["width"]),
+                    "height": float(resized["height"]),
+                }
+            self.objects_changes_requested.emit(changes)
+        elif interaction == "auto_layout_reorder" and object_id:
+            original_index = int(
+                self._auto_layout_reorder_context.get("index", -1)
+            )
+            target_index = int(self._auto_layout_reorder_target_index)
+            if target_index >= 0 and target_index != original_index:
+                self.auto_layout_reorder_requested.emit(
+                    object_id,
+                    target_index,
+                )
+        elif interaction == "radius" and object_id:
+            row = next(
+                (row for row in self._document["objects"] if row["id"] == object_id),
+                None,
+            )
+            if row is not None:
+                self.object_changes_requested.emit(
+                    object_id,
+                    {"style": copy.deepcopy(dict(row.get("style") or {}))},
+                )
+        elif interaction.startswith("arc_") and object_id:
+            row = next(
+                (row for row in self._document["objects"] if row["id"] == object_id),
+                None,
+            )
+            if row is not None:
+                self.object_changes_requested.emit(
+                    object_id,
+                    {
+                        "kind": str(row.get("kind") or "arc"),
+                        "content": copy.deepcopy(dict(row.get("content") or {})),
+                    },
+                )
+        elif interaction in {
+            "shape_count", "shape_ratio", "shape_radius",
+            "line_start", "line_end",
+        } and object_id:
+            row = next(
+                (row for row in self._document["objects"] if row["id"] == object_id),
+                None,
+            )
+            if row is not None:
+                self.object_changes_requested.emit(
+                    object_id,
+                    {
+                        "x": float(row["x"]), "y": float(row["y"]),
+                        "width": float(row["width"]), "height": float(row["height"]),
+                        "content": copy.deepcopy(dict(row.get("content") or {})),
+                        "style": copy.deepcopy(dict(row.get("style") or {})),
+                    },
+                )
+        elif interaction == "rotate_multi":
+            self.objects_changes_requested.emit(
+                {
+                    row_id: {
+                        "x": float(row["x"]),
+                        "y": float(row["y"]),
+                        "rotation": float(row.get("rotation", 0.0)),
+                    }
+                    for row_id in self._rotation_original_values
+                    for row in self._document["objects"]
+                    if str(row["id"]) == row_id
                 }
             )
         elif interaction in {"move", "resize", "rotate"} and object_id:
@@ -4155,6 +7108,10 @@ class PainterUIDesignOverlay(QWidget):
         self._move_original_positions = {}
         self._hierarchy_drop_preview_id = ""
         self._resize_original_geometries = {}
+        self._smart_resize_original_document = None
+        self._rotation_original_values = {}
+        self._radius_active_corner = ""
+        self._radius_original = 0.0
         self._vector_original_content = None
         if self._vector_edit_object_id:
             self.vector_edit_changed.emit(self._vector_edit_state())
@@ -4183,6 +7140,52 @@ class PainterUIDesignOverlay(QWidget):
             self.ruler_origin_reset_requested.emit()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton and self._tool == "select":
+            smart_report = self._smart_selection_report()
+            if smart_report is not None:
+                hit_ids = self.object_ids_at(
+                    float(event.position().x()),
+                    float(event.position().y()),
+                )
+                smart_ids = set(smart_report["ordered_object_ids"])
+                target = next(
+                    (object_id for object_id in hit_ids if object_id in smart_ids),
+                    "",
+                )
+                if target and smart_report["axis"] in {"horizontal", "vertical"}:
+                    self._smart_marked_ids = smart_ids
+                    self._cancel_interaction()
+                    self.update()
+                    event.accept()
+                    return
+                if target and smart_report["axis"] == "grid":
+                    grid_rows = [
+                        set(group) for group in smart_report.get("grid_rows", [])
+                    ]
+                    marked_axis = next(
+                        (
+                            group for group in grid_rows
+                            if group and group.issubset(self._smart_marked_ids)
+                        ),
+                        set(),
+                    )
+                    if marked_axis:
+                        self._smart_marked_ids = smart_ids
+                        self._cancel_interaction()
+                        self.update()
+                        event.accept()
+                        return
+                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        axis_group = next(
+                            (group for group in grid_rows if target in group),
+                            set(),
+                        )
+                        if axis_group:
+                            self._smart_marked_ids = set(axis_group)
+                            self._cancel_interaction()
+                            self.update()
+                            event.accept()
+                            return
         if event.button() == Qt.MouseButton.LeftButton:
             hit_ids = self.object_ids_at(
                 float(event.position().x()),
@@ -4191,11 +7194,12 @@ class PainterUIDesignOverlay(QWidget):
             selected = str(
                 self._document["selection"]["object_id"] or ""
             )
-            candidates = (
-                [selected]
-                if selected in hit_ids
-                else []
-            ) + [object_id for object_id in hit_ids if object_id != selected]
+            child_target = self._child_target_from_hits(selected, hit_ids)
+            # Double-click edits a directly hit leaf as well as a child of the
+            # currently selected container.  Restricting candidates to only a
+            # child target made top-level Text and Vector layers impossible to
+            # enter from the canvas.
+            candidates = [child_target] if child_target else list(hit_ids)
             text_target = next(
                 (
                     object_id
@@ -4245,29 +7249,34 @@ class PainterUIDesignOverlay(QWidget):
                 self.update()
                 event.accept()
                 return
+            if child_target:
+                self.object_selection_requested.emit(child_target, "replace")
+                event.accept()
+                return
+            from app.painter_ui_boolean import is_ui_boolean_group
+
             parent_ids = {
                 str(row.get("parent_id") or "")
                 for row in self._document["objects"]
             }
-            target = next(
+            rows_by_id = {
+                str(row["id"]): row for row in self._document["objects"]
+            }
+            scope_target = next(
                 (
                     object_id
-                    for object_id in candidates
+                    for object_id in hit_ids
                     if object_id in parent_ids
-                    and next(
-                        (
-                            row["kind"]
-                            for row in self._document["objects"]
-                            if row["id"] == object_id
-                        ),
-                        "",
+                    and (
+                        str(rows_by_id.get(object_id, {}).get("kind") or "")
+                        in {"frame", "group"}
+                        or is_ui_boolean_group(rows_by_id.get(object_id, {}))
                     )
-                    in {"frame", "group"}
                 ),
                 "",
             )
-            if target:
-                self.edit_scope_enter_requested.emit(target)
+            if scope_target:
+                self.edit_scope_enter_requested.emit(scope_target)
                 event.accept()
                 return
         super().mouseDoubleClickEvent(event)
@@ -4374,7 +7383,7 @@ class PainterUIDesignOverlay(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
             event.accept()
             return
-        if key == Qt.Key.Key_Delete:
+        if key in {Qt.Key.Key_Delete, Qt.Key.Key_Backspace}:
             if self._vector_edit_object_id and self._vector_active_node_id:
                 row = next(
                     (
@@ -4415,12 +7424,162 @@ class PainterUIDesignOverlay(QWidget):
             self.edit_scope_exit_requested.emit()
             event.accept()
             return
+        if key == Qt.Key.Key_Escape and self._tool == "comment":
+            self.key_command.emit("select_tool", False)
+            event.accept()
+            return
+        if key == Qt.Key.Key_Escape:
+            self.object_selection_requested.emit("", "replace")
+            event.accept()
+            return
+        if key in {Qt.Key.Key_Return, Qt.Key.Key_Enter} and (
+            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            selected = self._selected_row()
+            if selected is not None:
+                from app.painter_ui_selection_navigation import (
+                    parent_ui_object_id,
+                )
+
+                parent_id = parent_ui_object_id(
+                    self._document,
+                    str(selected["id"]),
+                )
+                if parent_id and parent_id != str(selected["id"]):
+                    self.object_selection_requested.emit(parent_id, "replace")
+            event.accept()
+            return
+        if key in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            selected = self._selected_row()
+            if selected is not None and selected.get("kind") == "text":
+                if self.begin_text_edit(str(selected["id"])):
+                    event.accept()
+                    return
+            if selected is not None:
+                child_id = self._top_child_id(str(selected["id"]))
+                if child_id:
+                    self.object_selection_requested.emit(child_id, "replace")
+                    event.accept()
+                    return
+        if key == Qt.Key.Key_Tab:
+            selected = self._selected_row()
+            if selected is not None:
+                from app.painter_ui_selection_navigation import (
+                    sibling_ui_object_id,
+                )
+
+                sibling_id = sibling_ui_object_id(
+                    self._document,
+                    str(selected["id"]),
+                    previous=bool(
+                        event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                    ),
+                )
+                if sibling_id:
+                    self.object_selection_requested.emit(sibling_id, "replace")
+            event.accept()
+            return
+        alignment_shortcuts = {
+            Qt.Key.Key_A: "left",
+            Qt.Key.Key_H: "hcenter",
+            Qt.Key.Key_D: "right",
+            Qt.Key.Key_W: "top",
+            Qt.Key.Key_V: "vcenter",
+            Qt.Key.Key_S: "bottom",
+        }
+        boolean_shortcuts = {
+            Qt.Key.Key_U: "union",
+            Qt.Key.Key_S: "subtract",
+            Qt.Key.Key_I: "intersect",
+            Qt.Key.Key_E: "exclude",
+        }
+        if (
+            key == Qt.Key.Key_F
+            and event.modifiers()
+            == (
+                Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            )
+        ):
+            self.key_command.emit("boolean_flatten", False)
+            event.accept()
+            return
+        if (
+            key == Qt.Key.Key_O
+            and event.modifiers()
+            == (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            )
+        ):
+            self.key_command.emit("toggle_layer_outlines", False)
+            event.accept()
+            return
+        if (
+            key in boolean_shortcuts
+            and event.modifiers()
+            == (
+                Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            )
+        ):
+            self.key_command.emit(
+                f"boolean_{boolean_shortcuts[key]}",
+                False,
+            )
+            event.accept()
+            return
+        if (
+            key in alignment_shortcuts
+            and event.modifiers() == Qt.KeyboardModifier.AltModifier
+        ):
+            self.key_command.emit(
+                f"align_{alignment_shortcuts[key]}",
+                False,
+            )
+            event.accept()
+            return
+        if (
+            key == Qt.Key.Key_A
+            and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+        ):
+            self.key_command.emit("add_auto_layout", False)
+            event.accept()
+            return
+        if (
+            key == Qt.Key.Key_A
+            and event.modifiers()
+            == (
+                Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.ShiftModifier
+            )
+        ):
+            self.key_command.emit("remove_auto_layout", False)
+            event.accept()
+            return
         if (
             key == Qt.Key.Key_K
             and not event.isAutoRepeat()
             and not event.modifiers()
         ):
             self.key_command.emit("scale_tool", False)
+            event.accept()
+            return
+        if key == Qt.Key.Key_P and not event.isAutoRepeat():
+            command = (
+                "pencil_tool"
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                else "pen_tool"
+            )
+            self.key_command.emit(command, False)
+            event.accept()
+            return
+        if (
+            key == Qt.Key.Key_C
+            and not event.isAutoRepeat()
+            and not event.modifiers()
+        ):
+            self.key_command.emit("comment_tool", False)
             event.accept()
             return
         if (

@@ -67,6 +67,10 @@ def inspect_painter_ui_focus(root: QWidget) -> dict[str, Any]:
         if isinstance(widget, _INTERACTIVE_TYPES)
         and not isinstance(widget, QScrollBar)
         and not (
+            isinstance(widget, QAbstractButton)
+            and isinstance(widget.parentWidget(), QLineEdit)
+        )
+        and not (
             isinstance(widget, QLineEdit)
             and isinstance(widget.parentWidget(), QAbstractSpinBox)
         )

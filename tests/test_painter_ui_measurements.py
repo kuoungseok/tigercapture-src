@@ -11,6 +11,38 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
+def test_single_selected_frame_draws_blue_size_badge() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, _frame = add_ui_object(
+        create_ui_document(390, 844),
+        kind="frame",
+        name="Phone",
+        x=60,
+        y=80,
+        width=180,
+        height=240,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(520, 720)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+    image = overlay.grab().toImage()
+    blue_pixels = 0
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = QColor(image.pixel(x, y))
+            if color.blue() > 220 and color.green() > 100 and color.red() < 60:
+                blue_pixels += 1
+    assert blue_pixels > 40
+    overlay.deleteLater()
+    app.processEvents()
+
+
 def _document():
     from app.painter_ui_document import (
         add_ui_object,

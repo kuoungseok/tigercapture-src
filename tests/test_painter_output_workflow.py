@@ -36,6 +36,23 @@ def test_print_pixel_math_and_preflight_are_explicit() -> None:
     assert report["target_ppi"] == 300
     assert any("profile" in warning.casefold() for warning in report["warnings"])
 
+    trim_only = output_preflight(
+        {
+            "mode": "print",
+            "width_mm": 210,
+            "height_mm": 297,
+            "ppi": 300,
+            "bleed_mm": 3,
+            "include_bleed": False,
+            "output_kind": "color",
+        },
+        pixel_width=2480,
+        pixel_height=3508,
+    )
+    assert trim_only["effective_ppi"] == pytest.approx(300, abs=0.2)
+    assert trim_only["summary"].endswith("0 mm bleed")
+    assert any("No bleed" in warning for warning in trim_only["warnings"])
+
     low_resolution = output_preflight(
         {
             "mode": "print",
@@ -48,9 +65,21 @@ def test_print_pixel_math_and_preflight_are_explicit() -> None:
         pixel_width=800,
         pixel_height=1200,
     )
-    assert not low_resolution["ok"]
-    assert low_resolution["errors"]
+    assert low_resolution["ok"]
+    assert low_resolution["errors"] == []
+    assert low_resolution["print_quality_threshold_claim"] is False
+    assert low_resolution["target_contract"]["printer_confirmation_required"] is True
+    assert any("guidance" in warning.casefold() for warning in low_resolution["warnings"])
     assert any("bleed" in warning.casefold() for warning in low_resolution["warnings"])
+
+    runtime_limited = output_preflight(
+        {"mode": "print", "output_kind": "color"},
+        pixel_width=16385,
+        pixel_height=100,
+    )
+    assert runtime_limited["ok"] is False
+    assert runtime_limited["canvas_limit_contract"]["universal_capacity_claim"] is False
+    assert "not a Qt" in runtime_limited["errors"][0]
 
 
 def test_new_canvas_print_preset_calculates_pixels_and_output_contract() -> None:

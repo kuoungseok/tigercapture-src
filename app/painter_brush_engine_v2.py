@@ -1,6 +1,7 @@
 """Bristle/impasto stroke dynamics shared by color and material rendering."""
 from __future__ import annotations
 
+import copy
 import colorsys
 import math
 from typing import Any, Sequence
@@ -27,6 +28,19 @@ BRISTLE_V2_STYLES = frozenset(
         "acrylic_bristle",
     }
 )
+MAX_EXPLICIT_BRISTLE_COUNT = 64
+
+BRISTLE_ENGINE_MODEL_CONTRACT = {
+    "schema": "tigerstudio.painter.bristle_engine_model.v1",
+    "model": "tiger_authored_deterministic_bristle_stylization_v1",
+    "coefficient_source": "authored_style_preset_not_measured_physical_bristles",
+    "deterministic_replay_claim": True,
+    "physical_bristle_claim": False,
+    "paint_rheology_claim": False,
+    "external_brush_engine_parity_claim": False,
+    "max_explicit_bristle_count": MAX_EXPLICIT_BRISTLE_COUNT,
+    "capacity_source": "tiger_authored_bristle_stylization_policy",
+}
 
 
 def _value(row: Any, name: str, default: Any = None) -> Any:
@@ -94,6 +108,63 @@ def stroke_uses_bristle_v2(stroke: Any) -> bool:
     )
 
 
+def incremental_stroke_segments(
+    stroke: Any,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+) -> list[Any]:
+    """Split Engine v2 strokes into prefix-stable two-point render units."""
+    raw_points = list(_value(stroke, "points", []) or [])
+    if not stroke_uses_bristle_v2(stroke) or len(raw_points) <= 2:
+        return [stroke]
+    curve_names = (
+        "point_pressure",
+        "point_tilt",
+        "point_tilt_x",
+        "point_tilt_y",
+        "point_rotation",
+        "point_tangential_pressure",
+        "point_load",
+    )
+    segments: list[Any] = []
+    cumulative_travel_px = max(
+        0.0,
+        float(_value(stroke, "brush_travel_offset_px", 0.0) or 0.0),
+    )
+    for index in range(len(raw_points) - 1):
+        if isinstance(stroke, dict):
+            segment = dict(stroke)
+        else:
+            segment = copy.copy(stroke)
+        segment_points = raw_points[index : index + 2]
+        if isinstance(segment, dict):
+            segment["points"] = segment_points
+            segment["brush_sample_offset"] = index
+            segment["brush_travel_offset_px"] = cumulative_travel_px
+            segment["brush_authored_stroke_start"] = index == 0
+        else:
+            segment.points = segment_points
+            setattr(segment, "brush_sample_offset", index)
+            setattr(segment, "brush_travel_offset_px", cumulative_travel_px)
+            setattr(segment, "brush_authored_stroke_start", index == 0)
+        for name in curve_names:
+            values = list(_value(stroke, name, []) or [])
+            sliced = values[index : index + 2] if values else []
+            if isinstance(segment, dict):
+                segment[name] = sliced
+            else:
+                setattr(segment, name, sliced)
+        segments.append(segment)
+        if width is not None and height is not None:
+            first, second = segment_points
+            cumulative_travel_px += math.hypot(
+                (float(second[0]) - float(first[0])) * int(width),
+                (float(second[1]) - float(first[1])) * int(height),
+            )
+    return segments
+
+
 def bristle_lane_paths(
     stroke: Any,
     *,
@@ -107,21 +178,8 @@ def bristle_lane_paths(
         (float(point[0]) * width, float(point[1]) * height)
         for point in raw_points
     ]
-    if len(points) > 256:
-        stride = max(1, int(math.ceil(len(points) / 256.0)))
-        points = points[::stride]
-        if points[-1] != (
-            float(raw_points[-1][0]) * width,
-            float(raw_points[-1][1]) * height,
-        ):
-            points.append(
-                (
-                    float(raw_points[-1][0]) * width,
-                    float(raw_points[-1][1]) * height,
-                )
-            )
     point_count = len(points)
-    pressure = normalize_curve(_value(stroke, "point_pressure", []), point_count, 0.82)
+    pressure = normalize_curve(_value(stroke, "point_pressure", []), point_count, 1.0)
     tilt = normalize_curve(_value(stroke, "point_tilt", []), point_count, 0.5)
     raw_tilt_x = list(_value(stroke, "point_tilt_x", []) or [])
     raw_tilt_y = list(_value(stroke, "point_tilt_y", []) or [])
@@ -131,16 +189,37 @@ def bristle_lane_paths(
     load = normalize_curve(_value(stroke, "point_load", []), point_count, 1.0)
     rotation = normalize_curve(_value(stroke, "point_rotation", []), point_count, 0.5)
     depletion = max(0.0, min(1.0, float(_value(stroke, "load_depletion", 0.28) or 0.0)))
+    dryout_px = max(1.0, float(_value(stroke, "load_dryout_px", 724.0) or 724.0))
+    resaturation = max(
+        0.0,
+        min(1.0, float(_value(stroke, "material_resaturation", 0.0) or 0.0)),
+    )
     base_width = max(0.25, float(_value(stroke, "width_px", 4.0) or 4.0))
     requested = int(_value(stroke, "bristle_count", 0) or 0)
-    lanes = max(5, min(36, requested or int(round(base_width * 0.46))))
+    lanes = (
+        max(1, min(MAX_EXPLICIT_BRISTLE_COUNT, requested))
+        if requested > 0
+        else max(5, min(36, int(round(base_width * 0.46))))
+    )
     seed = int(_value(stroke, "brush_seed", 0) or 0)
+    travel_offset_px = max(0.0, float(_value(stroke, "brush_travel_offset_px", 0.0) or 0.0))
+    travel_px = [travel_offset_px]
+    for first, second in zip(points, points[1:]):
+        travel_px.append(
+            travel_px[-1]
+            + math.hypot(
+                (second[0] - first[0]) * float(width),
+                (second[1] - first[1]) * float(height),
+            )
+        )
     out: list[list[tuple[float, float, float, float]]] = []
     for lane in range(lanes):
         lane_norm = (lane + 0.5) / lanes * 2.0 - 1.0
         lane_noise = math.sin((lane + 1) * 17.31 + seed * 0.137) * 0.5 + 0.5
         strand: list[tuple[float, float, float, float]] = []
+        sample_offset = int(_value(stroke, "brush_sample_offset", 0) or 0)
         for index, (x, y) in enumerate(points):
+            global_index = sample_offset + index
             prev_x, prev_y = points[max(0, index - 1)]
             next_x, next_y = points[min(point_count - 1, index + 1)]
             dx = next_x - prev_x
@@ -148,16 +227,19 @@ def bristle_lane_paths(
             length = max(0.001, math.hypot(dx, dy))
             nx = -dy / length
             ny = dx / length
-            progress = index / max(1, point_count - 1)
+            progress = min(1.0, travel_px[index] / dryout_px)
             local_pressure = pressure[index]
-            local_load = max(0.04, load[index] * (1.0 - depletion * progress))
+            depleted_load = max(
+                0.04, load[index] * (1.0 - depletion * progress)
+            )
+            local_load = depleted_load + (1.0 - depleted_load) * resaturation
             tilt_magnitude = (
                 min(1.0, math.hypot(tilt_x[index], tilt_y[index]))
                 if has_directional_tilt
                 else min(1.0, abs(tilt[index] - 0.5) * 2.0)
             )
             fan = 1.0 + (rotation[index] - 0.5) * lane_norm * 0.42
-            jitter = math.sin(index * 1.71 + lane * 2.13 + seed * 0.19) * base_width * 0.025
+            jitter = math.sin(global_index * 1.71 + lane * 2.13 + seed * 0.19) * base_width * 0.025
             offset = (
                 lane_norm
                 * base_width
@@ -176,7 +258,8 @@ def bristle_lane_paths(
                     local_load,
                 )
             )
-        if lane_noise > 0.10:
+        # Authored strand-density stylization, not a measured bristle cutoff.
+        if requested > 0 or lane_noise > 0.10:
             out.append(strand)
     return out
 
@@ -303,7 +386,8 @@ def stipple_dabs(
     tangent_x = math.cos(angle)
     tangent_y = math.sin(angle)
     base_width = max(1.0, float(_value(stroke, "width_px", 4.0) or 4.0))
-    seed = int(_value(stroke, "brush_seed", 0) or 0)
+    sample_offset = int(_value(stroke, "brush_sample_offset", 0) or 0)
+    seed = int(_value(stroke, "brush_seed", 0) or 0) + sample_offset * 7919
     dabs: list[tuple[float, float, float, float, float]] = []
     count = max(3, min(7, int(round(base_width * 0.18))))
     for index in range(count):
@@ -344,7 +428,7 @@ def _paint_stipple_oil(
             dab_color.setBlue(int(dab_color.blue() * 0.32 + color.blue() * 0.68))
             dab_color.setAlpha(color.alpha())
         else:
-            dab_color.setAlpha(max(1, int(color.alpha() * 0.78)))
+            dab_color.setAlpha(max(0, int(color.alpha() * 0.78)))
         half_length = max(0.5, radius_x * 0.46)
         dx = math.cos(angle) * half_length
         dy = math.sin(angle) * half_length
@@ -371,7 +455,7 @@ def _paint_palette_knife_oil(
     seed = int(_value(stroke, "brush_seed", 0) or 0)
     material_enabled = bool(_value(stroke, "material_enabled", False))
     base = QColor(color)
-    base.setAlpha(color.alpha() if material_enabled else max(1, int(color.alpha() * 0.88)))
+    base.setAlpha(color.alpha() if material_enabled else max(0, int(color.alpha() * 0.88)))
     base_pen = QPen(base, base_width * 0.96)
     base_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
     base_pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
@@ -383,6 +467,7 @@ def _paint_palette_knife_oil(
 
     # Short broken deposits remove the synthetic parallel-line look while
     # preserving the broad, compressed plateau of a real palette knife.
+    sample_offset = int(_value(stroke, "brush_sample_offset", 0) or 0)
     for segment_index, (first, second) in enumerate(zip(points, points[1:])):
         dx = second.x() - first.x()
         dy = second.y() - first.y()
@@ -391,7 +476,7 @@ def _paint_palette_knife_oil(
         nx, ny = -ty, tx
         deposits = max(2, int(math.ceil(length / max(6.0, base_width * 0.22))))
         for deposit_index in range(deposits):
-            key = segment_index * 131 + deposit_index
+            key = (sample_offset + segment_index) * 131 + deposit_index
             noise_a = math.sin((key + 1) * 17.13 + seed * 0.113)
             noise_b = math.sin((key + 1) * 29.71 + seed * 0.071)
             t = (deposit_index + 0.5 + noise_a * 0.24) / deposits
@@ -400,7 +485,7 @@ def _paint_palette_knife_oil(
             half = base_width * (0.07 + (noise_a * 0.5 + 0.5) * 0.13)
             detail = _lane_color(color, key, seed, color.alpha())
             detail.setAlpha(
-                max(1, int(color.alpha() * (0.82 if material_enabled else 0.48)))
+                max(0, int(color.alpha() * (0.82 if material_enabled else 0.48)))
             )
             pen = QPen(detail, max(0.8, base_width * (0.025 + abs(noise_b) * 0.045)))
             pen.setCapStyle(Qt.PenCapStyle.FlatCap)
@@ -468,7 +553,7 @@ def paint_bristle_v2(
                 if style in {"palette_knife", "knife_scrape_oil", "bristle_oil"}
                 else 0.82,
             )
-        body.setAlpha(max(1, min(255, int(color.alpha() * body_alpha_scale))))
+        body.setAlpha(max(0, min(255, int(color.alpha() * body_alpha_scale))))
         body_pen = QPen(
             body,
             max(
@@ -510,7 +595,7 @@ def paint_bristle_v2(
                 if material_enabled:
                     alpha = max(alpha, int(color.alpha() * 0.90))
                 segment_color = QColor(lane_color)
-                segment_color.setAlpha(max(1, min(255, alpha)))
+                segment_color.setAlpha(max(0, min(255, alpha)))
                 pen = QPen(
                     segment_color,
                     max(0.55, lane_width * (0.55 + min(pressure, next_pressure))),
@@ -520,7 +605,7 @@ def paint_bristle_v2(
                 painter.setPen(pen)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
                 if not material_enabled and lane_index % 4 == 0:
-                    highlight = QColor(255, 246, 220, max(4, int(alpha * 0.20)))
+                    highlight = QColor(255, 246, 220, max(0, int(alpha * 0.20)))
                     highlight_pen = QPen(highlight, max(0.35, pen.widthF() * 0.24))
                     highlight_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
                     painter.setPen(highlight_pen)

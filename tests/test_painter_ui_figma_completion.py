@@ -429,6 +429,139 @@ def test_umg_preflight_explicitly_blocks_unimplemented_advanced_features() -> No
     assert "mixed_text_ranges_require_rich_text_conversion" in reasons
 
 
+def test_m1b7_nested_figma_boolean_import_hierarchy_and_export_order(
+    tmp_path,
+) -> None:
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+    )
+
+    def box(x, y, width, height):
+        return {"x": x, "y": y, "width": width, "height": height}
+
+    payload = {
+        "name": "Nested Boolean",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "1:0",
+                    "type": "CANVAS",
+                    "name": "Page 1",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "FRAME",
+                            "name": "Canvas",
+                            "absoluteBoundingBox": box(0, 0, 800, 600),
+                            "children": [
+                                {
+                                    "id": "2:1",
+                                    "type": "BOOLEAN_OPERATION",
+                                    "name": "Outer",
+                                    "booleanOperation": "SUBTRACT",
+                                    "absoluteBoundingBox": box(100, 100, 240, 180),
+                                    "children": [
+                                        {
+                                            "id": "2:2",
+                                            "type": "BOOLEAN_OPERATION",
+                                            "name": "Inner",
+                                            "booleanOperation": "UNION",
+                                            "absoluteBoundingBox": box(100, 100, 200, 180),
+                                            "children": [
+                                                {
+                                                    "id": "2:3",
+                                                    "type": "RECTANGLE",
+                                                    "name": "Base",
+                                                    "absoluteBoundingBox": box(100, 100, 160, 160),
+                                                },
+                                                {
+                                                    "id": "2:4",
+                                                    "type": "ELLIPSE",
+                                                    "name": "Lobe",
+                                                    "absoluteBoundingBox": box(180, 100, 120, 160),
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            "id": "2:5",
+                                            "type": "ELLIPSE",
+                                            "name": "Cut",
+                                            "absoluteBoundingBox": box(250, 140, 90, 90),
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+    assert report["ok"] is True
+    rows = {row["name"]: row for row in document["objects"]}
+    outer = rows["Outer"]
+    inner = rows["Inner"]
+    assert outer["content"]["boolean"] == {
+        "enabled": True,
+        "group": True,
+        "operation": "subtract",
+        "operand_ids": [inner["id"], rows["Cut"]["id"]],
+    }
+    assert inner["content"]["boolean"]["operation"] == "union"
+    assert inner["content"]["boolean"]["operand_ids"] == [
+        rows["Base"]["id"],
+        rows["Lobe"]["id"],
+    ]
+    assert inner["parent_id"] == outer["id"]
+    assert rows["Base"]["parent_id"] == inner["id"]
+    assert rows["Lobe"]["parent_id"] == inner["id"]
+    assert rows["Cut"]["parent_id"] == outer["id"]
+
+    package = export_figma_plugin_package(document, tmp_path)
+    code = (tmp_path / "TigerStudioFigmaExport" / "code.js").read_text(
+        encoding="utf-8"
+    )
+    assert package["ok"]
+    assert "const booleanDepth=" in code
+    assert "Boolean cycle includes" in code
+    assert "booleanRows.sort" in code
+    assert "result.setSharedPluginData('tigerstudio','stable_id',row.id)" in code
+
+
+def test_m1b7_umg_preflight_keeps_boolean_explicitly_blocked() -> None:
+    from app.painter_ui_boolean import compose_ui_boolean
+    from app.painter_ui_umg_adapter import (
+        painter_ui_to_umg_document,
+        preflight_painter_umg,
+    )
+
+    document, _mask, first, second, _text = _document()
+    document, group = compose_ui_boolean(
+        document,
+        "exclude",
+        [first["id"], second["id"]],
+    )
+
+    report = preflight_painter_umg(document)
+    blocker = next(
+        row for row in report["blockers"] if row["object_id"] == group["id"]
+    )
+    umg_document = painter_ui_to_umg_document(document)
+    layer = next(row for row in umg_document["Layers"] if row["Id"] == group["id"])
+    assert report["ok"] is False
+    assert blocker["reasons"] == [
+        "painter_ui_boolean_requires_deterministic_bake"
+    ]
+    assert layer["Disposition"] == "Blocked"
+    assert layer["BlockReasons"] == blocker["reasons"]
+    assert layer["PayloadJson"]
+
+
 def test_object_removal_cleans_mask_boolean_and_section_references() -> None:
     from app.painter_ui_boolean import set_ui_boolean
     from app.painter_ui_document import remove_ui_object, validate_ui_document

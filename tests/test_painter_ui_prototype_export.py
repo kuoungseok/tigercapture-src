@@ -64,6 +64,10 @@ def test_html_export_includes_extended_runtime_and_transition(
     assert '"smart_animate"' in html
     assert "captureSmart" in html
     assert "animateSmart" in html
+    assert "applyInstanceVariant" in html
+    assert "interactionCandidates" in html
+    assert "state.component_variants[id]" in html
+    assert "p.reset_component_state" in html
     assert "corner_radius" in html
     assert 'ease_in_out:"ease-in-out"' in html
     assert "browser_transform_fade_approximation" not in html

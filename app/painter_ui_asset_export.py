@@ -50,6 +50,14 @@ def _color(value: Any, fallback: str = "#00000000") -> QColor:
     return color if color.isValid() else QColor(fallback)
 
 
+def _svg_color(value: Any, fallback: str = "#00000000") -> tuple[str, float]:
+    """Return SVG 1.1-compatible RGB and a separate alpha value."""
+    if str(value or "").strip().casefold() == "none":
+        return "none", 1.0
+    color = _color(value, fallback)
+    return color.name(QColor.NameFormat.HexRgb), float(color.alphaF())
+
+
 def _objects_for_artboard(
     document: Mapping[str, Any],
     artboard_id: str,
@@ -309,20 +317,31 @@ def _svg_for_artboard(
             artboard["width"],
             artboard["height"],
         ),
-        '<rect width="100%%" height="100%%" fill="%s"/>'
-        % str(artboard.get("background") or "#ffffff"),
+        '<rect width="%s" height="%s" fill="%s" fill-opacity="%s"/>'
+        % (
+            artboard["width"],
+            artboard["height"],
+            *_svg_color(artboard.get("background"), "#FFFFFFFF"),
+        ),
     ]
     for row in _objects_for_artboard(document, artboard["id"]):
         if row["id"] in blocked:
             continue
         style = dict(row.get("style") or {})
         content = dict(row.get("content") or {})
+        fill_color, fill_opacity = _svg_color(style.get("fill") or "none")
+        stroke_color, stroke_opacity = _svg_color(
+            style.get("stroke") or "none"
+        )
         common = (
-            'fill="%s" stroke="%s" stroke-width="%s" opacity="%s" '
+            'fill="%s" fill-opacity="%s" stroke="%s" '
+            'stroke-opacity="%s" stroke-width="%s" opacity="%s" '
             'transform="rotate(%s %s %s)"'
             % (
-                style.get("fill") or "none",
-                style.get("stroke") or "none",
+                fill_color,
+                fill_opacity,
+                stroke_color,
+                stroke_opacity,
                 style.get("stroke_width", 0),
                 row["opacity"],
                 row["rotation"],

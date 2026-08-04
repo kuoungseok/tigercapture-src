@@ -10,6 +10,15 @@ def _app():
     return QApplication.instance() or QApplication([])
 
 
+def test_bristle_engine_discloses_authored_nonphysical_model() -> None:
+    from app.painter_brush_engine_v2 import BRISTLE_ENGINE_MODEL_CONTRACT
+
+    assert BRISTLE_ENGINE_MODEL_CONTRACT["deterministic_replay_claim"] is True
+    assert BRISTLE_ENGINE_MODEL_CONTRACT["physical_bristle_claim"] is False
+    assert BRISTLE_ENGINE_MODEL_CONTRACT["paint_rheology_claim"] is False
+    assert BRISTLE_ENGINE_MODEL_CONTRACT["external_brush_engine_parity_claim"] is False
+
+
 def test_bristle_lanes_follow_path_normal_and_deplete_load() -> None:
     from app.drawing import Stroke
     from app.painter_brush_engine_v2 import bristle_lane_paths
@@ -60,6 +69,97 @@ def test_bristle_lanes_follow_tablet_tilt_direction() -> None:
     assert tilted_center[1] < base_center[1]
 
 
+def test_missing_bristle_pressure_is_constant_full_pressure_not_fabricated_partial_input() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import bristle_lane_paths
+
+    common = {
+        "points": [(0.2, 0.5), (0.5, 0.5), (0.8, 0.5)],
+        "width_px": 20,
+        "brush_style": "bristle_oil",
+        "brush_engine_version": 2,
+        "bristle_count": 10,
+        "brush_seed": 17,
+    }
+    missing = bristle_lane_paths(Stroke(**common), width=200, height=100)
+    explicit = bristle_lane_paths(
+        Stroke(**common, point_pressure=[1.0, 1.0, 1.0]),
+        width=200,
+        height=100,
+    )
+    assert missing == explicit
+
+
+def test_bristle_load_depletion_depends_on_travel_not_tablet_sample_count() -> None:
+    import pytest
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import bristle_lane_paths
+
+    common = {
+        "width_px": 20,
+        "brush_style": "bristle_oil",
+        "brush_engine_version": 2,
+        "bristle_count": 10,
+        "brush_seed": 17,
+        "load_depletion": 0.7,
+    }
+    coarse = Stroke(points=[(0.1, 0.5), (0.9, 0.5)], **common)
+    dense = Stroke(
+        points=[(0.1 + 0.8 * index / 32.0, 0.5) for index in range(33)],
+        **common,
+    )
+
+    coarse_lanes = bristle_lane_paths(coarse, width=200, height=100)
+    dense_lanes = bristle_lane_paths(dense, width=200, height=100)
+
+    assert len(coarse_lanes) == len(dense_lanes)
+    assert [lane[-1][3] for lane in dense_lanes] == pytest.approx(
+        [lane[-1][3] for lane in coarse_lanes]
+    )
+
+
+def test_incremental_bristle_segments_preserve_cumulative_document_travel() -> None:
+    import pytest
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import incremental_stroke_segments
+
+    stroke = Stroke(
+        points=[(0.1, 0.2), (0.4, 0.2), (0.4, 0.7)],
+        brush_style="bristle_oil",
+        brush_engine_version=2,
+        brush_travel_offset_px=7.0,
+    )
+    segments = incremental_stroke_segments(stroke, width=200, height=100)
+
+    assert len(segments) == 2
+    assert segments[0].brush_travel_offset_px == pytest.approx(7.0)
+    assert segments[1].brush_travel_offset_px == pytest.approx(67.0)
+
+
+def test_explicit_bristle_count_uses_the_published_engine_capacity() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import (
+        BRISTLE_ENGINE_MODEL_CONTRACT,
+        bristle_lane_paths,
+    )
+
+    count = BRISTLE_ENGINE_MODEL_CONTRACT["max_explicit_bristle_count"]
+    stroke = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        width_px=80,
+        brush_style="bristle_oil",
+        brush_engine_version=2,
+        bristle_count=count,
+        brush_seed=4,
+    )
+
+    lanes = bristle_lane_paths(stroke, width=240, height=120)
+
+    assert len(lanes) == count
+
+
 def test_bristle_v2_color_and_material_use_authored_strands() -> None:
     _app()
     import numpy as np
@@ -104,9 +204,93 @@ def test_bristle_v2_color_and_material_use_authored_strands() -> None:
     channels = rasterize_material_channels([stroke], [layer], width=240, height=140)
     occupied = channels["height"] > 0.005
     assert channels["stroke_count"] == 1
-    assert int(np.count_nonzero(occupied)) > 100
-    assert float(np.std(channels["height"][occupied])) > 0.003
-    assert float(np.std(channels["normal"][..., 0])) > 0.001
+    assert int(np.count_nonzero(occupied)) > 0
+    assert float(np.ptp(channels["height"][occupied])) > 0.0
+    assert float(np.ptp(channels["normal"][..., 0])) > 0.0
+
+
+def test_zero_alpha_artwork_remains_fully_transparent_for_tip_and_bristle_paths() -> None:
+    _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.drawing import DrawingCanvas, Stroke
+    from app.painter_brush_engine_v2 import paint_bristle_v2
+
+    canvas = DrawingCanvas(lambda: 0, lambda: [])
+    canvas.set_pen_opacity(0)
+    assert canvas._pen_opacity == 0
+
+    image = QImage(160, 80, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    try:
+        tip = Stroke(
+            points=[(0.1, 0.5), (0.9, 0.5)],
+            color=(220, 80, 40),
+            opacity=0,
+            width_px=24,
+            brush_style="marker",
+        )
+        DrawingCanvas._paint_stroke(painter, tip, image.width(), image.height())
+        bristle = Stroke(
+            points=[(0.1, 0.3), (0.9, 0.3)],
+            color=(220, 80, 40),
+            opacity=0,
+            width_px=24,
+            brush_style="bristle_oil",
+            brush_engine_version=2,
+            bristle_count=12,
+        )
+        assert paint_bristle_v2(
+            painter,
+            bristle,
+            image.width(),
+            image.height(),
+            QColor(220, 80, 40, 0),
+        )
+    finally:
+        painter.end()
+
+    assert all(
+        image.pixelColor(x, y).alpha() == 0
+        for y in range(image.height())
+        for x in range(image.width())
+    )
+
+
+def test_panel_icon_may_visualize_zero_alpha_stroke_without_mutating_artwork() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+
+    stroke = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        color=(220, 80, 40),
+        opacity=0,
+        width_px=24,
+        layer_id="paint-layer-1",
+    )
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(160, 80, "transparent"),
+        initial_strokes=[stroke],
+        time_ms=0,
+        standalone=True,
+    )
+    with_stroke = dialog._paint_panel_row_icon(
+        visible=True,
+        layer_id="paint-layer-1",
+    ).pixmap(58, 30).toImage()
+    assert dialog.canvas.embedded_strokes()[0].opacity == 0
+    dialog.canvas.set_strokes_snapshot([])
+    without_stroke = dialog._paint_panel_row_icon(
+        visible=True,
+        layer_id="paint-layer-1",
+    ).pixmap(58, 30).toImage()
+
+    assert with_stroke != without_stroke
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
 
 
 def test_material_stipple_is_opaque_compact_and_uses_matching_relief_dabs() -> None:

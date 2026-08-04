@@ -106,9 +106,14 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
             "paint.ui.component.sync",
             "paint.ui.component.property.define",
             "paint.ui.component.property.bind",
+            "paint.ui.component.slot.define",
+            "paint.ui.component.slot.inspect",
+            "paint.ui.component.slot.insert",
+            "paint.ui.component.slot.reset",
         "paint.ui.component.state.override.set",
         "paint.ui.component.instance.property.set",
         "paint.ui.component.variant.create",
+        "paint.ui.component.variants.combine",
         "paint.ui.component.instance.variant.set",
         "paint.ui.component.instance.detach",
         "paint.ui.component.override.reset",
@@ -415,7 +420,9 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
-    assert stored["ui_document"]["version"] == 22
+    from app.painter_ui_document import UI_DOCUMENT_VERSION
+
+    assert stored["ui_document"]["version"] == UI_DOCUMENT_VERSION == 31
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id
@@ -553,7 +560,14 @@ def test_painter_ui_design_toolbar_creates_edits_and_lists_visible_objects() -> 
         for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
         if row["id"] == object_id
     )
-    assert aligned["x"] == (800.0 - aligned["width"]) * 0.5
+    parent = next(
+        row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+        if row["id"] == aligned["parent_id"]
+    )
+    assert aligned["x"] == (
+        parent["x"] + (parent["width"] - aligned["width"]) * 0.5
+    )
     dialog._handle_painter_ui_key_command("right", True)
     nudged = next(
         row
@@ -633,6 +647,8 @@ def test_painter_ui_multi_select_align_distribute_and_group_undo() -> None:
         for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
     }
     ordered = sorted((objects[object_id] for object_id in rows), key=lambda row: row["x"])
+    assert ordered[0]["x"] == 60.0
+    assert ordered[-1]["x"] == 650.0
     gaps = [
         ordered[index + 1]["x"] - (ordered[index]["x"] + ordered[index]["width"])
         for index in range(2)
@@ -936,6 +952,473 @@ def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
 
     overlay.close()
     overlay.deleteLater()
+    app.processEvents()
+
+
+def test_rectangle_radius_gizmo_drags_and_emits_style() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, row = add_ui_object(
+        create_ui_document(640, 480),
+        kind="rectangle",
+        x=100,
+        y=100,
+        width=240,
+        height=160,
+        style={"fill": "#D9D9D9FF", "radius": 0},
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 480)
+    overlay.set_document(document)
+    overlay.set_tool("select")
+    overlay.show()
+    app.processEvents()
+
+    changes: list[tuple] = []
+    overlay.object_changes_requested.connect(lambda *args: changes.append(args))
+    rect = overlay._object_rect(row)
+    center = overlay._radius_handle_centers(row, rect)["nw"]
+    start = QPoint(round(center.x()), round(center.y()))
+    end = start + QPoint(50, 50)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end, delay=1)
+    assert overlay._interaction == "radius"
+    assert overlay._radius_preview > 0
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+
+    assert changes[-1][0] == row["id"]
+    style = changes[-1][1]["style"]
+    assert style["radius"] > 0
+    assert len(set(style["corner_radii"].values())) == 1
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_ellipse_arc_gizmo_creates_arc_and_emits_content() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, row = add_ui_object(
+        create_ui_document(640, 480),
+        kind="ellipse",
+        x=120,
+        y=90,
+        width=240,
+        height=180,
+        style={"fill": "#D9D9D9FF"},
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 480)
+    overlay.set_document(document)
+    # Figma keeps the ellipse tool active: selected-object gizmos still take
+    # priority, while a drag on empty canvas creates another ellipse.
+    overlay.set_tool("ellipse")
+    overlay.show()
+    app.processEvents()
+
+    changes: list[tuple] = []
+    overlay.object_changes_requested.connect(lambda *args: changes.append(args))
+    rect = overlay._object_rect(row)
+    handle = overlay._arc_handle_positions(row, rect)["sweep"]
+    assert handle.x() < rect.right() - 8.0
+    assert abs(handle.y() - rect.center().y()) < 0.001
+    start = QPoint(round(handle.x()), round(handle.y()))
+    end = QPoint(round(rect.center().x()), round(rect.bottom()))
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end, delay=1)
+    assert overlay._interaction == "arc_sweep"
+    preview = next(
+        item for item in overlay._document["objects"] if item["id"] == row["id"]
+    )
+    assert preview["kind"] == "arc"
+    assert -280.0 <= float(preview["content"]["sweep_angle"]) <= -260.0
+    assert set(overlay._arc_handle_positions(preview, rect)) == {
+        "start", "sweep", "ratio"
+    }
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+
+    assert changes[-1][0] == row["id"]
+    assert changes[-1][1]["kind"] == "arc"
+    assert -360.0 < changes[-1][1]["content"]["sweep_angle"] < 0.0
+    assert overlay.tool() == "ellipse"
+    created: list[tuple] = []
+    overlay.object_create_requested.connect(lambda *args: created.append(args))
+    blank_start = QPoint(40, 420)
+    blank_end = QPoint(100, 460)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=blank_start)
+    QTest.mouseMove(overlay, blank_end, delay=1)
+    assert overlay._interaction == "create"
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=blank_end)
+    assert created[-1][0] == "ellipse"
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_arc_controls_support_positive_sweep_ratio_flip_and_closed_ring() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    ellipse_document, ellipse = add_ui_object(
+        create_ui_document(640, 480),
+        kind="ellipse", x=120, y=90, width=240, height=180,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 480)
+    overlay.set_document(ellipse_document)
+    overlay.set_tool("ellipse")
+    overlay.show()
+    app.processEvents()
+    rect = overlay._object_rect(ellipse)
+    sweep_handle = overlay._arc_handle_positions(ellipse, rect)["sweep"]
+    QTest.mousePress(
+        overlay, Qt.MouseButton.LeftButton, pos=sweep_handle.toPoint()
+    )
+    QTest.mouseMove(
+        overlay,
+        QPoint(round(rect.center().x()), round(rect.top())),
+        delay=1,
+    )
+    positive_arc = next(
+        row for row in overlay._document["objects"] if row["id"] == ellipse["id"]
+    )
+    assert 260.0 <= float(positive_arc["content"]["sweep_angle"]) <= 280.0
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(round(rect.center().x()), round(rect.top())),
+    )
+
+    arc_document, arc = add_ui_object(
+        create_ui_document(640, 480),
+        kind="arc", x=120, y=90, width=240, height=180,
+        content={"start_angle": 0, "sweep_angle": 270, "inner_radius": 0},
+    )
+    overlay.set_document(arc_document)
+    overlay.set_tool("select")
+    rect = overlay._object_rect(arc)
+    ratio_handle = overlay._arc_handle_positions(arc, rect)["ratio"]
+    opposite = overlay._arc_point(rect, 315.0, 0.55).toPoint()
+    QTest.mousePress(
+        overlay, Qt.MouseButton.LeftButton, pos=ratio_handle.toPoint()
+    )
+    QTest.mouseMove(overlay, opposite, delay=1)
+    flipped = next(
+        row for row in overlay._document["objects"] if row["id"] == arc["id"]
+    )
+    assert -100.0 <= float(flipped["content"]["sweep_angle"]) <= -80.0
+    assert 0.5 <= float(flipped["content"]["inner_radius"]) <= 0.6
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=opposite)
+
+    ring_document, ring = add_ui_object(
+        create_ui_document(640, 480),
+        kind="arc", x=120, y=90, width=240, height=180,
+        content={"start_angle": 0, "sweep_angle": 360, "inner_radius": 0.55},
+    )
+    overlay.set_document(ring_document)
+    rect = overlay._object_rect(ring)
+    assert set(overlay._arc_handle_positions(ring, rect)) == {
+        "start", "sweep", "ratio",
+    }
+    ring_path = overlay._object_shape_path(ring)
+    assert not ring_path.contains(rect.center())
+    assert ring_path.contains(overlay._arc_point(rect, 90.0, 0.8))
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_shape_creation_preview_uses_geometry_and_line_endpoints() -> None:
+    app = _app()
+    from PySide6.QtCore import QPointF, QRectF, Qt
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(500, 400)
+
+    def prime_preview(tool: str) -> None:
+        overlay.set_tool(tool)
+        overlay._interaction = "create"
+        overlay._press_position = QPointF(80, 70)
+        overlay._preview_line_end = QPointF(300, 210)
+        overlay._preview_rect = QRectF(QPointF(80, 70), QPointF(300, 210))
+
+    ellipse_image = QImage(500, 400, QImage.Format.Format_ARGB32_Premultiplied)
+    ellipse_image.fill(Qt.GlobalColor.transparent)
+    prime_preview("ellipse")
+    painter = QPainter(ellipse_image)
+    overlay._paint_creation_preview(painter)
+    painter.end()
+    assert ellipse_image.pixelColor(190, 140).alpha() > 0
+    assert ellipse_image.pixelColor(84, 74).alpha() == 0
+
+    line_image = QImage(500, 400, QImage.Format.Format_ARGB32_Premultiplied)
+    line_image.fill(Qt.GlobalColor.transparent)
+    prime_preview("arrow")
+    painter = QPainter(line_image)
+    overlay._paint_creation_preview(painter)
+    painter.end()
+    assert line_image.pixelColor(190, 140).alpha() > 0
+    assert line_image.pixelColor(84, 204).alpha() == 0
+
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_line_creation_emits_pointer_to_pointer_vector() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 480)
+    overlay.set_document(create_ui_document(640, 480))
+    overlay.set_tool("arrow")
+    overlay.show()
+    app.processEvents()
+    created: list[tuple] = []
+    overlay.object_create_requested.connect(lambda *args: created.append(args))
+    start = QPoint(280, 220)
+    end = QPoint(120, 220)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end, delay=1)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+
+    assert created[-1][0] == "arrow"
+    assert created[-1][3] < 0.0
+    assert created[-1][4] == 0.0
+    overlay.close()
+    overlay.deleteLater()
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 480, "#FFFFFF"),
+        initial_strokes=[], time_ms=0, standalone=True,
+    )
+    dialog._create_painter_ui_object_from_rect("arrow", 280, 220, -160, 0)
+    arrow = next(
+        row for row in dialog._painter_ui_document["objects"]
+        if row["name"] == "Arrow 1"
+    )
+    assert arrow["width"] == 160.0
+    assert arrow["height"] == 1.0
+    assert arrow["content"]["start_anchor"] == [1.0, 0.5]
+    assert arrow["content"]["end_anchor"] == [0.0, 0.5]
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_star_and_line_canvas_gizmos_update_shape_content() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, star = add_ui_object(
+        create_ui_document(700, 500), kind="star", x=120, y=100,
+        width=220, height=220,
+        content={"point_count": 5, "inner_radius": 0.45, "rotation_offset": -90},
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(700, 500)
+    overlay.set_document(document)
+    overlay.set_tool("select")
+    overlay.show()
+    app.processEvents()
+    positions = overlay._shape_gizmo_positions(star, overlay._object_rect(star))
+    assert set(positions) == {"shape_count", "shape_ratio", "shape_radius"}
+    start = positions["shape_ratio"].toPoint()
+    end = QPoint(round(overlay._object_rect(star).center().x() + 80), round(overlay._object_rect(star).center().y()))
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end, delay=1)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    updated_star = next(row for row in overlay._document["objects"] if row["id"] == star["id"])
+    assert float(updated_star["content"]["inner_radius"]) > 0.45
+    radius_position = overlay._shape_gizmo_positions(
+        updated_star, overlay._object_rect(updated_star)
+    )["shape_radius"]
+    radius_end = QPoint(
+        round(overlay._object_rect(updated_star).center().x()),
+        round(overlay._object_rect(updated_star).center().y() - 18),
+    )
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        pos=radius_position.toPoint(),
+    )
+    QTest.mouseMove(overlay, radius_end, delay=1)
+    assert overlay._interaction == "shape_radius"
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=radius_end)
+    rounded_star = next(
+        row for row in overlay._document["objects"] if row["id"] == star["id"]
+    )
+    assert float(rounded_star["content"]["corner_radius"]) > 20.0
+    assert float(rounded_star["style"]["radius"]) == float(
+        rounded_star["content"]["corner_radius"]
+    )
+    rounded_path = overlay._object_shape_path(rounded_star)
+    assert any(
+        rounded_path.elementAt(index).isCurveTo()
+        for index in range(rounded_path.elementCount())
+    )
+
+    line_document, line = add_ui_object(
+        create_ui_document(700, 500), kind="line", x=100, y=100,
+        width=200, height=100, content={"arrow_end": True},
+    )
+    overlay.set_document(line_document)
+    positions = overlay._shape_gizmo_positions(line, overlay._object_rect(line))
+    assert set(positions) == {"line_start", "line_end"}
+    start = positions["line_end"].toPoint()
+    end = start + QPoint(60, -40)
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end, delay=1)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    updated_line = next(row for row in overlay._document["objects"] if row["id"] == line["id"])
+    assert "start_anchor" in updated_line["content"]
+    assert "end_anchor" in updated_line["content"]
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_frame_tool_is_one_shot_and_can_draw_over_existing_objects() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, rectangle = add_ui_object(
+        create_ui_document(700, 500), kind="rectangle",
+        x=180, y=140, width=220, height=160,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(700, 500)
+    overlay.set_document(document)
+    overlay.set_tool("frame")
+    overlay.show()
+    app.processEvents()
+    center = overlay._object_rect(rectangle).center().toPoint()
+    end = center + QPoint(100, 90)
+    created: list[tuple] = []
+    overlay.object_create_requested.connect(lambda *args: created.append(args))
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=center)
+    assert overlay._interaction == "create"
+    QTest.mouseMove(overlay, end, delay=1)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    assert created[-1][0] == "frame"
+
+    overlay.set_document(document)
+    overlay.set_tool("rectangle")
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=center)
+    assert overlay._interaction != "create"
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=center)
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_real_painter_frame_creation_returns_toolbar_to_select() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(700, 500, "#FFFFFF"),
+        initial_strokes=[], time_ms=0, standalone=True,
+    )
+    dialog._set_painter_ui_tool("frame")
+    assert dialog._painter_ui_overlay.tool() == "frame"
+    dialog._create_painter_ui_object_from_rect("frame", 40, 40, 300, 220)
+    assert dialog._painter_ui_overlay.tool() == "select"
+    dialog._set_painter_ui_tool("ellipse")
+    dialog._create_painter_ui_object_from_rect("ellipse", 380, 40, 120, 120)
+    assert dialog._painter_ui_overlay.tool() == "ellipse"
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_real_painter_draws_rectangle_inside_frame_as_child_container_content() -> None:
+    """Exercise the real dialog signal path, not only overlay helper methods."""
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[], time_ms=0, standalone=True,
+    )
+    dialog.resize(1200, 820)
+    dialog.show()
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._create_painter_ui_object_from_rect("frame", 120, 90, 420, 320)
+    app.processEvents()
+
+    frame = next(
+        row for row in dialog._painter_ui_document["objects"]
+        if row["kind"] == "frame"
+    )
+    overlay = dialog._painter_ui_overlay
+    assert overlay._radius_eligible(frame) is False
+    assert overlay._shape_gizmo_positions(
+        frame, overlay._object_rect(frame)
+    ) == {}
+    assert overlay._arc_handle_positions(
+        frame, overlay._object_rect(frame)
+    ) == {}
+
+    dialog._set_painter_ui_tool("rectangle")
+    frame_rect = overlay._object_rect(frame)
+    start = QPoint(
+        round(frame_rect.left() + frame_rect.width() * 0.25),
+        round(frame_rect.top() + frame_rect.height() * 0.25),
+    )
+    end = QPoint(
+        round(frame_rect.left() + frame_rect.width() * 0.62),
+        round(frame_rect.top() + frame_rect.height() * 0.58),
+    )
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    assert overlay._interaction == "create"
+    QTest.mouseMove(overlay, end, delay=1)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    app.processEvents()
+
+    rectangle = next(
+        row for row in dialog._painter_ui_document["objects"]
+        if row["kind"] == "rectangle"
+    )
+    assert rectangle["parent_id"] == frame["id"]
+    assert dialog._painter_ui_overlay.tool() == "rectangle"
+    dialog.close()
+    dialog.deleteLater()
     app.processEvents()
 
 

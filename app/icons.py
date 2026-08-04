@@ -340,7 +340,58 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
     s = float(size)
     n = (name or "").strip().lower()
 
-    if n in {"project", "folder"}:
+    if n in {"tiger-painter-logo", "tiger_painter_logo"}:
+        # Original Tiger Painter mark: a brush-nib T with two tiger stripes.
+        base = _color(color)
+        painter.setPen(
+            QPen(
+                base,
+                max(1.4, s * .075),
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        mark = QPainterPath()
+        mark.moveTo(s * .18, s * .24)
+        mark.cubicTo(s * .34, s * .14, s * .66, s * .14, s * .82, s * .24)
+        mark.moveTo(s * .50, s * .20)
+        mark.lineTo(s * .50, s * .69)
+        painter.drawPath(mark)
+        nib = QPainterPath()
+        nib.moveTo(s * .36, s * .64)
+        nib.lineTo(s * .50, s * .87)
+        nib.lineTo(s * .64, s * .64)
+        nib.closeSubpath()
+        painter.setBrush(base)
+        painter.drawPath(nib)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(QPointF(s * .22, s * .39), QPointF(s * .38, s * .34))
+        painter.drawLine(QPointF(s * .62, s * .34), QPointF(s * .78, s * .39))
+        painter.drawLine(QPointF(s * .25, s * .53), QPointF(s * .39, s * .48))
+        painter.drawLine(QPointF(s * .61, s * .48), QPointF(s * .75, s * .53))
+    elif n in {"figma-full-mode", "figma_full_mode", "panel-layout"}:
+        painter.drawRoundedRect(
+            QRectF(s * .14, s * .22, s * .72, s * .56),
+            s * .06,
+            s * .06,
+        )
+        painter.drawLine(
+            QPointF(s * .43, s * .22),
+            QPointF(s * .43, s * .78),
+        )
+    elif n in {"focus-canvas", "focus_canvas", "fullscreen"}:
+        # Four open corners read clearly at toolbar sizes and work for both
+        # entering and leaving the distraction-free canvas mode.
+        painter.drawLine(QPointF(s * .18, s * .38), QPointF(s * .18, s * .18))
+        painter.drawLine(QPointF(s * .18, s * .18), QPointF(s * .38, s * .18))
+        painter.drawLine(QPointF(s * .62, s * .18), QPointF(s * .82, s * .18))
+        painter.drawLine(QPointF(s * .82, s * .18), QPointF(s * .82, s * .38))
+        painter.drawLine(QPointF(s * .18, s * .62), QPointF(s * .18, s * .82))
+        painter.drawLine(QPointF(s * .18, s * .82), QPointF(s * .38, s * .82))
+        painter.drawLine(QPointF(s * .62, s * .82), QPointF(s * .82, s * .82))
+        painter.drawLine(QPointF(s * .82, s * .82), QPointF(s * .82, s * .62))
+    elif n in {"project", "folder"}:
         painter.drawRoundedRect(QRectF(s * .14, s * .32, s * .72, s * .46), 2, 2)
         painter.drawPolyline(QPolygonF([
             QPointF(s * .18, s * .34),
@@ -1011,6 +1062,19 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawPolygon(nib)
         painter.drawEllipse(QPointF(s * .50, s * .47), s * .075, s * .075)
         painter.drawLine(QPointF(s * .50, s * .55), QPointF(s * .50, s * .78))
+    elif n in {"pencil", "freehand"}:
+        painter.save()
+        painter.translate(s * .50, s * .50)
+        painter.rotate(-42.0)
+        painter.drawRoundedRect(QRectF(-s * .10, -s * .36, s * .20, s * .58), s * .04, s * .04)
+        tip = QPolygonF([
+            QPointF(-s * .10, s * .22),
+            QPointF(s * .10, s * .22),
+            QPointF(0.0, s * .39),
+        ])
+        painter.drawPolygon(tip)
+        painter.drawLine(QPointF(-s * .10, -s * .23), QPointF(s * .10, -s * .23))
+        painter.restore()
     elif n in {"zoom", "search", "zoom-in", "zoom_in", "zoom-out", "zoom_out"}:
         painter.drawEllipse(QPointF(s * .43, s * .42), s * .23, s * .23)
         painter.drawLine(QPointF(s * .60, s * .60), QPointF(s * .82, s * .82))

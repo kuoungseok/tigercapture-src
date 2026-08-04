@@ -1,14 +1,102 @@
 # Painter UI 전용 모드 작업 목록
 
+## 2026-08-03 M2.8 Auto Layout 마감 체크포인트
+
+- 상태: `M2.1~M2.8 Complete v2`.
+- Horizontal, Vertical, Grid, Fixed/Hug/Fill, Wrap, nested flow, Ignore auto layout,
+  scroll/overflow의 공식 문서 기반 범위를 구현·진단·테스트했다.
+- UE 5.8 실제 생성 결과는 HorizontalBox/GridPanel/Both축 ScrollBox/Fixed Canvas를
+  포함한 Widget Blueprint 17개 위젯, generated class 로드, visual capture,
+  shader error 0으로 확인했다.
+- Sticky 런타임 바인딩만 명시적 blocker로 남는다.
+
+## 2026-08-03 UMG Rounded Card 체크포인트
+
+- 상태: `Complete v1 (fixed geometry)`.
+- Figma/Painter의 solid·linear·radial fill, radial 3-handle basis,
+  TL/TR/BR/BL radius, corner smoothing, 단일 solid stroke, drop shadow,
+  inner shadow가 shared `ui_material.v2`로 변환된다.
+- 도킹 머터리얼 그래프와 시뮬레이터는 실제 Unreal의 stable CanvasPanel host
+  + expanded `_Visual` UImage 계층을 같은 방식으로 표시한다.
+- schema v9/plugin 0.8.0으로 UE 5.8 빌드, 14-widget Blueprint 생성·컴파일,
+  Material Custom node와 직렬화 참조 재오픈, 실제 에디터 캡처를 통과했다.
+- Button/Frame/Image rounded background, 다중 fill/stroke/shadow, blur,
+  stretch/flow/grid 크기 배정은 아직 명시적 Blocked다.
+
+## 2026-08-03 M2.7 Scroll/Overflow 체크포인트
+
+- 상태: `Complete v1`.
+- 문서 v29, Inspector, 진단, 속성 클립보드, 중첩 HTML prototype이 하나의 scroll contract를 사용한다.
+- UMG는 Horizontal/Vertical/Both ScrollBox와 Fixed Overlay를 네이티브 생성한다.
+  Sticky만 명시적 preflight blocker로 반환한다.
+- 다음 실행 단계: M2.8 전체 회귀와 실제 Unreal 변환·캡처, 오래된 스펙 문구 정리.
+
+## 2026-08-03 M2.5 Grid Auto Layout 체크포인트
+
+- 상태: `Complete v1`.
+- Grid columns, child row/column span, cell alignment, two-axis gap, Hug/Fill을
+  document version 28의 canonical resolver와 Inspector에 연결했다.
+- Tiger UMG schema v9/plugin 0.8.0은 Grid를 실제 `UGridPanel`/`UGridSlot`으로
+  변환하며 UE 5.8 build 및 Widget Blueprint 재오픈 검증을 통과했다.
+- 다음 실행 단계는 M2.6 nested Auto Layout과 Absolute child 상호작용이다.
+
 Status: canonical implementation backlog; P0-P10 local production foundation complete
+
+Boolean parity follow-up (2026-08-03):
+
+- The existing schema 18 non-destructive Boolean checkpoint is a baseline, not
+  a whole-Figma parity claim.
+- `docs/PAINTER_UI_BOOLEAN_PARITY_MILESTONES_KO.md` owns M1B.1-M1B.8 in the
+  required order: operand/style correctness, full fill+stroke geometry,
+  direct operand editing, commands/shortcuts, nested Boolean, Outline/Flatten,
+  delivery, and performance/release QA.
+- The next executable step is M1B.1. No later M1B milestone may be marked
+  complete before its documented acceptance evidence exists.
+
+Shape vertical-slice checkpoint (2026-08-02):
+
+- `docs/PAINTER_UI_SHAPE_VERTICAL_SLICE_KO.md` is the focused contract for
+  shape creation, frame parenting, layer hierarchy, contextual Inspector
+  pages, and the Figma Motion boundary.
+- Shape creation now resolves the deepest visible frame under the new layer
+  and writes its canonical `parent_id`; frame presets remain top-level.
+- Rectangle, Ellipse, Line, Arrow, Polygon, Star, and Arc receive stable
+  per-kind sequential default names.
+- The Inspector now owns a persistent selection-content stack. Page, frame
+  presets, selected frame, selected shape, and generic object properties are
+  swapped as pages instead of being presented as one permanent property form.
+- The first Shape page exposes parent context, alignment, position, size,
+  rotation, aspect lock, parametric controls, opacity, radius, Fill and Stroke
+  stacks, and the existing advanced appearance mutation path.
+- Painter remains the static UI authoring owner. Figma Motion-like timeline
+  work must enter the existing Motion Designer through stable object bindings;
+  no parallel Painter timeline document is allowed.
+
+M1 official tutorial completion checkpoint (2026-08-03):
+
+- Selection, hierarchy navigation, Layers synchronization, transform,
+  alignment, rotation, 1D/2D Tidy up, and Smart selection are `Complete v1`
+  for the bounded official-help flows tracked in
+  `docs/PAINTER_UI_M1_TUTORIAL_EVIDENCE_KO.md`.
+- The completion audit found and closed the missing 1D multi-mark Smart resize
+  path: marked bounds resize together, retain the captured spacing, and commit
+  as one batch.
+- This checkpoint is not a whole-Figma parity claim. Unpublished 2D cell
+  behavior remains an explicitly documented deterministic Painter rule.
+- The next official-tutorial audit is M2 Auto Layout over the existing local
+  foundation, in order: entry, direction, gap, padding, alignment,
+  Fixed/Hug/Fill, and Wrap.
 
 M1 Page checkpoint (2026-07-29):
 
-- Painter UI document schema is version 22. Version 19 Page documents migrate
+- Painter UI document schema is version 23. Version 19 Page documents migrate
   with stable-ID Theme Variable Collection/Mode records, and version 20
   documents gain empty named-Style collections without changing object IDs.
 - M3 named Color/Text/Effect Styles and existing Layout Grid Styles share one
   compact Assets library and `paint.ui.style.*` mutation contract.
+- Version 23 expands ordered Fill/Stroke paints to preserve solid, linear and
+  radial gradients, patterns, images, and videos. Pattern/media fills render in
+  Painter while unsupported UMG paths remain explicit preflight blockers.
 - M3 `.tsuilib` local packages and the compact Libraries Assets tab implement
   hash/license validation, version review, accept, defer, and rollback.
   Active package versions expose component definitions that can be inserted
@@ -453,6 +541,48 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 
 ## P3. Auto Layout와 반응형
 
+### 2026-08-03 M2.1 진입 체크포인트
+
+- `Shift+A`, Inspector `Add auto layout`, 우클릭 `Add auto layout`이
+  `app/painter_ui_auto_layout_entry.py`의 동일 mutation을 사용한다.
+- 일반 형제 레이어 선택은 투명 Frame으로 감싸고, 기존 Frame 선택은 중복
+  Frame 없이 직접 적용한다.
+- `Alt+Shift+A`/Remove는 Frame과 자식 hierarchy를 보존한다.
+- 서로 다른 부모/artboard 또는 부모+자식 혼합 선택은 임의 변환하지 않고
+  명시적으로 차단한다.
+- 세부 근거와 비공개 휴리스틱 비동일성은
+  `docs/PAINTER_UI_M2_AUTO_LAYOUT_TUTORIAL_EVIDENCE_KO.md`가 소유한다.
+- 다음 실행 단계는 M2.2 Horizontal/Vertical flow 편집이다.
+
+### 2026-08-03 M2.2 Horizontal/Vertical flow 체크포인트
+
+- 상태: `Complete v1`
+- Inspector는 Horizontal/Vertical을 즉시 비교 가능한 `→`/`↓` 버튼으로 노출한다.
+- Auto Layout 자식 드래그는 X/Y 이동 대신 축 기반 순서 변경과 파란 삽입선을
+  사용한다.
+- 가로 Left/Right, 세로 Up/Down 방향키가 같은 canonical 순서 mutation을 쓴다.
+- component instance 내부와 absolute child는 공식 제한에 따라 차단한다.
+- 근거와 테스트 범위는
+  `docs/PAINTER_UI_M2_AUTO_LAYOUT_TUTORIAL_EVIDENCE_KO.md`가 소유한다.
+- 다음 실행 단계는 M2.3 Padding/Gap/Alignment/Wrap이다.
+
+### 2026-08-03 M2.3 Spacing/Alignment/Wrap 체크포인트
+
+- 상태: `Complete v1`
+- 3×3 alignment, 고정/Auto Gap, Horizontal-only Wrap, 두 번째 Row Gap을
+  공식 도움말 범위와 일치시켰다.
+- Canvas spacing drag는 flow axis와 Shift/Alt modifier 계약을 따른다.
+- schema 의미 변경 없이 기존 `space_between`과 네 변 padding을 재사용한다.
+- 다음 실행 단계는 M2.4 Fixed/Hug/Fill 및 min/max 크기 정책이다.
+
+### 2026-08-03 M2.4 Sizing 체크포인트
+
+- 상태: `Complete v1`
+- Fixed/Hug/Fill 노출 조건을 공식 부모/자식 규칙에 맞췄다.
+- Fill min/max clamp 뒤 남은 공간을 다른 Fill 형제에게 재분배한다.
+- 기존 Hug/Fill cycle 및 overflow diagnostics와 함께 검증한다.
+- 다음 실행 단계는 M2.5 Grid Auto Layout과 UMG Grid 변환이다.
+
 1. Horizontal/Vertical Auto Layout
 2. Padding, Gap, Alignment, Wrap
 3. Hug Content, Fixed Size, Fill Container
@@ -567,6 +697,20 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
    로컬 개발 플러그인 번들로 내보내기. 네이티브 `.fig` 직접 생성은 범위 밖
 
 ## P9. Unreal UMG
+
+### 2026-08-03 Auto Layout 변환 체크포인트
+
+- 공용 Tiger UMG 문서가 schema v7로 올라갔고 `PanelKind`/`FlowSlot`을
+  provider-neutral 필드로 소유한다.
+- Painter의 UMG 변환은 별도
+  `app/painter_ui_umg_auto_layout.py` 계약에서 Canvas/Horizontal/Vertical을
+  분류한다.
+- Horizontal/Vertical, padding, gap, 교차축 정렬, 자식 Auto/Fill은
+  `UCanvasPanel`/`UHorizontalBox`/`UVerticalBox`와 Box Slot으로 변환한다.
+- Wrap, Start 이외 주축 분배, Absolute 자식은 이유가 있는 `Blocked`로 남긴다.
+- 공용 플러그인 0.6.1은 canonical UE 5.8에서 빌드하고 source-free bundle을
+  갱신한다. 상세 계약과 증거는
+  `docs/PAINTER_UI_UMG_AUTO_LAYOUT_CONVERSION_KO.md`가 소유한다.
 
 1. 별도 Painter 플러그인을 만들지 않고 기존 `TigerStudioUMG` 사용
 2. Painter에서 provider-neutral Tiger UMG adapter 구현

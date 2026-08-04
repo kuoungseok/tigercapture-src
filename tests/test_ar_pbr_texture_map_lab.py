@@ -9,6 +9,74 @@ from PIL import Image
 import pytest
 
 
+def test_texture_lab_srgb_transfer_matches_iec_reference_points() -> None:
+    from app.ar_pbr.texture_map_lab import _linear_to_srgb, _srgb_to_linear
+
+    encoded = np.asarray([0.0, 0.04045, 0.5, 1.0], dtype=np.float32)
+    linear = _srgb_to_linear(encoded)
+    assert linear[1] == pytest.approx(0.0031308, abs=1.0e-6)
+    assert linear[2] == pytest.approx(0.21404114, abs=1.0e-6)
+    assert np.allclose(_linear_to_srgb(linear), encoded, atol=1.0e-6)
+
+
+def test_surface_maps_from_height_reuses_texture_lab_normal_and_realtime_ao() -> None:
+    from app.ar_pbr.texture_map_lab import generate_surface_maps_from_height
+
+    height = np.zeros((64, 96), dtype=np.float32)
+    height[22:42, 18:78] = 0.72
+    maps = generate_surface_maps_from_height(
+        height,
+        {
+            "normal_strength": 6.0,
+            "normal_format": "unreal_directx",
+            "normal_filter": "sobel",
+            "ao_strength": 0.85,
+            "ao_radius_px": 4.0,
+        },
+        realtime=True,
+    )
+    assert set(maps) == {"height", "normal", "ao", "cavity", "curvature"}
+    assert maps["normal"].shape == (64, 96, 3)
+    assert float(np.std(maps["normal"][..., 0])) > 0.001
+    assert float(np.min(maps["ao"])) < 1.0
+
+
+def test_cpu_pbr_ndotl_is_normal_format_invariant() -> None:
+    from app.ar_pbr.texture_map_lab import (
+        _preview_array_for_mode,
+        normal_map_from_height,
+        normalize_texture_map_settings,
+    )
+
+    height = np.zeros((72, 96), dtype=np.float32)
+    height[18:54, 22:74] = np.linspace(0.1, 0.9, 52, dtype=np.float32)[None, :]
+    base = np.full((72, 96, 3), (0.52, 0.28, 0.12), dtype=np.float32)
+    scalar = np.full((72, 96), 0.45, dtype=np.float32)
+
+    def preview(normal_format: str) -> np.ndarray:
+        settings = normalize_texture_map_settings(
+            {
+                "normal_format": normal_format,
+                "preview_light_azimuth": 31.0,
+                "preview_light_elevation": 42.0,
+            }
+        )
+        maps = {
+            "base_color": base,
+            "normal": normal_map_from_height(height, settings),
+            "roughness": scalar,
+            "metallic": np.zeros_like(scalar),
+            "ao": np.ones_like(scalar),
+        }
+        return _preview_array_for_mode(maps, settings, "material")
+
+    assert np.allclose(
+        preview("unreal_directx"),
+        preview("opengl"),
+        atol=1.0e-6,
+    )
+
+
 def _sample_image(path) -> None:
     h, w = 24, 32
     y = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
@@ -36,12 +104,13 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
 
     payload = generate_texture_maps(image_path, {"normal_strength": 3.0})
 
-    assert payload["schema_id"] == "tigerstudio.ar_pbr.texture_map_lab.v1"
+    assert payload["schema_id"] == "tigerstudio.ar_pbr.texture_map_lab.v3"
     assert payload["size"] == [32, 24]
     maps = payload["maps"]
     assert {
         "base_color",
         "base_color_source",
+        "base_color_estimate",
         "normal",
         "ao",
         "roughness",
@@ -56,6 +125,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
     } <= set(maps)
     assert maps["base_color"].shape == (24, 32, 3)
     assert maps["base_color_source"].shape == (24, 32, 3)
+    assert maps["base_color_estimate"].shape == (24, 32, 3)
     assert maps["normal"].shape == (24, 32, 3)
     assert maps["roughness"].shape == (24, 32)
     assert maps["curvature"].shape == (24, 32)
@@ -136,16 +206,80 @@ def test_texture_lab_export_manifest_connects_height_to_renderer(tmp_path) -> No
 
     image_path = tmp_path / "source.png"
     _sample_image(image_path)
-    result = export_texture_maps(image_path, tmp_path / "maps")
+    result = export_texture_maps(image_path, tmp_path / "maps", max_size=16)
 
     assert Path(result["files"]["height"]).exists()
+    height16_path = Path(result["precision_files"]["height_16"])
+    assert height16_path.exists()
+    height16 = np.asarray(Image.open(height16_path))
+    assert height16.dtype in {np.dtype(np.uint16), np.dtype(np.int32)}
+    assert int(np.max(height16)) > 255
     usage = result["material_usage"]
     assert usage["height_map"] == result["files"]["height"]
+    assert usage["height_map_16"] == result["precision_files"]["height_16"]
+    assert usage["height_precision_bits"] == 16
     assert usage["height_semantics"] == "black_low_white_high"
     assert usage["recommended_rendering"]["parallax_mode"] == "pom"
     assert usage["recommended_rendering"]["parallax_enabled"] is True
     assert usage["recommended_rendering"]["parallax_steps"] >= 16
     assert usage["tessellation"]["supported_by_texture"] is True
+    assert result["source_size"] == [32, 24]
+    assert result["processing_size"] == [16, 12]
+    assert result["max_size"] == 16
+    assert result["resampled"] is True
+
+
+def test_texture_lab_cpu_preview_can_stay_in_memory(tmp_path) -> None:
+    from app.ar_pbr.texture_map_lab import generate_texture_maps, render_plane_preview_from_generated
+
+    image_path = tmp_path / "source.png"
+    forbidden_output = tmp_path / "preview_should_not_exist.png"
+    _sample_image(image_path)
+    generated = generate_texture_maps(image_path, max_size=64, backend="cpu", allow_cpu=True)
+
+    payload = render_plane_preview_from_generated(
+        generated,
+        output_path=forbidden_output,
+        width=96,
+        allow_cpu_preview=True,
+        write_output=False,
+    )
+
+    assert payload["preview_path"] == ""
+    assert payload["preview_image"].size[0] == 96
+    assert forbidden_output.exists() is False
+
+
+def test_texture_lab_torch_f0_matches_shared_cpu_formula_when_cuda_available(tmp_path) -> None:
+    from app.ar_pbr.texture_map_lab import generate_texture_maps, texture_map_backend_status
+
+    if not texture_map_backend_status()["backends"]["torch_cuda"]["available"]:
+        pytest.skip("torch CUDA is unavailable")
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    settings = {
+        "substrate_reflectance": 0.5,
+        "metallic_value": 0.0,
+        "delight_enabled": True,
+        "delight_strength": 0.8,
+        "delight_radius_px": 6.0,
+        "delight_contrast_preservation": 0.3,
+    }
+    cpu = generate_texture_maps(image_path, settings, backend="cpu", allow_cpu=True)
+    gpu = generate_texture_maps(image_path, settings, backend="torch_cuda", allow_cpu=False)
+
+    assert np.allclose(cpu["maps"]["f0"], gpu["maps"]["f0"], atol=1.0e-6)
+    estimate_delta = np.abs(
+        cpu["maps"]["base_color_estimate"] - gpu["maps"]["base_color_estimate"]
+    )
+    assert float(np.mean(estimate_delta)) < 1.0e-5
+    assert float(np.max(estimate_delta)) < 1.0e-4
+    assert np.allclose(
+        cpu["maps"]["delight_shading"],
+        gpu["maps"]["delight_shading"],
+        atol=1.0e-4,
+    )
+    assert gpu["maps"]["irradiance"] is gpu["maps"]["delight_shading"]
 
 
 def test_texture_lab_gpu_preview_smoke_when_context_available(tmp_path) -> None:
@@ -252,18 +386,41 @@ def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> No
         + baseline["maps"]["base_color"][..., 2] * 0.0722
     )
     delighted_luma = (
-        delighted["maps"]["base_color"][..., 0] * 0.2126
-        + delighted["maps"]["base_color"][..., 1] * 0.7152
-        + delighted["maps"]["base_color"][..., 2] * 0.0722
+        delighted["maps"]["base_color_estimate"][..., 0] * 0.2126
+        + delighted["maps"]["base_color_estimate"][..., 1] * 0.7152
+        + delighted["maps"]["base_color_estimate"][..., 2] * 0.0722
     )
     baseline_side_delta = abs(float(np.mean(baseline_luma[:, :16])) - float(np.mean(baseline_luma[:, -16:])))
     delighted_side_delta = abs(float(np.mean(delighted_luma[:, :16])) - float(np.mean(delighted_luma[:, -16:])))
 
     assert delighted_side_delta < baseline_side_delta * 0.65
-    assert np.mean(np.abs(delighted["maps"]["base_color_source"] - delighted["maps"]["base_color"])) > 0.02
+    assert np.allclose(delighted["maps"]["base_color_source"], delighted["maps"]["base_color"])
+    assert np.mean(
+        np.abs(delighted["maps"]["base_color_source"] - delighted["maps"]["base_color_estimate"])
+    ) > 0.02
+    assert np.allclose(delighted["maps"]["height"], baseline["maps"]["height"], atol=1.0e-6)
     assert delighted["maps"]["delight_shading"].shape == (h, w)
     assert float(np.std(delighted["maps"]["delight_shading"])) > 0.18
     assert delighted["algorithms"]["delight"]["enabled"] is True
+    assert delighted["algorithms"]["delight"]["validation"] == "not_photometrically_validated"
+    assert delighted["algorithms"]["delight"]["surface_maps_use_estimate"] is False
+    assert delighted["base_color_provenance"]["estimate_applied"] is False
+    assert delighted["base_color_provenance"]["confidence"] is None
+
+    applied = generate_texture_maps(
+        image_path,
+        {
+            "delight_enabled": True,
+            "delight_apply_to_base_color": True,
+            "delight_strength": 0.90,
+            "delight_radius_px": 18.0,
+            "delight_contrast_preservation": 0.0,
+        },
+        max_size=96,
+    )
+    assert np.allclose(applied["maps"]["base_color"], applied["maps"]["base_color_estimate"])
+    assert np.allclose(applied["maps"]["height"], baseline["maps"]["height"], atol=1.0e-6)
+    assert applied["base_color_provenance"]["estimate_applied"] is True
 
     compare = render_plane_preview_from_generated(
         delighted,
@@ -491,6 +648,7 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
     assert plan["result"]["target"] == "Unreal Engine Substrate Slab BSDF"
     settings_props = texture_lab_settings_schema()["properties"]
     assert "delight_enabled" in settings_props
+    assert "delight_apply_to_base_color" in settings_props
     assert "preview_animate_light" in settings_props
     assert "substrate_mode" in settings_props
 
@@ -550,6 +708,7 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window.settings()["preview_light_azimuth"] == pytest.approx(-45.0)
     assert window.settings()["preview_light_elevation"] == pytest.approx(45.0)
     assert window._gpu_setup_button.text() == "Install GPU"
+    assert window._export_max_size() == 4096
     assert window.sizeHint().width() <= 1200
     assert window._preview.thumbnail_count() >= 10
     assert window._preview_shape_combo.currentData() == "plane"
@@ -560,9 +719,13 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     window._preview_shape_combo.setCurrentIndex(window._preview_shape_combo.findData("plane"))
     assert window._advanced_map_checks["f0"].isChecked() is False
     assert window._delight_check is not None
+    assert window._delight_apply_check is not None
+    assert window._delight_apply_check.isEnabled() is False
     assert window._sliders["delight_strength"].isEnabled() is False
     window._delight_check.setChecked(True)
     assert window._sliders["delight_strength"].isEnabled() is True
+    assert window._delight_apply_check.isEnabled() is True
+    assert window._delight_apply_check.isChecked() is False
     assert window._preview_mode_combo.currentData() == "albedo"
     window._show_delight_compare_preview()
     assert window._preview_mode_combo.currentData() == "delight_compare"
@@ -572,7 +735,7 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window._preview_mode_combo.currentData() == "intrinsic_channels"
     window.refresh_preview()
     assert window._preview_heading is not None
-    assert window._preview_heading.text().endswith("Intrinsic Channels")
+    assert window._preview_heading.text().endswith("Analysis Channels")
 
     copied = window.copy_preview_to_clipboard()
     assert copied["copied"] is True
@@ -588,7 +751,8 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert pasted["source_kind"] == "clipboard_image"
     assert Path(pasted["source_path"]).exists()
     assert window.image_path == Path(pasted["source_path"])
-    assert window._last_preview_path is not None
+    assert window._last_preview_path is None
+    assert window._preview.preview_pixmap().isNull() is False
     window.close()
 
 

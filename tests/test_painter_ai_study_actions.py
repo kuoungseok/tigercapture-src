@@ -119,7 +119,10 @@ def test_painter_study_actions_build_editable_layers_and_quality_report(
     assert refined["ok"]
     report = registry.execute_action("paint.study.quality_report", {}).to_dict()
     assert report["ok"]
-    assert report["result"]["study"]["status"] in {"ready", "needs_refinement"}
+    assert report["result"]["study"]["status"] == "diagnostic_only"
+    assert report["result"]["study"]["quality_threshold_claim"] is False
+    assert report["result"]["study"]["release_readiness_claim"] is False
+    assert report["result"]["study"]["model_contract"]["parameter_source"] == "authored_style_preset_not_measured_quality_model"
     assert not report["result"]["study"]["baked_reference_pixels"]
     assert len(report["result"]["study"]["generated_layers"]) == 4
     assert any(
@@ -168,3 +171,37 @@ def test_painter_study_planner_is_deterministic_for_provider_replay(
     assert [stroke.brush_seed for stroke in strokes_a] == [
         stroke.brush_seed for stroke in strokes_b
     ]
+
+
+def test_painter_study_diagnostics_do_not_invent_quality_readiness_thresholds() -> None:
+    from app.painter_ai_study import quality_report
+
+    runtime = {
+        "session_id": "test",
+        "last_comparison": {
+            "mean_absolute_error": 255.0,
+            "luminance_correlation": -1.0,
+            "structural_edge_f1": 0.0,
+            "focus_regions": [{"id": "subject", "priority": 3.0, "mean_absolute_error": 255.0}],
+        },
+        "baked_reference_pixels": False,
+        "stroke_count": 1,
+        "generated_layers": [],
+        "timings": [],
+    }
+    report = quality_report(runtime)
+    assert report["status"] == "diagnostic_only"
+    assert report["reasons"] == []
+    assert report["quality_threshold_claim"] is False
+    assert report["comparison"]["mean_absolute_error"] == 255.0
+
+
+def test_openai_artwork_runner_does_not_wait_for_diagnostic_quality_readiness() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "tools"
+        / "run_openai_painter_agent_artwork.py"
+    ).read_text(encoding="utf-8")
+
+    assert "stop only when quality_report returns ready" not in source
+    assert "quality_report as diagnostic evidence only" in source

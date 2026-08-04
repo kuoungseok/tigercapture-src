@@ -104,7 +104,10 @@ def test_visible_ui_design_surface_has_complete_focus_contract() -> None:
     dialog._set_canvas_workspace_mode("ui_design")
     _app().processEvents()
     report = inspect_painter_ui_focus(dialog)
-    assert report["status"] == "covered"
+    assert report["status"] == "covered", [
+        (row["id"], row["kind"], row["issue_codes"])
+        for row in report["issues"]
+    ]
     assert report["control_count"] >= 20
     assert report["tab_focus_count"] == report["control_count"]
     assert report["labelled_count"] == report["control_count"]

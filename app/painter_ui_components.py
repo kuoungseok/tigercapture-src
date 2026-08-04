@@ -27,6 +27,7 @@ _STRUCTURAL_FIELDS = {
     "component_property_bindings",
     "component_scope_id",
     "component_scope_source_object_id",
+    "component_slot_property",
 }
 
 
@@ -65,6 +66,18 @@ def normalize_ui_component_property_bindings(value: object) -> dict[str, str]:
     }
 
 
+def normalize_ui_component_variant_properties(value: object) -> dict[str, str]:
+    """Normalize one Component Set member's property/value combination."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(name).strip(): str(item).strip()
+        for name, item in value.items()
+        if str(name or "").strip() and str(item or "").strip()
+    }
+
+
 def normalize_ui_component_property_definitions(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
@@ -85,12 +98,48 @@ def normalize_ui_component_property_definitions(value: object) -> dict[str, Any]
         default = copy.deepcopy(row.get("default"))
         if default is None and values:
             default = values[0]
-        definitions[property_name] = {
+        definition = {
             "type": property_type,
             "default": default,
             "values": values,
             "description": str(row.get("description") or ""),
         }
+        if property_type == "instance_swap":
+            definition["preferred_values"] = [
+                str(item)
+                for item in row.get("preferred_values", [])
+                if str(item or "").strip()
+            ]
+        elif property_type == "slot":
+            settings = row.get("slot_settings")
+            settings = dict(settings) if isinstance(settings, Mapping) else {}
+            minimum = settings.get("min_children")
+            maximum = settings.get("max_children")
+            definition["preferred_values"] = list(
+                dict.fromkeys(
+                    str(item)
+                    for item in row.get("preferred_values", [])
+                    if str(item or "").strip()
+                )
+            )
+            definition["slot_settings"] = {
+                "stretch_child_on_insert": bool(
+                    settings.get("stretch_child_on_insert", False)
+                ),
+                "display_empty_by_default": bool(
+                    settings.get("display_empty_by_default", False)
+                ),
+                "min_children": (
+                    max(0, int(minimum)) if minimum is not None else None
+                ),
+                "max_children": (
+                    max(0, int(maximum)) if maximum is not None else None
+                ),
+                "allow_preferred_values_only": bool(
+                    settings.get("allow_preferred_values_only", False)
+                ),
+            }
+        definitions[property_name] = definition
     return definitions
 
 
@@ -133,6 +182,34 @@ def component_property_defaults(component: Mapping[str, Any]) -> dict[str, Any]:
 
 def _component_family_id(component: Mapping[str, Any]) -> str:
     return str(component.get("base_component_id") or component.get("id") or "")
+
+
+def component_variant_properties(component: Mapping[str, Any]) -> dict[str, str]:
+    metadata = component.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    return normalize_ui_component_variant_properties(
+        metadata.get("variant_properties")
+    )
+
+
+def _component_family_members(
+    document: Mapping[str, Any],
+    component_id: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    components = {row["id"]: row for row in document["components"]}
+    component = components.get(str(component_id))
+    if component is None:
+        from app.painter_ui_document import PainterUIDocumentError
+
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    family_id = _component_family_id(component)
+    family = components.get(family_id)
+    if family is None:
+        from app.painter_ui_document import PainterUIDocumentError
+
+        raise PainterUIDocumentError(f"UI component family not found: {family_id}")
+    member_ids = [family_id, *family.get("variant_ids", [])]
+    return family, [components[item] for item in member_ids if item in components]
 
 
 def _component_source_map(
@@ -203,7 +280,9 @@ def _component_scope_source_id(
 ) -> str:
     if str(row.get("component_scope_id") or "") == str(component_id):
         return str(row.get("component_scope_source_object_id") or "")
-    return str(row.get("component_source_object_id") or "")
+    if str(row.get("component_id") or "") == str(component_id):
+        return str(row.get("component_source_object_id") or "")
+    return ""
 
 
 def _nested_instance_ancestor(
@@ -583,6 +662,7 @@ def create_ui_component_variant(
     name: str = "",
     offset_x: float | None = None,
     variant_key: str = "",
+    variant_properties: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     from app.painter_ui_document import (
         PainterUIDocumentError,
@@ -651,8 +731,25 @@ def create_ui_component_variant(
         if source_id in inverse_source_map
     }
     metadata = copy.deepcopy(dict(source_component.get("metadata") or {}))
+    normalized_variant_properties = component_variant_properties(
+        source_component
+    )
+    normalized_variant_properties.update(
+        normalize_ui_component_variant_properties(variant_properties)
+    )
+    metadata["variant_properties"] = normalized_variant_properties
     metadata["variant_key"] = str(
-        variant_key or name or f"Variant {len(family['variant_ids']) + 1}"
+        variant_key
+        or (
+            ", ".join(
+                f"{property_name}={property_value}"
+                for property_name, property_value in normalized_variant_properties.items()
+            )
+            if normalized_variant_properties
+            else ""
+        )
+        or name
+        or f"Variant {len(family['variant_ids']) + 1}"
     )
     metadata["variant_source_map"] = variant_source_map
     state_overrides: dict[str, Any] = {}
@@ -831,6 +928,7 @@ def switch_ui_component_instance_variant(
                     if key in target_component["property_definitions"]
                 }
             )
+            properties.update(component_variant_properties(target_component))
             row["component_properties"] = properties
         replacement.append(apply_ui_instance_overrides(row))
     old_member_ids = set(member_ids)
@@ -853,6 +951,473 @@ def switch_ui_component_instance_variant(
         "root_object_id": str(instance_root_id),
         "component_id": target_component["id"],
         "object_ids": [row["id"] for row in replacement],
+    }
+
+
+def combine_ui_components_as_variants(
+    value: Mapping[str, Any],
+    *,
+    component_ids: list[str] | tuple[str, ...],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Combine independent main components using Figma's documented rules."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    requested = list(dict.fromkeys(str(item) for item in component_ids if str(item)))
+    if len(requested) < 2:
+        raise PainterUIDocumentError("Combine as variants requires at least two components")
+    component_by_id = {row["id"]: row for row in document["components"]}
+    members = [component_by_id.get(item) for item in requested]
+    if any(row is None for row in members):
+        raise PainterUIDocumentError("Combine as variants includes a missing component")
+    members = [row for row in members if row is not None]
+    if any(row["base_component_id"] or row["variant_ids"] for row in members):
+        raise PainterUIDocumentError(
+            "Combine as variants accepts independent main components only"
+        )
+    objects = {row["id"]: row for row in document["objects"]}
+    roots = [objects.get(row["root_object_id"]) for row in members]
+    if any(row is None for row in roots):
+        raise PainterUIDocumentError("Combine as variants component root is missing")
+    roots = [row for row in roots if row is not None]
+    if len({row["artboard_id"] for row in roots}) != 1:
+        raise PainterUIDocumentError("Combine as variants requires one canvas")
+    ordered = sorted(
+        zip(members, roots),
+        key=lambda pair: (float(pair[1]["y"]), float(pair[1]["x"]), pair[0]["id"]),
+    )
+    members = [pair[0] for pair in ordered]
+    roots = [pair[1] for pair in ordered]
+    baseline = normalize_ui_component_property_definitions(
+        members[0].get("property_definitions")
+    )
+    for member in members[1:]:
+        if normalize_ui_component_property_definitions(
+            member.get("property_definitions")
+        ) != baseline:
+            raise PainterUIDocumentError(
+                "Components must share the same properties before combining"
+            )
+    split_names = [str(row["name"]).split("/") for row in members]
+    slash_count = len(split_names[0]) - 1
+    use_slash_names = slash_count > 0 and all(
+        len(parts) == len(split_names[0]) for parts in split_names
+    )
+    if use_slash_names:
+        property_names = [
+            "Variant" if index == 0 else f"Property {index + 1}"
+            for index in range(slash_count)
+        ]
+        family_name = split_names[0][0].strip() or members[0]["name"]
+        combinations = [parts[1:] for parts in split_names]
+    else:
+        property_names = ["Variant"]
+        family_name = str(members[0]["name"]).split("/")[0].strip()
+        combinations = [[str(row["name"])] for row in members]
+    if len({tuple(values) for values in combinations}) != len(combinations):
+        raise PainterUIDocumentError("Variant property combinations must be unique")
+    definitions = copy.deepcopy(baseline)
+    for index, property_name in enumerate(property_names):
+        values = list(dict.fromkeys(row[index] for row in combinations))
+        definitions[property_name] = {
+            "type": "enum",
+            "default": combinations[0][index],
+            "values": values,
+            "description": "Variant property",
+        }
+    definitions = normalize_ui_component_property_definitions(definitions)
+    family = members[0]
+    family["name"] = family_name
+    family["base_component_id"] = ""
+    family["variant_ids"] = [row["id"] for row in members[1:]]
+    for member, combination in zip(members, combinations):
+        member["base_component_id"] = "" if member is family else family["id"]
+        member["variant_ids"] = family["variant_ids"] if member is family else []
+        member["property_definitions"] = copy.deepcopy(definitions)
+        metadata = copy.deepcopy(dict(member.get("metadata") or {}))
+        metadata["variant_properties"] = dict(zip(property_names, combination))
+        metadata["variant_key"] = ", ".join(
+            f"{name}={item}" for name, item in zip(property_names, combination)
+        )
+        member["metadata"] = metadata
+    document["selection"] = {
+        "object_id": roots[0]["id"],
+        "object_ids": [row["id"] for row in roots],
+    }
+    document["revision"] += 1
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid Component Set: " + ", ".join(validation["errors"])
+        )
+    return document, inspect_ui_component_set(document, component_id=family["id"])
+
+
+def component_set_canvas_bounds(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    padding: float = 24.0,
+) -> dict[str, Any]:
+    """Return the virtual no-fill, dashed-purple Component Set container."""
+
+    family, members = _component_family_members(value, str(component_id))
+    object_by_id = {row["id"]: row for row in value["objects"]}
+    roots = [object_by_id.get(row["root_object_id"]) for row in members]
+    roots = [row for row in roots if row is not None]
+    if not roots:
+        return {}
+    pad = max(0.0, float(padding))
+    left = min(float(row["x"]) for row in roots) - pad
+    top = min(float(row["y"]) for row in roots) - pad
+    right = max(float(row["x"]) + float(row["width"]) for row in roots) + pad
+    bottom = max(float(row["y"]) + float(row["height"]) for row in roots) + pad
+    return {
+        "id": f"component-set:{family['id']}",
+        "component_id": family["id"],
+        "name": family["name"],
+        "artboard_id": roots[0]["artboard_id"],
+        "x": left,
+        "y": top,
+        "width": right - left,
+        "height": bottom - top,
+        "stroke": "#9747FF",
+        "fill": None,
+        "dash": [6.0, 4.0],
+        "member_root_ids": [row["id"] for row in roots],
+    }
+
+
+def inspect_ui_component_set(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+) -> dict[str, Any]:
+    """Report Figma-style multidimensional Variant combinations and conflicts."""
+
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    family, members = _component_family_members(document, component_id)
+    member_properties = {
+        row["id"]: component_variant_properties(row) for row in members
+    }
+    property_names = list(
+        dict.fromkeys(
+            [
+                name
+                for row in members
+                for name in member_properties[row["id"]]
+            ]
+        )
+    )
+    definitions = family.get("property_definitions", {})
+    property_names.sort(
+        key=lambda name: (
+            list(definitions).index(name) if name in definitions else len(definitions),
+            name.casefold(),
+        )
+    )
+    issues: list[dict[str, Any]] = []
+    combinations: dict[tuple[str, ...], list[str]] = {}
+    rows: list[dict[str, Any]] = []
+    for member in members:
+        properties = member_properties[member["id"]]
+        for name in property_names:
+            definition = definitions.get(name)
+            value_text = str(properties.get(name) or "")
+            if not value_text:
+                issues.append(
+                    {
+                        "type": "missing_variant_property",
+                        "component_id": member["id"],
+                        "property_name": name,
+                    }
+                )
+            elif isinstance(definition, Mapping):
+                allowed = [str(item) for item in definition.get("values", [])]
+                if allowed and value_text not in allowed:
+                    issues.append(
+                        {
+                            "type": "invalid_variant_value",
+                            "component_id": member["id"],
+                            "property_name": name,
+                            "value": value_text,
+                        }
+                    )
+        combination = tuple(str(properties.get(name) or "") for name in property_names)
+        if property_names:
+            combinations.setdefault(combination, []).append(member["id"])
+        rows.append(
+            {
+                "component_id": member["id"],
+                "name": member["name"],
+                "is_default": member["id"] == family["id"],
+                "properties": properties,
+                "combination": ", ".join(
+                    f"{name}={properties.get(name, '')}" for name in property_names
+                ),
+            }
+        )
+    conflicts = [
+        {
+            "type": "duplicate_variant_combination",
+            "properties": {
+                name: combination[index]
+                for index, name in enumerate(property_names)
+            },
+            "component_ids": component_ids,
+        }
+        for combination, component_ids in combinations.items()
+        if len(component_ids) > 1
+    ]
+    return {
+        "schema": "tigerstudio.painter.ui.component_set.inspect.v1",
+        "ok": not issues and not conflicts,
+        "family_id": family["id"],
+        "family_name": family["name"],
+        "property_names": property_names,
+        "property_definitions": copy.deepcopy(
+            {
+                name: definitions.get(name, {}) for name in property_names
+            }
+        ),
+        "members": rows,
+        "issues": issues,
+        "conflicts": conflicts,
+    }
+
+
+def define_ui_component_variant_property(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    property_name: str,
+    values: list[str] | tuple[str, ...],
+    default_value: str = "",
+    description: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Define one shared Variant property and apply its default to all members."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        update_ui_component,
+    )
+
+    document = normalize_ui_document(value)
+    family, members = _component_family_members(document, component_id)
+    name = str(property_name or "").strip()
+    options = list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+    if not name or not options:
+        raise PainterUIDocumentError("Variant property requires a name and values")
+    default = str(default_value or options[0]).strip()
+    if default not in options:
+        raise PainterUIDocumentError(
+            f"Invalid variant property default: {name}={default}"
+        )
+    definitions = copy.deepcopy(family.get("property_definitions") or {})
+    definitions[name] = {
+        "type": "enum",
+        "default": default,
+        "values": options,
+        "description": str(description or ""),
+    }
+    document, _ = update_ui_component(
+        document,
+        family["id"],
+        {"property_definitions": definitions},
+    )
+    for member in members:
+        current = next(
+            row for row in document["components"] if row["id"] == member["id"]
+        )
+        metadata = copy.deepcopy(current.get("metadata") or {})
+        properties = component_variant_properties(current)
+        properties.setdefault(name, default)
+        metadata["variant_properties"] = properties
+        metadata["variant_key"] = ", ".join(
+            f"{item_name}={item_value}"
+            for item_name, item_value in properties.items()
+        )
+        member_definitions = copy.deepcopy(
+            current.get("property_definitions") or {}
+        )
+        member_definitions[name] = copy.deepcopy(definitions[name])
+        document, _ = update_ui_component(
+            document,
+            current["id"],
+            {
+                "metadata": metadata,
+                "property_definitions": member_definitions,
+            },
+        )
+    return document, inspect_ui_component_set(
+        document,
+        component_id=family["id"],
+    )
+
+
+def set_ui_component_variant_properties(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    properties: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Set a member combination while preserving Figma conflict diagnostics."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        update_ui_component,
+    )
+
+    document = normalize_ui_document(value)
+    family, members = _component_family_members(document, component_id)
+    member = next((row for row in members if row["id"] == component_id), None)
+    if member is None:
+        raise PainterUIDocumentError(f"Component Set member not found: {component_id}")
+    requested = normalize_ui_component_variant_properties(properties)
+    definitions = family.get("property_definitions") or {}
+    current = component_variant_properties(member)
+    for name, item in requested.items():
+        definition = definitions.get(name)
+        if not isinstance(definition, Mapping) or definition.get("type") != "enum":
+            raise PainterUIDocumentError(f"Variant property not found: {name}")
+        options = [str(value) for value in definition.get("values", [])]
+        if options and item not in options:
+            raise PainterUIDocumentError(f"Invalid variant value: {name}={item}")
+        current[name] = item
+    metadata = copy.deepcopy(member.get("metadata") or {})
+    metadata["variant_properties"] = current
+    metadata["variant_key"] = ", ".join(
+        f"{name}={item}" for name, item in current.items()
+    )
+    document, updated = update_ui_component(
+        document,
+        component_id,
+        {"metadata": metadata},
+    )
+    return document, {
+        "component": updated,
+        "inspection": inspect_ui_component_set(
+            document,
+            component_id=family["id"],
+        ),
+    }
+
+
+def switch_ui_component_instance_variant_values(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    properties: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Select the unique Component Set member matching property values."""
+
+    from app.painter_ui_document import PainterUIDocumentError, normalize_ui_document
+
+    document = normalize_ui_document(value)
+    objects = {row["id"]: row for row in document["objects"]}
+    root = objects.get(str(instance_root_id))
+    if root is None or root.get("component_role") != "instance":
+        raise PainterUIDocumentError(f"Component instance not found: {instance_root_id}")
+    family, members = _component_family_members(
+        document,
+        str(root.get("component_id") or ""),
+    )
+    current_component = next(
+        row for row in members if row["id"] == root["component_id"]
+    )
+    requested = component_variant_properties(current_component)
+    requested.update(normalize_ui_component_variant_properties(properties))
+    inspection = inspect_ui_component_set(document, component_id=family["id"])
+    property_names = inspection["property_names"]
+    matches = [
+        row
+        for row in members
+        if all(
+            component_variant_properties(row).get(name) == requested.get(name)
+            for name in property_names
+        )
+    ]
+    if len(matches) != 1:
+        reason = "missing" if not matches else "conflicted"
+        raise PainterUIDocumentError(
+            f"Component variant combination is {reason}: "
+            + ", ".join(f"{name}={requested.get(name, '')}" for name in property_names)
+        )
+    return switch_ui_component_instance_variant(
+        document,
+        instance_root_id=instance_root_id,
+        target_component_id=matches[0]["id"],
+    )
+
+
+def add_ui_component_change_to_interaction(
+    value: Mapping[str, Any],
+    *,
+    source_component_id: str,
+    target_component_id: str,
+    trigger: str = "click",
+    transition: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Author Figma-style Change to between variants in one Component Set."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        add_ui_interaction,
+        normalize_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    family, members = _component_family_members(
+        document,
+        str(source_component_id),
+    )
+    source = next(
+        (row for row in members if row["id"] == str(source_component_id)),
+        None,
+    )
+    target = next(
+        (row for row in members if row["id"] == str(target_component_id)),
+        None,
+    )
+    if source is None or target is None:
+        raise PainterUIDocumentError(
+            "Change to requires variants from the same Component Set"
+        )
+    if source["id"] == target["id"]:
+        raise PainterUIDocumentError("Change to target must be another variant")
+    target_properties = component_variant_properties(target)
+    parameters = {
+        "variant": ", ".join(
+            f"{name}={item}" for name, item in target_properties.items()
+        ),
+        "variant_properties": target_properties,
+        "preserve_overrides": True,
+        "transition": copy.deepcopy(dict(transition or {})),
+    }
+    document, interaction = add_ui_interaction(
+        document,
+        name=f"Change to {target['name']}",
+        source_object_id=str(source["root_object_id"]),
+        trigger=str(trigger),
+        action="change_variant",
+        target_object_id=str(source["root_object_id"]),
+        component_id=str(target["id"]),
+        parameters=parameters,
+    )
+    return document, {
+        "family_id": str(family["id"]),
+        "source_component_id": str(source["id"]),
+        "target_component_id": str(target["id"]),
+        "interaction": interaction,
     }
 
 
@@ -954,6 +1519,395 @@ def define_ui_component_property(
         )
     document["revision"] += 1
     return document, copy.deepcopy(component["property_definitions"][str(property_name)])
+
+
+def set_ui_component_instance_swap_preferred_values(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    property_name: str,
+    preferred_component_ids: list[str] | tuple[str, ...],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Curate Instance Swap suggestions without restricting other components."""
+
+    from app.painter_ui_document import PainterUIDocumentError, normalize_ui_document
+
+    document = normalize_ui_document(value)
+    component = next(
+        (row for row in document["components"] if row["id"] == component_id),
+        None,
+    )
+    if component is None:
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    definitions = normalize_ui_component_property_definitions(
+        component.get("property_definitions")
+    )
+    definition = definitions.get(str(property_name))
+    if definition is None or definition["type"] != "instance_swap":
+        raise PainterUIDocumentError(
+            f"Instance Swap property not found: {property_name}"
+        )
+    component_ids = {row["id"] for row in document["components"]}
+    preferred = list(
+        dict.fromkeys(
+            str(item) for item in preferred_component_ids if str(item)
+        )
+    )
+    missing = [item for item in preferred if item not in component_ids]
+    if missing:
+        raise PainterUIDocumentError(
+            "Preferred Instance component not found: " + ", ".join(missing)
+        )
+    definition["preferred_values"] = preferred
+    definitions[str(property_name)] = definition
+    component["property_definitions"] = definitions
+    document["revision"] += 1
+    return document, copy.deepcopy(definition)
+
+
+def define_ui_component_slot(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    source_object_id: str,
+    property_name: str,
+    description: str = "",
+    preferred_component_ids: list[str] | tuple[str, ...] = (),
+    slot_settings: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Turn a component frame into a Figma-compatible Slot property."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    component = next(
+        (row for row in document["components"] if row["id"] == component_id),
+        None,
+    )
+    if component is None:
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    property_name = str(property_name or "").strip()
+    if not property_name:
+        raise PainterUIDocumentError("Slot property name is required")
+    member_ids = set(_subtree_ids(document, component["root_object_id"]))
+    source = next(
+        (row for row in document["objects"] if row["id"] == source_object_id),
+        None,
+    )
+    if source is None or source["id"] not in member_ids:
+        raise PainterUIDocumentError(
+            f"Component Slot source not found: {source_object_id}"
+        )
+    if (
+        source["parent_id"] != component["root_object_id"]
+        or source["kind"] != "frame"
+    ):
+        raise PainterUIDocumentError(
+            "A Slot source must be a direct child frame of the component"
+        )
+    component_ids = {row["id"] for row in document["components"]}
+    preferred = list(
+        dict.fromkeys(
+            str(item) for item in preferred_component_ids if str(item)
+        )
+    )
+    missing = [item for item in preferred if item not in component_ids]
+    if missing:
+        raise PainterUIDocumentError(
+            "Preferred Slot component not found: " + ", ".join(missing)
+        )
+    settings = dict(slot_settings or {})
+    minimum = settings.get("min_children")
+    maximum = settings.get("max_children")
+    if minimum is not None and maximum is not None and int(minimum) > int(maximum):
+        raise PainterUIDocumentError("Slot min_children must be <= max_children")
+    definitions = normalize_ui_component_property_definitions(
+        component.get("property_definitions")
+    )
+    existing = definitions.get(property_name)
+    if existing is not None and existing.get("type") != "slot":
+        raise PainterUIDocumentError(
+            f"Component property already exists: {property_name}"
+        )
+    for row in document["objects"]:
+        if (
+            row["component_slot_property"] == property_name
+            and row["id"] != source["id"]
+            and row["id"] in member_ids
+        ):
+            row["component_slot_property"] = ""
+    source["component_slot_property"] = property_name
+    definitions[property_name] = {
+        "type": "slot",
+        "default": source["id"],
+        "values": [],
+        "description": str(description or ""),
+        "preferred_values": preferred,
+        "slot_settings": settings,
+    }
+    component["property_definitions"] = normalize_ui_component_property_definitions(
+        definitions
+    )
+    document = sync_ui_component_instances(document, component_id, normalize=False)
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component Slot: " + ", ".join(validation["errors"])
+        )
+    document["revision"] += 1
+    return document, copy.deepcopy(component["property_definitions"][property_name])
+
+
+def _instance_slot_rows(
+    document: Mapping[str, Any],
+    instance_root_id: str,
+    property_name: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import PainterUIDocumentError
+
+    root = next(
+        (row for row in document["objects"] if row["id"] == instance_root_id),
+        None,
+    )
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(f"Component instance not found: {instance_root_id}")
+    component = next(
+        row for row in document["components"] if row["id"] == root["component_id"]
+    )
+    definition = component["property_definitions"].get(str(property_name))
+    if definition is None or definition.get("type") != "slot":
+        raise PainterUIDocumentError(f"Component Slot not found: {property_name}")
+    source_id = str(definition.get("default") or "")
+    descendants = set(_subtree_ids(document, root["id"]))
+    slot = next(
+        (
+            row
+            for row in document["objects"]
+            if row["id"] in descendants
+            and _component_scope_source_id(row, component["id"]) == source_id
+        ),
+        None,
+    )
+    if slot is None:
+        raise PainterUIDocumentError(
+            f"Component instance Slot node not found: {property_name}"
+        )
+    return root, component, definition, slot
+
+
+def inspect_ui_component_instance_slot(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    property_name: str,
+) -> dict[str, Any]:
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    _root, component, definition, slot = _instance_slot_rows(
+        document, instance_root_id, property_name
+    )
+    children = sorted(
+        (row for row in document["objects"] if row["parent_id"] == slot["id"]),
+        key=lambda row: int(row["z_index"]),
+    )
+    settings = dict(definition.get("slot_settings") or {})
+    violations: list[str] = []
+    minimum = settings.get("min_children")
+    maximum = settings.get("max_children")
+    if minimum is not None and len(children) < int(minimum):
+        violations.append("below_min")
+    if maximum is not None and len(children) > int(maximum):
+        violations.append("above_max")
+    preferred = set(definition.get("preferred_values") or [])
+    if settings.get("allow_preferred_values_only") and preferred:
+        component_by_id = {row["id"]: row for row in document["components"]}
+        for child in children:
+            child_component_id = str(child.get("component_id") or "")
+            child_component = component_by_id.get(child_component_id)
+            family_id = (
+                _component_family_id(child_component) if child_component else ""
+            )
+            if child_component_id not in preferred and family_id not in preferred:
+                violations.append("has_non_preferred")
+                break
+    return {
+        "component_id": component["id"],
+        "instance_root_id": str(instance_root_id),
+        "property_name": str(property_name),
+        "slot_object_id": slot["id"],
+        "child_ids": [row["id"] for row in children],
+        "child_count": len(children),
+        "limit_violations": violations,
+        "preferred_values": list(definition.get("preferred_values") or []),
+        "slot_settings": settings,
+    }
+
+
+def inspect_ui_component_slot_target(
+    value: Mapping[str, Any],
+    *,
+    slot_object_id: str,
+) -> dict[str, Any] | None:
+    """Resolve a canvas/layer frame to an editable Slot in an instance."""
+
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    by_id = {str(row["id"]): row for row in document["objects"]}
+    slot = by_id.get(str(slot_object_id))
+    if slot is None:
+        return None
+    property_name = str(slot.get("component_slot_property") or "")
+    if not property_name:
+        return None
+    ancestor = slot
+    while ancestor is not None:
+        if str(ancestor.get("component_role") or "") == "instance":
+            report = inspect_ui_component_instance_slot(
+                document,
+                instance_root_id=str(ancestor["id"]),
+                property_name=property_name,
+            )
+            if str(report["slot_object_id"]) == str(slot["id"]):
+                return report
+            return None
+        ancestor = by_id.get(str(ancestor.get("parent_id") or ""))
+    return None
+
+
+def insert_ui_object_into_component_slot(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    property_name: str,
+    object_id: str,
+    index: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Insert without enforcing limits; Figma reports violations after edits."""
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+    from app.painter_ui_constraints import (
+        capture_ui_constraints,
+        constraint_parent_geometry,
+        resolve_ui_constraints,
+    )
+    from app.painter_ui_motion_bridge import resolved_ui_geometry
+
+    document = normalize_ui_document(value)
+    absolute_geometry = resolve_ui_constraints(
+        document,
+        resolved_ui_geometry(
+            document,
+            normalize=False,
+            resolve_responsive=False,
+        ),
+    )
+    root, _component, definition, slot = _instance_slot_rows(
+        document, instance_root_id, property_name
+    )
+    target = next(
+        (row for row in document["objects"] if row["id"] == object_id), None
+    )
+    if target is None:
+        raise PainterUIDocumentError(f"UI object not found: {object_id}")
+    if target["artboard_id"] != root["artboard_id"]:
+        raise PainterUIDocumentError("Slot content must be on the same artboard")
+    if slot["id"] in set(_subtree_ids(document, target["id"])):
+        raise PainterUIDocumentError("Slot insertion would create a parent cycle")
+    if target["component_role"] == "definition":
+        raise PainterUIDocumentError("A component definition cannot move into an instance Slot")
+    # Parent constraints are authored relative to their parent. Preserve the
+    # current rendered rectangle and recapture those offsets for the Slot;
+    # otherwise a canvas drop succeeds in the hierarchy but jumps visually by
+    # the Slot parent's origin.
+    rendered = absolute_geometry[str(target["id"])]
+    target.update(
+        {
+            key: float(rendered[key])
+            for key in ("x", "y", "width", "height")
+        }
+    )
+    target["parent_id"] = slot["id"]
+    target["constraints"] = capture_ui_constraints(
+        target,
+        constraint_parent_geometry(document, target, absolute_geometry),
+        target.get("constraints"),
+    )
+    settings = dict(definition.get("slot_settings") or {})
+    if settings.get("stretch_child_on_insert"):
+        layout = dict(target.get("layout") or {})
+        slot_mode = str((slot.get("layout") or {}).get("mode") or "none")
+        if slot_mode == "horizontal":
+            layout["height_sizing"] = "fill"
+        elif slot_mode == "vertical":
+            layout["width_sizing"] = "fill"
+        target["layout"] = layout
+    siblings = sorted(
+        (row for row in document["objects"] if row["parent_id"] == slot["id"]),
+        key=lambda row: int(row["z_index"]),
+    )
+    siblings = [row for row in siblings if row["id"] != target["id"]]
+    insertion = len(siblings) if index is None else max(0, min(int(index), len(siblings)))
+    siblings.insert(insertion, target)
+    base_z = min([int(row["z_index"]) for row in siblings] or [0])
+    for offset, row in enumerate(siblings):
+        row["z_index"] = base_z + offset
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid Slot insertion: " + ", ".join(validation["errors"])
+        )
+    document["selection"] = {"object_id": target["id"], "object_ids": [target["id"]]}
+    document["revision"] += 1
+    return document, inspect_ui_component_instance_slot(
+        document,
+        instance_root_id=instance_root_id,
+        property_name=property_name,
+    )
+
+
+def reset_ui_component_instance_slot(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    property_name: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    _root, component, _definition, slot = _instance_slot_rows(
+        document, instance_root_id, property_name
+    )
+    custom_roots = [
+        row["id"]
+        for row in document["objects"]
+        if row["parent_id"] == slot["id"]
+        and not _component_scope_source_id(row, component["id"])
+    ]
+    removed: set[str] = set()
+    for object_id in custom_roots:
+        removed.update(_subtree_ids(document, object_id))
+    document["objects"] = [
+        row for row in document["objects"] if row["id"] not in removed
+    ]
+    document = sync_ui_component_instances(document, component["id"], normalize=False)
+    document["revision"] += 1
+    report = inspect_ui_component_instance_slot(
+        document,
+        instance_root_id=instance_root_id,
+        property_name=property_name,
+    )
+    report["removed_object_ids"] = sorted(removed)
+    return document, report
 
 
 def bind_ui_component_property(
@@ -1091,6 +2045,10 @@ def set_ui_instance_component_property(
     if definition is None:
         raise PainterUIDocumentError(
             f"Component property not found: {property_name}"
+        )
+    if definition["type"] == "slot":
+        raise PainterUIDocumentError(
+            "Slot content is edited with Slot insert, reorder, and reset actions"
         )
     if definition["type"] == "enum" and definition["values"]:
         if str(property_value) not in definition["values"]:
@@ -1458,30 +2416,45 @@ def resolve_ui_component_document(
 
 
 __all__ = [
+    "add_ui_component_change_to_interaction",
     "bind_ui_component_property",
     "UI_COMPONENT_ROLES",
     "UI_COMPONENT_STATES",
     "apply_ui_instance_overrides",
     "component_property_defaults",
+    "component_set_canvas_bounds",
+    "component_variant_properties",
+    "combine_ui_components_as_variants",
     "convert_ui_object_to_component",
     "create_ui_component_variant",
     "default_ui_component_property_definitions",
     "detach_ui_component_instance",
+    "define_ui_component_slot",
     "define_ui_component_property",
+    "define_ui_component_variant_property",
     "instantiate_ui_component",
+    "inspect_ui_component_set",
     "inspect_ui_component_instance_overrides",
+    "inspect_ui_component_instance_slot",
+    "inspect_ui_component_slot_target",
+    "insert_ui_object_into_component_slot",
     "merge_ui_instance_overrides",
     "normalize_ui_component_properties",
     "normalize_ui_component_property_bindings",
     "normalize_ui_component_property_definitions",
     "normalize_ui_component_role",
     "normalize_ui_component_state_overrides",
+    "normalize_ui_component_variant_properties",
     "normalize_ui_instance_overrides",
     "resolve_ui_component_document",
     "reset_all_ui_component_instance_overrides",
+    "reset_ui_component_instance_slot",
     "reset_ui_component_instance_override",
     "set_ui_component_state_override",
+    "set_ui_component_instance_swap_preferred_values",
+    "set_ui_component_variant_properties",
     "set_ui_instance_component_property",
     "switch_ui_component_instance_variant",
+    "switch_ui_component_instance_variant_values",
     "sync_ui_component_instances",
 ]

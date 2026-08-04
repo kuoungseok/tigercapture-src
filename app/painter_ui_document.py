@@ -5,10 +5,11 @@ import copy
 from typing import Any, Mapping
 
 from app.painter_ui_auto_layout import normalize_ui_auto_layout
+from app.painter_ui_scroll import normalize_ui_scroll
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 22
+UI_DOCUMENT_VERSION = 31
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -344,6 +345,7 @@ def _normalize_object(
         "visible": bool(row.get("visible", True)),
         "locked": bool(row.get("locked", False)),
         "clip_content": bool(row.get("clip_content", False)),
+        "scroll": normalize_ui_scroll(row.get("scroll")),
         "z_index": int(_number(row.get("z_index"), index)),
         "style": normalized_style,
         "content": normalized_content,
@@ -373,6 +375,9 @@ def _normalize_object(
         "component_scope_id": str(row.get("component_scope_id") or ""),
         "component_scope_source_object_id": str(
             row.get("component_scope_source_object_id") or ""
+        ),
+        "component_slot_property": str(
+            row.get("component_slot_property") or ""
         ),
         "variant": str(row.get("variant") or ""),
         "style_ids": normalize_ui_style_ids(row.get("style_ids")),
@@ -1119,6 +1124,28 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                     f"invalid_component_property_default:{row['id']}:"
                     f"{property_name}:{definition['default']}"
                 )
+            if definition["type"] == "slot":
+                slot_source = object_by_id.get(str(definition.get("default") or ""))
+                if (
+                    slot_source is None
+                    or slot_source["kind"] != "frame"
+                    or slot_source["component_slot_property"] != property_name
+                ):
+                    errors.append(
+                        f"invalid_component_slot_source:{row['id']}:"
+                        f"{property_name}:{definition.get('default')}"
+                    )
+                settings = dict(definition.get("slot_settings") or {})
+                minimum = settings.get("min_children")
+                maximum = settings.get("max_children")
+                if (
+                    minimum is not None
+                    and maximum is not None
+                    and int(minimum) > int(maximum)
+                ):
+                    errors.append(
+                        f"invalid_component_slot_limits:{row['id']}:{property_name}"
+                    )
         for state, source_rows in row["state_overrides"].items():
             state_definition = row["property_definitions"].get("state")
             if (
@@ -2213,6 +2240,21 @@ def move_ui_objects_in_hierarchy(
     placement: str = "inside",
 ) -> dict[str, Any]:
     document = normalize_ui_document(value)
+    from app.painter_ui_constraints import (
+        capture_ui_constraints,
+        constraint_parent_geometry,
+        resolve_ui_constraints,
+    )
+    from app.painter_ui_motion_bridge import resolved_ui_geometry
+
+    absolute_geometry = resolve_ui_constraints(
+        document,
+        resolved_ui_geometry(
+            document,
+            normalize=False,
+            resolve_responsive=False,
+        ),
+    )
     active = document["active_artboard_id"]
     object_by_id = {row["id"]: row for row in document["objects"]}
     selected_ids = list(dict.fromkeys(str(item or "") for item in object_ids))
@@ -2267,8 +2309,21 @@ def move_ui_objects_in_hierarchy(
             f"Unsupported UI hierarchy placement: {placement}"
         )
     for row in document["objects"]:
-        if row["id"] in selected:
-            row["parent_id"] = parent_id
+        if row["id"] not in selected:
+            continue
+        rendered = absolute_geometry[str(row["id"])]
+        row.update(
+            {
+                key: float(rendered[key])
+                for key in ("x", "y", "width", "height")
+            }
+        )
+        row["parent_id"] = parent_id
+        row["constraints"] = capture_ui_constraints(
+            row,
+            constraint_parent_geometry(document, row, absolute_geometry),
+            row.get("constraints"),
+        )
 
     active_rows = sorted(
         (

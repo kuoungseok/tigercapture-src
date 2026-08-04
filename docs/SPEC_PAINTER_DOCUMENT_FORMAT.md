@@ -1,6 +1,6 @@
 # Tiger Studio Painter Native Document
 
-Status: implemented v1
+Status: implemented v3; v1/v2 migration supported
 
 ## Purpose
 
@@ -12,8 +12,8 @@ non-destructive construction state used to continue the work.
 ## Container
 
 - Extension: `.tspaint`
-- Schema: `tigerstudio.painter.document.v1`
-- Current format version: `1`
+- Schema: `tigerstudio.painter.document.v3` (v1/v2 documents migrate on open)
+- Current format version: `3`
 - Container: ZIP with `document.json` plus embedded assets
 - Save: atomic temporary-file replacement
 - Load: version/schema validation, safe archive paths, asset size limits, and
@@ -28,13 +28,16 @@ remains the durable source.
 
 - canvas dimensions, background pixels/presence/color, and Painter time
 - ordered layers, names, visibility, opacity, lock, blend mode, color labels
-- layer masks and mask enabled state
+- document-sized 8-bit raster layer-mask PNG assets, enabled state, and
+  linked/unlinked transform state; v2 polygon masks rasterize on open
 - standard and Material Paint layer types and settings
 - complete editable strokes, including brush style, pressure, X/Y tilt,
   rotation, tangential pressure, load, bristle seed/count, and material values
 - Wet Canvas enabled state, Mix, Bleed, Pickup, dry duration, and elapsed time
 - selection geometry/inversion/mode, Quick Mask, channels, and Work Path
 - active/selected layer, selected channel/path, grid, mirror, zoom, and pan
+- editable 1/2/3-point perspective ruler state, off-canvas vanishing points,
+  and the separate brush-snap toggle
 - active brush and material-light preview settings
 - PBR Texture Lab settings and source
 - non-destructive reference board with embedded reference images
@@ -156,7 +159,7 @@ preview. The format preserves:
   `tigerstudio.painter.ui.template_package.v1` manifests. A manifest includes
   stable template ID, version, category, tags, artboard presets, feature list,
   author, source, and explicit license terms. Applying a built-in template
-  creates a normal current-version UI document (version 22 at this checkpoint)
+  creates a normal current-version UI document (version 27 at this checkpoint)
   and stores immutable source provenance in `linked_targets.template_source`;
   all template contents remain ordinary editable artboards, objects, tokens,
   components, and interactions.
@@ -178,6 +181,13 @@ preview. The format preserves:
   `linked_targets.prototype` and transition metadata under each Interaction's
   parameters. Flow and Transition changes are document revisions with one-step
   Undo; Motion clips remain stable-ID links and no keyframes are duplicated.
+- UI schema 27 adds provider-neutral continuous Canvas anchors. An object may
+  use `custom` independently on either constraint axis and then persists
+  normalized `anchor_min_*`/`anchor_max_*` values plus UMG-compatible
+  `anchor_offset_*` values. Point and stretched anchors both preserve the
+  current rectangle when authored; parent resizing resolves with the same
+  `SConstraintCanvas` formulas used by Unreal UMG. Older left/center/right,
+  top/center/bottom, stretch, and scale records retain their prior meaning.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`,
   guide visibility/locking, and a per-artboard ruler origin

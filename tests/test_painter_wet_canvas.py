@@ -64,6 +64,72 @@ def test_wet_canvas_state_advances_deterministically() -> None:
     assert wet_canvas_remaining(dried) == 0.0
 
 
+def test_wet_canvas_drying_minutes_cover_serialized_domain_with_bounded_round_trip() -> None:
+    import pytest
+
+    from app.painter_wet_canvas import (
+        WET_CANVAS_DRYING_MAX_SECONDS,
+        WET_CANVAS_DRYING_MIN_SECONDS,
+        WET_CANVAS_DRYING_UI_MINUTES_MAX,
+        WET_CANVAS_DRYING_UI_MINUTES_MIN,
+        drying_seconds_to_ui_minutes,
+        drying_ui_minutes_to_seconds,
+    )
+
+    errors = []
+    for seconds in range(
+        int(WET_CANVAS_DRYING_MIN_SECONDS),
+        int(WET_CANVAS_DRYING_MAX_SECONDS) + 1,
+    ):
+        minutes = drying_seconds_to_ui_minutes(seconds)
+        assert WET_CANVAS_DRYING_UI_MINUTES_MIN <= minutes <= WET_CANVAS_DRYING_UI_MINUTES_MAX
+        restored = drying_ui_minutes_to_seconds(minutes)
+        errors.append(abs(restored - seconds))
+
+    assert max(errors) == 59.0
+    assert drying_seconds_to_ui_minutes(30) == 1
+    assert drying_seconds_to_ui_minutes(90) == 2
+    assert drying_seconds_to_ui_minutes(3600) == 60
+    assert drying_seconds_to_ui_minutes(86400) == 1440
+    assert drying_ui_minutes_to_seconds(1440) == 86400.0
+    for invalid in (0, 1441, 1.5, True):
+        with pytest.raises(ValueError):
+            drying_ui_minutes_to_seconds(invalid)
+
+
+def test_wet_canvas_drying_slider_edits_the_complete_serialized_domain() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    layer = dialog._new_material_paint_layer("Wet Oil")
+    layer.wet_canvas_settings["drying_seconds"] = 86400.0
+    menu = dialog._build_material_options_menu()
+    slider = dialog._wet_canvas_control_sliders["drying_seconds"]
+    label = dialog._wet_canvas_control_labels["drying_seconds"]
+
+    assert slider.minimum() == 1
+    assert slider.maximum() == 1440
+    assert slider.value() == 1440
+    assert label.text() == "1440 min"
+
+    slider.setValue(721)
+    app.processEvents()
+    assert layer.wet_canvas_settings["drying_seconds"] == 43260.0
+    assert label.text() == "721 min"
+
+    menu.close()
+    menu.deleteLater()
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_wet_canvas_exchanges_color_only_while_layer_is_wet() -> None:
     _app()
     from app.drawing import Stroke
@@ -154,6 +220,36 @@ def test_wet_canvas_export_uses_saved_layer_state(tmp_path: Path) -> None:
     pixel = np.asarray(Image.open(path).convert("RGBA"))[60, 80, :3]
     assert int(pixel[0]) > 40
     assert int(pixel[2]) > 20
+
+
+def test_wet_canvas_diffusion_failure_is_typed_and_never_claimed(monkeypatch) -> None:
+    _app()
+    import cv2
+    from app.drawing import Stroke
+
+    def fail_blur(*_args, **_kwargs):
+        raise RuntimeError("injected wet diffusion failure")
+
+    monkeypatch.setattr(cv2, "GaussianBlur", fail_blur)
+    _image, report = _render(
+        [
+            Stroke(
+                points=[(0.2, 0.5), (0.8, 0.5)],
+                color=(90, 130, 220),
+                width_px=18,
+            )
+        ],
+        {
+            "enabled": True,
+            "diffusion": 1.0,
+            "drying_seconds": 100,
+            "elapsed_seconds": 0,
+        },
+    )
+    assert report["diffusion_applied"] is False
+    assert report["diffusion_error"] == (
+        "RuntimeError: injected wet diffusion failure"
+    )
 
 
 def test_wet_canvas_actions_are_registered_and_edit_layer_state() -> None:

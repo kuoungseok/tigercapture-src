@@ -12,6 +12,7 @@ from app.effect_cards import (
 )
 from app.i18n import tr
 from app.media_asset_routing import (
+    motion_project_paths_from_mime as _shared_motion_project_paths_from_mime,
     performance_source_paths_from_mime as _shared_performance_source_paths_from_mime,
     timeline_media_paths_from_mime as _shared_timeline_media_paths_from_mime,
 )
@@ -1040,6 +1041,7 @@ def dragEnterEvent(self, event) -> None:
     if (
         self._ar_pbr_paths_from_mime(md)
         or self._mmd_paths_from_mime(md)
+        or _shared_motion_project_paths_from_mime(md)
         or _shared_performance_source_paths_from_mime(md)
         or _shared_timeline_media_paths_from_mime(md)
     ):
@@ -1296,6 +1298,11 @@ def dropEvent(self, event) -> None:
     mmd_paths = self._mmd_paths_from_mime(md)
     if mmd_paths:
         self.media_dropped.emit(self.track.id, mmd_paths[0])
+        event.acceptProposedAction()
+        return
+    motion_paths = _shared_motion_project_paths_from_mime(md)
+    if motion_paths:
+        self.media_dropped.emit(self.track.id, motion_paths[0])
         event.acceptProposedAction()
         return
     ar_paths = self._ar_pbr_paths_from_mime(md)

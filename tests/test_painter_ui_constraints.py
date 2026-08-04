@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 
 def test_constraint_capture_and_right_bottom_resolution() -> None:
     from app.painter_ui_constraints import (
@@ -125,3 +127,119 @@ def test_pivot_and_reanchored_resize_preserve_expected_anchor() -> None:
         height=100,
     )
     assert centered == QRectF(-40, -5, 200, 100)
+
+
+def test_custom_point_anchor_preserves_rect_and_tracks_parent_resize() -> None:
+    from app.painter_ui_constraints import (
+        capture_ui_constraints,
+        resolve_ui_constraints,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, _row = add_ui_object(
+        create_ui_document(400, 300),
+        kind="button",
+        x=100,
+        y=60,
+        width=80,
+        height=40,
+    )
+    authored = document["objects"][0]
+    authored["constraints"] = capture_ui_constraints(
+        authored,
+        {"x": 0.0, "y": 0.0, "width": 400.0, "height": 300.0},
+        {
+            "horizontal": "custom",
+            "vertical": "custom",
+            "anchor_min_x": 0.25,
+            "anchor_max_x": 0.25,
+            "anchor_min_y": 0.5,
+            "anchor_max_y": 0.5,
+            "pivot_x": 0.25,
+            "pivot_y": 0.75,
+        },
+    )
+    constraints = authored["constraints"]
+    assert constraints["anchor_offset_left"] == pytest.approx(20.0)
+    assert constraints["anchor_offset_right"] == pytest.approx(80.0)
+    assert constraints["anchor_offset_top"] == pytest.approx(-60.0)
+    assert constraints["anchor_offset_bottom"] == pytest.approx(40.0)
+    assert resolve_ui_constraints(document)[authored["id"]] == {
+        "x": 100.0,
+        "y": 60.0,
+        "width": 80.0,
+        "height": 40.0,
+    }
+
+    document["artboards"][0]["width"] = 800
+    document["artboards"][0]["height"] = 600
+    assert resolve_ui_constraints(document)[authored["id"]] == {
+        "x": 200.0,
+        "y": 210.0,
+        "width": 80.0,
+        "height": 40.0,
+    }
+
+
+def test_custom_stretched_anchor_preserves_margins_across_parent_resize() -> None:
+    from app.painter_ui_constraints import (
+        capture_ui_constraints,
+        resolve_ui_constraints,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, _row = add_ui_object(
+        create_ui_document(400, 300),
+        kind="frame",
+        x=100,
+        y=60,
+        width=200,
+        height=100,
+    )
+    authored = document["objects"][0]
+    authored["constraints"] = capture_ui_constraints(
+        authored,
+        {"x": 0.0, "y": 0.0, "width": 400.0, "height": 300.0},
+        {
+            "horizontal": "custom",
+            "vertical": "custom",
+            "anchor_min_x": 0.2,
+            "anchor_max_x": 0.8,
+            "anchor_min_y": 0.1,
+            "anchor_max_y": 0.9,
+        },
+    )
+    constraints = authored["constraints"]
+    assert constraints["anchor_offset_left"] == pytest.approx(20.0)
+    assert constraints["anchor_offset_right"] == pytest.approx(20.0)
+    assert constraints["anchor_offset_top"] == pytest.approx(30.0)
+    assert constraints["anchor_offset_bottom"] == pytest.approx(110.0)
+
+    document["artboards"][0]["width"] = 800
+    document["artboards"][0]["height"] = 600
+    assert resolve_ui_constraints(document)[authored["id"]] == {
+        "x": 180.0,
+        "y": 90.0,
+        "width": pytest.approx(440.0),
+        "height": pytest.approx(340.0),
+    }
+
+
+def test_custom_anchor_normalization_clamps_orders_and_collapses_noise() -> None:
+    from app.painter_ui_constraints import normalize_ui_constraints
+
+    constraints = normalize_ui_constraints(
+        {
+            "horizontal": "custom",
+            "vertical": "custom",
+            "anchor_min_x": 1.4,
+            "anchor_max_x": -0.2,
+            "anchor_min_y": 0.4,
+            "anchor_max_y": 0.4000005,
+        },
+        width=80,
+        height=40,
+    )
+    assert constraints["anchor_min_x"] == 0.0
+    assert constraints["anchor_max_x"] == 1.0
+    assert constraints["anchor_min_y"] == constraints["anchor_max_y"] == 0.4

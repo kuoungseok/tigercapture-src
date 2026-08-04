@@ -45,6 +45,7 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "metallic_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.5},
             "metallic_softness": {"type": "number", "minimum": 0.001, "maximum": 0.5},
             "delight_enabled": {"type": "boolean"},
+            "delight_apply_to_base_color": {"type": "boolean"},
             "delight_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "delight_radius_px": {"type": "number", "minimum": 1.0, "maximum": 256.0},
             "delight_contrast_preservation": {"type": "number", "minimum": 0.0, "maximum": 1.0},

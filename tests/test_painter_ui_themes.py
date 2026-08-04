@@ -54,13 +54,13 @@ def _themed_document():
 
 
 def test_theme_values_normalize_and_resolve_alias_chain() -> None:
-    from app.painter_ui_document import normalize_ui_document
+    from app.painter_ui_document import UI_DOCUMENT_VERSION, normalize_ui_document
     from app.painter_ui_themes import resolve_ui_theme_document
 
     document, base, alias, row = _themed_document()
     document["artboards"][0]["theme"] = "high contrast"
     normalized = normalize_ui_document(document)
-    assert normalized["version"] == 22
+    assert normalized["version"] == UI_DOCUMENT_VERSION
     assert normalized["artboards"][0]["theme"] == "high_contrast"
     assert normalized["tokens"][0]["theme_values"]["high_contrast"] == "#000000"
 

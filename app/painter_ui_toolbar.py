@@ -1,8 +1,8 @@
 """Compact floating toolbar for Painter's UI Design canvas."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, Signal
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -38,6 +38,7 @@ class PainterUIFloatingToolbar(QFrame):
     quick_actions_requested = Signal()
     navigator_requested = Signal()
     inspector_requested = Signal()
+    focus_mode_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -50,57 +51,76 @@ class PainterUIFloatingToolbar(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setSizeConstraint(QHBoxLayout.SizeConstraint.SetFixedSize)
-        layout.setContentsMargins(6, 5, 6, 5)
-        layout.setSpacing(2)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
 
         self.tool_buttons: dict[str, QPushButton | QToolButton] = {}
         self._tool_actions: dict[str, QAction] = {}
+        self._tool_icon_names: dict[str, str] = {}
         self._tool_group_for_kind: dict[str, QPushButton | QToolButton] = {}
+        self._tooltip_buttons: set[QPushButton | QToolButton] = set()
+        self._pending_tooltip_button: QPushButton | QToolButton | None = None
+        tooltip_parent = self.parentWidget() or self
+        self._fast_tooltip = QLabel("", tooltip_parent)
+        self._fast_tooltip.setObjectName("PainterUIFastToolTip")
+        self._fast_tooltip.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self._fast_tooltip.setWordWrap(False)
+        self._fast_tooltip.setStyleSheet(
+            "QLabel#PainterUIFastToolTip {"
+            "background-color: #111720;"
+            "color: #f4f7fb;"
+            "border: 1px solid #60748c;"
+            "border-radius: 5px;"
+            "padding: 5px 8px;"
+            "font-size: 11px;"
+            "font-weight: 500;"
+            "}"
+        )
+        self._fast_tooltip.hide()
+        self._fast_tooltip_timer = QTimer(self)
+        self._fast_tooltip_timer.setSingleShot(True)
+        # Native Qt tooltips wait for the platform hover delay. The compact
+        # icon-only toolbar needs a much faster response to remain legible.
+        self._fast_tooltip_timer.setInterval(90)
+        self._fast_tooltip_timer.timeout.connect(self._show_pending_tooltip)
 
-        select_button = self._tool_button(
-            "Select",
-            "cursor",
-            checked=True,
+        select_button = self._tool_group_button(
+            (
+                ("이동 (V)", "select", "cursor"),
+                ("손 도구 (H)", "pan", "hand"),
+                ("확대/축소 (K)", "scale", "scale"),
+            )
         )
-        select_button.clicked.connect(
-            lambda _checked=False: self.tool_requested.emit("select")
-        )
+        select_button.setChecked(True)
         layout.addWidget(select_button)
-        self.tool_buttons["select"] = select_button
-        self._tool_group_for_kind["select"] = select_button
+        for kind in ("select", "pan", "scale"):
+            self.tool_buttons[kind] = select_button
+            self._tool_group_for_kind[kind] = select_button
 
-        pan_button = self._tool_button("Pan / Hand (H)", "hand")
-        pan_button.clicked.connect(
-            lambda _checked=False: self._select_direct_tool("pan")
-        )
-        layout.addWidget(pan_button)
-        self.tool_buttons["pan"] = pan_button
-        self._tool_group_for_kind["pan"] = pan_button
-
-        scale_button = self._tool_button("Scale (K)", "scale")
-        scale_button.clicked.connect(
-            lambda _checked=False: self._select_direct_tool("scale")
-        )
-        layout.addWidget(scale_button)
-        self.tool_buttons["scale"] = scale_button
-        self._tool_group_for_kind["scale"] = scale_button
-
-        frame_button = self._tool_button("Frame", "ui-frame")
-        frame_button.clicked.connect(
-            lambda _checked=False: self.tool_requested.emit("frame")
+        frame_button = self._tool_group_button(
+            (
+                ("프레임 (F)", "frame", "ui-frame"),
+                ("섹션 (Shift+S)", "section", "rectangle"),
+                ("슬라이스 (S)", "slice", "crop"),
+            )
         )
         layout.addWidget(frame_button)
-        self.tool_buttons["frame"] = frame_button
-        self._tool_group_for_kind["frame"] = frame_button
+        for kind in ("frame", "section", "slice"):
+            self.tool_buttons[kind] = frame_button
+            self._tool_group_for_kind[kind] = frame_button
 
         shape_button = self._tool_group_button(
             (
-                ("Rectangle", "rectangle", "rectangle"),
-                ("Ellipse", "ellipse", "ellipse"),
-                ("Line", "line", "line"),
-                ("Polygon", "polygon", "polygon"),
-                ("Star", "star", "star"),
-                ("Arc", "arc", "arc"),
+                ("직사각형 (R)", "rectangle", "rectangle"),
+                ("선 (L)", "line", "line"),
+                ("화살표 (Shift+L)", "arrow", "line"),
+                ("타원 (O)", "ellipse", "ellipse"),
+                ("다각형", "polygon", "polygon"),
+                ("별", "star", "star"),
+                ("이미지/동영상… (Ctrl+Shift+K)", "image", "image"),
             )
         )
         layout.addWidget(shape_button)
@@ -108,41 +128,65 @@ class PainterUIFloatingToolbar(QFrame):
             "rectangle",
             "ellipse",
             "line",
+            "arrow",
             "polygon",
             "star",
-            "arc",
+            "image",
         ):
             self.tool_buttons[kind] = shape_button
             self._tool_group_for_kind[kind] = shape_button
 
-        vector_button = self._tool_button("Pen / Vector", "pen-nib")
-        vector_button.clicked.connect(
-            lambda _checked=False: self.tool_requested.emit("path")
-        )
-        layout.addWidget(vector_button)
-        self.tool_buttons["path"] = vector_button
-        self._tool_group_for_kind["path"] = vector_button
-
-        content_button = self._tool_group_button(
+        vector_button = self._tool_group_button(
             (
-                ("Text", "text", "caption"),
-                ("Image", "image", "image"),
-                ("Button", "button", "button"),
-                ("Progress", "progress", "progress"),
+                ("펜 (P)", "path", "pen-nib"),
+                ("연필 (Shift+P)", "pencil", "pencil"),
             )
         )
-        layout.addWidget(content_button)
-        for kind in ("text", "image", "button", "progress"):
-            self.tool_buttons[kind] = content_button
-            self._tool_group_for_kind[kind] = content_button
+        layout.addWidget(vector_button)
+        for kind in ("path", "pencil"):
+            self.tool_buttons[kind] = vector_button
+            self._tool_group_for_kind[kind] = vector_button
 
-        layout.addWidget(self._separator())
+        # Keep Figma's primary order (Move, Frame, Shape, Pen, Text,
+        # Comment, Actions) and make Text visually distinct from Comment.
+        text_button = self._tool_button("텍스트 (T)", "caption")
+        text_button.setIcon(QIcon())
+        text_button.setText("T")
+        text_button.setAccessibleName("텍스트 (T)")
+        text_button.setProperty("painterTextTool", True)
+        text_button.clicked.connect(
+            lambda _checked=False: self._select_direct_tool("text")
+        )
+        layout.addWidget(text_button)
+        self.tool_buttons["text"] = text_button
+        self._tool_group_for_kind["text"] = text_button
+        self._tool_icon_names["text"] = ""
+
+        self.comment_button = self._tool_button("댓글 (C)", "caption")
+        self.comment_button.clicked.connect(
+            lambda _checked=False: self._select_direct_tool("comment")
+        )
+        layout.addWidget(self.comment_button)
+        self.tool_buttons["comment"] = self.comment_button
+        self._tool_group_for_kind["comment"] = self.comment_button
+        self._tool_icon_names["comment"] = "caption"
+
+        self.resources_button = self._icon_button(
+            "Actions (Ctrl+/)", "spark"
+        )
+        self.resources_button.setAccessibleName("Actions (Ctrl+/)")
+        self.resources_button.clicked.connect(self.quick_actions_requested)
+        layout.addWidget(self.resources_button)
+
+        self.mode_separator = self._separator()
+        layout.addWidget(self.mode_separator)
         self.snap_button = self._icon_button(
             "Snap to grid",
             "grid",
             checkable=True,
         )
-        self.snap_button.setToolTip(
+        self._set_button_help(
+            self.snap_button,
             "Snap position and size to an 8 px grid; rotate to 15 degrees"
         )
         self.snap_button.toggled.connect(self.snap_changed)
@@ -158,8 +202,7 @@ class PainterUIFloatingToolbar(QFrame):
             app_icon("ruler", size=15, color="#E4E8EE")
         )
         self.guide_button.setIconSize(icon_size(15))
-        self.guide_button.setToolTip("Rulers and guides")
-        self.guide_button.setAccessibleName("Rulers and guides")
+        self._set_button_help(self.guide_button, "Rulers and guides")
         guide_menu = QMenu(self.guide_button)
         guide_menu.setObjectName("PainterUIGuideMenu")
         self.guide_visibility_action = guide_menu.addAction("Show guides")
@@ -214,7 +257,9 @@ class PainterUIFloatingToolbar(QFrame):
         )
         layout.addWidget(self.quick_actions_button)
 
-        layout.addWidget(self._separator())
+        self.panel_separator = self._separator()
+        self.panel_separator.hide()
+        layout.addWidget(self.panel_separator)
         self.navigator_button = self._icon_button(
             painter_text("Layers and assets"),
             "layers",
@@ -228,19 +273,31 @@ class PainterUIFloatingToolbar(QFrame):
         self.inspector_button.clicked.connect(self.inspector_requested)
         layout.addWidget(self.inspector_button)
 
-        layout.addWidget(self._separator())
+        self.focus_mode_button = self._icon_button(
+            painter_text("Focus canvas"),
+            "figma-full-mode",
+            checkable=True,
+        )
+        self.focus_mode_button.toggled.connect(self.focus_mode_changed)
+        layout.addWidget(self.focus_mode_button)
+
+        self.motion_separator = self._separator()
+        self.motion_separator.hide()
+        layout.addWidget(self.motion_separator)
         self.motion_actor_button = self._icon_button(
             "Motion Actor",
             "import",
         )
-        self.motion_actor_button.setToolTip(
+        self._set_button_help(
+            self.motion_actor_button,
             "Import and place a .tgmotion animation actor"
         )
         self.motion_actor_button.clicked.connect(self.motion_actor_requested)
         layout.addWidget(self.motion_actor_button)
 
         self.animate_button = self._icon_button("Animate", "motion")
-        self.animate_button.setToolTip(
+        self._set_button_help(
+            self.animate_button,
             "Open the selected UI object in Motion Designer"
         )
         self.animate_button.clicked.connect(self.animate_requested)
@@ -251,13 +308,30 @@ class PainterUIFloatingToolbar(QFrame):
             "play",
             checkable=True,
         )
-        self.motion_preview_button.setToolTip(
+        self._set_button_help(
+            self.motion_preview_button,
             "Play or stop the selected UI motion"
         )
         self.motion_preview_button.toggled.connect(
             self.motion_preview_changed
         )
         layout.addWidget(self.motion_preview_button)
+        # Figma's canvas toolbar keeps creation tools and the mode control in
+        # the island. View/navigation/motion commands remain available from
+        # their dedicated menus and panels instead of crowding this surface.
+        for button in (
+            self.snap_button,
+            self.guide_button,
+            self.zoom_button,
+            self.quick_actions_button,
+            self.navigator_button,
+            self.inspector_button,
+            self.motion_actor_button,
+            self.animate_button,
+            self.motion_preview_button,
+        ):
+            button.hide()
+        self.set_active_tool("select")
 
     def set_active_tool(self, tool: str) -> None:
         active = str(tool or "select")
@@ -267,20 +341,63 @@ class PainterUIFloatingToolbar(QFrame):
         )
         for button in set(self._tool_group_for_kind.values()):
             button.blockSignals(True)
-            button.setChecked(button is active_button)
+            is_active = button is active_button
+            button.setChecked(is_active)
+            button.setProperty("activeTool", is_active)
+            default_action = (
+                button.defaultAction()
+                if isinstance(button, QToolButton) else None
+            )
+            default_kind = (
+                str(default_action.data() or "")
+                if default_action is not None else ""
+            )
+            if not default_kind:
+                default_kind = next(
+                    (
+                        kind for kind, candidate
+                        in self._tool_group_for_kind.items()
+                        if candidate is button
+                        and kind in self._tool_icon_names
+                    ),
+                    "",
+                )
+            icon_name = self._tool_icon_names.get(default_kind)
+            if icon_name:
+                button.setIcon(
+                    app_icon(icon_name, size=15, color="#E4E8EE")
+                )
             button.blockSignals(False)
+            button.style().unpolish(button)
+            button.style().polish(button)
         action = self._tool_actions.get(active)
         if action is not None and isinstance(active_button, QToolButton):
             active_button.setDefaultAction(action)
             active_button.setCheckable(True)
             active_button.setChecked(True)
             active_button.setObjectName("PainterUIFloatingToolButton")
+            active_button.setProperty("activeTool", True)
+            icon_name = self._tool_icon_names.get(active)
+            if icon_name:
+                active_button.setIcon(
+                    app_icon(icon_name, size=15, color="#FFFFFF")
+                )
+            self._set_button_help(active_button, action.text())
+        else:
+            active_button.setProperty("activeTool", True)
+            icon_name = self._tool_icon_names.get(active)
+            if icon_name:
+                active_button.setIcon(
+                    app_icon(icon_name, size=15, color="#FFFFFF")
+                )
 
     def sync_density(self, available_width: int) -> None:
         width = max(0, int(available_width))
-        compact = width < 620
-        self.motion_actor_button.setVisible(not compact)
-        self.inspector_button.setVisible(not compact)
+        self.motion_actor_button.hide()
+        self.inspector_button.hide()
+        self.comment_button.setVisible(width >= 360)
+        self.focus_mode_button.setVisible(width >= 400)
+        self.mode_separator.setVisible(width >= 400)
         self.adjustSize()
 
     def set_zoom_percent(
@@ -291,10 +408,10 @@ class PainterUIFloatingToolbar(QFrame):
     ) -> None:
         self._zoom_percent = max(3.0, min(800.0, float(percent)))
         rounded = int(round(self._zoom_percent))
-        self.zoom_button.setToolTip(
-            f"{painter_text('Zoom and fit')} · {rounded}%"
+        self._set_button_help(
+            self.zoom_button,
+            f"{painter_text('Zoom and fit')} · {rounded}%",
         )
-        self.zoom_button.setAccessibleName(self.zoom_button.toolTip())
         self.zoom_popover.set_zoom_percent(self._zoom_percent)
         self.zoom_indicator.setText(f"{rounded}%")
         if transient and not self.zoom_popover.isVisible() and self.isVisible():
@@ -355,7 +472,70 @@ class PainterUIFloatingToolbar(QFrame):
     def hideEvent(self, event) -> None:
         self.zoom_popover.hide()
         self.zoom_indicator.hide()
+        self._hide_fast_tooltip()
         super().hideEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched in self._tooltip_buttons:
+            event_type = event.type()
+            if event_type == QEvent.Type.Enter:
+                self._pending_tooltip_button = watched
+                self._fast_tooltip_timer.start()
+            elif event_type in {
+                QEvent.Type.Leave,
+                QEvent.Type.Hide,
+                QEvent.Type.MouseButtonPress,
+            }:
+                if (
+                    watched is self._pending_tooltip_button
+                    or self._fast_tooltip.isVisible()
+                ):
+                    self._hide_fast_tooltip()
+            elif event_type == QEvent.Type.ToolTip:
+                # Keep the native delayed tooltip from appearing over the
+                # fast, consistently styled Painter tooltip.
+                return True
+        return super().eventFilter(watched, event)
+
+    def _set_button_help(
+        self,
+        button: QPushButton | QToolButton,
+        text: str,
+    ) -> None:
+        help_text = painter_text(str(text or "").strip())
+        button.setToolTip(help_text)
+        button.setAccessibleName(help_text)
+        button.setProperty("painter_ui_help_text", help_text)
+        if button not in self._tooltip_buttons:
+            self._tooltip_buttons.add(button)
+            button.installEventFilter(self)
+
+    def _show_pending_tooltip(self) -> None:
+        button = self._pending_tooltip_button
+        if button is None or not button.isVisible() or not self.isVisible():
+            return
+        text = str(button.property("painter_ui_help_text") or "").strip()
+        if not text:
+            return
+        parent = self._fast_tooltip.parentWidget()
+        if parent is None:
+            return
+        self._fast_tooltip.setText(text)
+        self._fast_tooltip.adjustSize()
+        anchor = button.mapTo(parent, QPoint(0, 0))
+        x = anchor.x() + (button.width() - self._fast_tooltip.width()) // 2
+        x = max(6, min(x, parent.width() - self._fast_tooltip.width() - 6))
+        y = anchor.y() - self._fast_tooltip.height() - 7
+        if y < 6:
+            y = anchor.y() + button.height() + 7
+        self._fast_tooltip.move(x, y)
+        self._fast_tooltip.show()
+        self._fast_tooltip.raise_()
+
+    def _hide_fast_tooltip(self) -> None:
+        self._fast_tooltip_timer.stop()
+        self._pending_tooltip_button = None
+        self._fast_tooltip.hide()
 
     @staticmethod
     def _separator() -> QFrame:
@@ -365,8 +545,8 @@ class PainterUIFloatingToolbar(QFrame):
         separator.setFixedSize(7, 22)
         return separator
 
-    @staticmethod
     def _icon_button(
+        self,
         label: str,
         icon_name: str,
         *,
@@ -377,21 +557,20 @@ class PainterUIFloatingToolbar(QFrame):
         button.setObjectName("PainterUIFloatingToolButton")
         button.setCheckable(checkable)
         button.setChecked(checked)
-        button.setToolTip(label)
-        button.setAccessibleName(label)
+        self._set_button_help(button, label)
         button.setIcon(app_icon(icon_name, size=15, color="#E4E8EE"))
         button.setIconSize(icon_size(15))
-        button.setFixedSize(30, 30)
+        button.setFixedSize(34, 32)
         return button
 
-    @staticmethod
     def _tool_button(
+        self,
         label: str,
         icon_name: str,
         *,
         checked: bool = False,
     ) -> QPushButton:
-        return PainterUIFloatingToolbar._icon_button(
+        return self._icon_button(
             label,
             icon_name,
             checkable=True,
@@ -406,7 +585,7 @@ class PainterUIFloatingToolbar(QFrame):
         button.setObjectName("PainterUIFloatingToolButton")
         button.setCheckable(True)
         button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
-        button.setFixedSize(38, 30)
+        button.setFixedSize(42, 32)
         button.setIconSize(icon_size(15))
         menu = QMenu(button)
         menu.setObjectName("PainterUIToolFlyout")
@@ -424,11 +603,28 @@ class PainterUIFloatingToolbar(QFrame):
             )
             menu.addAction(action)
             self._tool_actions[kind] = action
+            self._tool_icon_names[kind] = icon_name
         button.setMenu(menu)
+        menu.aboutToShow.connect(
+            lambda control=button: self._activate_group_menu(control)
+        )
         button.setDefaultAction(self._tool_actions[rows[0][1]])
+        button.setIcon(
+            app_icon(rows[0][2], size=15, color="#E4E8EE")
+        )
         button.setCheckable(True)
         button.setObjectName("PainterUIFloatingToolButton")
+        self._set_button_help(button, painter_text(rows[0][0]))
         return button
+
+    def _activate_group_menu(self, button: QToolButton) -> None:
+        """Treat opening a split-button arrow as selecting its shown tool."""
+        action = button.defaultAction()
+        kind = str(action.data() or "") if action is not None else ""
+        if not kind:
+            return
+        self.set_active_tool(kind)
+        self.tool_requested.emit(kind)
 
     def _select_group_tool(self, kind: str) -> None:
         self.set_active_tool(kind)

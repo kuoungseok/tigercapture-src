@@ -1,0 +1,578 @@
+{
+  "schema": "tigerstudio.painter.numeric-decision-ledger.v1",
+  "scope": "painting_only_ui_design_excluded",
+  "review_rule": "A contract is accepted only when row_count and rows_sha256 match the exact audited path/class/function/text inventory. New or changed rows return the whole contract to unresolved review.",
+  "allowed_basis": [
+    "external_standard",
+    "mathematical_or_format_invariant",
+    "explicit_scope_boundary",
+    "explicit_tiger_product_policy_no_external_parity_claim",
+    "operational_failure_or_fallback_contract"
+  ],
+  "contracts": {
+    "advanced_brush_product_integration_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 55,
+      "rows_sha256": "0a1959822d0a298d35b76dbb331e04b7097678009406e80836cfc78a8fb27ade",
+      "evidence": "The 55 exact rows define Tiger's deterministic advanced-dab product model: unit mask intersection with zero-strength neutral identity, replay-seeded noise/texture fields, scale-and-offset sampling over the ordered dab sequence, one-dimensional wet-edge pooling, normalized percentage inputs, and uint64 seed normalization. app.painter_brush_dynamics.dynamic_dabs calls advanced_dab_alphas, whose provenance-aware AST call graph reaches all four primitives only through app.painter_advanced_brush; unrelated imports, local shadows, arbitrary methods, comments, strings, and import-only references are rejected. DrawingCanvas._paint_stroke uses this path for live, committed, PNG, and video-QImage rendering. Tests prove disabled byte identity, zero-strength identity, corrupt/oversized seed replay, Protect Texture document-setting precedence including scale response, malformed nested setting normalization, actual rendered-pixel change, identical replay, Undo/Redo, and document payload restoration. Rendering leaves authored brush_dynamics unchanged; the same calculation-only workload planner exposes bounded-degrade diagnostics through Painter Action state. This is an explicit Tiger-authored product policy and makes no physical wet-media or Adobe/Corel brush-engine parity claim."
+    },
+    "advanced_brush_texture_sampling_control_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 1,
+      "rows_sha256": "5f009ca6f7493f3dc501194cf5058d82accacb0d1c1d00684566e14df0698bfd",
+      "evidence": "The single exact row selects interpolation only when the ordered dab field contains more than one sample. A one-sample field has no adjacent sample and would make modulo-based right-neighbour interpolation degenerate; the direct base sample is the exact structural result."
+    },
+    "output_dialog_enum_selection_structure": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 2,
+      "rows_sha256": "88b3f78c6d77f71d72068379f95f42dc9c7a67c5dd83e30a1316b0769fe35c66",
+      "evidence": "QComboBox.findData returns -1 when absent; index 0 is the dialog's explicit normalized fallback. This is selection routing, not a quality or parity claim."
+    },
+    "optional_overlay_parent_bounds_geometry": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 4,
+      "rows_sha256": "b5bea3cf1f07d3b1d77fa487245734945a3cb9bdb6d05f90b580c78aa71d9fbe",
+      "evidence": "The four rows are exact child-inside-parent coordinate clamps: 0 <= x <= parent width minus child width and the corresponding y relation."
+    },
+    "checkerboard_preview_tile_extent": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 1,
+      "rows_sha256": "b64284a37f17221a482f55cb89eac8b38a3fcc031fac4894670bb01d7dad1736",
+      "evidence": "Display-only transparency checkerboard cell size; it is never serialized into or composited with artwork. The 4 px floor and 24 px default are Tiger preview policy, not an external-quality claim."
+    },
+    "reference_preview_minimum_raster_extent": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 4,
+      "rows_sha256": "b2cf7564956057a65c2aa37157febdfae3e9146f5fcab92d90df60c9f5c77bda",
+      "evidence": "Reference-board overlay display raster bounds only. These values do not alter, export, or bake the source artwork unless a separate explicit bake command is invoked."
+    },
+    "color_wheel_raster_bounds_or_display_scale": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 7,
+      "rows_sha256": "b7910c9a1ef8b4bfc6d120b1fb663de19cdb3a3223f23d03ecd060df11e62b5d",
+      "evidence": "All seven rows bound dirty rectangles or display pen widths for the color-wheel widget. Color conversion and selected channel values are outside these rows and are audited separately."
+    },
+    "ui_layout_or_optional_overlay_policy_not_quality_claim": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 20,
+      "rows_sha256": "b97001282a330afd638dfeb13730ff8f2d7acda43f161dbbf326c75afbc0c960",
+      "evidence": "Exact frozen inventory of Tiger-authored widget layout and optional bubble/sticker placement policies. No row is used as a release-quality threshold or attributed to another painter."
+    },
+    "ui_layout_or_preview_only_policy_not_artwork_claim": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 23,
+      "rows_sha256": "df1e2476e43693dddb089cfcca001dcfd4b1de09d4fe8b86a17c7f926d40b9be",
+      "evidence": "Exact frozen inventory of Painting window fit, panel scroll/size, popup height/radius, palette-button raster size, preset-icon stroke width, and brush-preview-only raster parameters. Inspection removed color-input geometry, wet-canvas value mapping, enum selection, and the authored minimum-visible-alpha row from this boundary. None of these 23 rows writes document state or committed stroke pixels; UI Design mode remains outside this audit."
+    },
+    "color_input_widget_geometry_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "e1335cc9a7c477c1ea70e41440a48022cf06e397901af8c7038d00e7e6c0104c",
+      "evidence": "Exact frozen geometry rows for the Painter color-wheel triangle radius rule and Photoshop-style SV field QRectF bounds. tests/test_painter_color_input_geometry.py dispatches real floating-point QMouseEvent presses through the widgets immediately inside the wheel hue/white/black vertices and at its centroid, plus all four SV corners, an outside clamp point, and the hue strip; it also retains forward/inverse quantization checks at minimum and normal/resized extents. A forced logical-size subclass reaches the field's 8-DIP structural floor. Separate QT_SCALE_FACTOR=1 and =2 processes prove DPR changes while logical triangle/field geometry and an actual bottom-right SV event result remain identical. Qt documents QMouseEvent.position() as a floating local QPointF and its High DPI model states widget and event geometry use device-independent pixels. The wheel rule subtracts 24 times its authored scale; the field uses one-DIP top/left margins, a two-DIP vertical reserve, a 24-DIP horizontal reserve, and an 8-DIP floor. These are Tiger layout/input policies, not Adobe color-picker parity. Sources: https://doc.qt.io/qtforpython-6/PySide6/QtGui/QMouseEvent.html and https://doc.qt.io/qtforpython-6/overviews/qtdoc-highdpi.html."
+    },
+    "combo_semantic_fallback_index_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 1,
+      "rows_sha256": "73cdb2673babf318050d5611ce9f25e99339deb2724e5207f22fd2320eb757c3",
+      "evidence": "Exact numeric-control row for the shared Painter combo selector's invalid-index guard. Qt for Python QComboBox documents that findData returns -1 when item data is absent and that -1 means no current item. The helper never converts that sentinel into visual row zero: it searches the caller's named fallback data and raises if that semantic fallback is also absent. Source: https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QComboBox.html."
+    },
+    "combo_semantic_fallback_literal_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 1,
+      "rows_sha256": "2d4e928f82e1bdc4f36458ce60051087d5357d0a945fa2cfde449c9902d093c7",
+      "evidence": "Exact AST-only companion row for the nonnegative match test in select_combo_data. tests/test_painter_combo_selection.py reorders the unrelated first row ahead of the declared fallback, proves exact requested-data selection, proves missing requested data selects only the named fallback, and proves a missing fallback raises without selecting another row. The four Painting callers declare color, complementary, or normal explicitly for output-kind, palette-harmony, and layer-blend state. Qt QComboBox findData/currentIndex semantics are authoritative; the fallback meanings themselves are explicit Tiger product policy."
+    },
+    "wet_canvas_drying_serialized_and_ui_domain_literal_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 6,
+      "rows_sha256": "0593d299ff085013adc7494779ba73b9bef749046139a17b9aa545e6cb37ab9b",
+      "evidence": "Exact frozen inventory of the existing serialized Wet Canvas drying domain (1..86400 seconds), its complete UI domain (1..1440 minutes), the exact 60-seconds-per-minute conversion, and the explicit positive half-up rounding expression. tests/test_painter_wet_canvas.py exhaustively checks every integer serialized second, proves a maximum 59-second error caused only by the one-minute UI minimum, checks the 90-second half case, rejects bool/fractional/out-of-domain UI values, and verifies the live material menu exposes 1..1440 and commits 721 minutes as 43260 seconds. These are Tiger document/UI policy values and do not claim physical paint drying parity."
+    },
+    "output_file_or_archive_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 28,
+      "rows_sha256": "5705786753203984e591bc2af43e3ca6da2b30a339bd9e028911e39b93f7d6f5",
+      "evidence": "Frozen output contract covering positive dimensions/PPI, mm-to-inch conversion, nonnegative trim/safe geometry, ICC rendering-intent indices, Pillow encoder quality domains, and the separately derived visible-layer LSB budget. Sources: ICC.1:2022, Qt QColorSpace/QImage, Pillow image file formats, PNG 3; Tiger print presets remain declared product policy rather than industry-optimal defaults."
+    },
+    "raster_alpha_geometry_or_structural_domain": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 8,
+      "rows_sha256": "4387dd0ffe1ddfdc95c70beab3b2e5a8048754836cb30400912394fe0084f668",
+      "evidence": "Frozen raster contract: mask coordinates remain inside the image, alpha uses the 8-bit 0..255 domain, radius is nonnegative, and morphology is processed in bounded chunks. Pillow Image/Filter documents the raster/filter operators; chunk size and magic-select max-channel metric are explicit Tiger policies, not Adobe parity claims."
+    },
+    "painter_input_geometry_or_authored_model_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 20,
+      "rows_sha256": "f2b23cecd3fcd15425b0aabbe5f83b9703a3a59288c358946b00b253355a50a1",
+      "evidence": "Frozen geometry/input inventory covering endpoint-safe indexing, normalized reference sampling, declared perspective modes, measured percentile interpolation, Catmull-Rom sample policy, tablet-summary empty defaults, and Wet Canvas elapsed-time operations. The two former inline Wet Canvas drying-domain bounds were replaced with named constants and are frozen separately by wet_canvas_drying_serialized_and_ui_domain_literal_contract. The corrected Catmull-Rom path preserves every source control in order and distributes only the remaining caller budget across the complete path; tests cover 100-, 700-, and caller-expanded 2,300-point budgets. Qt QTabletEvent is authoritative for event channels; wet timing and sampling limits are Tiger-authored controls without physical-media parity claims."
+    },
+    "canvas_selection_mask_or_guide_geometry_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 55,
+      "rows_sha256": "f6623c383ca8b1145140fecc591e4e4fbdd90c577412df73d67d0d7533885cce",
+      "evidence": "Frozen canvas contract: coordinates are clamped to document/raster bounds, normalized object extents remain positive, crop rectangles remain nonempty, and perspective/symmetry/grid/straighten ranges are declared Tiger controls. Qt coordinate semantics and Pillow raster bounds are authoritative; guide positions, grid cadence, and +/-45 degree straighten range are product policy, not competitor parity."
+    },
+    "canvas_input_raster_bounds_or_layer_percent_domain": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 10,
+      "rows_sha256": "9750b590d0bcca56a47f1c80679bec75abc26587ca12d9be2ebbebb71ab38925",
+      "evidence": "Frozen event/display contract: tablet and mouse sample indices stay inside the QImage, drag corners are ordered, layer-view percentages use 0..100, and transient overlay width/alpha are Tiger display policy. This does not certify physical tablet behavior."
+    },
+    "qt_argb32_windows_alpha_byte_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 1,
+      "rows_sha256": "e8656ac2e2e0d9e985b18d70af90e3fced46230af9ce2f508df4bf2a73c6425c",
+      "evidence": "The one exact row inspects every fourth byte at offset three after conversion to QImage Format_ARGB32. Qt defines Format_ARGB32 as 0xAARRGGBB; on Tiger's supported little-endian Windows runtime its byte order places alpha at offset three. A direct regression proves hidden RGB with alpha zero is empty and alpha one is nonempty. Reference: https://doc.qt.io/qt-6/qimage.html#Format-enum. This is explicitly Windows-scoped and makes no cross-endian portability claim."
+    },
+    "raster_alpha_color_or_selection_domain": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 19,
+      "rows_sha256": "bcb7dbd64a357266e8a52c6527ca6bec0c8b1e1947422eef073dee1b2d03c42f",
+      "evidence": "Frozen QColor/QImage and document-opacity mapping inventory after removing the authored nonzero pen-opacity floor into its own pending contract. 8-bit channels stay in 0..255, document/layer opacity in 0..100, and preview icon widths/colors are explicitly non-artwork."
+    },
+    "explicit_color_input_view_or_tool_product_domain": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 16,
+      "rows_sha256": "dd1a13468beeb35ab32d13cbd2280bbdfdbcbd5f555edb166472b6ce467395d0",
+      "evidence": "Frozen explicit color-tool and view-control inventory. HSV percentage-to-8-bit conversion follows Qt QColor channel domains; pressure calibration is ordered in normalized 0..1 space. Palette layout, power-window feather, zoom, pattern spacing, and value floors are declared Tiger tool policies without perceptual-uniformity or competitor-parity claims."
+    },
+    "optional_overlay_geometry_or_bounds_policy": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 32,
+      "rows_sha256": "bb8aa4c8a049baf5abc868a5b71fc315c35df64c6318073dda7eca28de13b9dd",
+      "evidence": "Frozen bubble/sticker/caption geometry and serialization defaults. Positive normalized extents and in-frame placement are document safety rules; font, tail, padding, duplicate offset, and default sizes are Tiger-authored appearance policy with no Photoshop or illustration-package parity claim."
+    },
+    "authored_optional_3d_pbr_material_preview_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 27,
+      "rows_sha256": "7d4bf68ae2cba67dec29448585b3a2140ed81ef968b5d82a55577c62380eb650",
+      "evidence": "Frozen optional blockout/PBR/wet-preview interaction inventory. Bounds, nonzero vector denominators, normalized hue/SV picking, bounded preview raster size, and camera controls prevent invalid preview state. Lighting angles, preview size, and gizmo scale are Tiger policies; the preview does not claim a calibrated physical renderer. The former duplicated Wet Canvas document-state ceiling was removed from this preview contract: the setter now delegates to normalize_wet_canvas_settings and the shared drying domain is frozen by wet_canvas_drying_serialized_and_ui_domain_literal_contract."
+    },
+    "authored_optional_preview_model_not_physical_claim": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 4,
+      "rows_sha256": "dbd0bdaf49f3e59c9fce7ab6292ca5e4996ecd9aeccddc2c0e8c5bbcff2d3b24",
+      "evidence": "Three legacy display color-variation factors and one blockout camera zoom clamp. They are explicitly non-colorimetric/non-physical preview policies and are not accepted as artwork-quality evidence."
+    },
+    "authored_blockout_preview_model_not_physical_claim": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 29,
+      "rows_sha256": "372b2dd4c4de6c2b807f27877b9d0c11e864643afde1de20ab1728429cb420b0",
+      "evidence": "Frozen 3D blockout helper projection inventory. Perspective projection, positive scale/distance, depth normalization, stable IDs, and raster bounds are sufficient for the authoring aid; opacity, FOV, grid, shadow, and near/far defaults are Tiger preview choices and are not physical-camera or renderer claims."
+    },
+    "authored_diagnostic_study_planner_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 21,
+      "rows_sha256": "c1ca65a74c1f669e1030dc6a7b61918faacabd218d1b08c94ae25ad5c47af5a8",
+      "evidence": "Frozen AI reference-study diagnostic inventory. IoU/F1 denominators and normalized boxes are mathematical; analysis resolution, percentiles, clustering, pressure pattern, and stroke budgets are Tiger diagnostic sampling policy. These metrics rank a fixed internal corpus and cannot certify artistic similarity or product readiness."
+    },
+    "adjustment_parameter_or_numeric_domain_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 17,
+      "rows_sha256": "73a0a662ba0daa047d6505e91d7d024d0cf201ff7056c5d94e1503f4d2683552",
+      "evidence": "Adobe Levels documents black/white input mapping to 0..255 output and a gamma midtone control; Adobe Hue/Saturation documents hue +/-180 and saturation/lightness +/-100. ASE RGB is normalized to 8-bit. Tiger blur/sharpen radius, amount, and gamma bounds are explicit product capacity policy and do not claim Photoshop pixel parity."
+    },
+    "color_standard_or_authored_palette_domain_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 25,
+      "rows_sha256": "ebe20778af16cc48ca0aff113d9ad52f114cc5bbeef80d1b1b68fd3e0fd7d922",
+      "evidence": "W3C CSS Color 4 supplies the Oklab/OkLCh conversion model and normalized lightness/chroma semantics; Qt QColor supplies HSV channel domains. Companion saturation floors, shade/tint chroma and lightness weights, daub phase, marker layout, and brush-preset defaults/ranges are frozen Tiger-authored policies, not perceptual-optimality or competitor-parity claims."
+    },
+    "action_schema_domain_or_authored_action_resource_contract": {
+      "resolution": "pending",
+      "evidence_required": "Remove fabricated time/size/pressure values, prove missing input fails structurally, then freeze action-schema domains against persistence and Undo contracts."
+    },
+    "authored_bristle_stylization_contract": {
+      "resolution": "pending",
+      "evidence_required": "Qt tablet channel contract plus deterministic whole-polyline, pressure/tilt response, live/commit/export parity, and reference-corpus measurements. No Adobe/Corel parity claim."
+    },
+    "authored_brush_dynamics_model_and_workload_contract": {
+      "resolution": "pending",
+      "evidence_required": "Deterministic spacing/scatter/rotation/pressure metamorphic tests, disabled identity, bounded workload telemetry, and live/commit/export parity."
+    },
+    "authored_legacy_brush_renderer_or_shared_stroke_contract": {
+      "resolution": "pending",
+      "evidence_required": "Inventory every legacy constant, remove fabricated pressure/size defaults, and pass fixed-seed live/commit/export/replay byte-parity tests before approval."
+    },
+    "authored_stylized_material_model_contract": {
+      "resolution": "pending",
+      "evidence_required": "Krita/Corel/Adobe documented feature semantics, explicit non-physical Tiger model declaration, deterministic fallback blur, disabled identity, and material live/commit/export parity."
+    },
+    "canvas_view_or_document_product_domain": {
+      "resolution": "pending",
+      "evidence_required": "Remove Full-HD substitution from invalid/missing document paths; separate visible New Canvas preset policy from document truth; validate resize and zoom failures."
+    },
+    "output_document_or_structural_state_contract": {
+      "resolution": "pending",
+      "evidence_required": "Remove export-size fallback and prove remaining output-size rows cannot fabricate document state."
+    },
+    "output_guide_noninverting_geometry_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 6,
+      "rows_sha256": "a37aec592ea18a1bc5fffe3b018a764f78c25c9658d6efb877e7a3602ca5cd61",
+      "evidence": "Exact numeric-control inventory for nonnegative trim extents, per-axis half-trim safe-margin caps, and nonnegative safe extents in the shared output_guide_geometry helper. The helper consumes normalize_output_settings rather than duplicating width/height/bleed/safe domains. tests/test_painter_output_guides.py proves A4+3 mm bleed+5 mm safe coordinates from the same full physical extents used by output settings, and proves a 100 mm safe margin on a 10x8 mm trim collapses at the center without negative/inverted QRectF dimensions. These are display-safety and unit-consistency rules, not print-quality or printer-acceptance claims."
+    },
+    "output_guide_geometry_literal_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 6,
+      "rows_sha256": "a747611ae693d951db6ee7935c1a827bdc97d26d6e6cfa908948742159a67185",
+      "evidence": "Exact AST-only companion inventory for the include_bleed=false zero inset, two-sided bleed expansion, tuple x/y indexing, and positive-safe visibility. The tests verify both axes independently, prove trim-only A4 uses the entire 2480x3508 raster and approximately 300 PPI while its configured 3 mm bleed is ignored by guide and physical-size fallback calculations, and prove screen mode returns no print guide. Multiplication by two follows the documented contract that bleed/safe margins apply symmetrically on both opposing sides; it does not certify any default millimetre value as an industry optimum."
+    },
+    "history_and_reorder_index_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 2,
+      "rows_sha256": "9e80012307c5e2c6409830e274acd299de230eb87e115ec66295024936c5a4aa",
+      "evidence": "The two exact rows select the current History list row after rebuilding one base item, all applied undo labels, and all redo labels. tests/test_painter_stroke_latency_guards.py::test_malformed_stroke_history_indices_are_rejected_without_mutation verifies an empty history selects base row 0 and two applied labels plus one redo item select row 2 without selecting a future redo command. This is a list-index structural invariant, not an authored quality or capacity threshold."
+    },
+    "history_and_reorder_literal_boundary_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 6,
+      "rows_sha256": "b48821403e9b75808e69515cd25f76c5c06d0080d1e024cd9251a6fb42edb420",
+      "evidence": "The six exact AST-only literal rows implement strict integer defaults and current-list bounds for stroke-add undo/redo, stroke-remove undo/redo, path reorder, and History row selection. Negative, fractional, empty-list, and past-end stroke indices raise before mutation; negative, fractional, missing, and past-end path targets return false before Undo state or order changes. Focused tests preserve exact stroke/path order for every rejected case and still prove a valid reorder succeeds."
+    },
+    "render_resource_or_normalized_graphics_domain_contract": {
+      "resolution": "pending",
+      "evidence_required": "Actual OpenGL context-churn count, context-loss recovery, bounded queues/errors/caches, and corrected-source repeated two-hour soak evidence."
+    },
+    "shared_brush_material_or_grid_contract": {
+      "resolution": "pending",
+      "evidence_required": "Align UI/action/persistence/export domains, remove implicit material/pressure fabrication, and pass preset/grid/PBR-source round trips."
+    },
+    "explicit_normalized_or_signed_unit_channel_domain": {
+      "resolution": "pending",
+      "evidence_required": "Review the frozen row inventory to distinguish genuine normalized sensor/color/opacity channels from clamps that hide invalid required input."
+    },
+    "qt_normalized_color_or_opacity_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 3,
+      "rows_sha256": "9bae285bc1a2f59b9fd1147ff87b3629e05355cffc1edf1ab63aab93b836aede",
+      "evidence": "Exact inventory contains only one QColor.setAlphaF call, one QColor.fromRgbF call, and one QPainter.setOpacity call whose arguments visibly clamp to 0.0..1.0. Qt documents floating QColor components and setAlphaF in 0.0..1.0 (https://doc.qt.io/qt-6/qcolor.html) and QPainter opacity in 0.0..1.0 (https://doc.qt.io/qt-6.8/qpainter.html). This evidence is explicitly not inherited by the remaining 141 sensor, brush-model, geometry, or OpenGL rows."
+    },
+    "icc_profile_header_field_boundary_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 7,
+      "rows_sha256": "1cf8ecad007e17a4dd22a61125f3eb8521b87c1d9ada1c857acfdc14ba36b568",
+      "evidence": "All seven exact rows are payload-length guards for ICC.1:2022 Table 17 fields: fixed 128-byte header, profile size bytes 0..3, version 8..11, device class 12..15, data colour space 16..19, PCS 20..23, and acsp signature 36..39. Official specification: https://www.color.org/specifications/ICC.1-2022-05.pdf. Rendering-intent policy and LittleCMS behavior are excluded."
+    },
+    "product_readiness_flat_export_matrix_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 4,
+      "rows_sha256": "99f13d43962a264a815067f71c6eb14d8c39fe743b35ccd0e33332005d40f46b",
+      "evidence": "The four exact readiness-matrix rows mirror Tiger's tested flat-export scope: PNG/TIFF expose 8/16-bit paths, JPEG/WebP expose 8-bit paths, and alpha/profile capabilities match the implemented preflight and round-trip tests. This is a Tiger support matrix, not the full capability of those formats or external products. Current RED TIFF ICC field-type and uint8-array conversion defects still block reapproval; listing a supported path cannot waive a failing conformance test."
+    },
+    "product_reapproval_aggregation_structure_contract": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 8,
+      "rows_sha256": "0d3daea92018ac343539d83632c5b8c57ab5f72eec018b8442e6421408a8e30a",
+      "evidence": "The eight exact rows are aggregation integrity gates: repository-root resolution, impossible-byte-count sentinels, exact inventory counts, zero failed/unreviewed/blocking findings, and the declared four-artifact external interoperability corpus. Reapproval tests cover missing evidence, source fingerprint changes, stale independent review, typed report-load failures, and the four-artifact external contract. These are fail-closed aggregation rules, not quality scores or proof that the underlying claims passed."
+    },
+    "psd_header_signature_or_version_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 2,
+      "rows_sha256": "db399ff00c1232eaf3ccd82a10e884632f9c6230a30813f6e59d3d5b53910bfb",
+      "evidence": "The two exact AST-only rows validate the Adobe Photoshop File Header Section signature '8BPS' and versions 1 (PSD) or 2 (PSB): https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/. This contract does not certify channels, dimensions, bit depth, color mode, layers, or composite decoding."
+    },
+    "psd_header_length_and_field_extent_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 7,
+      "rows_sha256": "b5171a611e3c5573f762863eeec9776d59c4dc6fed47e28ad5402825bfae05f1",
+      "evidence": "The seven exact rows enforce sufficient payload length for Adobe's 26-byte PSD/PSB File Header and its signature/version/channels/height/width/depth/color-mode field extents: https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/. Field value ranges, layer/composite data, and decoder success are excluded."
+    },
+    "png_chunk_structure_and_crc_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 10,
+      "rows_sha256": "400f4895a96cfbcc51cea4437b3319f5d4ff4deb916b7131a4c5f800ea37f4cb",
+      "evidence": "The ten exact AST-only sites in _png_chunk/_png_integrity implement the W3C PNG signature and chunk layout: 4-byte length, 4-byte type, payload, 4-byte CRC over type+data, IHDR first, and IEND final with no trailing data. Official specification: https://www.w3.org/TR/png-3/. Pixel encoding, compression level, profiles, and pHYs policy are excluded."
+    },
+    "psd_premultiplied_8bit_comparison_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 6,
+      "rows_sha256": "b86e8b1fe47fcd22d24dc431696a11233f639fc811a9ad46ce8e5c769c3d2fb4",
+      "evidence": "The six exact rows convert expected and PSD-decoded straight-alpha RGB to 8-bit premultiplied visible color using nearest-integer (channel*alpha)/255, implemented as (product+127)//255. This prevents undefined hidden RGB at alpha zero from affecting the comparison while retaining alpha itself. W3C Compositing defines premultiplied color as color multiplied by alpha; the integer rounding is a mathematical representation choice. Reference: https://www.w3.org/TR/compositing-1/. The separately measured per-visible-layer tolerance, PSD algorithm parity, decoder correctness, and perceptual equivalence are excluded."
+    },
+    "png16_ihdr_and_physical_pixel_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 4,
+      "rows_sha256": "a84b9d6268e5fab52d3c08ae098df4e449c5b25cec8677f7197405119bbfee5d",
+      "evidence": "The four exact AST-only rows in _write_png16/_write_png16_gray encode W3C PNG 3 IHDR values for 16-bit RGBA color type 6 or 16-bit RGB color type 2 with compression/filter/interlace methods 0, and pHYs with equal pixels-per-unit axes plus unit specifier 1 (metre). Official specification: https://www.w3.org/TR/png-3/. The zlib level 6 rows are deliberately excluded as implementation policy; PPI selection, ICC payload validity, and image-quality claims are also excluded."
+    },
+    "png16_zlib_encoding_policy_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "e5a49924fc966fe06477621102f62a68fea6e8726c1ae78a8e74b47365a230c6",
+      "evidence": "The two exact PNG16 writer rows choose zlib compression level 6 as a Tiger deterministic encoding policy. Python's zlib API defines the accepted compression-level domain, while W3C PNG requires a zlib datastream but does not mandate this level. Existing PNG16 round-trip and integrity tests prove decodability; this contract makes no smallest-file, fastest-encode, perceptual-quality, or external-product-parity claim. References: https://docs.python.org/3/library/zlib.html and https://www.w3.org/TR/png-3/."
+    },
+    "flat_image_bit_depth_metadata_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 3,
+      "rows_sha256": "3d857fc0246bfa5c041c7193224c8ff8d57912d71cff1eeed0079adea3586cfa",
+      "evidence": "Three exact AST-only inspect_flat_image rows read format-defined bit-depth metadata: PNG's 13-byte IHDR begins after the 8-byte signature plus length/type fields, placing its bit-depth byte at file offset 24, and TIFF tag 258 is BitsPerSample. Official specifications: https://www.w3.org/TR/png-3/ and https://printtechnologies.org/standards/files/tiff-v6.pdf. Decoder success, fallback bit-depth inference, and precision claims are excluded."
+    },
+    "flat_export_8_16_bit_product_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 8,
+      "rows_sha256": "a61173189fd7753a1cdd37defefd1a93b1e9b2a43d257f6d4b691250a8c35467",
+      "evidence": "The eight exact rows declare Tiger's supported flat-export precision choices: 8-bit is the default, 16-bit output is enabled only for PNG/TIFF, the selected precision controls the writer branch and source-precision report, and the height-map writer reports its fixed 16-bit output. PNG and TIFF standards permit the represented depths, while round-trip tests prove Tiger's implemented paths. This is a deliberately narrower Tiger product contract, not a claim that the formats or competing products support only these choices. Default quality, PPI, rendering intent, input-array dtype semantics, decoder fallback inference, and perceptual quality are excluded."
+    },
+    "flat_writer_array_shape_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 4,
+      "rows_sha256": "f821fe9104c00bb1c6f5f1938645cb434c27860de05c06cfb8ed43cc2e7cdd33",
+      "evidence": "The four exact rows contain array-shape operations only: RGBA writer height and width come from the first two array axes, and grayscale writer samples are repeated three times into a new channel axis to form RGB pixels. These are structural NumPy invariants consumed by the already separately audited PNG/TIFF writers. Input validation, channel values, ICC, compression, file packing, decoder success, and quality claims are excluded."
+    },
+    "exact_international_inch_conversion_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 1,
+      "rows_sha256": "f77e9790bd6d2990c9d02982e45db8104a6713eb26c7ad1cc984af9e913230e4",
+      "evidence": "The single exact MM_PER_INCH = 25.4 row follows NIST's international-inch definition, exactly 25.4 millimetres: https://www.nist.gov/pml/owm/si-units-length. Print preset sizes, PPI defaults, bleed, rounding, and quality policy are excluded."
+    },
+    "external_evidence_hash_streaming_policy_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 1,
+      "rows_sha256": "be63eca681dd89f4bd9b7be5863910568c3276c2cdd0932784e983c0da40cd3e",
+      "evidence": "The one exact row reads external-evidence artifacts in 1 MiB chunks while incrementally computing SHA-256. Chunk boundaries do not alter the SHA-256 digest; 1 MiB is Tiger's bounded I/O policy and is not a throughput, memory-optimality, or file-capacity claim. External report validation tests cover valid hashes and tampering."
+    },
+    "icc_v2_v4_profile_version_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 2,
+      "rows_sha256": "488bf1d794124c8910c85d6f5f2b064c3f584b62209d371d9e6c8e27d37edd31",
+      "evidence": "The two exact inspect_icc_profile rows distinguish supported ICC profile major versions 2 and 4 and enforce version 4 when require_v4 is requested. ICC documents current v4 and continued v2 support: https://www.color.org/abouticc.xalter and https://www.color.org/icc_specs2.xalter. Rendering-intent defaults, CMM behavior, and product profile policy are excluded."
+    },
+    "relative_colorimetric_default_product_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 3,
+      "rows_sha256": "9f0b3cf2a6fbdc42c7d818a664283bdebb994d8fbc73b1e6bad8189e81fe8ca3",
+      "evidence": "The three exact defaults choose ICC rendering intent index 1 (media-relative colorimetric) for Tiger profile conversion and both soft-proof transform legs. ICC.1:2022 defines the intent index meaning; it does not mandate this as universally optimal. Existing transform and soft-proof tests prove the selected path and alpha preservation. This approval is only Tiger's overridable default policy and makes no CMM parity, gamut fidelity, print-match, or perceptual-quality claim. Official specification: https://www.color.org/specifications/ICC.1-2022-05.pdf."
+    },
+    "runtime_measurement_statistics_contract": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 13,
+      "rows_sha256": "e8c8ee6f1eb6c7ae22305151ef6b9af0ef2f40b8b7f3de61fe22cbff3344ee50",
+      "evidence": "The 13 exact rows report observations only: linear-interpolated percentiles, ordinary least-squares slope converted from seconds to hours, zero slope for a zero time denominator, first/last/delta/duration selection, and p50/p95/p99 fields. Runtime-metrics tests verify the formulas. Percentile selection is Tiger telemetry policy and none of these values is an acceptance threshold, latency promise, or leak-free decision."
+    },
+    "repeated_soak_baseline_structure_contract": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 3,
+      "rows_sha256": "b62fe47abb1444f56013aea9d483c939c712e9d49d3a13875ae35187f88d7900",
+      "evidence": "The three exact rows encode baseline aggregation structure, not stability limits: an empty distribution has count zero, all admitted reports must share the declared cyclic workload of 120 operations and 100 strokes, and resource keys are read from the first report only after the separate minimum-three-reports guard. Tests reject fewer than three, incomplete, schema-mismatched, and workload-mismatched reports. The output explicitly remains an observed baseline with no release threshold or leak-free claim."
+    },
+    "tspaint_v1_v2_v3_migration_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 3,
+      "rows_sha256": "0b0833563dda9e34cbea14bd1ae2a502155f335cde69717d6154c80f9f19caa2",
+      "evidence": "The three exact module-level rows declare Tiger's current .tspaint v3 schema and its v1/v2 legacy schema numbers. docs/SPEC_PAINTER_DOCUMENT_FORMAT.md declares implemented v3 with v1/v2 migration, while test_painter_document_io proves v3 save metadata and loss-preserving v1/v2 migration. This is an internal Tiger compatibility contract, not an external file-format standard. Hash digest sizes, archive capacities, JSON indentation, and asset-index policy are excluded."
+    },
+    "tspaint_asset_uri_prefix_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 1,
+      "rows_sha256": "c3316d8ce53ff6c2fead61b73e453ddd2b251099f00c1a9898413d8aa2313590",
+      "evidence": "The one exact row removes the eight-character literal prefix 'asset://' after the same function has confirmed startswith('asset://'), then resolves the remaining archive-entry key. This is a string-length invariant of Tiger's internal URI scheme and is covered by v1/v2/v3 embedded-asset round-trip tests. Archive security, path traversal, missing-asset behavior, extraction capacity, and external URI standards are excluded."
+    },
+    "three_run_soak_retention_review_contract": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 10,
+      "rows_sha256": "d4707f0974a4d34f733d91f327e73237c40e56d447b65fe0566a84bc22695d84",
+      "evidence": "The ten exact rows implement Tiger's explicitly scoped repeated-soak review: require three distinct accepted runs, divide each time axis into four equal windows, analyze the late half, and mark unresolved positive retention only when the late-half slope is positive and the last three quarter medians strictly increase. Tests cover insufficient/distinct runs, reported distributions, stable cyclic retention, and contradictory late growth. Three runs and quarter windows are authored evidence policy, not statistical universality; no byte magnitude, leak-free, or universal-performance threshold is claimed."
+    },
+    "uint16_channel_conversion_and_shape_contract": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 13,
+      "rows_sha256": "ece3a0d3893c1977a47158c75c6ff9d618b9bc293428d361ed40b874bfcc0d2f",
+      "evidence": "The 13 exact rows cover explicit channel-domain and array-shape invariants: PIL and uint8 RGBA samples expand to the full uint16 domain by multiplication by 257; uint16 samples are preserved; normalized floating samples clamp to [0,1], scale by 65535, and round by 0.5; all other integer dtypes are rejected instead of guessed; RGB inputs receive an opaque 65535 alpha channel on axis 2; grayscale writers require a two-dimensional normalized-float map. tests/test_painter_file_exchange.py proves exact 0/1/254/255 mapping, uint16 preservation, rejection of signed/uint32/bool inputs, and high-precision output. Decoder success, file-format packing, and perceptual quality are excluded."
+    },
+    "windows_process_resource_api_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 3,
+      "rows_sha256": "65e7b056bba13d1e71c64824c1447109301550b151ffd41671cb447599d094f3",
+      "evidence": "The three exact Windows telemetry rows call GetGuiResources with uiFlags 0 for GDI objects and 1 for USER objects and report error code zero only when the separately checked memory and handle calls succeeded. Microsoft documents the GetGuiResources selector values. Official API reference: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguiresources. This contract does not define resource limits or prove leak freedom."
+    },
+    "tiff_header_and_ifd_structure_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 4,
+      "rows_sha256": "749e4b2c433039663167eccc861228400fafdd38806261ffaac76f5cd4e9d4aa",
+      "evidence": "The four exact AST-only sites in _tiff_integrity implement TIFF Revision 6.0 Section 2 structure: an 8-byte header, byte-order-dependent 42 identifier, first-IFD offset after the header, then a 2-byte entry count, 12 bytes per directory entry, and the 4-byte next-IFD offset. Official specification: https://printtechnologies.org/standards/files/tiff-v6.pdf. Tag semantics, strip/tile data, compression, ICC, and decoder success are excluded."
+    },
+    "tiff_writer_ifd_and_baseline_tag_contract": {
+      "resolution": "approved",
+      "decision_basis": "external_standard",
+      "row_count": 28,
+      "rows_sha256": "69ac498c066172224bdcee03422b96a70b24d074785fb53a46758ad53f54b058",
+      "evidence": "The 28 exact AST-only rows in _write_tiff16/_write_tiff16_gray cover TIFF Revision 6.0 Section 2 IFD layout, word alignment, SHORT/LONG/RATIONAL packing, little-endian header, baseline image tags, and ICC profile tag 34675 encoded with required TIFF field type 7 UNDEFINED. Official specifications: https://printtechnologies.org/standards/files/tiff-v6.pdf and ICC.1 legacy profile embedding definition https://www.color.org/ICC34.pdf. Binary IFD regression tests prove both RGBA and gray writers emit field type 7. PPI product choice, source precision creation, decoder success, and perceptual quality are excluded."
+    },
+    "explicit_8bit_channel_domain": {
+      "resolution": "approved",
+      "decision_basis": "mathematical_or_format_invariant",
+      "row_count": 56,
+      "rows_sha256": "51404a864346e378fab47b021564d8c0c47b4502e384ef54daf74437cc3f7936",
+      "evidence": "Exact review of all 56 rows found only 0..255 RGB/RGBA/Alpha8/tone-curve channels, per-channel color-selection tolerance, or conversion of those channels to normalized OpenGL/ASE values by division by 255. Qt documents alpha 0 as fully transparent and 255 as fully opaque. Five former artwork/brush-preview minimum-one clamps now retain alpha 0; additional bristle stipple, knife/detail, and highlight floors found by the AST audit were corrected in the same regression. tests/test_painter_brush_engine_v2.py proves zero-alpha tip and bristle artwork leaves every target pixel transparent. The remaining panel-icon-only floor is separated into authored_minimum_visible_alpha_contract."
+    },
+    "authored_minimum_visible_alpha_contract": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 1,
+      "rows_sha256": "bea284515c9340f4e507420e0f62af888ea3c6b26f7ea5cdb72eab05fb644b2c",
+      "evidence": "The sole remaining minimum-alpha row is confined to a 58x30 Layers/Channels panel icon. It does not enter canvas rendering, document serialization, export, or committed Stroke.opacity. tests/test_painter_brush_engine_v2.py::test_panel_icon_may_visualize_zero_alpha_stroke_without_mutating_artwork proves the icon remains distinguishable while the source stroke stays opacity 0; the separate artwork regression proves its rendered pixels remain fully transparent. This is an explicit non-artwork visibility policy, not a claim about paint output."
+    },
+    "structural_nonzero_size_count_or_denominator": {
+      "resolution": "pending",
+      "evidence_required": "Separate mathematical denominator/raster-allocation guards from required document dimensions and capacities that must fail instead of clamping."
+    },
+    "structural_minimum_points_or_channels": {
+      "resolution": "pending",
+      "evidence_required": "Verify each point/channel cardinality from the consuming algorithm or format; syntax-only len comparisons are not evidence."
+    },
+    "zero_sign_or_nonempty_routing": {
+      "resolution": "pending",
+      "evidence_required": "Verify every sign/nonempty branch from an explicit state, geometry, or failure contract; do not infer correctness from comparison-to-zero syntax."
+    },
+    "computational_degeneracy_epsilon": {
+      "resolution": "pending",
+      "evidence_required": "Verify scale-relative numerical tolerances and distinguish them from authored perceptual/quality thresholds before approval."
+    },
+    "capacity_caller_configured_palette_extraction_capacity": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "b549b1494f9499b60e054221c1220ac0682677e149ed15279cbb6a3bf2cbb923",
+      "evidence": "Palette extraction count is an explicit caller request (default 6, Painter panel 8), not a document or color-space capacity and not an automatic quality threshold."
+    },
+    "capacity_declared_authored_archive_resource_guard_not_format_limit": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 3,
+      "rows_sha256": "f43ebb46b702a140d7e8b02c11c9b5d531de38f79776a7d05dab49743c5f2093",
+      "evidence": "16 MiB document JSON and 512 MiB asset limits are declared Tiger zip-bomb/memory guards, not OpenRaster/ZIP format limits. Boundary and traversal tests cover rejection. PNG writer zlib level is excluded and routed as its own exact encoding-policy contract."
+    },
+    "capacity_declared_authored_atomic_action_payload_guard": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "5eede0415696496d01f7c493568b3270ea0afa86a7a7fe791384304d4b118fdf",
+      "evidence": "512 strokes and 2,048 source points bound one atomic Action/Undo payload only. They do not limit document stroke count; namespace schema, adapter validation, and boundary tests share these constants."
+    },
+    "capacity_declared_authored_blockout_preview_grid_scale": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 1,
+      "rows_sha256": "8cfab2752e31cb3e6fa506efe296bb9f388e2124b239bfe9746b8db6c4d929bd",
+      "evidence": "One-unit blockout checker floor tile default for a non-physical preview helper; it is not artwork resolution or a measurement claim."
+    },
+    "capacity_declared_authored_reference_study_planner_capacity": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 3,
+      "rows_sha256": "6cbdf6b55a3d4747bac18823066605a3ba0dc86cb277367a19431ce2038b3b05",
+      "evidence": "Reference-study region/stroke budgets bound a diagnostic planner and cannot certify similarity, artistic quality, or document capacity."
+    },
+    "capacity_declared_bounded_pbr_preview_resolution_not_export_capacity": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 4,
+      "rows_sha256": "7e614190d0405c2e52df5ffff94736d6c571b73e873366d8aa5cbba8aa6c9d02",
+      "evidence": "512 px defaults bound optional PBR preview-map generation only. Static material export uses document/output dimensions and is audited separately."
+    },
+    "capacity_declared_bounded_preview_resolution_not_export_capacity": {
+      "resolution": "approved",
+      "decision_basis": "explicit_scope_boundary",
+      "row_count": 1,
+      "rows_sha256": "8d15ce976d4b4c18d93229253b183a3275f210ae7b392ba2a186910c49f4c622",
+      "evidence": "768 px wet-canvas display preview ceiling; committed layer state and export are not downscaled by this value."
+    },
+    "capacity_declared_painter_zoom_product_capacity": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "6a2602361886cee59ec2f2c8303e83c7221cd8e3d5c6c26d05e4a79b4269db09",
+      "evidence": "800% is the same explicit Tiger view-zoom capacity in CPU UI and GPU capability reporting. It changes view scale only, never document pixels or export resolution."
+    },
+    "capacity_serialized_recovery_writer_concurrency_policy": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 2,
+      "rows_sha256": "80529b337c956c8c2b139ff7365bd6117ec1a7ed26247771ee1ceb0fdadaf5d6",
+      "evidence": "One recovery worker serializes atomic snapshot writes and is exposed in runtime telemetry. Recovery tests verify ordering/error state; this is not a throughput claim."
+    },
+    "capacity_declared_authored_dynamic_dab_workload_budget": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 2,
+      "rows_sha256": "c123e6c4c4e02f186e65a95e4b1086a4b304b20f71b4c51ae9d0265b6dbf53b1",
+      "evidence": "8,192 materialized dabs per stroke is a measured Tiger runtime workload guard, not a document, brush-format, quality, or third-party parity limit. The uncapped 256x256 40-segment worst-case probe estimated 228,304 dabs and approximately 111.7 MB peak in independent QA. The guarded implementation uniformly resamples the complete path to 8,192 dabs, preserves both endpoints and every segment in that probe, and reports requested/effective spacing plus estimated/rendered counts and degraded=true. Corrected-source measurement recorded 24.9963 ms median untraced generation, 55.6207 ms median QImage render, and 4,427,871-byte traced peak. Independent 16K/5,000-point QA also stayed at 8,192 dabs with about 4.78 MB traced peak. These target-machine observations justify bounded materialization only; they are not a universal frame-time guarantee."
+    },
+    "capacity_declared_authored_action_stroke_sampling_policy": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 3,
+      "rows_sha256": "66d61d68e54d8a64861f9be84f253c0633948d4f8061c77a74ce6c243ee4c3f0",
+      "evidence": "The 8 samples-per-segment and 512 generated-point defaults are Tiger-authored Action-path policies, not tablet behavior, document capacity, or external brush parity. smooth_action_points now requires integer controls, rejects non-finite point channels, preserves every normalized source control in order even when input count exceeds 512, distributes only the remaining budget across the complete path, and preserves caller budgets above the former 2,048 hidden cap. tests/test_painter_stylus.py verifies exact 512-point default allocation for 100 controls, exact preservation of 700 controls, a 2,300 caller budget, signed-channel interpolation, and rejection of fractional controls; tests/test_painter_actions.py verifies non-finite channel rejection at the Action boundary."
+    },
+    "capacity_declared_authored_resource_policy_with_runtime_telemetry": {
+      "resolution": "pending",
+      "evidence_required": "Correct bounded worker errors and OpenGL session lifetime, then freeze budgets only after corrected-source repeated long soak and context-loss tests."
+    },
+    "capacity_declared_shared_large_canvas_tile_policy": {
+      "resolution": "approved",
+      "decision_basis": "explicit_tiger_product_policy_no_external_parity_claim",
+      "row_count": 1,
+      "rows_sha256": "4b68bba84156f11b03d1a436a1f5441bbf03b6f9b4e931467a89869ee3b7ae6c",
+      "evidence": "The remaining exact row enforces a positive runtime tile extent at the retained OpenGL compositor boundary. The shared policy is configurable from 32 through 1,024 pixels with 256 as the Tiger default, not a GPU, Qt, image-format, or universal performance limit. painter_canvas_gpu_capabilities now reports the default and supported range instead of falsely presenting 256 as fixed. tests/test_painter_large_canvas.py::test_shared_tile_policy_reaches_caches_gpu_compositor_capabilities_and_telemetry configures 64 pixels and proves the same value reaches all four retained CPU caches, the GPU compositor call, and telemetry while capability metadata remains aligned with the shared constants. Existing context-loss, cache-completeness, dirty-tile, and CPU-fallback tests cover recreation/failure behavior without claiming universal resource safety."
+    }
+  }
+}

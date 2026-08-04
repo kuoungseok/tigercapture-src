@@ -36,9 +36,10 @@ First impression:
 
 ## UX Reference Map
 
-The maintained Photoshop parity matrix is
-`docs/PAINTER_PHOTOSHOP_PARITY_AUDIT.md`. Agents must use that matrix instead of
-waiting for the user to identify individual mismatches.
+The current evidence and correction authority is
+`docs/PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md` plus `SPEC.md`.
+`docs/PAINTER_PHOTOSHOP_PARITY_AUDIT.md` is a historical workspace-gap snapshot;
+agents must not treat its old Missing/follow-up rows as current state.
 
 Tiger Painter does not clone one application. Each reference owns a role:
 
@@ -780,6 +781,11 @@ Minimum QA matrix before claiming production-art readiness:
 - Action registry parity tests.
 
 ## Milestones
+
+Painting 모드의 현재 실행 순서, 완료 조건, 테스트 기준은
+`docs/PAINTER_PAINTING_MILESTONES_KO.md`가 소유한다. 아래 M0-M6 목록은
+초기 제품 방향을 설명하는 상위 단계이며, 실제 작업 우선순위는 새 문서의
+M0-M8 게이트를 따른다. Painter UI Design은 별도 로드맵이다.
 
 M0: Planning and claim cleanup
 

@@ -32,6 +32,9 @@ a = Analysis(
         # `app` package can find them exactly as on Windows.
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
         (str(project_root / 'resources' / 'tigercapture.ico'), 'resources'),
+        (str(project_root / 'resources' / 'fonts' / '*.ttf'), 'resources/fonts'),
+        (str(project_root / 'resources' / 'fonts' / '*.txt'), 'resources/fonts'),
+        (str(project_root / 'resources' / 'fonts' / '*.md'), 'resources/fonts'),
         (str(project_root / 'resources' / 'luts' / '*.cube'), 'resources/luts'),
         (str(project_root / 'resources' / 'ui' / 'sound_editor' / '*.png'), 'resources/ui/sound_editor'),
     ] + copy_metadata('imageio_ffmpeg') + ocio_datas,

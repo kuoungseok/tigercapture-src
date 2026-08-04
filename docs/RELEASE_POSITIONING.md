@@ -1,6 +1,6 @@
 # Tiger Studio Release Positioning Guardrails
 
-Last updated: 2026-07-26
+Last updated: 2026-07-31
 
 This document is the public-claim guardrail for README, website, release notes,
 pricing copy, and store text. It separates implemented behavior from parity
@@ -14,15 +14,16 @@ legacy release metadata until those surfaces are renamed deliberately.
 
 - Tiger Studio is a local-first Windows creator studio for polished screen
   recordings, timeline editing, 2.5D editorial motion graphics, reviewable AI
-  editing, production drawing, actor workflows, AR/PBR material workflows, and
-  Unreal UMG handoff.
+  editing, production drawing, UI design/prototyping, actor workflows, AR/PBR
+  material workflows, Figma exchange, and Unreal UMG handoff.
 - The strongest current market position is not "another NLE" or "another
   screen recorder". Use "local-first creator studio for screen videos,
-  anime/game actors, Motion Designer, Painter, PBR helper workflows, and Unreal
-  UI handoff".
+  anime/game actors, Motion Designer, Painter, UI design/prototyping, PBR
+  helper workflows, Figma exchange, and Unreal UI handoff".
 - The most defensible niche is a subculture/game-creator studio: screen video
-  polish, Live2D/Spine/MMD/VRM-style actors, production drawing, texture/PBR
-  support, Motion Designer, and local AI/automation in one Windows app.
+  polish, Live2D/Spine/MMD/VRM-style actors, production drawing, UI design,
+  texture/PBR support, Motion Designer, Figma/UMG handoff, and local
+  AI/automation in one Windows app.
 - Screen Studio comparison: "Screen Studio-style screen recording polish",
   "Screen Studio-inspired Auto Polish", and scoped local replacement language
   are acceptable for the measured interaction corpus. Do not claim universal
@@ -41,21 +42,25 @@ legacy release metadata until those surfaces are renamed deliberately.
   version history, or team workspace parity.
 - After Effects / motion graphics comparison: Tiger Studio supports editable
   2.5D editorial motion through Camera depth/FOV/roll/parallax controls,
-  renderer-neutral Replicator metadata, per-layer motion blur, alpha/luma track
-  mattes, text animator automation, directional blur, displacement, corner pin,
-  mesh warp, paper fold, paper paste composites, direction presets, and
-  interactive button components. Safe wording is "After Effects-lite editorial
-  motion tools" or "2.5D motion graphics for creator videos". Do not claim
-  After Effects plugin, expression, scripting, shader-only compositor,
-  arbitrary displacement video-map, full 3D scene graph, or cloth/physics
-  parity.
+  procedural Generator layers, renderer-neutral Replicator metadata, per-layer
+  motion blur, alpha/luma track mattes, text animator automation, directional
+  blur, displacement, corner pin, mesh warp, paper fold, deterministic paper
+  crumple/unfold, paper paste composites, direction presets, 136 built-in
+  media-backed templates, and interactive button components. Safe wording is
+  "After Effects-lite editorial motion tools" or "2.5D motion graphics for
+  creator videos". Do not claim After Effects plugin, expression, scripting,
+  shader-only compositor, arbitrary displacement video-map, full 3D scene
+  graph, cloth/physics parity, or native Lottie/HTML runtime export for every
+  authored motion feature.
 - Unreal UMG comparison: Tiger Studio may claim a Tiger-owned Unreal UMG handoff
   workflow for supported Motion Designer and Painter content. The safe claim is
   that Tiger can package a provider-neutral UMG document, install/update the
   TigerStudioUMG project plugin, generate a Widget Blueprint, compile it, and
-  validate the generated asset for supported widgets. Do not claim a general
-  Unreal/Unity project importer, game-engine replacement, arbitrary Blueprint
-  generation, universal UI conversion, or runtime plugin marketplace.
+  validate the generated asset for supported widgets. Current Painter UI UMG
+  wording may mention verified UE 5.8 checkout-style Widget Blueprint output
+  when backed by local QA. Do not claim a general Unreal/Unity project importer,
+  game-engine replacement, arbitrary Blueprint generation, universal UI
+  conversion, or runtime plugin marketplace.
 - Painter comparison: Tiger Studio Painter is now a real production drawing
   workspace for game concept art, character art, props, backgrounds, texture
   paint-over, and video paint-over. It may be compared to Photoshop/Clip
@@ -74,6 +79,20 @@ legacy release metadata until those surfaces are renamed deliberately.
   Painter-window timelapse. Do not claim that the app trains a general image
   model, silently copies a reference into output pixels, or provides autonomous
   unreviewed artwork generation.
+- Painter UI Design / Figma comparison: Tiger Studio may claim a local UI
+  design workspace with artboards, pages, layers, components, instances,
+  variants, typed properties, tokens, variables, styles, layout grids, basic
+  Auto Layout, responsive overrides, themes, comments, checkpoints, local
+  HTML prototypes, UI asset export, `.tsuilib` libraries, and Figma exchange
+  through official REST/plugin boundaries. Do not claim Figma replacement,
+  real-time multiplayer collaboration, browser-native community platform,
+  hosted handoff, Dev Mode parity, proprietary `.fig` archive read/write, or
+  exact import of every Figma feature.
+- Rive / interactive runtime comparison: Tiger Studio may claim interactive
+  button states, prototype flows, Motion bindings, HTML preview packages, and
+  supported UMG interaction output. Do not claim Rive replacement, general
+  runtime state machines, universal app-embedded animation runtimes, or native
+  interactive vector export parity.
 - Texture Lab / Substance comparison: Tiger Studio can be positioned as a
   lightweight image-to-PBR helper. It exports BaseColor, Normal, AO, Roughness,
   Metallic, Height, Cavity, Curvature, packed ORM/ARM/Unreal ORM/glTF MR maps,
@@ -124,20 +143,21 @@ legacy release metadata until those surfaces are renamed deliberately.
   claim OBS replacement, production broadcast suite, or commercial live
   streaming readiness.
 - Plugin/template claims: Tiger Studio now has manifest validation, registry
-  foundations, safe template-pack validation, Motion template gallery, and
-  UMG-oriented button templates. Do not claim third-party runtime plugins,
+  foundations, safe template-pack validation, Motion template gallery, 136
+  built-in media-backed Motion templates, Painter UI template/library packages,
+  and UMG-oriented button templates. Do not claim third-party runtime plugins,
   hosted plugin marketplace, sandboxed extension execution, uninstall/safe-mode
   parity, or arbitrary exporter/source/effect code loading until those runtime
   paths are implemented and smoke-tested in an installed build.
 
 ## Current Evidence Snapshot
 
-Latest local evidence observed on 2026-07-26:
+Latest local evidence observed on 2026-07-31:
 
 | Gate | Current Result | Public Meaning |
 |---|---:|---|
-| Spec currency | `SPEC.md` updated 2026-07-26 10:35 | Current spec includes native Painter persistence, tablet pressure/tilt, Wet Canvas v1, AI study/timelapse workflows, Texture Lab/POM, interactive Motion buttons, and Unreal UMG handoff. |
-| Targeted current tests | 23 passed | Painter actions/new canvas, Unreal UMG document/plugin, and Motion advanced direction tests pass for this latest documentation slice. |
+| Spec currency | `SPEC.md` updated 2026-07-31 | Current spec includes Motion Generators/Replicators, deterministic paper crumple/unfold, 136 media-backed Motion templates, Painter UI Design, Auto Layout, components/tokens/variables/styles, local prototypes, Figma exchange, and Painter UI UMG delivery. |
+| Targeted current tests | 212 passed | Motion generators/templates/trend templates and Painter UI Auto Layout, Figma exchange, Unreal UMG QA, and prototype export tests pass for this documentation slice. |
 | Public positioning QA | passing after copy update | README and release-positioning copy are within current public-claim guardrails. |
 | Final Product Readiness | 99/100, `release_ready=false` | Broad local product evidence is strong; commercial release claims are still blocked by real-platform broadcast evidence. |
 | Screen Studio Interaction | local corpus threshold met in final readiness evidence | Scoped Screen Studio-style local replacement language is acceptable; do not imply human customer validation. |
@@ -146,8 +166,9 @@ Latest local evidence observed on 2026-07-26:
 | NLE Readiness | 91/100, `professional_nle_claim_ok=false` | Core NLE/action surface is strong; professional NLE replacement language remains blocked. |
 | Broadcast Readiness | 95/100, `alpha_ready=true`, `commercial_ready=false` | Broadcast foundations are alpha-ready; sale/commercial broadcast claims require redacted real-platform evidence. |
 | Voice Lab Sidecar | latest `voice_lab_sidecar_qa.json`: `ok=false`, `ready=false` | Voice Lab must stay optional/sidecar-gated in public copy until a current reference run reports ready. |
-| Painter | covered by spec and focused tests | Production drawing, native document save/load, editable strokes, pressure/tilt capture, Wet Canvas v1, and AI study workflows are claimable within scoped limits. |
-| Motion Graphics / UMG | covered by spec and focused tests | 2.5D editorial motion, interactive button components, and supported Unreal UMG generation are claimable; AE/Unreal replacement language is not. |
+| Painter | covered by spec and focused tests | Production drawing, native document save/load, editable strokes, pressure/tilt capture, Wet Canvas v1, AI study workflows, and Painter UI Design are claimable within scoped limits. |
+| Motion Graphics / UMG | covered by spec and focused tests | 2.5D editorial motion, generators, replicators, paper crumple/unfold, media-backed templates, interactive button components, and supported Unreal UMG generation are claimable; AE/Unreal/Rive replacement language is not. |
+| Painter UI/Figma | covered by spec and focused tests | Local UI design, Auto Layout, components, variables/tokens/styles, prototypes, Figma REST/plugin exchange, and local review/export packages are claimable; Figma SaaS/collaboration/Dev Mode parity is not. |
 | Texture Lab/PBR | covered by spec and focused tests | Image-to-material, map export, GPU preview, and Height/POM preview are scoped helper claims, not Substance parity. |
 
 Current release-blocking evidence gaps are intentionally explicit:
@@ -155,10 +176,11 @@ Current release-blocking evidence gaps are intentionally explicit:
 real-platform checks before commercial broadcast wording. Voice Lab must be
 rechecked before public voice-generation readiness is claimed. Cloud/share
 providers remain dry-run/local-package contracts until real provider uploads,
-permissions, comments, and round-trip review links exist. UMG claims must remain
-limited to supported generated widgets and must be backed by plugin compile,
-Widget Blueprint compile, asset validation, and real Unreal evidence for each
-strengthened public claim.
+permissions, comments, and round-trip review links exist. Figma claims must stay
+inside REST/plugin exchange and must not imply `.fig` archive control. UMG
+claims must remain limited to supported generated widgets and must be backed by
+plugin compile, Widget Blueprint compile, asset validation, and real Unreal
+evidence for each strengthened public claim.
 
 ## Current Claim Status
 
@@ -166,11 +188,13 @@ strengthened public claim.
 |---|---|---|
 | Screen Studio | Auto Polish path, cursor sidecars, click/drag/hotkey metadata support, manual zoom tools, export handoff, local interaction QA corpus | 100% parity, perfect defaults, customer-study claims, macOS app parity |
 | Core Video/NLE | Timeline editing, media pool, transitions, subtitles, render queue, Source/Record and 3-point foundations, Final Cut-style fast timeline foundations | Premiere/Resolve/Final Cut-class professional NLE, long-project proven stability, enterprise editorial collaboration |
-| Motion Graphics | 2.5D camera/depth controls, Replicator, track mattes, motion blur, typography animator, directional blur, displacement, corner pin, mesh warp, paper fold, paper paste presets, interactive button states | After Effects replacement, plugin/expression parity, shader-only compositor, arbitrary displacement video maps, full 3D/physics scene graph |
+| Motion Graphics | 2.5D camera/depth controls, Generators, Replicator, track mattes, motion blur, typography animator, directional blur, displacement, corner pin, mesh warp, paper fold, paper crumple/unfold, paper paste presets, media-backed templates, interactive button states | After Effects replacement, plugin/expression parity, shader-only compositor, arbitrary displacement video maps, full 3D/physics scene graph, universal Lottie/HTML runtime export |
 | Unreal UMG | Provider-neutral Tiger UMG document, Motion/Painter supported content package, project-plugin install/update, supported Widget Blueprint generation/compile/validation | General Unreal/Unity importer, arbitrary Blueprint generation, game-engine replacement, universal UI conversion, user graph ownership guarantees beyond generated boundaries |
 | Motion AI / Cutout | Multimodal AI Workspace, reviewed candidate generation, layered image planning, cutout quality validation, Basic/optional BiRefNet/SAM setup, editable 2D FK cutout arm rigs | One-click universal semantic segmentation, autonomous mutation without review, full body rigging, Live2D mesh deformation, hidden-joint synthesis |
 | Painter | Photoshop-style production drawing workspace, layers/channels/paths, selections/masks, reference board, 3D blockout guides, brush library, Pro Oils, designer brush catalog, tablet pressure/tilt channels, Wet Canvas v1, `.tspaint` save/load, action-driven strokes | Full Photoshop/Clip Studio/Krita/Corel replacement, ABR/Painter pack import, physical pigment simulation, persistent GPU wet-fluid simulation, content-aware/clone/heal parity |
 | Painter AI Study | Reference analysis, deterministic segmentation/underpaint/stroke generation, render comparison/refinement, editable output, real Painter-window timelapse capture | Model training, unreviewed autonomous art generation, hidden reference copying into final pixels, universal style transfer |
+| Painter UI Design | Artboards, pages/layers, components/instances/variants, tokens/variables/styles, Auto Layout, constraints, responsive overrides, themes, guides/safe areas, local prototypes, comments/checkpoints, asset export, `.tsuilib`, Figma exchange, HTML preview, supported UMG output | Figma replacement, real-time multiplayer, browser/community platform, Dev Mode parity, `.fig` archive read/write, exact universal Figma import, hosted review/collaboration |
+| Interactive Runtime | Button states, prototype flows, Smart Animate inspection, HTML preview packages, Motion bindings, supported UMG interactions | Rive replacement, general runtime state machine, universal app/runtime embedding, native interactive vector export parity |
 | Texture Lab / PBR | Image-to-PBR map generation, plane/sphere material preview, GPU-required interactive preview, Height/POM preview, packed ORM/ARM/Unreal/glTF maps, optional Substrate F0/F90 plans | Substance/Marmoset/Blender replacement, full mesh texturing, smart materials, baking, UDIM, physically complete lookdev |
 | CapCut | Creator Assist recipes, captions, Shorts planning, vertical reframe, prompt-to-edit planning, publish package, local asset packs, local/cloud-handoff package contracts | CapCut-scale mobile/cloud collaboration, direct social publishing, trend ecosystem, huge template marketplace, magic edit for every video |
 | Descript | Descript-lite reviewed AI script edit, transcript cleanup, safe apply, local transcription, speech-enhance contracts, sentence-level voice replacement contracts | Hosted Underlord-class coeditor, hosted comments/share links, team workspace, version history, provider-direct collaboration |
@@ -186,29 +210,31 @@ strengthened public claim.
 
 ## Pricing Guardrails
 
-- Early public/beta positioning: one-time USD $129-$149 or subscription USD
-  $12-$15/month remains safe if installer polish, website copy, and onboarding
+- Early public/beta positioning: one-time USD $149-$199 or subscription USD
+  $15-$19/month remains safe if installer polish, website copy, and onboarding
   are still catching up.
-- Current Pro target: one-time USD $199 or subscription USD $15-$19/month is
+- Current Pro target: one-time USD $229-$249 or subscription USD $19-$24/month is
   now defensible because the product is no longer screen capture plus timeline
   editing. Painter persistence, tablet-aware brushes, Wet Canvas v1, Motion AI,
-  2.5D editorial motion graphics, actor tracks, Texture Lab/PBR, Unreal UMG
-  handoff, and local automation make the suite materially broader.
-- USD $229-$249 one-time is conditionally testable after the public website,
-  README, release notes, installer flow, sample projects, UMG sample evidence,
-  and share/cloud handoff copy are updated to explain the new product clearly.
-  Do not use $229+ copy while the public page still presents the app like a
-  plain screen recorder.
-- USD $299+ or premium pro-suite positioning should wait for hosted
+  2.5D editorial motion graphics, media-backed templates, actor tracks,
+  Texture Lab/PBR, Painter UI Design, Figma exchange, Unreal UMG handoff, and
+  local automation make the suite materially broader.
+- USD $279-$299 one-time is conditionally testable after the public website,
+  README, release notes, installer flow, sample projects, Painter UI/Figma
+  samples, UMG sample evidence, and share/cloud handoff copy explain the new
+  product clearly. Do not use $279+ copy while the public page still presents
+  the app like a plain screen recorder.
+- USD $349+ or premium pro-suite positioning should wait for hosted
   review/share links, real provider uploads, hardened plugin/runtime safety,
   current Voice Lab readiness, real long-project NLE corpus evidence,
-  commercial broadcast platform evidence, and repeatable installed-build Unreal
-  UMG evidence.
+  commercial broadcast platform evidence, repeatable installed-build Unreal
+  UMG evidence, and clearer Figma/HTML/UMG production examples.
 - Do not price or describe Tiger Studio as a Resolve/Premiere/Photoshop/
-  Substance/After Effects replacement. Those tools anchor mature professional
-  markets. Tiger Studio should be sold as a differentiated local creator suite
-  with screen polish, anime/game actors, Painter, Motion AI, PBR helpers, and
-  Unreal UMG handoff in one Windows app.
+  Substance/After Effects/Figma/Rive replacement. Those tools anchor mature
+  professional markets. Tiger Studio should be sold as a differentiated local
+  creator suite with screen polish, anime/game actors, Painter, UI Design,
+  Motion AI, PBR helpers, Figma exchange, and Unreal UMG handoff in one Windows
+  app.
 
 ## Release Truth Gates
 
@@ -222,9 +248,11 @@ Before public paid positioning, verify:
    remain only where legacy file names, package names, or release history
    require it.
 3. Current-slice tests covering the newest product claims pass:
-   `tests/test_motion_advanced_direction.py`, `tests/test_painter_actions.py`,
-   `tests/test_painter_new_canvas.py`, `tests/test_unreal_umg_document.py`, and
-   `tests/test_unreal_umg_plugin.py`.
+   `tests/test_motion_generators_replicators.py`,
+   `tests/test_motion_templates.py`, `tests/test_motion_trend_templates.py`,
+   `tests/test_painter_ui_auto_layout.py`, `tests/test_painter_ui_figma.py`,
+   `tests/test_painter_ui_unreal_umg_qa.py`, and
+   `tests/test_painter_ui_prototype_export.py`.
 4. `tools/qa_screenstudio_real_recording_corpus.py` reports real interaction
    readiness before scoped Screen Studio-inspired paid wording ships.
 5. `tools/qa_ai_edit_corpus_quality.py --use-provider` and
@@ -248,8 +276,11 @@ Before public paid positioning, verify:
     `tools/build_unreal_umg_plugin.py` or equivalent release packaging, plus
     Widget Blueprint generation, compile, save, reload validation, and real
     Unreal capture for the advertised sample.
-12. New Motion/Painter/Texture Lab/plugin changes receive an installed-build
+12. Figma public claims require REST/plugin boundary evidence and explicit
+    compatibility reports; copy must not imply proprietary `.fig` archive
+    support or exact universal import/export.
+13. New Motion/Painter/Texture Lab/plugin changes receive an installed-build
     smoke test before they are included in public binary release notes.
-13. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
-14. Public copy contains no unsupported external engine bridge, encrypted bundle
+14. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
+15. Public copy contains no unsupported external engine bridge, encrypted bundle
     extraction, or universal asset-import claims.

@@ -22,7 +22,7 @@ _MODE_CODES: dict[str, int] = {
     "material": 0,
     "base_color_source": 1,
     "base_color": 2,
-    "albedo": 2,
+    "albedo": 20,
     "normal": 3,
     "ao": 4,
     "roughness": 5,
@@ -46,6 +46,7 @@ _MODE_CODES: dict[str, int] = {
 _TEXTURE_NAMES: tuple[str, ...] = (
     "base_color_source",
     "base_color",
+    "base_color_estimate",
     "normal",
     "ao",
     "roughness",
@@ -73,6 +74,7 @@ _FRAGMENT_SHADER = """
 varying vec2 v_uv;
 uniform sampler2D u_base_source;
 uniform sampler2D u_base;
+uniform sampler2D u_base_estimate;
 uniform sampler2D u_normal;
 uniform sampler2D u_ao;
 uniform sampler2D u_roughness;
@@ -84,6 +86,7 @@ uniform sampler2D u_f0;
 uniform sampler2D u_f90;
 uniform sampler2D u_irradiance;
 uniform sampler2D u_delight_shading;
+uniform int u_normal_directx;
 uniform int u_mode;
 uniform int u_shape;
 uniform vec3 u_light;
@@ -107,7 +110,9 @@ float scalar_sample(sampler2D tex, vec2 uv) {
 
 vec3 normal_sample(vec2 uv) {
     vec3 n = texture2D(u_normal, clamp(uv, vec2(0.0), vec2(1.0))).rgb * 2.0 - 1.0;
-    n.y = -n.y;
+    if (u_normal_directx == 1) {
+        n.y = -n.y;
+    }
     return normalize(vec3(n.xy * 0.65, max(0.18, n.z)));
 }
 
@@ -231,14 +236,14 @@ vec3 material_sample(vec2 uv, vec3 surface_normal) {
 vec3 panel_sample(int panel, vec2 uv) {
     if (u_mode == 18) {
         if (panel == 0) return texture2D(u_base_source, uv).rgb;
-        if (panel == 1) return texture2D(u_base, uv).rgb;
+        if (panel == 1) return texture2D(u_base_estimate, uv).rgb;
         if (panel == 2) return texture2D(u_normal, uv).rgb;
         if (panel == 3) return vec3(scalar_sample(u_roughness, uv));
         return texture2D(u_irradiance, uv).rgb;
     }
     if (u_mode == 19) {
         vec3 source = texture2D(u_base_source, uv).rgb;
-        vec3 base = texture2D(u_base, uv).rgb;
+        vec3 base = texture2D(u_base_estimate, uv).rgb;
         if (panel == 0) return source;
         if (panel == 1) return base;
         return clamp(abs(source - base) * 4.0, 0.0, 1.0);
@@ -274,6 +279,7 @@ void main() {
 
     if (u_mode == 1) { gl_FragColor = vec4(texture2D(u_base_source, material_uv).rgb, 1.0); return; }
     if (u_mode == 2) { gl_FragColor = vec4(texture2D(u_base, material_uv).rgb, 1.0); return; }
+    if (u_mode == 20) { gl_FragColor = vec4(texture2D(u_base_estimate, material_uv).rgb, 1.0); return; }
     if (u_mode == 3) { gl_FragColor = vec4(texture2D(u_normal, material_uv).rgb, 1.0); return; }
     if (u_mode == 4) { gl_FragColor = vec4(vec3(scalar_sample(u_ao, material_uv)), 1.0); return; }
     if (u_mode == 5) { gl_FragColor = vec4(vec3(scalar_sample(u_roughness, material_uv)), 1.0); return; }
@@ -417,6 +423,7 @@ def render_texture_lab_gpu_preview_from_generated(
     width: int = 768,
     height: int | None = None,
     source_path: str | Path | None = None,
+    write_output: bool = True,
 ) -> dict[str, Any]:
     """Render a Texture Lab preview through an offscreen OpenGL fragment shader."""
     if QGuiApplication.instance() is None:
@@ -489,6 +496,7 @@ def render_texture_lab_gpu_preview_from_generated(
         sampler_uniforms = {
             "base_color_source": "u_base_source",
             "base_color": "u_base",
+            "base_color_estimate": "u_base_estimate",
             "normal": "u_normal",
             "ao": "u_ao",
             "roughness": "u_roughness",
@@ -518,6 +526,13 @@ def render_texture_lab_gpu_preview_from_generated(
         GL.glUniform1i(_uniform(GL, program, "u_shape"), 1 if effective_shape == "sphere" else 0)
         GL.glUniform3f(_uniform(GL, program, "u_light"), float(light[0]), float(light[1]), float(light[2]))
         GL.glUniform1f(_uniform(GL, program, "u_environment"), float(preview_settings.get("preview_environment", 0.35)))
+        GL.glUniform1i(
+            _uniform(GL, program, "u_normal_directx"),
+            1
+            if str(preview_settings.get("normal_format", "unreal_directx")).casefold()
+            in {"unreal_directx", "directx"}
+            else 0,
+        )
         GL.glUniform1i(
             _uniform(GL, program, "u_parallax_enabled"),
             1 if bool(preview_settings.get("preview_parallax_enabled", True)) else 0,
@@ -552,13 +567,15 @@ def render_texture_lab_gpu_preview_from_generated(
         raw = GL.glReadPixels(0, 0, target_w, target_h, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE)
         pixels = np.frombuffer(raw, dtype=np.uint8).reshape((target_h, target_w, 4))
         image = Image.fromarray(np.flipud(pixels[..., :3]), "RGB")
-        if output_path is None:
-            source = Path(str(source_path or generated.get("source_path") or "texture_source.png")).expanduser()
-            out = source.with_name(f"{source.stem}_pbr_{effective_shape}_gpu_preview_{mode}.png")
-        else:
-            out = Path(output_path).expanduser()
-        out.parent.mkdir(parents=True, exist_ok=True)
-        image.save(out)
+        out: Path | None = None
+        if write_output:
+            if output_path is None:
+                source = Path(str(source_path or generated.get("source_path") or "texture_source.png")).expanduser()
+                out = source.with_name(f"{source.stem}_pbr_{effective_shape}_gpu_preview_{mode}.png")
+            else:
+                out = Path(output_path).expanduser()
+            out.parent.mkdir(parents=True, exist_ok=True)
+            image.save(out)
     finally:
         try:
             GL.glUseProgram(0)
@@ -583,7 +600,7 @@ def render_texture_lab_gpu_preview_from_generated(
         "renderer": "opengl_offscreen_texture_lab",
         "mode": mode,
         "shape": effective_shape,
-        "readback": "rgba8_png",
+        "readback": "rgba8_memory" if not write_output else "rgba8_png",
         "cpu_preview": False,
         "height_map": "bound",
         "parallax": {
@@ -593,10 +610,10 @@ def render_texture_lab_gpu_preview_from_generated(
             "steps": int(preview_settings.get("preview_parallax_steps", 24)),
         },
     }
-    return {
+    result = {
         "schema_id": SCHEMA_ID,
         "source_path": str(source_path or generated.get("source_path") or ""),
-        "preview_path": str(out),
+        "preview_path": str(out or ""),
         "preview_mode": mode,
         "preview_shape": effective_shape,
         "requested_preview_shape": requested_shape,
@@ -605,10 +622,14 @@ def render_texture_lab_gpu_preview_from_generated(
         "algorithms": generated["algorithms"],
         "diagnostics": diagnostics,
         "backend": backend,
+        "base_color_provenance": dict(generated.get("base_color_provenance") or {}),
         "source_fingerprint": generated.get("source_fingerprint", ""),
         "settings_fingerprint": generated.get("settings_fingerprint", ""),
         "substrate": substrate_export_plan(preview_settings),
     }
+    if not write_output:
+        result["preview_image"] = image
+    return result
 
 
 def texture_lab_gpu_preview_status() -> dict[str, Any]:

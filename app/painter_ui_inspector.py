@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
-from PySide6.QtCore import QRect, QSize, Signal, Qt
+from PySide6.QtCore import QEvent, QRect, QSize, Signal, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QValidator
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -42,14 +43,46 @@ from app.painter_ui_document import normalize_ui_document
 from app.icons import app_icon, icon_size
 from app.painter_i18n import painter_text
 from app.painter_ui_sizing_control import PainterUISizingControl
+from app.color_picker_widget import ColorPaletteStrip, color_edit_with_picker
 
 
 class PainterUILayerList(QListWidget):
     hierarchy_drop_requested = Signal(object, str, str)
+    hovered_object_changed = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._hierarchy_drop_preview: tuple[str, str, QRect] | None = None
+        self._hovered_object_id = ""
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self.itemEntered.connect(
+            lambda item: self._set_hovered_object(
+                str(item.data(Qt.ItemDataRole.UserRole) or "")
+            )
+        )
+
+    def _set_hovered_object(self, object_id: str) -> None:
+        target = str(object_id or "")
+        if target == self._hovered_object_id:
+            return
+        self._hovered_object_id = target
+        self.hovered_object_changed.emit(target)
+
+    def clear_hover(self) -> None:
+        self._set_hovered_object("")
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.Type.MouseMove:
+            item = self.itemAt(event.position().toPoint())
+            self._set_hovered_object(
+                str(item.data(Qt.ItemDataRole.UserRole) or "")
+                if item is not None
+                else ""
+            )
+        elif event.type() == QEvent.Type.Leave:
+            self.clear_hover()
+        return super().viewportEvent(event)
 
     def _hierarchy_drop_plan(
         self,
@@ -279,6 +312,8 @@ class PainterUIInspector(QWidget):
     template_install_requested = Signal(str)
     review_comment_add_requested = Signal(str)
     review_comment_update_requested = Signal(str, object)
+    review_comment_remove_requested = Signal(str)
+    review_comment_selected = Signal(str)
     review_checkpoint_requested = Signal(str)
     review_export_requested = Signal(str)
     prototype_export_requested = Signal(str)
@@ -313,7 +348,13 @@ class PainterUIInspector(QWidget):
     component_instantiate_requested = Signal(str, str, float, float)
     component_playground_requested = Signal(str)
     component_variant_create_requested = Signal(str, str)
+    component_variants_combine_requested = Signal(object)
     component_variant_switch_requested = Signal(str, str)
+    component_variant_values_set_requested = Signal(str, object)
+    component_instance_variant_values_set_requested = Signal(str, object)
+    component_instance_property_set_requested = Signal(str, str, object)
+    component_instance_swap_preferred_edit_requested = Signal(str, str)
+    component_slot_reset_requested = Signal(str, str)
     component_detach_requested = Signal(str, bool, str)
     component_override_reset_requested = Signal(str, str, str)
     component_override_reset_all_requested = Signal(str)
@@ -345,10 +386,12 @@ class PainterUIInspector(QWidget):
     variable_mode_set_requested = Signal(str, str, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
+    layer_hover_changed = Signal(str)
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
     batch_properties_changed = Signal(object)
     selection_tidy_requested = Signal(str, object)
+    auto_layout_entry_requested = Signal(str)
     clip_changed = Signal(str, bool)
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
@@ -374,6 +417,9 @@ class PainterUIInspector(QWidget):
     prototype_flow_activate_requested = Signal(str)
     prototype_preview_changed = Signal(bool)
     prototype_preview_reset_requested = Signal()
+    prototype_device_changed = Signal(object)
+    prototype_background_changed = Signal(str)
+    frame_preset_requested = Signal(str, int, int)
     stress_preview_requested = Signal(str, str)
     dev_ready_set_requested = Signal(str, str, bool, str)
     dev_annotation_add_requested = Signal(str, str, str, str)
@@ -384,11 +430,14 @@ class PainterUIInspector(QWidget):
     dock_toggle_requested = Signal()
     temporary_close_requested = Signal()
     auto_hide_changed = Signal(bool)
+    zoom_requested = Signal(float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._document = normalize_ui_document(None)
         self._syncing = False
+        self._active_tool_context = "select"
+        self._selection_count = 0
         self._appearance_style: dict[str, Any] = {}
         self._collapsed = False
         self._temporary_expanded = False
@@ -405,6 +454,7 @@ class PainterUIInspector(QWidget):
         root.setSpacing(4)
         title_bar = QFrame()
         title_bar.setObjectName("PainterUIInspectorTitleBar")
+        self.title_bar = title_bar
         title_layout = QHBoxLayout(title_bar)
         title_layout.setContentsMargins(7, 3, 5, 3)
         title_layout.setSpacing(4)
@@ -713,6 +763,7 @@ class PainterUIInspector(QWidget):
         tabs.tabBar().setAutoHide(True)
         tabs.tabBar().setExpanding(True)
         tabs.tabBar().setUsesScrollButtons(False)
+        tabs.tabBar().setDrawBase(False)
         tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         tabs.setMinimumWidth(0)
         tabs.setSizePolicy(
@@ -721,6 +772,22 @@ class PainterUIInspector(QWidget):
         )
         self._tabs = tabs
         self._tabs.currentChanged.connect(self._emit_context_mode_changed)
+        self.zoom_button = QPushButton("100%")
+        self.zoom_button.setObjectName("PainterUIInspectorZoom")
+        self.zoom_button.setFixedHeight(25)
+        zoom_menu = QMenu(self.zoom_button)
+        for percent in (25, 50, 75, 100, 150, 200):
+            action = zoom_menu.addAction(f"{percent}%")
+            action.triggered.connect(
+                lambda _checked=False, value=percent: (
+                    self.zoom_requested.emit(float(value))
+                )
+            )
+        self.zoom_button.setMenu(zoom_menu)
+        tabs.setCornerWidget(
+            self.zoom_button,
+            Qt.Corner.TopRightCorner,
+        )
         root.addWidget(tabs, 1)
         self._collapsible_widgets = (
             artboard_bar,
@@ -746,6 +813,7 @@ class PainterUIInspector(QWidget):
         layers_layout.setContentsMargins(4, 4, 4, 4)
         self.layer_list = PainterUILayerList()
         self.layer_list.setObjectName("PaintLayerList")
+        self.layer_list.setAccessibleName(painter_text("LAYERS"))
         self.layer_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
@@ -757,6 +825,9 @@ class PainterUIInspector(QWidget):
         self.layer_list.setAcceptDrops(True)
         self.layer_list.setDropIndicatorShown(False)
         self.layer_list.itemSelectionChanged.connect(self._on_selection_changed)
+        self.layer_list.hovered_object_changed.connect(
+            self.layer_hover_changed
+        )
         self.layer_list.hierarchy_drop_requested.connect(
             self.hierarchy_drop_requested
         )
@@ -1008,6 +1079,12 @@ class PainterUIInspector(QWidget):
         self.prototype_panel.preview_reset_requested.connect(
             self.prototype_preview_reset_requested
         )
+        self.prototype_panel.device_changed.connect(
+            self.prototype_device_changed
+        )
+        self.prototype_panel.background_changed.connect(
+            self.prototype_background_changed
+        )
         motion_layout.addWidget(self.prototype_panel)
         self.motion_binding_panel = PainterUIMotionBindingPanel()
         self.motion_binding_panel.migrate_requested.connect(
@@ -1108,6 +1185,196 @@ class PainterUIInspector(QWidget):
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
         inspect_layout.setContentsMargins(6, 6, 6, 6)
+        self.selection_content_stack = QStackedWidget()
+        self.selection_content_stack.setObjectName(
+            "PainterUISelectionContentStack"
+        )
+        inspect_layout.addWidget(self.selection_content_stack, 1)
+        from app.painter_ui_frame_presets import PainterUIFramePresetsPanel
+
+        self.frame_presets_panel = PainterUIFramePresetsPanel()
+        self.frame_presets_panel.preset_requested.connect(
+            self.frame_preset_requested
+        )
+        self.frame_presets_panel.hide()
+        self.selection_content_stack.addWidget(self.frame_presets_panel)
+        from app.painter_ui_frame_selection_panel import (
+            PainterUIFrameSelectionPanel,
+        )
+
+        self.frame_selection_panel = PainterUIFrameSelectionPanel()
+        self.frame_selection_panel.geometry_changed.connect(
+            self._emit_frame_panel_geometry
+        )
+        self.frame_selection_panel.properties_changed.connect(
+            self._emit_frame_panel_properties
+        )
+        self.frame_selection_panel.align_requested.connect(
+            self._emit_frame_panel_align
+        )
+        self.frame_selection_panel.hide()
+        self.frame_selection_scroll = QScrollArea()
+        self.frame_selection_scroll.setObjectName(
+            "PainterUIFrameSelectionScroll"
+        )
+        self.frame_selection_scroll.setWidgetResizable(True)
+        self.frame_selection_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.frame_selection_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.frame_selection_scroll.setWidget(self.frame_selection_panel)
+        self.frame_selection_scroll.hide()
+        self.selection_content_stack.addWidget(self.frame_selection_scroll)
+        from app.painter_ui_shape_selection_panel import (
+            PainterUIShapeSelectionPanel,
+        )
+
+        self.shape_selection_panel = PainterUIShapeSelectionPanel()
+        self.shape_selection_panel.geometry_changed.connect(
+            self._emit_frame_panel_geometry
+        )
+        self.shape_selection_panel.properties_changed.connect(
+            self._emit_frame_panel_properties
+        )
+        self.shape_selection_panel.align_requested.connect(
+            self._emit_frame_panel_align
+        )
+        self.shape_selection_panel.advanced_appearance_requested.connect(
+            self._edit_appearance
+        )
+        self.shape_selection_scroll = QScrollArea()
+        self.shape_selection_scroll.setObjectName(
+            "PainterUIShapeSelectionScroll"
+        )
+        self.shape_selection_scroll.setWidgetResizable(True)
+        self.shape_selection_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.shape_selection_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.shape_selection_scroll.setWidget(self.shape_selection_panel)
+        self.selection_content_stack.addWidget(self.shape_selection_scroll)
+        from app.painter_ui_comments import PainterUICommentsPanel
+
+        self.comments_panel = PainterUICommentsPanel()
+        self.comments_panel.comment_update_requested.connect(
+            self.review_comment_update_requested
+        )
+        self.comments_panel.comment_remove_requested.connect(
+            self.review_comment_remove_requested
+        )
+        self.comments_panel.comment_selected.connect(
+            self.review_comment_selected
+        )
+        self.selection_content_stack.addWidget(self.comments_panel)
+        self.page_properties_panel = QFrame()
+        self.page_properties_panel.setObjectName(
+            "PainterUIPageProperties"
+        )
+        self.page_properties_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.page_properties_panel.setFixedHeight(152)
+        page_layout = QVBoxLayout(self.page_properties_panel)
+        page_layout.setContentsMargins(8, 8, 8, 8)
+        page_layout.setSpacing(7)
+        page_heading = QLabel(painter_text("Page"))
+        page_heading.setObjectName("PainterUIPagePropertiesTitle")
+        page_heading.setFixedHeight(18)
+        page_layout.addWidget(page_heading)
+        background_row = QFrame()
+        background_row.setObjectName("PainterUIPageBackgroundRow")
+        background_row.setFixedHeight(36)
+        background_layout = QHBoxLayout(background_row)
+        background_layout.setContentsMargins(6, 4, 6, 4)
+        background_layout.setSpacing(6)
+        self.page_background_swatch = QLabel("")
+        self.page_background_swatch.setObjectName(
+            "PainterUIPageBackgroundSwatch"
+        )
+        self.page_background_swatch.setFixedSize(18, 18)
+        self.page_background_value = QLabel("F5F5F5")
+        self.page_background_value.setObjectName(
+            "PainterUIPageBackgroundValue"
+        )
+        self.page_background_opacity = QLabel("100 %")
+        self.page_background_opacity.setObjectName(
+            "PainterUIPageBackgroundOpacity"
+        )
+        background_layout.addWidget(self.page_background_swatch)
+        background_layout.addWidget(self.page_background_value, 1)
+        background_layout.addWidget(self.page_background_opacity)
+        page_layout.addWidget(background_row)
+        self.page_style_button = QPushButton(
+            f"{painter_text('Style')}    +"
+        )
+        self.page_style_button.setObjectName("PainterUIPageSection")
+        self.page_style_button.setFlat(True)
+        self.page_style_button.setFixedHeight(30)
+        self.page_style_button.clicked.connect(self._show_page_style_menu)
+        page_layout.addWidget(self.page_style_button)
+        self.page_style_menu = QMenu(self.page_style_button)
+        self.page_style_menu.setObjectName("PainterUIPageStyleMenu")
+        for label, kind, icon_name in (
+            ("텍스트", "text", "caption"),
+            ("색상", "color", "color"),
+            ("효과", "effect", "effects"),
+            ("레이아웃 가이드", "layout_grid", "grid"),
+        ):
+            action = self.page_style_menu.addAction(
+                app_icon(icon_name, size=14, color="#E6EBF2"),
+                label,
+            )
+            action.setData(kind)
+            if kind == "text":
+                action.triggered.connect(self._open_text_style_dialog)
+        self.page_export_button = QPushButton(
+            f"{painter_text('Export')}    +"
+        )
+        self.page_export_button.setObjectName("PainterUIPageSection")
+        self.page_export_button.setFlat(True)
+        self.page_export_button.setFixedHeight(30)
+        page_layout.addWidget(self.page_export_button)
+        self.selection_content_stack.addWidget(self.page_properties_panel)
+        self.object_properties_host = QWidget()
+        self.object_properties_host.setObjectName(
+            "PainterUIObjectPropertiesHost"
+        )
+        # The generic property form contains several rich editors whose size
+        # hints are wider than the dock. Ignore that horizontal hint so the
+        # scroll viewport, not an off-screen child width, controls layout.
+        self.object_properties_host.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.object_properties_host.setMinimumWidth(0)
+        self.object_properties_host.setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
+        object_properties_layout = QVBoxLayout(
+            self.object_properties_host
+        )
+        object_properties_layout.setContentsMargins(0, 0, 0, 0)
+        object_properties_layout.setSpacing(6)
+        self.object_properties_scroll = QScrollArea()
+        self.object_properties_scroll.setObjectName(
+            "PainterUIObjectPropertiesScroll"
+        )
+        self.object_properties_scroll.setWidgetResizable(True)
+        self.object_properties_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.object_properties_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.object_properties_scroll.viewport().setObjectName(
+            "PainterUIObjectPropertiesViewport"
+        )
+        self.object_properties_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
+        self.object_properties_scroll.setWidget(self.object_properties_host)
+        self.selection_content_stack.addWidget(self.object_properties_scroll)
         self.selection_context = QFrame()
         self.selection_context.setObjectName("PainterUISelectionContext")
         context_summary_layout = QVBoxLayout(self.selection_context)
@@ -1124,7 +1391,28 @@ class PainterUIInspector(QWidget):
         self.selection_context_hint.setWordWrap(True)
         context_summary_layout.addWidget(self.selection_context_title)
         context_summary_layout.addWidget(self.selection_context_hint)
-        inspect_layout.addWidget(self.selection_context)
+        object_properties_layout.addWidget(self.selection_context)
+        palette_field = QFrame()
+        palette_field.setObjectName("PainterUISharedColorPalette")
+        palette_layout = QHBoxLayout(palette_field)
+        palette_layout.setContentsMargins(0, 0, 0, 0)
+        palette_layout.setSpacing(4)
+        palette_layout.addWidget(QLabel("Palette"))
+        self.palette_target_combo = QComboBox()
+        self.palette_target_combo.addItem("Fill", "fill")
+        self.palette_target_combo.addItem("Stroke", "stroke")
+        self.shared_color_palette = ColorPaletteStrip(
+            palette_field,
+            # Four swatches fit a Figma-width inspector at 150% DPI without
+            # pushing the right side outside the scroll viewport.
+            maximum_colors=4,
+        )
+        self.shared_color_palette.color_selected.connect(
+            self._apply_shared_palette_color
+        )
+        palette_layout.addWidget(self.palette_target_combo)
+        palette_layout.addWidget(self.shared_color_palette, 1)
+        object_properties_layout.addWidget(palette_field)
         self.advanced_properties_toggle = QPushButton("Advanced properties")
         self.advanced_properties_toggle.setObjectName(
             "PainterUISectionHeader"
@@ -1138,9 +1426,20 @@ class PainterUIInspector(QWidget):
         self.advanced_properties_toggle.toggled.connect(
             self._on_advanced_properties_toggled
         )
-        inspect_layout.addWidget(self.advanced_properties_toggle)
+        object_properties_layout.addWidget(
+            self.advanced_properties_toggle
+        )
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(4)
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+        form.setLabelAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self.name_edit = QLineEdit()
         self.name_edit.editingFinished.connect(self._emit_properties)
         form.addRow("Name", self.name_edit)
@@ -1271,6 +1570,13 @@ class PainterUIInspector(QWidget):
         self.component_instance_button.clicked.connect(
             self._emit_component_instantiate
         )
+        self.component_combine_button = QPushButton("Combine")
+        self.component_combine_button.setToolTip(
+            "Combine selected independent components as variants"
+        )
+        self.component_combine_button.clicked.connect(
+            self._emit_component_variants_combine
+        )
         self.component_playground_button = QPushButton("")
         self.component_playground_button.setIcon(
             app_icon("play", size=12, color="#CBD5E2")
@@ -1287,8 +1593,11 @@ class PainterUIInspector(QWidget):
         )
         component_layout.addWidget(self.component_create_button)
         component_layout.addWidget(self.component_instance_button)
+        component_layout.addWidget(self.component_combine_button)
         component_layout.addWidget(self.component_playground_button)
-        form.addRow("Component", component_row)
+        # Component actions span the inspector width. Keeping them in the form
+        # value column made the four controls overflow at Figma-sized docks.
+        form.addRow(component_row)
         self.component_status_label = QLabel("Not a component")
         self.component_status_label.setObjectName("PaintMuted")
         form.addRow("", self.component_status_label)
@@ -1330,6 +1639,36 @@ class PainterUIInspector(QWidget):
         variant_layout.addWidget(self.component_variant_combo, 1)
         variant_layout.addWidget(self.component_variant_new_button)
         form.addRow("Variant", variant_row)
+        self.component_variant_properties_frame = QFrame()
+        self.component_variant_properties_layout = QFormLayout(
+            self.component_variant_properties_frame
+        )
+        self.component_variant_properties_layout.setContentsMargins(0, 0, 0, 0)
+        self.component_variant_properties_layout.setHorizontalSpacing(6)
+        self.component_variant_properties_layout.setVerticalSpacing(4)
+        self.component_variant_property_combos: dict[str, QComboBox] = {}
+        self.component_variant_properties_frame.setVisible(False)
+        form.addRow(self.component_variant_properties_frame)
+        self.component_definition_properties_frame = QFrame()
+        self.component_definition_properties_layout = QFormLayout(
+            self.component_definition_properties_frame
+        )
+        self.component_definition_properties_layout.setContentsMargins(0, 0, 0, 0)
+        self.component_definition_properties_layout.setHorizontalSpacing(6)
+        self.component_definition_properties_layout.setVerticalSpacing(4)
+        self.component_definition_property_controls: dict[str, QWidget] = {}
+        self.component_definition_properties_frame.setVisible(False)
+        form.addRow(self.component_definition_properties_frame)
+        self.component_instance_properties_frame = QFrame()
+        self.component_instance_properties_layout = QFormLayout(
+            self.component_instance_properties_frame
+        )
+        self.component_instance_properties_layout.setContentsMargins(0, 0, 0, 0)
+        self.component_instance_properties_layout.setHorizontalSpacing(6)
+        self.component_instance_properties_layout.setVerticalSpacing(4)
+        self.component_instance_property_controls: dict[str, QWidget] = {}
+        self.component_instance_properties_frame.setVisible(False)
+        form.addRow(self.component_instance_properties_frame)
         detach_row = QFrame()
         detach_layout = QHBoxLayout(detach_row)
         detach_layout.setContentsMargins(0, 0, 0, 0)
@@ -1384,12 +1723,32 @@ class PainterUIInspector(QWidget):
         override_layout.addWidget(self.component_override_combo, 1)
         override_layout.addWidget(self.component_override_reset_button)
         override_layout.addWidget(self.component_override_reset_all_button)
-        form.addRow(painter_text("Overrides"), override_row)
+        form.addRow(override_row)
+        auto_layout_entry = QFrame()
+        auto_layout_entry_row = QHBoxLayout(auto_layout_entry)
+        auto_layout_entry_row.setContentsMargins(0, 0, 0, 0)
+        auto_layout_entry_row.setSpacing(4)
+        self.auto_layout_add_button = QPushButton("Add auto layout")
+        self.auto_layout_add_button.setToolTip("Add Auto Layout (Shift+A)")
+        self.auto_layout_add_button.clicked.connect(
+            lambda: self.auto_layout_entry_requested.emit("add")
+        )
+        self.auto_layout_remove_button = QPushButton("Remove")
+        self.auto_layout_remove_button.setToolTip(
+            "Remove Auto Layout (Alt+Shift+A)"
+        )
+        self.auto_layout_remove_button.clicked.connect(
+            lambda: self.auto_layout_entry_requested.emit("remove")
+        )
+        auto_layout_entry_row.addWidget(self.auto_layout_add_button, 1)
+        auto_layout_entry_row.addWidget(self.auto_layout_remove_button)
+        form.addRow("Auto Layout", auto_layout_entry)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
             ("Horizontal", "horizontal"),
             ("Vertical", "vertical"),
+            ("Grid", "grid"),
         ):
             self.auto_layout_mode_combo.addItem(label, mode)
         self.auto_layout_mode_combo.currentIndexChanged.connect(
@@ -1398,7 +1757,68 @@ class PainterUIInspector(QWidget):
         self.auto_layout_mode_combo.currentIndexChanged.connect(
             self._emit_properties
         )
-        form.addRow("Auto Layout", self.auto_layout_mode_combo)
+        # Keep the combo as the serialization source, but expose Figma's
+        # immediately readable one-axis direction control instead of a menu.
+        self.auto_layout_mode_combo.hide()
+        self.auto_layout_flow_control = QFrame()
+        flow_control_layout = QHBoxLayout(self.auto_layout_flow_control)
+        flow_control_layout.setContentsMargins(0, 0, 0, 0)
+        flow_control_layout.setSpacing(4)
+        self.auto_layout_horizontal_button = QPushButton("→")
+        self.auto_layout_vertical_button = QPushButton("↓")
+        self.auto_layout_grid_button = QPushButton("▦")
+        for button, tooltip in (
+            (self.auto_layout_horizontal_button, "Horizontal flow"),
+            (self.auto_layout_vertical_button, "Vertical flow"),
+            (self.auto_layout_grid_button, "Grid flow (beta)"),
+        ):
+            button.setCheckable(True)
+            button.setToolTip(tooltip)
+            button.setMinimumHeight(28)
+            flow_control_layout.addWidget(button, 1)
+        self.auto_layout_horizontal_button.clicked.connect(
+            lambda: self.auto_layout_mode_combo.setCurrentIndex(
+                self.auto_layout_mode_combo.findData("horizontal")
+            )
+        )
+        self.auto_layout_vertical_button.clicked.connect(
+            lambda: self.auto_layout_mode_combo.setCurrentIndex(
+                self.auto_layout_mode_combo.findData("vertical")
+            )
+        )
+        self.auto_layout_grid_button.clicked.connect(
+            lambda: self.auto_layout_mode_combo.setCurrentIndex(
+                self.auto_layout_mode_combo.findData("grid")
+            )
+        )
+        form.addRow("Flow", self.auto_layout_flow_control)
+        auto_grid = QFrame()
+        auto_grid_layout = QGridLayout(auto_grid)
+        auto_grid_layout.setContentsMargins(0, 0, 0, 0)
+        auto_grid_layout.setSpacing(3)
+        self.auto_layout_grid_columns_spin = QSpinBox()
+        self.auto_layout_grid_columns_spin.setRange(1, 100)
+        self.auto_layout_grid_columns_spin.setPrefix("Columns ")
+        self.auto_layout_grid_columns_spin.valueChanged.connect(
+            self._emit_properties
+        )
+        self.auto_layout_grid_column_span_spin = QSpinBox()
+        self.auto_layout_grid_column_span_spin.setRange(1, 100)
+        self.auto_layout_grid_column_span_spin.setPrefix("Column span ")
+        self.auto_layout_grid_column_span_spin.valueChanged.connect(
+            self._emit_properties
+        )
+        self.auto_layout_grid_row_span_spin = QSpinBox()
+        self.auto_layout_grid_row_span_spin.setRange(1, 100)
+        self.auto_layout_grid_row_span_spin.setPrefix("Row span ")
+        self.auto_layout_grid_row_span_spin.valueChanged.connect(
+            self._emit_properties
+        )
+        auto_grid_layout.addWidget(self.auto_layout_grid_columns_spin, 0, 0, 1, 2)
+        auto_grid_layout.addWidget(self.auto_layout_grid_column_span_spin, 1, 0)
+        auto_grid_layout.addWidget(self.auto_layout_grid_row_span_spin, 1, 1)
+        form.addRow("Grid", auto_grid)
+        self.auto_layout_grid_controls = auto_grid
         auto_sizing = QFrame()
         auto_sizing_layout = QVBoxLayout(auto_sizing)
         auto_sizing_layout.setContentsMargins(0, 0, 0, 0)
@@ -1581,10 +2001,19 @@ class PainterUIInspector(QWidget):
         self.auto_layout_main_combo.currentIndexChanged.connect(
             self._emit_properties
         )
+        self.auto_layout_gap_auto_button = QPushButton("Auto")
+        self.auto_layout_gap_auto_button.setCheckable(True)
+        self.auto_layout_gap_auto_button.setToolTip(
+            "Distribute items using the largest available gap"
+        )
+        self.auto_layout_gap_auto_button.clicked.connect(
+            self._set_auto_layout_gap_auto
+        )
         auto_flow_layout.addWidget(self.auto_layout_gap_spin)
         auto_flow_layout.addWidget(self.auto_layout_cross_gap_spin)
-        auto_flow_layout.addWidget(self.auto_layout_main_combo)
+        auto_flow_layout.addWidget(self.auto_layout_gap_auto_button)
         form.addRow("Flow", auto_flow)
+        self.auto_layout_main_combo.hide()
         auto_cross = QFrame()
         auto_cross_layout = QHBoxLayout(auto_cross)
         auto_cross_layout.setContentsMargins(0, 0, 0, 0)
@@ -1600,9 +2029,44 @@ class PainterUIInspector(QWidget):
         self.auto_layout_cross_combo.currentIndexChanged.connect(
             self._emit_properties
         )
+        self.auto_layout_cross_combo.hide()
+        self.auto_layout_alignment_control = QFrame()
+        alignment_layout = QGridLayout(self.auto_layout_alignment_control)
+        alignment_layout.setContentsMargins(0, 0, 0, 0)
+        alignment_layout.setHorizontalSpacing(3)
+        alignment_layout.setVerticalSpacing(3)
+        self.auto_layout_alignment_buttons: dict[tuple[int, int], QPushButton] = {}
+        for alignment_row in range(3):
+            for alignment_column in range(3):
+                button = QPushButton("•")
+                button.setCheckable(True)
+                button.setFixedSize(28, 24)
+                button.setToolTip("Set Auto Layout child alignment")
+                button.clicked.connect(
+                    lambda _checked=False, row_index=alignment_row,
+                    column_index=alignment_column: self._set_auto_layout_alignment(
+                        row_index,
+                        column_index,
+                    )
+                )
+                alignment_layout.addWidget(
+                    button,
+                    alignment_row,
+                    alignment_column,
+                )
+                self.auto_layout_alignment_buttons[
+                    (alignment_row, alignment_column)
+                ] = button
+        form.addRow("Alignment", self.auto_layout_alignment_control)
         self.auto_layout_positioning_combo = QComboBox()
-        self.auto_layout_positioning_combo.addItem("Auto", "auto")
-        self.auto_layout_positioning_combo.addItem("Absolute", "absolute")
+        self.auto_layout_positioning_combo.addItem("In flow", "auto")
+        self.auto_layout_positioning_combo.addItem(
+            "Ignore auto layout", "absolute"
+        )
+        self.auto_layout_positioning_combo.setToolTip(
+            "Ignore auto layout keeps the object in its parent but removes it "
+            "from the automatic flow so constraints and free positioning apply."
+        )
         self.auto_layout_positioning_combo.currentIndexChanged.connect(
             self._emit_properties
         )
@@ -1618,11 +2082,27 @@ class PainterUIInspector(QWidget):
         self.fill_edit = QLineEdit()
         self.fill_edit.setPlaceholderText("#RRGGBB")
         self.fill_edit.editingFinished.connect(self._emit_properties)
-        form.addRow("Fill", self.fill_edit)
+        fill_field, self.fill_color_picker = color_edit_with_picker(
+            self.fill_edit,
+            title="Choose fill color",
+        )
+        self.fill_color_picker.clicked.disconnect()
+        self.fill_color_picker.clicked.connect(
+            lambda: self._open_common_paint_editor(stroke=False)
+        )
+        form.addRow("Fill", fill_field)
         self.stroke_edit = QLineEdit()
         self.stroke_edit.setPlaceholderText("#RRGGBB")
         self.stroke_edit.editingFinished.connect(self._emit_properties)
-        form.addRow("Stroke", self.stroke_edit)
+        stroke_field, self.stroke_color_picker = color_edit_with_picker(
+            self.stroke_edit,
+            title="Choose stroke color",
+        )
+        self.stroke_color_picker.clicked.disconnect()
+        self.stroke_color_picker.clicked.connect(
+            lambda: self._open_common_paint_editor(stroke=True)
+        )
+        form.addRow("Stroke", stroke_field)
         self.stroke_width_spin = PainterUIDragDoubleSpinBox()
         self.stroke_width_spin.setRange(0.0, 64.0)
         self.stroke_width_spin.setDecimals(1)
@@ -1668,7 +2148,7 @@ class PainterUIInspector(QWidget):
             self.shape_parameter_rows[key] = row
 
         self.shape_point_count_spin = PainterUIDragSpinBox()
-        self.shape_point_count_spin.setRange(3, 64)
+        self.shape_point_count_spin.setRange(3, 60)
         self.shape_point_count_spin.setResetValue(5)
         self.shape_point_count_spin.editingFinished.connect(
             self._emit_properties
@@ -1689,6 +2169,19 @@ class PainterUIInspector(QWidget):
             "inner_radius",
             "Inner",
             (self.shape_inner_radius_spin,),
+        )
+        self.shape_corner_radius_spin = PainterUIDragDoubleSpinBox()
+        self.shape_corner_radius_spin.setRange(0.0, 4096.0)
+        self.shape_corner_radius_spin.setDecimals(1)
+        self.shape_corner_radius_spin.setSuffix(" px")
+        self.shape_corner_radius_spin.setResetValue(0.0)
+        self.shape_corner_radius_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        add_shape_parameter_row(
+            "corner_radius",
+            "Radius",
+            (self.shape_corner_radius_spin,),
         )
         self.shape_rotation_spin = PainterUIDragDoubleSpinBox()
         self.shape_rotation_spin.setRange(-360.0, 360.0)
@@ -1713,7 +2206,7 @@ class PainterUIInspector(QWidget):
             self._emit_properties
         )
         self.shape_sweep_angle_spin = PainterUIDragDoubleSpinBox()
-        self.shape_sweep_angle_spin.setRange(1.0, 360.0)
+        self.shape_sweep_angle_spin.setRange(-360.0, 360.0)
         self.shape_sweep_angle_spin.setDecimals(1)
         self.shape_sweep_angle_spin.setPrefix("Sweep ")
         self.shape_sweep_angle_spin.setSuffix(" deg")
@@ -1740,6 +2233,20 @@ class PainterUIInspector(QWidget):
         self.multi_fill_edit.setPlaceholderText("#RRGGBB")
         self.multi_stroke_edit = QLineEdit()
         self.multi_stroke_edit.setPlaceholderText("#RRGGBB")
+        (
+            self.multi_fill_field,
+            self.multi_fill_color_picker,
+        ) = color_edit_with_picker(
+            self.multi_fill_edit,
+            title="Choose common fill color",
+        )
+        (
+            self.multi_stroke_field,
+            self.multi_stroke_color_picker,
+        ) = color_edit_with_picker(
+            self.multi_stroke_edit,
+            title="Choose common stroke color",
+        )
         self.multi_stroke_width_spin = PainterUIDragDoubleSpinBox()
         self.multi_stroke_width_spin.setRange(0.0, 64.0)
         self.multi_stroke_width_spin.setDecimals(1)
@@ -1763,7 +2270,14 @@ class PainterUIInspector(QWidget):
             row_index = index // 2
             column = (index % 2) * 2
             multi_layout.addWidget(QLabel(label), row_index, column)
-            multi_layout.addWidget(control, row_index, column + 1)
+            display_control = (
+                self.multi_fill_field
+                if control is self.multi_fill_edit
+                else self.multi_stroke_field
+                if control is self.multi_stroke_edit
+                else control
+            )
+            multi_layout.addWidget(display_control, row_index, column + 1)
             if isinstance(control, QLineEdit):
                 control.textEdited.connect(
                     lambda _text, value=key: self._mark_multi_dirty(value)
@@ -1809,6 +2323,12 @@ class PainterUIInspector(QWidget):
         self.multi_gap_spin.setDecimals(1)
         self.multi_gap_spin.setSpecialValueText("—")
         self.multi_gap_spin.setSuffix(" px")
+        self.multi_gap_y_spin = PainterUIDragDoubleSpinBox()
+        self.multi_gap_y_spin.setRange(-1.0, 4096.0)
+        self.multi_gap_y_spin.setDecimals(1)
+        self.multi_gap_y_spin.setSpecialValueText("—")
+        self.multi_gap_y_spin.setSuffix(" px")
+        self.multi_gap_y_spin.hide()
         self.multi_tidy_button = QPushButton("Tidy Up")
         self.multi_tidy_button.setToolTip(
             "Make the selected object spacing uniform"
@@ -1820,6 +2340,7 @@ class PainterUIInspector(QWidget):
         tidy_layout.setSpacing(3)
         tidy_layout.addWidget(self.multi_tidy_axis_combo)
         tidy_layout.addWidget(self.multi_gap_spin)
+        tidy_layout.addWidget(self.multi_gap_y_spin)
         tidy_layout.addWidget(self.multi_tidy_button)
         multi_layout.addWidget(tidy_row, 4, 0, 1, 4)
         form.addRow("Common", multi_properties)
@@ -1829,6 +2350,37 @@ class PainterUIInspector(QWidget):
         )
         self.clip_content_check.toggled.connect(self._emit_clip_content)
         form.addRow("Frame", self.clip_content_check)
+        self.scroll_overflow_combo = QComboBox()
+        for label, value in (
+            ("No scrolling", "none"),
+            ("Horizontal", "horizontal"),
+            ("Vertical", "vertical"),
+            ("Both directions", "both"),
+        ):
+            self.scroll_overflow_combo.addItem(label, value)
+        self.scroll_overflow_combo.setToolTip(
+            "Prototype overflow requires a frame with Clip content and content "
+            "that extends beyond its bounds."
+        )
+        self.scroll_overflow_combo.currentIndexChanged.connect(
+            self._emit_scroll_overflow
+        )
+        form.addRow("Overflow", self.scroll_overflow_combo)
+        self.scroll_position_combo = QComboBox()
+        for label, value in (
+            ("Scroll with parent", "scroll"),
+            ("Fixed", "fixed"),
+            ("Sticky", "sticky"),
+        ):
+            self.scroll_position_combo.addItem(label, value)
+        self.scroll_position_combo.setToolTip(
+            "Fixed requires Ignore auto layout inside an Auto Layout frame; "
+            "Sticky requires vertical overflow."
+        )
+        self.scroll_position_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        form.addRow("Scroll position", self.scroll_position_combo)
         self.text_edit = QLineEdit()
         self.text_edit.setPlaceholderText("Text")
         self.text_edit.editingFinished.connect(self._emit_properties)
@@ -1846,10 +2398,17 @@ class PainterUIInspector(QWidget):
         self.text_range_weight_spin.setSingleStep(100)
         self.text_range_weight_spin.setValue(700)
         self.text_range_color_edit = QLineEdit("#FFFFFFFF")
+        (
+            self.text_range_color_field,
+            self.text_range_color_picker,
+        ) = color_edit_with_picker(
+            self.text_range_color_edit,
+            title="Choose text range color",
+        )
         text_range_layout.addWidget(self.text_range_start_spin)
         text_range_layout.addWidget(self.text_range_end_spin)
         text_range_layout.addWidget(self.text_range_weight_spin)
-        text_range_layout.addWidget(self.text_range_color_edit)
+        text_range_layout.addWidget(self.text_range_color_field)
         form.addRow("Text Range", text_range_row)
         text_range_actions = QFrame()
         text_range_actions_layout = QHBoxLayout(text_range_actions)
@@ -2029,6 +2588,15 @@ class PainterUIInspector(QWidget):
         text_metrics_layout.addWidget(self.font_size_spin)
         text_metrics_layout.addWidget(self.font_weight_combo)
         form.addRow("Typography", text_metrics)
+        self.text_resize_combo = QComboBox()
+        for label, mode in (
+            ("Auto width", "auto_width"),
+            ("Auto height", "auto_height"),
+            ("Fixed size", "fixed_size"),
+        ):
+            self.text_resize_combo.addItem(label, mode)
+        self.text_resize_combo.currentIndexChanged.connect(self._emit_properties)
+        form.addRow("Resizing", self.text_resize_combo)
         font_axes = QFrame()
         self.font_axes_frame = font_axes
         font_axes_layout = QHBoxLayout(font_axes)
@@ -2075,7 +2643,7 @@ class PainterUIInspector(QWidget):
             self.text_align_combo.addItem(label, alignment)
         self.text_align_combo.currentIndexChanged.connect(self._emit_properties)
         self.line_height_spin = PainterUIDragDoubleSpinBox()
-        self.line_height_spin.setRange(0.5, 4.0)
+        self.line_height_spin.setRange(0.5, 1000.0)
         self.line_height_spin.setDecimals(2)
         self.line_height_spin.setSingleStep(0.05)
         self.line_height_spin.setPrefix("Line ")
@@ -2188,13 +2756,20 @@ class PainterUIInspector(QWidget):
                 self.component_status_label,
                 self.component_state_combo,
                 variant_row,
+                self.component_variant_properties_frame,
+                self.component_definition_properties_frame,
+                self.component_instance_properties_frame,
                 detach_row,
+                override_row,
             ),
             "auto_layout": (
-                self.auto_layout_mode_combo,
+                auto_layout_entry,
+                self.auto_layout_flow_control,
+                self.auto_layout_grid_controls,
                 auto_sizing,
                 auto_padding,
                 auto_flow,
+                self.auto_layout_alignment_control,
                 auto_cross,
             ),
             "content_stress": (stress_preview,),
@@ -2210,6 +2785,8 @@ class PainterUIInspector(QWidget):
             "shape": (shape_controls,),
             "multi_properties": (multi_properties,),
             "frame": (self.clip_content_check,),
+            "scroll_overflow": (self.scroll_overflow_combo,),
+            "scroll_position": (self.scroll_position_combo,),
             "text": (
                 self.text_edit,
                 text_metrics,
@@ -2247,8 +2824,8 @@ class PainterUIInspector(QWidget):
                 for widget in widgets
             )
         )
-        inspect_layout.addLayout(form)
-        inspect_layout.addStretch(1)
+        object_properties_layout.addLayout(form)
+        object_properties_layout.addStretch(1)
         add_inspector_tab(inspect_page, "Inspect", "settings")
         self._configure_context_tabs(
             design_page=inspect_page,
@@ -2299,8 +2876,8 @@ class PainterUIInspector(QWidget):
             return
         visible = {
             "design": True,
-            "prototype": selection_count == 1,
-            "inspect": True,
+            "prototype": True,
+            "inspect": selection_count > 0,
         }
         current = self._tabs.currentWidget()
         for key, page in pages.items():
@@ -2456,22 +3033,17 @@ class PainterUIInspector(QWidget):
             pages[label] = widget
         return pages
 
-    def set_document(self, value: Mapping[str, Any] | None) -> None:
-        self._document = normalize_ui_document(value)
-        self._sync_token_suggestions()
-        self.component_library.set_document(self._document)
-        self.style_library.set_document(self._document)
-        self.library_panel.set_document(self._document)
-        self.token_library.set_document(self._document)
-        self.prototype_panel.set_document(self._document)
-        self.production_panel.set_document(self._document)
-        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+    def _sync_layer_hierarchy_lists(self) -> None:
+        """Refresh the lightweight Layers/Sections view from ``_document``.
 
-        self.dev_panel.set_report(inspect_ui_dev_handoff(self._document))
-        selected = self._document["selection"]["object_id"]
+        Canvas creation tools call this without rebuilding the expensive
+        libraries, prototype reports, and property editors.  The left
+        navigator owns ``layer_list`` visually, but the inspector remains its
+        data/controller owner for compatibility.
+        """
+        selected = str(self._document["selection"]["object_id"] or "")
         selected_ids = set(self._document["selection"]["object_ids"])
-        active_page = self._document["active_page_id"]
-        active = self._document["active_artboard_id"]
+        active = str(self._document["active_artboard_id"] or "")
         active_rows = [
             row
             for row in self._document["objects"]
@@ -2490,6 +3062,103 @@ class PainterUIInspector(QWidget):
                 append_children(row["id"])
 
         append_children("")
+        row_by_id = {row["id"]: row for row in rows}
+        self.layer_list.clear_hover()
+        self.layer_list.clear()
+        for row in rows:
+            depth = 0
+            parent_id = row["parent_id"]
+            visited = set()
+            while parent_id and parent_id not in visited:
+                visited.add(parent_id)
+                parent = row_by_id.get(parent_id)
+                if parent is None:
+                    break
+                depth += 1
+                parent_id = parent["parent_id"]
+            # QListWidget is retained for drag/reorder compatibility; use a
+            # Figma-sized visual indent so children read as hierarchy instead
+            # of appearing aligned with their parent.
+            prefix = "    " * depth
+            state = "" if row["visible"] else "hidden"
+            mask_state = (
+                "mask"
+                if bool((row.get("mask") or {}).get("enabled", False))
+                else ""
+            )
+            component_role = str(row.get("component_role") or "none")
+            icon_name = {
+                "frame": "ui-frame",
+                "group": "group",
+                "text": "caption",
+                "image": "image",
+                "ellipse": "ellipse",
+                "line": "line",
+                "button": "button",
+                "progress": "progress",
+            }.get(str(row["kind"]), "rectangle")
+            item = QListWidgetItem(
+                app_icon(icon_name, size=12, color="#AAB7C6"),
+                f"{prefix}{row['name']}",
+            )
+            detail = " | ".join(
+                value
+                for value in (
+                    str(row["kind"]),
+                    component_role if component_role != "none" else "",
+                    mask_state,
+                    state,
+                )
+                if value
+            )
+            item.setToolTip(detail)
+            item.setData(Qt.ItemDataRole.UserRole, row["id"])
+            item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
+            self.layer_list.addItem(item)
+            if row["id"] in selected_ids:
+                item.setSelected(True)
+            if row["id"] == selected:
+                self.layer_list.setCurrentItem(item)
+        self.section_list.clear()
+        for section in self._document.get("sections", []):
+            item = QListWidgetItem(
+                f"{section['name']}  ({len(section['object_ids'])})"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, section["id"])
+            self.section_list.addItem(item)
+
+    def set_hierarchy_document(
+        self,
+        value: Mapping[str, Any] | None,
+    ) -> None:
+        """Update only the layer hierarchy during repeated canvas creation."""
+        self._document = normalize_ui_document(value)
+        self._syncing = True
+        try:
+            self._sync_layer_hierarchy_lists()
+            # Keep the contextual shell live while a creation tool remains
+            # active.  This swaps Frame/Shape pages and loads the selected
+            # object's compact controls without rebuilding libraries or dev
+            # reports on every drag.
+            self._sync_design_context_visibility(self._selected_row())
+        finally:
+            self._syncing = False
+
+    def set_document(self, value: Mapping[str, Any] | None) -> None:
+        self._document = normalize_ui_document(value)
+        self.comments_panel.set_document(self._document)
+        self._sync_token_suggestions()
+        self.component_library.set_document(self._document)
+        self.style_library.set_document(self._document)
+        self.library_panel.set_document(self._document)
+        self.token_library.set_document(self._document)
+        self.prototype_panel.set_document(self._document)
+        self.production_panel.set_document(self._document)
+        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+
+        self.dev_panel.set_report(inspect_ui_dev_handoff(self._document))
+        active_page = self._document["active_page_id"]
+        active = self._document["active_artboard_id"]
         self._syncing = True
         try:
             self.artboard_combo.clear()
@@ -2511,66 +3180,7 @@ class PainterUIInspector(QWidget):
                 len(page_artboards) > 1
             )
             self._sync_artboard_layout_fields()
-            self.layer_list.clear()
-            row_by_id = {row["id"]: row for row in rows}
-            for row in rows:
-                depth = 0
-                parent_id = row["parent_id"]
-                visited = set()
-                while parent_id and parent_id not in visited:
-                    visited.add(parent_id)
-                    parent = row_by_id.get(parent_id)
-                    if parent is None:
-                        break
-                    depth += 1
-                    parent_id = parent["parent_id"]
-                prefix = "  " * depth
-                state = "" if row["visible"] else "hidden"
-                mask_state = (
-                    "mask"
-                    if bool((row.get("mask") or {}).get("enabled", False))
-                    else ""
-                )
-                component_role = str(row.get("component_role") or "none")
-                icon_name = {
-                    "frame": "ui-frame",
-                    "group": "group",
-                    "text": "caption",
-                    "image": "image",
-                    "ellipse": "ellipse",
-                    "line": "line",
-                    "button": "button",
-                    "progress": "progress",
-                }.get(str(row["kind"]), "rectangle")
-                item = QListWidgetItem(
-                    app_icon(icon_name, size=12, color="#AAB7C6"),
-                    f"{prefix}{row['name']}",
-                )
-                detail = " | ".join(
-                    value
-                    for value in (
-                        str(row["kind"]),
-                        component_role if component_role != "none" else "",
-                        mask_state,
-                        state,
-                    )
-                    if value
-                )
-                item.setToolTip(detail)
-                item.setData(Qt.ItemDataRole.UserRole, row["id"])
-                item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
-                self.layer_list.addItem(item)
-                if row["id"] in selected_ids:
-                    item.setSelected(True)
-                if row["id"] == selected:
-                    self.layer_list.setCurrentItem(item)
-            self.section_list.clear()
-            for section in self._document.get("sections", []):
-                item = QListWidgetItem(
-                    f"{section['name']}  ({len(section['object_ids'])})"
-                )
-                item.setData(Qt.ItemDataRole.UserRole, section["id"])
-                self.section_list.addItem(item)
+            self._sync_layer_hierarchy_lists()
             self._sync_selected_fields()
         finally:
             self._syncing = False
@@ -2690,10 +3300,13 @@ class PainterUIInspector(QWidget):
             self.appearance_button,
             self.shape_point_count_spin,
             self.shape_inner_radius_spin,
+            self.shape_corner_radius_spin,
             self.shape_rotation_spin,
             self.shape_start_angle_spin,
             self.shape_sweep_angle_spin,
             self.clip_content_check,
+            self.scroll_overflow_combo,
+            self.scroll_position_combo,
             self.use_as_mask_check,
             self.mask_invert_check,
             self.mask_outline_check,
@@ -2709,6 +3322,7 @@ class PainterUIInspector(QWidget):
             self.remote_component_key_edit,
             self.font_size_spin,
             self.font_weight_combo,
+            self.text_resize_combo,
             *self.font_axis_checks.values(),
             *self.font_axis_controls.values(),
             self.text_align_combo,
@@ -2743,6 +3357,7 @@ class PainterUIInspector(QWidget):
             self.responsive_clear_button,
             self.component_create_button,
             self.component_instance_button,
+            self.component_combine_button,
             self.component_playground_button,
             self.component_state_combo,
             self.component_variant_combo,
@@ -2766,6 +3381,8 @@ class PainterUIInspector(QWidget):
             self._appearance_style = {}
             self.appearance_button.setText("Solid")
             self.clip_content_check.setChecked(False)
+            self.scroll_overflow_combo.setCurrentIndex(0)
+            self.scroll_position_combo.setCurrentIndex(0)
             self.use_as_mask_check.setChecked(False)
             self.mask_invert_check.setChecked(False)
             self.mask_outline_check.setChecked(False)
@@ -2780,6 +3397,9 @@ class PainterUIInspector(QWidget):
             self.auto_layout_status_label.setToolTip("")
             self.component_state_combo.setCurrentIndex(0)
             self.component_variant_combo.clear()
+            self._rebuild_component_variant_property_controls(None, None)
+            self._rebuild_component_definition_property_controls(None, None)
+            self._rebuild_component_instance_property_controls(None, None)
             self.component_override_combo.clear()
             self.component_override_reset_button.setEnabled(False)
             self.component_override_reset_all_button.setEnabled(False)
@@ -2805,7 +3425,27 @@ class PainterUIInspector(QWidget):
         component_id = str(base_row.get("component_id") or "")
         self.component_create_button.setEnabled(component_role == "none")
         self.component_instance_button.setEnabled(bool(component_id))
+        selected_ids = set(
+            self._document.get("selection", {}).get("object_ids", [])
+        )
+        selected_components = [
+            item
+            for item in self._document.get("components", [])
+            if item.get("root_object_id") in selected_ids
+            and not item.get("base_component_id")
+            and not item.get("variant_ids")
+        ]
+        self.component_combine_button.setEnabled(
+            len(selected_components) == len(selected_ids) and len(selected_ids) >= 2
+        )
         self.component_playground_button.setEnabled(bool(component_id))
+        self.component_create_button.setVisible(component_role == "none")
+        self.component_instance_button.setVisible(bool(component_id))
+        self.component_combine_button.setVisible(
+            len(selected_components) == len(selected_ids)
+            and len(selected_ids) >= 2
+        )
+        self.component_playground_button.setVisible(bool(component_id))
         instance_root = self._component_instance_root(base_row)
         self.component_state_combo.setEnabled(instance_root is not None)
         component_state = str(
@@ -2844,6 +3484,32 @@ class PainterUIInspector(QWidget):
             instance_root is not None and len(family_ids) > 1
         )
         self.component_variant_new_button.setEnabled(bool(component_id))
+        variant_inspection = None
+        if component is not None:
+            from app.painter_ui_components import inspect_ui_component_set
+
+            variant_inspection = inspect_ui_component_set(
+                self._document,
+                component_id=component_id,
+            )
+        self._rebuild_component_variant_property_controls(
+            variant_inspection,
+            instance_root,
+            component_id=component_id,
+        )
+        self._rebuild_component_definition_property_controls(
+            component,
+            instance_root,
+        )
+        self._rebuild_component_instance_property_controls(
+            component,
+            instance_root,
+            variant_property_names=(
+                variant_inspection.get("property_names", [])
+                if variant_inspection is not None
+                else []
+            ),
+        )
         self.component_detach_button.setEnabled(instance_root is not None)
         self.component_localize_button.setEnabled(instance_root is not None)
         self.component_override_combo.clear()
@@ -2910,6 +3576,9 @@ class PainterUIInspector(QWidget):
         self.shape_inner_radius_spin.setValue(
             int(round(float(shape_content.get("inner_radius", 0.45)) * 100.0))
         )
+        self.shape_corner_radius_spin.setValue(
+            float(shape_content.get("corner_radius", 0.0))
+        )
         self.shape_rotation_spin.setValue(
             float(shape_content.get("rotation_offset", -90.0))
         )
@@ -2924,6 +3593,31 @@ class PainterUIInspector(QWidget):
         self.clip_content_check.setChecked(
             is_frame and bool(row.get("clip_content", False))
         )
+        from app.painter_ui_scroll import normalize_ui_scroll
+
+        scroll = normalize_ui_scroll(base_row.get("scroll"))
+        self.scroll_overflow_combo.setCurrentIndex(
+            max(0, self.scroll_overflow_combo.findData(scroll["overflow"]))
+        )
+        self.scroll_position_combo.setCurrentIndex(
+            max(0, self.scroll_position_combo.findData(scroll["position"]))
+        )
+        self.scroll_overflow_combo.setEnabled(is_frame)
+        parent = next(
+            (
+                candidate
+                for candidate in self._document.get("objects", [])
+                if str(candidate.get("id") or "")
+                == str(base_row.get("parent_id") or "")
+            ),
+            None,
+        )
+        parent_scroll = normalize_ui_scroll(
+            parent.get("scroll") if parent is not None else None
+        )
+        self.scroll_position_combo.setEnabled(
+            parent is not None and parent_scroll["overflow"] != "none"
+        )
         mask = dict(base_row.get("mask") or {})
         self.use_as_mask_check.setChecked(bool(mask.get("enabled", False)))
         self.mask_invert_check.setChecked(bool(mask.get("inverted", False)))
@@ -2933,6 +3627,7 @@ class PainterUIInspector(QWidget):
             self.text_edit,
             self.font_size_spin,
             self.font_weight_combo,
+            self.text_resize_combo,
             *self.font_axis_checks.values(),
             *self.font_axis_controls.values(),
             self.text_align_combo,
@@ -2940,6 +3635,12 @@ class PainterUIInspector(QWidget):
         ):
             widget.setEnabled(is_text)
         self.text_edit.setText(str(row["content"].get("text") or ""))
+        from app.painter_ui_text_layout import normalize_text_resize_mode
+
+        resize_index = self.text_resize_combo.findData(
+            normalize_text_resize_mode(row["content"].get("text_resize"))
+        )
+        self.text_resize_combo.setCurrentIndex(max(0, resize_index))
         text_length = len(self.text_edit.text())
         self.text_range_start_spin.setRange(0, text_length)
         self.text_range_end_spin.setRange(0, text_length)
@@ -2991,7 +3692,25 @@ class PainterUIInspector(QWidget):
             str(style.get("text_align") or "left")
         )
         self.text_align_combo.setCurrentIndex(max(0, align_index))
-        self.line_height_spin.setValue(float(style.get("line_height") or 1.2))
+        try:
+            line_height = float(style.get("line_height") or 1.2)
+        except (TypeError, ValueError):
+            line_height = 1.2
+        line_height_unit = str(
+            style.get("line_height_unit") or ""
+        ).strip().casefold()
+        pixel_line_height = (
+            line_height_unit in {"px", "pixel", "pixels"}
+            or line_height > 4.0
+        )
+        self.line_height_spin.setSingleStep(0.5 if pixel_line_height else 0.05)
+        self.line_height_spin.setSuffix(" px" if pixel_line_height else "×")
+        self.line_height_spin.setResetValue(
+            float(style.get("font_size") or 14.0) * 1.2
+            if pixel_line_height
+            else 1.2
+        )
+        self.line_height_spin.setValue(line_height)
         from app.painter_ui_image_renderer import normalize_ui_image_content
 
         image_content = normalize_ui_image_content(row.get("content"))
@@ -3032,6 +3751,13 @@ class PainterUIInspector(QWidget):
         layout = normalize_ui_auto_layout(row.get("layout"))
         mode_index = self.auto_layout_mode_combo.findData(layout["mode"])
         self.auto_layout_mode_combo.setCurrentIndex(max(0, mode_index))
+        self.auto_layout_grid_columns_spin.setValue(int(layout["grid_columns"]))
+        self.auto_layout_grid_column_span_spin.setValue(
+            int(layout["grid_column_span"])
+        )
+        self.auto_layout_grid_row_span_spin.setValue(
+            int(layout["grid_row_span"])
+        )
         for edge, spin in self.auto_layout_padding_controls.items():
             spin.setValue(float(layout["padding"][edge]))
         self.auto_layout_gap_spin.setValue(float(layout["gap"]))
@@ -3129,7 +3855,7 @@ class PainterUIInspector(QWidget):
             context = "multi"
             title = f"{count} objects selected"
             hint = "Edit common properties, align, or distribute."
-            visible_groups = {"multi_properties", "arrange"}
+            visible_groups = {"multi_properties", "arrange", "auto_layout"}
         else:
             kind = str(row.get("kind") or "object").casefold()
             component_role = str(
@@ -3182,6 +3908,10 @@ class PainterUIInspector(QWidget):
             visible_groups.add("content_stress")
             if kind == "frame":
                 visible_groups.add("frame")
+                visible_groups.add("scroll_overflow")
+            parent_id = str(row.get("parent_id") or "")
+            if parent_id:
+                visible_groups.add("scroll_position")
             if kind in {"text", "button"}:
                 visible_groups.add("text")
             from app.painter_ui_image_assets import IMAGE_FILL_KINDS
@@ -3213,6 +3943,12 @@ class PainterUIInspector(QWidget):
                 if kind == "image":
                     visible_groups.add("image_advanced")
         self._design_context = context
+        empty_selection = count == 0
+        if bool(self.property("emptySelection")) != empty_selection:
+            self.setProperty("emptySelection", empty_selection)
+            self.style().unpolish(self)
+            self.style().polish(self)
+        self.title_bar.setVisible(not empty_selection)
         self.artboard_bar.setVisible(count == 0)
         localized_title = painter_text(title)
         self.title_label.setText(
@@ -3221,13 +3957,45 @@ class PainterUIInspector(QWidget):
             else f"UI · {localized_title}"
         )
         self._sync_context_tabs(count)
+        self._selection_count = count
+        self._selected_context_kind = (
+            str(row.get("kind") or "").casefold()
+            if count == 1 and row is not None
+            else ""
+        )
+        self._selected_context_component_role = (
+            str(row.get("component_role") or "none").casefold()
+            if count == 1 and row is not None
+            else "none"
+        )
+        frame_selected = bool(
+            count == 1
+            and row is not None
+            and str(row.get("kind") or "") == "frame"
+        )
+        if frame_selected:
+            self.frame_selection_panel.set_frame(row)
+        shape_selected = bool(
+            count == 1
+            and row is not None
+            and str(row.get("kind") or "")
+            in {"rectangle", "ellipse", "line", "polygon", "star", "arc"}
+        )
+        if shape_selected:
+            self.shape_selection_panel.set_shape(row, self._document)
+        self.selection_context.setVisible(count > 0 and not frame_selected)
+        self._sync_tool_context_visibility()
+        if count == 0:
+            self.artboard_bar.hide()
+            self.artboard_settings_toggle.hide()
+            self.artboard_layout_frame.hide()
+        self.motion_binding_panel.setVisible(count > 0)
+        self.motion_delivery_panel.setVisible(count > 0)
         self.selection_context_title.setText(localized_title)
         self.selection_context_hint.setText(painter_text(hint))
         self.advanced_properties_toggle.setVisible(count == 1)
-        self.artboard_settings_toggle.setVisible(count == 0)
-        self.artboard_layout_frame.setVisible(
-            count == 0 and self.artboard_settings_toggle.isChecked()
-        )
+        self.artboard_settings_toggle.hide()
+        self.artboard_layout_frame.hide()
         visible_rows = {
             widget
             for group in visible_groups
@@ -3246,10 +4014,104 @@ class PainterUIInspector(QWidget):
             str(row.get("kind") or "") if row is not None and count == 1 else ""
         )
 
+    def set_active_tool_context(self, tool: str) -> None:
+        self._active_tool_context = str(tool or "select").casefold()
+        self._sync_tool_context_visibility()
+
+    def _sync_tool_context_visibility(self) -> None:
+        mode = str(getattr(self, "_active_tool_context", "select"))
+        selection_count = int(getattr(self, "_selection_count", 0))
+        selected_kind = str(getattr(self, "_selected_context_kind", ""))
+        component_selected = (
+            str(
+                getattr(
+                    self,
+                    "_selected_context_component_role",
+                    "none",
+                )
+            )
+            != "none"
+        )
+        region_tool = selection_count == 0 and mode in {
+            "frame",
+            "section",
+            "slice",
+        }
+        panel = getattr(self, "frame_presets_panel", None)
+        if panel is not None:
+            panel.set_mode(mode)
+        stack = getattr(self, "selection_content_stack", None)
+        if stack is None:
+            return
+        if mode == "comment":
+            target = self.comments_panel
+        elif region_tool:
+            target = self.frame_presets_panel
+        elif selection_count == 0:
+            target = self.page_properties_panel
+        elif component_selected:
+            target = self.object_properties_scroll
+        elif selection_count == 1 and selected_kind == "frame":
+            target = self.frame_selection_scroll
+        elif selection_count == 1 and selected_kind in {
+            "rectangle",
+            "ellipse",
+            "line",
+            "polygon",
+            "star",
+            "arc",
+        }:
+            target = self.shape_selection_scroll
+        else:
+            target = self.object_properties_scroll
+        stack.setCurrentWidget(target)
+        self.object_properties_host.setVisible(
+            target is self.object_properties_scroll
+        )
+
+    def select_comment(self, comment_id: str) -> None:
+        self.set_active_tool_context("comment")
+        self.comments_panel.select_comment(comment_id)
+
+    def _emit_frame_panel_geometry(self, changes: object) -> None:
+        object_id = self._selected_id()
+        if object_id and isinstance(changes, Mapping):
+            self.geometry_changed.emit(object_id, dict(changes))
+
+    def _emit_frame_panel_properties(self, changes: object) -> None:
+        object_id = self._selected_id()
+        if object_id and isinstance(changes, Mapping):
+            self.properties_changed.emit(object_id, dict(changes))
+
+    def _emit_frame_panel_align(self, command: str) -> None:
+        object_id = self._selected_id()
+        if object_id:
+            self.arrange_requested.emit(object_id, str(command))
+
+    def _show_page_style_menu(self) -> None:
+        point = self.page_style_button.mapToGlobal(
+            self.page_style_button.rect().bottomRight()
+        )
+        point.setX(point.x() - self.page_style_menu.sizeHint().width())
+        self.page_style_menu.popup(point)
+
+    def _open_text_style_dialog(self) -> None:
+        from app.painter_ui_text_style_dialog import PainterUITextStyleDialog
+
+        dialog = PainterUITextStyleDialog(self)
+        dialog.style_created.connect(self.style_add_requested)
+        dialog.finished.connect(dialog.deleteLater)
+        self._text_style_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def _sync_parametric_shape_controls(self, kind: str) -> None:
         visible_by_kind = {
-            "polygon": {"points", "rotation"},
-            "star": {"points", "inner_radius", "rotation"},
+            "polygon": {"points", "corner_radius", "rotation"},
+            "star": {
+                "points", "inner_radius", "corner_radius", "rotation",
+            },
             "arc": {"inner_radius", "angles"},
         }.get(str(kind).casefold(), set())
         for key, row in self.shape_parameter_rows.items():
@@ -3324,6 +4186,22 @@ class PainterUIInspector(QWidget):
             float(row["y"]) + 32.0,
         )
 
+    def _emit_component_variants_combine(self) -> None:
+        if self._syncing:
+            return
+        selected_ids = set(
+            self._document.get("selection", {}).get("object_ids", [])
+        )
+        component_ids = [
+            str(item["id"])
+            for item in self._document.get("components", [])
+            if item.get("root_object_id") in selected_ids
+            and not item.get("base_component_id")
+            and not item.get("variant_ids")
+        ]
+        if len(component_ids) >= 2:
+            self.component_variants_combine_requested.emit(component_ids)
+
     def _emit_component_playground(self) -> None:
         row = self._selected_row()
         if self._syncing or row is None or not row.get("component_id"):
@@ -3379,6 +4257,289 @@ class PainterUIInspector(QWidget):
         self.component_variant_switch_requested.emit(
             str(instance_root["id"]),
             target_component_id,
+        )
+
+    def _rebuild_component_variant_property_controls(
+        self,
+        inspection: Mapping[str, Any] | None,
+        instance_root: Mapping[str, Any] | None,
+        *,
+        component_id: str = "",
+    ) -> None:
+        layout = self.component_variant_properties_layout
+        while layout.rowCount():
+            layout.removeRow(0)
+        self.component_variant_property_combos.clear()
+        report = dict(inspection or {})
+        property_names = [str(name) for name in report.get("property_names", [])]
+        members = {
+            str(member.get("component_id") or ""): member
+            for member in report.get("members", [])
+            if isinstance(member, Mapping)
+        }
+        selected_component_id = str(
+            (instance_root or {}).get("component_id") or component_id or ""
+        )
+        selected_properties = dict(
+            (members.get(selected_component_id) or {}).get("properties") or {}
+        )
+        definitions = dict(report.get("property_definitions") or {})
+        for property_name in property_names:
+            definition = definitions.get(property_name)
+            if not isinstance(definition, Mapping):
+                continue
+            values = [str(value) for value in definition.get("values", [])]
+            if not values:
+                continue
+            combo = QComboBox()
+            combo.setToolTip(
+                painter_text(
+                    "Choose the Variant value for this component property"
+                )
+            )
+            for value in values:
+                combo.addItem(value, value)
+            current_value = str(
+                selected_properties.get(property_name)
+                or definition.get("default")
+                or values[0]
+            )
+            combo.setCurrentIndex(max(0, combo.findData(current_value)))
+            combo.currentIndexChanged.connect(
+                lambda _index, name=property_name: (
+                    self._emit_component_variant_property_change(name)
+                )
+            )
+            layout.addRow(property_name, combo)
+            self.component_variant_property_combos[property_name] = combo
+        self.component_variant_properties_frame.setVisible(
+            bool(self.component_variant_property_combos)
+        )
+
+    def _emit_component_variant_property_change(self, _name: str) -> None:
+        if self._syncing:
+            return
+        row = self._selected_row()
+        if row is None:
+            return
+        properties = {
+            name: str(combo.currentData() or combo.currentText())
+            for name, combo in self.component_variant_property_combos.items()
+        }
+        instance_root = self._component_instance_root(row)
+        if instance_root is not None:
+            self.component_instance_variant_values_set_requested.emit(
+                str(instance_root["id"]),
+                properties,
+            )
+            return
+        component_id = str(row.get("component_id") or "")
+        if component_id:
+            self.component_variant_values_set_requested.emit(
+                component_id,
+                properties,
+            )
+
+    def _rebuild_component_definition_property_controls(
+        self,
+        component: Mapping[str, Any] | None,
+        instance_root: Mapping[str, Any] | None,
+    ) -> None:
+        """Show main-component property management, separate from instance values."""
+
+        layout = self.component_definition_properties_layout
+        while layout.rowCount():
+            layout.removeRow(0)
+        self.component_definition_property_controls.clear()
+        if component is None or instance_root is not None:
+            self.component_definition_properties_frame.setVisible(False)
+            return
+        from app.painter_ui_components import (
+            normalize_ui_component_property_definitions,
+        )
+
+        definitions = normalize_ui_component_property_definitions(
+            component.get("property_definitions")
+        )
+        component_id = str(component["id"])
+        for property_name, definition in definitions.items():
+            if str(definition.get("type") or "") != "instance_swap":
+                continue
+            preferred_count = len(definition.get("preferred_values") or [])
+            control = QPushButton(
+                f"Preferred instances ({preferred_count})…"
+            )
+            control.setToolTip(
+                "Curate the components shown first when this nested instance is swapped"
+            )
+            control.clicked.connect(
+                lambda _checked=False, cid=component_id, name=property_name: (
+                    self.component_instance_swap_preferred_edit_requested.emit(
+                        cid,
+                        name,
+                    )
+                )
+            )
+            layout.addRow(property_name, control)
+            self.component_definition_property_controls[property_name] = control
+        self.component_definition_properties_frame.setVisible(
+            bool(self.component_definition_property_controls)
+        )
+
+    def _rebuild_component_instance_property_controls(
+        self,
+        component: Mapping[str, Any] | None,
+        instance_root: Mapping[str, Any] | None,
+        *,
+        variant_property_names: object = (),
+    ) -> None:
+        layout = self.component_instance_properties_layout
+        while layout.rowCount():
+            layout.removeRow(0)
+        self.component_instance_property_controls.clear()
+        if component is None or instance_root is None:
+            self.component_instance_properties_frame.setVisible(False)
+            return
+        from app.painter_ui_components import (
+            component_property_defaults,
+            normalize_ui_component_properties,
+            normalize_ui_component_property_definitions,
+        )
+
+        definitions = normalize_ui_component_property_definitions(
+            component.get("property_definitions")
+        )
+        values = component_property_defaults(component)
+        values.update(
+            normalize_ui_component_properties(
+                instance_root.get("component_properties")
+            )
+        )
+        variant_names = {str(name) for name in (variant_property_names or [])}
+        components = {
+            str(row["id"]): str(row["name"])
+            for row in self._document.get("components", [])
+        }
+        for property_name, definition in definitions.items():
+            if property_name in variant_names or property_name == "state":
+                continue
+            property_type = str(definition.get("type") or "text")
+            value = values.get(property_name)
+            if property_type == "slot":
+                from app.painter_ui_components import (
+                    inspect_ui_component_instance_slot,
+                )
+
+                report = inspect_ui_component_instance_slot(
+                    self._document,
+                    instance_root_id=str(instance_root["id"]),
+                    property_name=property_name,
+                )
+                control = QWidget()
+                row_layout = QHBoxLayout(control)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                count = int(report.get("child_count") or 0)
+                violations = list(report.get("limit_violations") or [])
+                summary = QLabel(
+                    f"{count} layer" + ("s" if count != 1 else "")
+                    + (f" · {', '.join(violations)}" if violations else "")
+                )
+                summary.setObjectName("painterUISlotSummary")
+                reset = QPushButton("Reset")
+                reset.setToolTip("Reset Slot to the main component contents")
+                reset.clicked.connect(
+                    lambda _checked=False, name=property_name, root_id=str(
+                        instance_root["id"]
+                    ): self.component_slot_reset_requested.emit(root_id, name)
+                )
+                row_layout.addWidget(summary, 1)
+                row_layout.addWidget(reset)
+            elif property_type == "boolean":
+                control = QCheckBox()
+                control.setChecked(bool(value))
+                control.toggled.connect(
+                    lambda checked, name=property_name: (
+                        self._emit_component_instance_property(name, checked)
+                    )
+                )
+            elif property_type in {"enum", "instance_swap"}:
+                control = QComboBox()
+                choices = (
+                    list(definition.get("values") or [])
+                    if property_type == "enum"
+                    else [
+                        *[
+                            item
+                            for item in definition.get("preferred_values", [])
+                            if item in components
+                        ],
+                        *[
+                            item
+                            for item in components
+                            if item not in definition.get("preferred_values", [])
+                        ],
+                    ]
+                )
+                for choice in choices:
+                    control.addItem(
+                        components.get(str(choice), str(choice)),
+                        choice,
+                    )
+                control.setCurrentIndex(max(0, control.findData(value)))
+                control.currentIndexChanged.connect(
+                    lambda _index, name=property_name, widget=control: (
+                        self._emit_component_instance_property(
+                            name,
+                            widget.currentData(),
+                        )
+                    )
+                )
+            elif property_type == "number":
+                control = QDoubleSpinBox()
+                control.setRange(-100000.0, 100000.0)
+                control.setDecimals(2)
+                control.setValue(float(value or 0.0))
+                control.editingFinished.connect(
+                    lambda name=property_name, widget=control: (
+                        self._emit_component_instance_property(
+                            name,
+                            widget.value(),
+                        )
+                    )
+                )
+            else:
+                control = QLineEdit(str(value or ""))
+                control.editingFinished.connect(
+                    lambda name=property_name, widget=control: (
+                        self._emit_component_instance_property(
+                            name,
+                            widget.text(),
+                        )
+                    )
+                )
+            description = str(definition.get("description") or "")
+            if description:
+                control.setToolTip(description)
+            layout.addRow(property_name, control)
+            self.component_instance_property_controls[property_name] = control
+        self.component_instance_properties_frame.setVisible(
+            bool(self.component_instance_property_controls)
+        )
+
+    def _emit_component_instance_property(
+        self,
+        property_name: str,
+        value: Any,
+    ) -> None:
+        if self._syncing:
+            return
+        instance_root = self._component_instance_root(self._selected_row())
+        if instance_root is None:
+            return
+        self.component_instance_property_set_requested.emit(
+            str(instance_root["id"]),
+            str(property_name),
+            value,
         )
 
     def _emit_component_detach(self, create_local_component: bool) -> None:
@@ -3809,11 +4970,57 @@ class PainterUIInspector(QWidget):
         )
         self._emit_properties()
 
+    def _open_common_paint_editor(self, *, stroke: bool) -> None:
+        """Open the same fill component used by frame and shape inspectors."""
+        if self._syncing or not self._selected_id():
+            return
+        from PySide6.QtWidgets import QDialog
+
+        from app.painter_ui_advanced_appearance import normalize_ui_paint
+        from app.painter_ui_paint_editor import PainterUIPaintDialog
+
+        key = "strokes" if stroke else "fills"
+        rows = list(self._appearance_style.get(key) or [])
+        legacy = self.stroke_edit.text() if stroke else self.fill_edit.text()
+        source = rows[0] if rows else {
+            "type": "solid",
+            "color": legacy or ("#000000FF" if stroke else "#FFFFFFFF"),
+            "width": float(self.stroke_width_spin.value()),
+            "align": str(self._appearance_style.get("stroke_align") or "center"),
+        }
+        dialog = PainterUIPaintDialog(source, stroke=stroke, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        paint = normalize_ui_paint(dialog.paint(), stroke=stroke)
+        if rows:
+            rows[0] = paint
+        else:
+            rows = [paint]
+        self._appearance_style[key] = rows
+        if stroke:
+            self.stroke_edit.setText(str(paint.get("color") or ""))
+            self.stroke_width_spin.setValue(float(paint.get("width", 1.0)))
+            self._appearance_style["stroke_align"] = str(paint.get("align") or "center")
+        else:
+            self.fill_edit.setText(str(paint.get("color") or ""))
+        self._emit_properties()
+
     def _emit_clip_content(self, checked: bool) -> None:
         row = self._selected_row()
         if self._syncing or row is None or row["kind"] != "frame":
             return
         self.clip_changed.emit(str(row["id"]), bool(checked))
+
+    def _emit_scroll_overflow(self) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or row["kind"] != "frame":
+            return
+        if (
+            str(self.scroll_overflow_combo.currentData() or "none") != "none"
+            and not self.clip_content_check.isChecked()
+        ):
+            self.clip_content_check.setChecked(True)
+        self._emit_properties()
 
     def _selected_rows(self) -> list[dict[str, Any]]:
         selected_ids = {
@@ -3953,6 +5160,7 @@ class PainterUIInspector(QWidget):
         eligible = bool(report["eligible"])
         self.multi_tidy_axis_combo.setEnabled(eligible)
         self.multi_gap_spin.setEnabled(eligible)
+        self.multi_gap_y_spin.setEnabled(eligible)
         self.multi_tidy_button.setEnabled(eligible)
         self.multi_tidy_button.setToolTip(
             (
@@ -3963,7 +5171,14 @@ class PainterUIInspector(QWidget):
         )
         self.multi_gap_spin.setMinimum(-1.0)
         self.multi_gap_spin.setSpecialValueText("—")
-        if eligible and report["uniform"]:
+        is_grid = eligible and report["axis"] == "grid"
+        self.multi_gap_y_spin.setVisible(is_grid)
+        self.multi_gap_spin.setPrefix("H " if is_grid else "")
+        self.multi_gap_y_spin.setPrefix("V ")
+        if is_grid:
+            self.multi_gap_spin.setValue(float(report["horizontal_gap"]))
+            self.multi_gap_y_spin.setValue(float(report["vertical_gap"]))
+        elif eligible and report["uniform"]:
             self.multi_gap_spin.setValue(float(report["gap"] or 0.0))
         else:
             self.multi_gap_spin.setValue(-1.0)
@@ -3972,9 +5187,19 @@ class PainterUIInspector(QWidget):
         if self._syncing or self._design_context != "multi":
             return
         raw_gap = float(self.multi_gap_spin.value())
+        axis = str(self.multi_tidy_axis_combo.currentData() or "auto")
+        from app.painter_ui_smart_selection import inspect_ui_selection_spacing
+
+        report = inspect_ui_selection_spacing(self._document, axis=axis)
+        gap: object = None if raw_gap < 0.0 else raw_gap
+        if report["eligible"] and report["axis"] == "grid":
+            gap = {
+                "horizontal": float(self.multi_gap_spin.value()),
+                "vertical": float(self.multi_gap_y_spin.value()),
+            }
         self.selection_tidy_requested.emit(
-            str(self.multi_tidy_axis_combo.currentData() or "auto"),
-            None if raw_gap < 0.0 else raw_gap,
+            axis,
+            gap,
         )
 
     def _mark_multi_dirty(self, key: str) -> None:
@@ -3982,7 +5207,7 @@ class PainterUIInspector(QWidget):
             self._multi_dirty_keys.add(str(key))
 
     def _emit_multi_property(self, key: str, *, force: bool = False) -> None:
-        if self._syncing or self._design_context != "multi":
+        if self._syncing or getattr(self, "_design_context", "") != "multi":
             return
         rows = self._selected_rows()
         if len(rows) < 2:
@@ -4042,6 +5267,22 @@ class PainterUIInspector(QWidget):
         self._multi_dirty_keys.discard(key)
         self.batch_properties_changed.emit(changes_by_id)
 
+    def _apply_shared_palette_color(self, color: str) -> None:
+        target = str(self.palette_target_combo.currentData() or "fill")
+        if getattr(self, "_design_context", "") == "multi":
+            edit = (
+                self.multi_stroke_edit
+                if target == "stroke"
+                else self.multi_fill_edit
+            )
+            edit.setText(str(color))
+            self._mark_multi_dirty(target)
+            self._emit_multi_property(target)
+            return
+        edit = self.stroke_edit if target == "stroke" else self.fill_edit
+        edit.setText(str(color))
+        edit.editingFinished.emit()
+
     def _emit_properties(self) -> None:
         if self._syncing or not self._selected_id():
             return
@@ -4091,6 +5332,7 @@ class PainterUIInspector(QWidget):
                         "inner_radius": (
                             self.shape_inner_radius_spin.value() / 100.0
                         ),
+                        "corner_radius": self.shape_corner_radius_spin.value(),
                         "rotation_offset": self.shape_rotation_spin.value(),
                         "start_angle": self.shape_start_angle_spin.value(),
                         "sweep_angle": self.shape_sweep_angle_spin.value(),
@@ -4099,6 +5341,10 @@ class PainterUIInspector(QWidget):
             )
         if row.get("kind") in {"text", "button"}:
             content["text"] = self.text_edit.text()
+            if row.get("kind") == "text":
+                content["text_resize"] = str(
+                    self.text_resize_combo.currentData() or "auto_width"
+                )
             style["font_size"] = float(self.font_size_spin.value())
             style["font_weight"] = int(
                 self.font_weight_combo.currentData() or 400
@@ -4182,6 +5428,13 @@ class PainterUIInspector(QWidget):
                 "height_sizing": (
                     self.auto_layout_height_sizing_combo.currentData() or "fixed"
                 ),
+                "grid_columns": int(self.auto_layout_grid_columns_spin.value()),
+                "grid_column_span": int(
+                    self.auto_layout_grid_column_span_spin.value()
+                ),
+                "grid_row_span": int(
+                    self.auto_layout_grid_row_span_spin.value()
+                ),
                 "wrap": self.auto_layout_wrap_check.isChecked(),
             }
         )
@@ -4191,10 +5444,24 @@ class PainterUIInspector(QWidget):
             "opacity": self.opacity_spin.value() / 100.0,
             "visible": self.visible_check.isChecked(),
             "locked": self.locked_check.isChecked(),
+            "clip_content": (
+                self.clip_content_check.isChecked()
+                if str((row or {}).get("kind") or "") == "frame"
+                else bool((row or {}).get("clip_content", False))
+            ),
             "style": style,
             "content": content,
             "constraints": constraints,
             "layout": layout,
+            "scroll": {
+                **dict(row.get("scroll") or {}),
+                "overflow": str(
+                    self.scroll_overflow_combo.currentData() or "none"
+                ),
+                "position": str(
+                    self.scroll_position_combo.currentData() or "scroll"
+                ),
+            },
             "mask": {
                 **dict(row.get("mask") or {}),
                 "enabled": self.use_as_mask_check.isChecked(),
@@ -4336,8 +5603,52 @@ class PainterUIInspector(QWidget):
             {"width": float(width), "height": float(height)},
         )
 
+    def _set_auto_layout_gap_auto(self, checked: bool) -> None:
+        self.auto_layout_main_combo.blockSignals(True)
+        try:
+            target = "space_between" if checked else "start"
+            if not checked and self.auto_layout_main_combo.currentData() != "space_between":
+                target = str(self.auto_layout_main_combo.currentData() or "start")
+            index = self.auto_layout_main_combo.findData(target)
+            self.auto_layout_main_combo.setCurrentIndex(max(0, index))
+        finally:
+            self.auto_layout_main_combo.blockSignals(False)
+        self._sync_auto_layout_control_states()
+        self._emit_properties()
+
+    def _set_auto_layout_alignment(
+        self,
+        row_index: int,
+        column_index: int,
+    ) -> None:
+        positions = ("start", "center", "end")
+        mode = str(self.auto_layout_mode_combo.currentData() or "horizontal")
+        if mode == "vertical":
+            main_alignment = positions[max(0, min(2, row_index))]
+            cross_alignment = positions[max(0, min(2, column_index))]
+        else:
+            main_alignment = positions[max(0, min(2, column_index))]
+            cross_alignment = positions[max(0, min(2, row_index))]
+        self.auto_layout_main_combo.blockSignals(True)
+        self.auto_layout_cross_combo.blockSignals(True)
+        try:
+            self.auto_layout_main_combo.setCurrentIndex(
+                self.auto_layout_main_combo.findData(main_alignment)
+            )
+            self.auto_layout_cross_combo.setCurrentIndex(
+                self.auto_layout_cross_combo.findData(cross_alignment)
+            )
+        finally:
+            self.auto_layout_main_combo.blockSignals(False)
+            self.auto_layout_cross_combo.blockSignals(False)
+        self._sync_auto_layout_control_states()
+        self._emit_properties()
+
     def _sync_auto_layout_control_states(self) -> None:
         row = self._selected_row()
+        selected_count = len(
+            self._document.get("selection", {}).get("object_ids", [])
+        )
         is_container = (
             row is not None
             and row.get("kind") in {"frame", "group", "button"}
@@ -4345,17 +5656,92 @@ class PainterUIInspector(QWidget):
         active = (
             is_container
             and self.auto_layout_mode_combo.currentData()
-            in {"horizontal", "vertical"}
+            in {"horizontal", "vertical", "grid"}
         )
+        self.auto_layout_add_button.setEnabled(selected_count > 0 and not active)
+        self.auto_layout_add_button.setVisible(not active)
+        self.auto_layout_remove_button.setEnabled(active)
+        self.auto_layout_remove_button.setVisible(active)
         self.auto_layout_mode_combo.setEnabled(is_container)
+        mode = str(self.auto_layout_mode_combo.currentData() or "none")
+        self.auto_layout_horizontal_button.setChecked(mode == "horizontal")
+        self.auto_layout_vertical_button.setChecked(mode == "vertical")
+        self.auto_layout_grid_button.setChecked(mode == "grid")
+        self.auto_layout_flow_control.setEnabled(is_container)
+        parent = None
+        if row is not None and row.get("parent_id"):
+            parent = next(
+                (
+                    candidate
+                    for candidate in self._document.get("objects", [])
+                    if str(candidate.get("id") or "")
+                    == str(row.get("parent_id") or "")
+                ),
+                None,
+            )
+        parent_layout = normalize_ui_auto_layout(
+            parent.get("layout") if parent is not None else None
+        )
+        is_grid = active and mode == "grid"
+        is_grid_child = (
+            row is not None
+            and parent is not None
+            and parent_layout["mode"] == "grid"
+            and normalize_ui_auto_layout(row.get("layout"))["positioning"]
+            != "absolute"
+        )
+        is_horizontal = active and mode == "horizontal"
+        if active and not is_horizontal and self.auto_layout_wrap_check.isChecked():
+            self.auto_layout_wrap_check.blockSignals(True)
+            self.auto_layout_wrap_check.setChecked(False)
+            self.auto_layout_wrap_check.blockSignals(False)
+        is_wrapped = is_horizontal and self.auto_layout_wrap_check.isChecked()
+        self.auto_layout_wrap_check.setEnabled(is_horizontal)
+        self.auto_layout_wrap_check.setVisible(is_horizontal)
+        self.auto_layout_cross_gap_spin.setEnabled(is_wrapped or is_grid)
+        self.auto_layout_cross_gap_spin.setVisible(is_wrapped or is_grid)
+        self.auto_layout_grid_controls.setVisible(is_grid or is_grid_child)
+        self.auto_layout_grid_columns_spin.setVisible(is_grid)
+        self.auto_layout_grid_columns_spin.setEnabled(is_grid)
+        self.auto_layout_grid_column_span_spin.setVisible(is_grid_child)
+        self.auto_layout_grid_column_span_spin.setEnabled(is_grid_child)
+        self.auto_layout_grid_row_span_spin.setVisible(is_grid_child)
+        self.auto_layout_grid_row_span_spin.setEnabled(is_grid_child)
+        gap_auto = self.auto_layout_main_combo.currentData() == "space_between"
+        self.auto_layout_gap_auto_button.setChecked(gap_auto)
+        self.auto_layout_gap_auto_button.setEnabled(
+            active and not is_wrapped and not is_grid
+        )
+        self.auto_layout_gap_spin.setEnabled(active and not gap_auto)
+        positions = {"start": 0, "center": 1, "end": 2}
+        main = str(self.auto_layout_main_combo.currentData() or "start")
+        cross = str(self.auto_layout_cross_combo.currentData() or "start")
+        if mode == "vertical":
+            selected_alignment = (positions.get(main, 0), positions.get(cross, 0))
+        else:
+            selected_alignment = (positions.get(cross, 0), positions.get(main, 0))
+        for position, button in self.auto_layout_alignment_buttons.items():
+            button.setChecked(position == selected_alignment)
+            button.setEnabled(active)
         self.auto_layout_width_sizing_combo.setEnabled(row is not None)
         self.auto_layout_height_sizing_combo.setEnabled(row is not None)
         self.auto_layout_width_sizing_control.setEnabled(row is not None)
         self.auto_layout_height_sizing_control.setEnabled(row is not None)
-        self.auto_layout_wrap_check.setEnabled(active)
+        can_hug = active
+        can_fill = (
+            parent is not None
+            and parent_layout["mode"] in {"horizontal", "vertical", "grid"}
+            and normalize_ui_auto_layout(row.get("layout"))["positioning"]
+            != "absolute"
+        )
+        for sizing_control in (
+            self.auto_layout_width_sizing_control,
+            self.auto_layout_height_sizing_control,
+        ):
+            sizing_control.set_option_enabled("fixed", row is not None)
+            sizing_control.set_option_enabled("hug", can_hug)
+            sizing_control.set_option_enabled("fill", can_fill)
         for widget in (
-            self.auto_layout_gap_spin,
-            self.auto_layout_cross_gap_spin,
             self.auto_layout_main_combo,
             self.auto_layout_cross_combo,
             *self.auto_layout_padding_controls.values(),

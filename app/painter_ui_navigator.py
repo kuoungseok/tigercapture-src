@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -75,9 +77,12 @@ class PainterUINavigatorPanel(QFrame):
     dock_toggle_requested = Signal()
     pin_requested = Signal()
     temporary_close_requested = Signal()
+    main_menu_requested = Signal()
+    focus_mode_changed = Signal(bool)
 
-    MIN_EXPANDED_WIDTH = 112
-    DEFAULT_EXPANDED_WIDTH = 168
+    RAIL_WIDTH = 52
+    MIN_EXPANDED_WIDTH = 190
+    DEFAULT_EXPANDED_WIDTH = 248
 
     def __init__(
         self,
@@ -104,19 +109,86 @@ class PainterUINavigatorPanel(QFrame):
         self._layer_list = layer_list
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(self.RAIL_WIDTH, 0, 0, 0)
         root.setSpacing(0)
+
+        self.navigation_rail = QFrame(self)
+        self.navigation_rail.setObjectName("PainterUINavigationRail")
+        rail_layout = QVBoxLayout(self.navigation_rail)
+        rail_layout.setContentsMargins(3, 6, 3, 6)
+        rail_layout.setSpacing(2)
+        self.logo_button = QToolButton(self.navigation_rail)
+        self.logo_button.setObjectName("PainterUINavigationLogo")
+        self.logo_button.setIcon(
+            app_icon("tiger-painter-logo", size=22, color="#E7EEF7")
+        )
+        self.logo_button.setIconSize(icon_size(22))
+        self.logo_button.setFixedSize(46, 40)
+        self.logo_button.setToolTip(painter_text("Main menu"))
+        self.logo_button.setAccessibleName(painter_text("Main menu"))
+        self.logo_button.clicked.connect(self.main_menu_requested)
+        rail_layout.addWidget(self.logo_button)
+        rail_separator = QFrame(self.navigation_rail)
+        rail_separator.setObjectName("PainterUINavigationRailSeparator")
+        rail_separator.setFixedHeight(1)
+        rail_layout.addWidget(rail_separator)
+        self.navigation_group = QButtonGroup(self)
+        self.navigation_group.setExclusive(True)
+        self.navigation_buttons: dict[str, QToolButton] = {}
+        for section, label, icon_name in (
+            ("file", "File", "ui-frame"),
+            ("assets", "Assets", "grid"),
+            ("tools", "Tools", "settings"),
+            ("variables", "Variables", "keyframe"),
+        ):
+            button = QToolButton(self.navigation_rail)
+            button.setObjectName("PainterUINavigationButton")
+            button.setCheckable(True)
+            button.setAutoExclusive(True)
+            button.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+            )
+            button.setText(painter_text(label))
+            button.setToolTip(painter_text(label))
+            button.setAccessibleName(painter_text(label))
+            button.setIcon(app_icon(icon_name, size=16, color="#C8D1DC"))
+            button.setIconSize(icon_size(16))
+            button.setFixedSize(46, 52)
+            button.clicked.connect(
+                lambda _checked=False, value=section: self.select_section(
+                    value,
+                    user_initiated=True,
+                )
+            )
+            self.navigation_group.addButton(button)
+            self.navigation_buttons[section] = button
+            rail_layout.addWidget(button)
+        rail_layout.addStretch(1)
 
         header = QFrame()
         header.setObjectName("PainterUINavigatorHeader")
         header.setFixedHeight(26)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(5, 2, 4, 2)
-        title = QLabel("Document")
+        title = QLabel(painter_text("Untitled"))
         title.setObjectName("PainterUINavigatorTitle")
         self.title_label = title
         header_layout.addWidget(title)
         header_layout.addStretch(1)
+        self.focus_mode_button = QPushButton("")
+        self.focus_mode_button.setObjectName("PainterUIPanelCollapse")
+        self.focus_mode_button.setCheckable(True)
+        self.focus_mode_button.setFixedSize(24, 22)
+        self.focus_mode_button.setIcon(
+            app_icon("figma-full-mode", size=14, color="#B8C4D3")
+        )
+        self.focus_mode_button.setIconSize(icon_size(14))
+        self.focus_mode_button.setToolTip(painter_text("Focus canvas"))
+        self.focus_mode_button.setAccessibleName(
+            painter_text("Focus canvas")
+        )
+        self.focus_mode_button.toggled.connect(self.focus_mode_changed)
+        header_layout.addWidget(self.focus_mode_button)
         self.collapse_button = QPushButton("")
         self.collapse_button.setObjectName("PainterUIPanelCollapse")
         self.collapse_button.setFixedSize(20, 20)
@@ -170,13 +242,17 @@ class PainterUINavigatorPanel(QFrame):
             QLineEdit.ActionPosition.LeadingPosition,
         )
         self.search_edit.textChanged.connect(self._apply_filter)
-        content_layout.addWidget(self.search_edit)
+        # Search is a panel-level command. Keeping it above the document
+        # header avoids visually placing it between the title and page list.
+        root.insertWidget(0, self.search_edit)
 
-        pages_header = QLabel("PAGES")
+        pages_header = QLabel(painter_text("PAGES"))
         pages_header.setObjectName("PainterUINavigatorSection")
+        self.pages_header = pages_header
         content_layout.addWidget(pages_header)
         self.page_list = QListWidget()
         self.page_list.setObjectName("PainterUIPageList")
+        self.page_list.setAccessibleName(painter_text("PAGES"))
         self.page_list.setIconSize(icon_size(13))
         self.page_list.setMaximumHeight(66)
         self.page_list.itemSelectionChanged.connect(
@@ -224,10 +300,15 @@ class PainterUINavigatorPanel(QFrame):
         layers_host_layout = QVBoxLayout(layers_host)
         layers_host_layout.setContentsMargins(0, 0, 0, 0)
         layers_host_layout.setSpacing(0)
+        self.layers_header = QLabel(painter_text("Layers"))
+        self.layers_header.setObjectName("PainterUINavigatorSection")
+        self.layers_header.setAccessibleName(painter_text("Layers"))
+        layers_host_layout.addWidget(self.layers_header)
         layers_page.setObjectName("PainterUILayersPage")
         layers_host_layout.addWidget(layers_page, 1)
         layers_page.show()
-        self.mode_tabs.addTab(layers_host, "Layers")
+        self.file_host = layers_host
+        self.mode_tabs.addTab(layers_host, painter_text("File"))
 
         self.assets_host = QWidget()
         self.assets_host.setObjectName("PainterUIAssetsHost")
@@ -239,20 +320,72 @@ class PainterUINavigatorPanel(QFrame):
         self.asset_tabs.setDocumentMode(True)
         self.asset_tabs.tabBar().setExpanding(True)
         self.asset_tabs.tabBar().setUsesScrollButtons(False)
+        variable_widget = None
         for label, widget in (asset_pages or {}).items():
+            if str(label) == "Tokens":
+                variable_widget = widget
+                continue
             self.asset_tabs.addTab(widget, str(label))
         assets_layout.addWidget(self.asset_tabs, 1)
-        self.mode_tabs.addTab(self.assets_host, "Assets")
+        self.mode_tabs.addTab(self.assets_host, painter_text("Assets"))
+
+        self.tools_host = QWidget()
+        self.tools_host.setObjectName("PainterUIToolsHost")
+        tools_layout = QVBoxLayout(self.tools_host)
+        tools_layout.setContentsMargins(8, 8, 8, 8)
+        tools_layout.setSpacing(7)
+        tools_title = QLabel(painter_text("Tools"))
+        tools_title.setObjectName("PainterUINavigatorPanelTitle")
+        tools_layout.addWidget(tools_title)
+        self.tools_search_edit = QLineEdit()
+        self.tools_search_edit.setObjectName("PainterUINavigatorSearch")
+        self.tools_search_edit.setPlaceholderText(
+            painter_text("Search tools")
+        )
+        self.tools_search_edit.setClearButtonEnabled(True)
+        self.tools_search_edit.addAction(
+            app_icon("search", size=12, color="#96A2B1"),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        tools_layout.addWidget(self.tools_search_edit)
+        tools_summary = QLabel(
+            painter_text("Plugins, widgets and extensions appear here.")
+        )
+        tools_summary.setObjectName("PainterUINavigatorEmptyText")
+        tools_summary.setWordWrap(True)
+        tools_layout.addWidget(tools_summary)
+        tools_empty = QLabel(painter_text("No tools installed"))
+        tools_empty.setObjectName("PainterUINavigatorEmptyState")
+        tools_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tools_layout.addWidget(tools_empty, 1)
+        self.mode_tabs.addTab(self.tools_host, painter_text("Tools"))
+
+        self.variables_host = QWidget()
+        self.variables_host.setObjectName("PainterUIVariablesHost")
+        variables_layout = QVBoxLayout(self.variables_host)
+        variables_layout.setContentsMargins(0, 0, 0, 0)
+        variables_layout.setSpacing(0)
+        if variable_widget is not None:
+            variables_layout.addWidget(variable_widget, 1)
+        else:
+            variables_empty = QLabel(painter_text("No variables"))
+            variables_empty.setObjectName("PainterUINavigatorEmptyState")
+            variables_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            variables_layout.addWidget(variables_empty, 1)
+        self.variable_widget = variable_widget
+        self.mode_tabs.addTab(
+            self.variables_host,
+            painter_text("Variables"),
+        )
+        self.mode_tabs.tabBar().hide()
         self.mode_tabs.setMinimumHeight(180)
         content_layout.addWidget(self.mode_tabs, 1)
         self.content_scroll.setWidget(self.content_widget)
         root.addWidget(self.content_scroll, 1)
         self._collapsible_widgets = (
             self.search_edit,
-            pages_header,
-            self.page_list,
-            self.page_actions,
-            self.mode_tabs,
+            header,
+            self.content_scroll,
         )
         self.resize_handle = _NavigatorResizeHandle(self)
         self.resize_handle.width_requested.connect(
@@ -261,6 +394,8 @@ class PainterUINavigatorPanel(QFrame):
                 user_initiated=True,
             )
         )
+        self._active_section = "file"
+        self.select_section("file")
         self._sync_collapse_button()
 
     def set_collapsed(
@@ -281,8 +416,8 @@ class PainterUINavigatorPanel(QFrame):
         self.pin_button.hide()
         self.dock_button.setVisible(not value)
         if value:
-            self.setMinimumWidth(0)
-            self.setMaximumWidth(0)
+            self.setMinimumWidth(self.RAIL_WIDTH)
+            self.setMaximumWidth(self.RAIL_WIDTH)
             self.resize_handle.hide()
         else:
             if self._splitter_managed:
@@ -329,8 +464,8 @@ class PainterUINavigatorPanel(QFrame):
             self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
             self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
         elif self._collapsed:
-            self.setMinimumWidth(0)
-            self.setMaximumWidth(0)
+            self.setMinimumWidth(self.RAIL_WIDTH)
+            self.setMaximumWidth(self.RAIL_WIDTH)
         self._sync_collapse_button()
 
     def is_temporary_expanded(self) -> bool:
@@ -376,6 +511,14 @@ class PainterUINavigatorPanel(QFrame):
 
     def reveal_asset(self, label: str, asset_id: str = "") -> bool:
         target_label = str(label or "")
+        if target_label == "Tokens":
+            if self._collapsed and not self._temporary_expanded:
+                self.set_auto_hide(False, user_initiated=True)
+            self.select_section("variables")
+            widget = self.variable_widget
+            if widget is not None and hasattr(widget, "select_token"):
+                widget.select_token(str(asset_id or ""))
+            return widget is not None
         target_index = next(
             (
                 index
@@ -388,12 +531,10 @@ class PainterUINavigatorPanel(QFrame):
             return False
         if self._collapsed and not self._temporary_expanded:
             self.set_collapsed(False, user_initiated=True)
-        self.mode_tabs.setCurrentWidget(self.assets_host)
+        self.select_section("assets")
         self.asset_tabs.setCurrentIndex(target_index)
         widget = self.asset_tabs.widget(target_index)
-        if target_label == "Tokens" and hasattr(widget, "select_token"):
-            widget.select_token(str(asset_id or ""))
-        elif target_label == "Components" and hasattr(
+        if target_label == "Components" and hasattr(
             widget,
             "select_component",
         ):
@@ -421,8 +562,8 @@ class PainterUINavigatorPanel(QFrame):
     def set_splitter_managed(self, managed: bool) -> None:
         self._splitter_managed = bool(managed)
         if self._collapsed:
-            self.setMinimumWidth(0)
-            self.setMaximumWidth(0)
+            self.setMinimumWidth(self.RAIL_WIDTH)
+            self.setMaximumWidth(self.RAIL_WIDTH)
         elif self._splitter_managed:
             self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
             self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
@@ -455,6 +596,12 @@ class PainterUINavigatorPanel(QFrame):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.navigation_rail.setGeometry(
+            0,
+            0,
+            self.RAIL_WIDTH,
+            self.height(),
+        )
         self.resize_handle.setGeometry(
             max(0, self.width() - self.resize_handle.width()),
             26,
@@ -463,6 +610,64 @@ class PainterUINavigatorPanel(QFrame):
         )
         if not self._collapsed:
             self.resize_handle.raise_()
+        self.navigation_rail.raise_()
+
+    def active_section(self) -> str:
+        return str(self._active_section)
+
+    def select_section(
+        self,
+        section: str,
+        *,
+        user_initiated: bool = False,
+    ) -> str:
+        requested = str(section or "file").strip().casefold()
+        selected = requested if requested in {
+            "file",
+            "assets",
+            "tools",
+            "variables",
+        } else "file"
+        if user_initiated and self._collapsed:
+            self.set_auto_hide(False, user_initiated=True)
+        self._active_section = selected
+        index_by_section = {
+            "file": self.mode_tabs.indexOf(self.file_host),
+            "assets": self.mode_tabs.indexOf(self.assets_host),
+            "tools": self.mode_tabs.indexOf(self.tools_host),
+            "variables": self.mode_tabs.indexOf(self.variables_host),
+        }
+        self.mode_tabs.setCurrentIndex(index_by_section[selected])
+        file_visible = selected == "file"
+        for widget in (
+            self.search_edit,
+            self.pages_header,
+            self.page_list,
+            self.page_actions,
+        ):
+            widget.setVisible(file_visible)
+        labels = {
+            "file": "File",
+            "assets": "Assets",
+            "tools": "Tools",
+            "variables": "Variables",
+        }
+        button = self.navigation_buttons[selected]
+        button.setChecked(True)
+        return selected
+
+    def set_document_title(self, title: str) -> None:
+        self.title_label.setText(
+            str(title or "").strip() or painter_text("Untitled")
+        )
+
+    def set_focus_mode(self, enabled: bool) -> None:
+        value = bool(enabled)
+        if self.focus_mode_button.isChecked() == value:
+            return
+        self.focus_mode_button.blockSignals(True)
+        self.focus_mode_button.setChecked(value)
+        self.focus_mode_button.blockSignals(False)
 
     def _sync_collapse_button(self) -> None:
         self.collapse_button.setIcon(

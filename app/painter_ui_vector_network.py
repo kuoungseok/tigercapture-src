@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from collections import defaultdict, deque
 from math import hypot
 from typing import Any, Mapping
 
@@ -213,9 +214,22 @@ def vector_network_to_qpath(value: Any, rect) -> Any:
             float(rect.top()) + float(value_point["y"]) * float(rect.height()),
         )
 
-    unused = list(network["segments"])
-    while unused:
-        segment = unused.pop(0)
+    segments = list(network["segments"])
+    outgoing = defaultdict(deque)
+    remaining = {segment["id"] for segment in segments}
+    for segment in segments:
+        outgoing[segment["start_node_id"]].append(segment)
+    root_index = 0
+    while remaining:
+        while (
+            root_index < len(segments)
+            and segments[root_index]["id"] not in remaining
+        ):
+            root_index += 1
+        if root_index >= len(segments):
+            break
+        segment = segments[root_index]
+        remaining.discard(segment["id"])
         start_id = segment["start_node_id"]
         start = nodes[start_id]
         path.moveTo(point(start))
@@ -235,17 +249,13 @@ def vector_network_to_qpath(value: Any, rect) -> Any:
             else:
                 path.lineTo(point(end))
             current_id = active["end_node_id"]
-            next_index = next(
-                (
-                    index
-                    for index, candidate in enumerate(unused)
-                    if candidate["start_node_id"] == current_id
-                ),
-                -1,
-            )
-            if next_index < 0:
+            candidates = outgoing.get(current_id)
+            while candidates and candidates[0]["id"] not in remaining:
+                candidates.popleft()
+            if not candidates:
                 break
-            segment = unused.pop(next_index)
+            segment = candidates.popleft()
+            remaining.discard(segment["id"])
         if network["closed"] and current_id == start_id:
             path.closeSubpath()
     return path

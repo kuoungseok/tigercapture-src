@@ -13,6 +13,18 @@ from PIL import Image
 
 STUDY_SCHEMA = "tigerstudio.painter.ai_study.v1"
 
+STUDY_MODEL_CONTRACT: dict[str, Any] = {
+    "model": "tiger_authored_reference_study_planner_v1",
+    "parameter_source": "authored_style_preset_not_measured_quality_model",
+    "comparison_metrics": "diagnostic_measurements_only",
+    "quality_threshold_claim": False,
+    "reference_reconstruction_quality_claim": False,
+    "external_product_parity_claim": False,
+    "analysis_width_px_domain": [256, 1600],
+    "region_count_domain": [3, 24],
+    "capacity_source": "tiger_authored_diagnostic_planner_workload_policy",
+}
+
 PHASE_PRESETS: dict[str, dict[str, Any]] = {
     "underpaint": {
         "step": 24,
@@ -113,20 +125,20 @@ def analyze_reference(
         "seed": int(seed),
         "generated_layers": [],
         "generated_layer_history": [],
-        "generated_layer_history": [],
         "stroke_count": 0,
         "last_comparison": {},
         "baked_reference_pixels": False,
         "timings": [],
-        "timings": [],
         "focus_regions": _normalize_focus_regions(focus_regions),
+        "model_contract": dict(STUDY_MODEL_CONTRACT),
     }
     report = {
         "schema": STUDY_SCHEMA,
         "session_id": session_id,
         "reference_path": str(source_path),
         "canvas": {"width": width, "height": height},
-        "edge_coverage": round(float(np.mean(edge >= 0.22)), 6),
+        "edge_mean": round(float(np.mean(edge)), 6),
+        "edge_p95": round(float(np.percentile(edge, 95)), 6),
         "luminance": {
             "mean": round(float(np.mean(gray)) / 255.0, 6),
             "p05": round(float(np.percentile(gray, 5)) / 255.0, 6),
@@ -135,6 +147,7 @@ def analyze_reference(
         "region_count": int(len(centers)),
         "seed": int(seed),
         "focus_regions": list(runtime["focus_regions"]),
+        "model_contract": dict(STUDY_MODEL_CONTRACT),
     }
     return runtime, report
 
@@ -169,6 +182,7 @@ def segment_report(runtime: dict[str, Any]) -> dict[str, Any]:
         "schema": STUDY_SCHEMA,
         "session_id": runtime["session_id"],
         "regions": rows,
+        "model_contract": dict(STUDY_MODEL_CONTRACT),
     }
 
 
@@ -431,6 +445,7 @@ def compare_reference_to_render(
         "edge_iou": round(intersection / max(1, union), 6),
         "structural_edge_f1": round(edge_f1, 6),
         "focus_regions": focus_rows,
+        "model_contract": dict(STUDY_MODEL_CONTRACT),
     }
     runtime["last_comparison"] = report
     runtime["error_map"] = np.mean(absolute, axis=2)
@@ -461,8 +476,12 @@ def generate_refinement_strokes(
     for y in range(2, height - 2, 3):
         for x in range(2, width - 2, 3):
             focus = _focus_weight(runtime.get("focus_regions") or [], x / width, y / height)
-            score = float(normalized_error[y, x]) + focus * 0.24
-            if score >= 0.42:
+            pixel_error = float(normalized_error[y, x])
+            score = pixel_error + focus * 0.24
+            # Candidate admission is based only on an observed mismatch.
+            # Authored focus weighting affects ordering, not a hidden quality
+            # threshold. max_strokes remains the explicit caller-owned cap.
+            if pixel_error > 0.0:
                 candidates.append((score + rng.random() * 0.04, x, y))
     candidates.sort(reverse=True)
     strokes: list[Stroke] = []
@@ -505,35 +524,23 @@ def generate_refinement_strokes(
 
 def quality_report(runtime: dict[str, Any]) -> dict[str, Any]:
     comparison = dict(runtime.get("last_comparison") or {})
-    reasons: list[str] = []
+    observations: list[str] = []
     if not comparison:
-        reasons.append("render comparison has not run")
-    if float(comparison.get("mean_absolute_error", 999.0)) > 32.0:
-        reasons.append("mean reconstruction error is above 32")
-    if float(comparison.get("luminance_correlation", 0.0)) < 0.86:
-        reasons.append("luminance correlation is below 0.86")
-    if float(comparison.get("structural_edge_f1", 0.0)) < 0.42:
-        reasons.append("structural edge F1 is below 0.42")
-    for focus in comparison.get("focus_regions") or []:
-        if (
-            float(focus.get("priority", 0.0)) >= 2.0
-            and float(focus.get("mean_absolute_error", 999.0)) > 28.0
-        ):
-            reasons.append(f"focus region {focus.get('id')} error is above 28")
+        observations.append("render comparison has not run")
     if bool(runtime.get("baked_reference_pixels")):
-        reasons.append("baked reference pixels are present")
-    if int(runtime.get("stroke_count", 0)) < 1000:
-        reasons.append("editable stroke count is below 1000")
+        observations.append("baked reference pixels are present")
     return {
         "schema": STUDY_SCHEMA,
         "session_id": runtime["session_id"],
-        "status": "ready" if not reasons else "needs_refinement",
-        "reasons": reasons,
+        "status": "diagnostic_only",
+        "reasons": observations,
+        "quality_threshold_claim": False,
+        "release_readiness_claim": False,
+        "model_contract": dict(STUDY_MODEL_CONTRACT),
         "stroke_count": int(runtime.get("stroke_count", 0)),
         "generated_layers": list(runtime.get("generated_layers") or []),
         "baked_reference_pixels": bool(runtime.get("baked_reference_pixels")),
         "comparison": comparison,
-        "timings": list(runtime.get("timings") or []),
         "timings": list(runtime.get("timings") or []),
     }
 
@@ -615,6 +622,7 @@ def _focus_weight(rows: list[dict[str, Any]], x: float, y: float) -> float:
 
 __all__ = [
     "PHASE_PRESETS",
+    "STUDY_MODEL_CONTRACT",
     "STUDY_SCHEMA",
     "analyze_reference",
     "compare_reference_to_render",

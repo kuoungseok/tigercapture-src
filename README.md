@@ -2,19 +2,22 @@
 
 **Tiger Studio is a local-first Windows creator studio for polished screen
 recordings, timeline editing, reviewable AI editing, Motion Designer, Painter,
-anime/game actor workflows, AR/PBR material helpers, and supported Unreal UMG
-handoff.**
+UI design/prototyping, anime/game actor workflows, AR/PBR material helpers,
+Figma exchange, and supported Unreal UMG handoff.**
 
 Tiger Studio records screenshots, GIFs, and MP4 screen captures, then continues
 into a full local editor with Screen Studio-style polish, CapCut-style creator
 assistance, professional color/audio foundations, node-based effects,
 subtitles, render queue delivery, Live2D/Spine/MMD/VRM-oriented actor tracks,
 production drawing, Texture Lab/PBR support, and optional local Voice Lab
-workflows.
+workflows. Painter also includes a UI Design workspace for artboards,
+components, tokens, responsive layout, local prototypes, Figma exchange, and
+supported Unreal UMG delivery.
 
 Korean: Tiger Studio는 화면 녹화, 영상 편집, AI 보조 편집, 모션 그래픽,
-캐릭터 액터, Painter, PBR 텍스처 보조, Unreal UMG 전달 흐름을 하나의 로컬
-Windows 제작 환경으로 묶는 크리에이터 스튜디오입니다.
+Painter, UI 디자인/프로토타입, 캐릭터 액터, PBR 텍스처 보조, Figma 교환,
+Unreal UMG 전달 흐름을 하나의 로컬 Windows 제작 환경으로 묶는 크리에이터
+스튜디오입니다.
 
 **Made by** [artmouse (KyoungSeok Ko)](https://github.com/kuoungseok)
 
@@ -34,8 +37,9 @@ utility, and game UI pipeline for every project.
 | **Polished screen recordings** | Record or import a screen video, apply Auto Polish, add cursor/click/hotkey emphasis, trim, and export. |
 | **Timeline studio** | Edit clips, subtitles, effects, zooms, color, audio, masks, transitions, and render jobs in one local project. |
 | **Reviewable AI editing** | Use Creator Assist and Script Edit to plan captions, cleanup edits, short ranges, vertical reframes, render jobs, publish copy, and platform variants before safe apply. |
-| **Motion Designer** | Build 2.5D editorial motion, typography, paper/collage effects, particles, templates, and reusable interactive button components. |
+| **Motion Designer** | Build 2.5D editorial motion, typography, paper/collage effects, particles, generators, replicators, templates, and reusable interactive button components. |
 | **Painter** | Create game concept art, character/prop/background art, texture paint-over, video paint-over, and AI study passes with editable strokes. |
+| **UI design and prototyping** | Author artboards, components, tokens, responsive variants, local prototypes, HTML preview packages, Figma exchange, and supported Unreal UMG output from Painter UI Design. |
 | **Actor workflows** | Add Live2D, Spine/NIKKE, MMD, and VRM/VSeeFace-oriented actor workflows as timeline tracks or Program Output sources, then preview and bake supported outputs. |
 | **AR/PBR and Texture Lab** | Generate and preview supported PBR maps, place 3D object tracks, inspect material/environment payloads, and keep preview/export diagnostics visible. |
 | **Unreal UMG handoff** | Package supported Motion Designer/Painter content through a provider-neutral Tiger UMG document and generate supported Widget Blueprint output. |
@@ -97,18 +101,25 @@ utility, and game UI pipeline for every project.
 ### Motion Designer
 
 - 2.5D camera controls for depth, FOV, camera position, roll, and parallax.
-- Renderer-neutral Replicator metadata for count, offset, rotation, scale,
-  opacity falloff, deterministic jitter, and seed.
+- Renderer-neutral Replicator metadata for line, grid, and radial arrangements,
+  count, offset/radius, rotation, scale, opacity falloff, deterministic jitter,
+  and seed.
+- Procedural Generator layers for solid color, linear gradients, checkerboard,
+  grid, deterministic noise, and radial rays.
 - Track mattes, per-layer motion blur, typography animator automation,
   directional blur, displacement, corner pin, mesh warp, paper fold, and paper
   paste composites.
+- Deterministic paper crumple/unfold effects with animated amount, crease
+  density, sharpness, depth, residual wrinkle, and matching CPU/GPU output.
 - Direction presets such as headline slam, paper reveal, cutout collage,
   editorial camera push, and beat-synced montage.
 - Interactive button components with Normal, Hover, Pressed, Disabled, and
   Focused states, pointer/focus triggers, hit padding, transition duration, and
   deterministic preview/export behavior.
 - Template gallery with production-rendered thumbnails, search/category
-  filters, aspect-ratio variants, and learning templates.
+  filters, aspect-ratio variants, learning templates, photo-led Studio
+  Originals, product/ad/education packages, logo reveal samples, and visible
+  demonstration media across the built-in catalog.
 
 ### Painter
 
@@ -134,6 +145,33 @@ utility, and game UI pipeline for every project.
   segmentation, underpaint, editable stroke generation, render comparison,
   refinement, quality reporting, and real Painter-window timelapse capture.
 
+### Painter UI Design and Prototyping
+
+- Three-column UI Design workspace with Pages and Layers on the left, artboards
+  in the center, and properties, Components, Tokens, Motion delivery, Publish,
+  and inspection in the right inspector.
+- Artboards, frames, groups, buttons, image objects, component definitions,
+  instances, variants, typed properties, tokens, variables, styles, layout grid
+  styles, and `.tsuilib` local design-system packages.
+- Deterministic Auto Layout with Horizontal/Vertical flow, padding, gap,
+  alignment, Wrap, Fixed/Hug/Fill sizing, constraints, responsive overrides,
+  themes, high-contrast preview, safe areas, guides, and layout diagnostics.
+- Image placement supports PNG, WebP, JPEG, and BMP with Fit, Fill, Stretch,
+  Tile, and optional 9-slice rendering.
+- Prototype authoring supports flow start points, object connection handles,
+  click/navigation interactions, overlay/state/variant/variable behavior,
+  Smart Animate inspection, inline Play/Reset debugging, and self-contained
+  HTML prototype export.
+- Production UI packages cover PNG/WebP/SVG, density variants, object slices,
+  trim/padding, 9-slice, texture atlases, resource hashes, object-anchored
+  comments, named checkpoints, revision diff, and offline review packages.
+- `Publish > Figma` exchanges editable frames, text, fills, images,
+  constraints, Auto Layout, local components/instances, variables, tokens,
+  prototype links, and supported effects through the official REST/plugin
+  boundary without claiming proprietary `.fig` archive support.
+- Painter UI output uses the shared TigerStudioUMG backend through
+  `paint.ui.umg.*`; no Painter-specific Unreal plugin exists.
+
 ### Actor, VTuber, and AR/PBR Tracks
 
 - Live2D and Spine clips live on dedicated actor tracks instead of normal video
@@ -155,7 +193,7 @@ utility, and game UI pipeline for every project.
   diagnostics.
 - Actor overlays are baked into final videos as transparent overlays.
 
-### Texture Lab, PBR, and Unreal UMG
+### Texture Lab, PBR, Figma, and Unreal UMG
 
 - Texture Lab generates supported BaseColor, Normal, AO, Roughness, Metallic,
   Height, Cavity, Curvature, packed ORM/ARM, Unreal ORM, glTF MR, and optional
@@ -169,6 +207,8 @@ utility, and game UI pipeline for every project.
 - The TigerStudioUMG workflow installs or updates the project plugin, generates
   supported Widget Blueprint content, compiles it, validates the generated
   asset, and reports the result.
+- Painter UI Design can also package Figma exchange artifacts and
+  self-contained HTML prototypes for supported local-review workflows.
 - Unsupported UMG content must be reported as native, UI Material,
   deterministic bake, or blocked preflight; it must not be silently omitted.
 
@@ -225,10 +265,10 @@ Readiness diagnostics.
 
 Tiger Studio is not trying to replace every professional editor. Its strongest
 position is the intersection of polished screen recordings, local creator
-assistance, anime/game actor workflows, production drawing, Motion Designer,
-PBR helpers, and Unreal UI handoff.
+assistance, anime/game actor workflows, production drawing, UI design,
+Motion Designer, PBR helpers, Figma exchange, and Unreal UI handoff.
 
-Current local QA snapshot as of 2026-07-26:
+Current local QA snapshot as of 2026-07-31:
 
 - Final Product Readiness: 99/100, with release still blocked by real broadcast
   platform evidence.
@@ -240,8 +280,9 @@ Current local QA snapshot as of 2026-07-26:
 - CapCut Parity Next: 89.38/100, with cloud/mobile/collaboration still the
   largest gap.
 - Broadcast Readiness: 95/100 alpha-ready, not commercial broadcast-ready.
-- Latest documentation slice: Painter actions/new canvas, Unreal UMG
-  document/plugin, and Motion advanced direction tests passed locally.
+- Latest documentation slice: Motion generators/templates/trend templates plus
+  Painter UI Auto Layout, Figma exchange, Unreal UMG, and prototype export
+  tests passed locally.
 
 | Compared with | Tiger Studio position |
 |---|---|
@@ -249,13 +290,15 @@ Current local QA snapshot as of 2026-07-26:
 | **CapCut** | Creator Assist covers captions, Shorts planning, vertical reframe, publish packages, render handoff, mobile-safe templates, and local asset packs. CapCut still wins on mobile/cloud collaboration, huge social/template scale, and trend ecosystem depth. |
 | **Camtasia** | Strong overlap for tutorials and product demos. Tiger Studio adds local ML planning, actor overlays, Painter, and Motion Designer; Camtasia still has mature education/business trust. |
 | **Descript** | Descript-lite positioning is evidence-backed for transcript planning, reviewed safe apply, cleanup, speech-enhance contracts, and sentence-level voice replacement contracts. Descript still wins on hosted collaboration, provider-direct coediting, share links, comments, version history, and team workspaces. |
+| **Figma** | Painter UI Design now overlaps with artboards, components, Auto Layout, variables/tokens, local prototypes, comments, and Figma exchange. Figma still wins on real-time collaboration, mature design systems, community assets, browser-native review, Dev Mode, and platform trust. |
+| **Rive** | Motion Designer and Painter prototype flows can author interactive states and motion handoff, but Rive remains stronger for runtime state machines, interactive animation runtimes, and app-embedded vector animation. |
 | **Live2D / Spine tools** | Tiger Studio treats supported Live2D, Spine, MMD, and VRM-style assets as timeline actors and exportable overlays. It is not a Cubism, Spine Editor, or MMD authoring replacement. |
 | **Clip Studio / Photoshop / Krita / Corel Painter** | Painter is now a scoped production drawing workspace with native documents, editable brushes, pressure/tilt, Wet Canvas v1, 3D blockout, and AI study automation. It is not a full replacement for mature dedicated paint packages. |
 | **Substance / Marmoset / Blender** | Texture Lab and PBR workflows help generate maps, preview materials, and hand off supported data. They are not full mesh texturing, baking, lookdev, or DCC replacements. |
 | **OBS** | Program Output recording/RTMP foundations and an optional OBS bridge exist, but OBS is still stronger for live streaming, scenes, plugins, and production broadcast ecosystems. |
 | **Premiere / Resolve / Final Cut Pro** | Tiger Studio has a stronger NLE foundation with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and project-bin action surfaces. It is still not a Premiere/Resolve/Final Cut-class professional NLE until real long-project evidence clears. |
 | **PowerPoint / presentation tools** | Tiger Studio can author timeline-native decks and export PPTX, PDF, or MP4 presentation videos. It should not be positioned as a full PowerPoint replacement or enterprise presentation collaboration tool. |
-| **Unreal UI workflows** | Tiger Studio can generate supported UMG output through its project plugin path. Unreal remains the runtime/editor authority; Tiger is the local authoring and handoff tool for supported UI content. |
+| **Unreal UI workflows** | Tiger Studio can generate supported UMG output through its project plugin path, including verified checkout-style Painter UI output. Unreal remains the runtime/editor authority; Tiger is the local authoring and handoff tool for supported UI content. |
 
 ---
 
@@ -270,9 +313,10 @@ Current local QA snapshot as of 2026-07-26:
 | Color | CPU RGB pipeline, LUTs, optional PyOpenColorIO bridge, FFmpeg color metadata |
 | Audio | Qt playback, FFmpeg audio graph, LUFS/true-peak helpers, Demucs optional |
 | Painter | Qt canvas, editable stroke model, `.tspaint`, tablet channels, Wet Canvas v1, optional OpenGL-backed previews |
-| Motion | Motion Designer render graph, 2.5D metadata, templates, interactive button components |
+| UI Design | Painter UI document model, artboards, components, Auto Layout, variables/tokens, prototypes, `.tsuilib`, HTML preview, Figma exchange |
+| Motion | Motion Designer render graph, 2.5D metadata, generators, replicators, templates, interactive button components |
 | Texture/PBR | Texture Lab map generation, GPU material preview, Height/POM preview, shared Painter PBR actions |
-| Unreal UMG | Provider-neutral Tiger UMG document, TigerStudioUMG project plugin, Widget Blueprint generation for supported content |
+| Unreal UMG | Provider-neutral Tiger UMG document, TigerStudioUMG project plugin, Widget Blueprint generation for supported Motion/Painter UI content |
 | Voice Lab | Optional external Style-Bert-VITS2 sidecar, FastAPI `/voice` endpoint, generated WAV media |
 | Local ML | OpenCV/Pillow baseline analysis, optional Whisper/SAM/Demucs/ONNX/Ultralytics |
 | Actors | In-app Live2D runtime path, Spine parser/renderers, MMD/VRM-oriented workflows, OpenGL/software fallback |
@@ -295,6 +339,9 @@ Current local QA snapshot as of 2026-07-26:
   Tiger Studio does not bundle that AGPL engine into the closed editor build.
 - Optional Unreal UMG workflow: Unreal Engine 5.8 project access is required
   when generating supported Widget Blueprint output.
+- Optional Figma exchange workflow: a Figma file key or exported REST JSON is
+  required for import; export creates a local development-plugin package for
+  supported editable reconstruction.
 
 ---
 

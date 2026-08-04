@@ -64,7 +64,10 @@ def test_overlay_uses_custom_pivot_for_rotation_handle_and_hit_transform() -> No
         90.0,
         constraints,
     )
-    assert abs(restored.x() - 100.0) < 0.001
+    # Painter stores Figma inspector angles: +90 is counterclockwise.
+    # The screen point above the pivot therefore maps back to the local point
+    # on the right side of the pivot.
+    assert abs(restored.x() - 200.0) < 0.001
     assert abs(restored.y() - pivot.y()) < 0.001
     overlay.deleteLater()
     app.processEvents()

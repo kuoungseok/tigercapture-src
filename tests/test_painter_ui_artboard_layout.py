@@ -274,6 +274,37 @@ def test_ui_canvas_rulers_draw_and_drag_guides() -> None:
     overlay.deleteLater()
 
 
+def test_selected_frame_range_is_highlighted_on_both_rulers() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, frame = add_ui_object(
+        create_ui_document(640, 480),
+        kind="frame",
+        name="Frame 1",
+        x=40,
+        y=50,
+        width=220,
+        height=160,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(800, 600)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+
+    selected = overlay._selected_frame_ruler_rect()
+    assert selected is not None
+    image = overlay.grab().toImage()
+    horizontal = image.pixelColor(int(selected.center().x()), 8)
+    vertical = image.pixelColor(8, int(selected.center().y()))
+    baseline = image.pixelColor(24, 8)
+    assert horizontal.blue() > baseline.blue()
+    assert vertical.blue() > baseline.blue()
+    overlay.deleteLater()
+
+
 def test_ui_canvas_guide_creation_uses_document_undo_path() -> None:
     app = _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap

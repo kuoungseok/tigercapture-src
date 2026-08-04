@@ -2085,7 +2085,17 @@ class VideoExportThread(QThread):
         input_idx = 1  # 0 is the source video
         total_out_s = sum((e - s) / sp for (s, e, sp) in self._segments) / 1000.0
 
-        for (start_ms, end_ms), group_strokes in groups.items():
+        def fail_overlay(kind: str, index: int, failed_path: str) -> None:
+            for candidate in [failed_path, *png_paths]:
+                try:
+                    os.unlink(candidate)
+                except OSError:
+                    pass
+            raise RuntimeError(
+                f"Painter {kind} overlay {index} could not be rendered"
+            )
+
+        for group_index, ((start_ms, end_ms), group_strokes) in enumerate(groups.items()):
             t_start = _map_source_to_output(start_ms, self._segments)
             if t_start < 0:
                 t_start = 0.0  # clamp strokes that would land in a cut
@@ -2100,11 +2110,7 @@ class VideoExportThread(QThread):
                 group_strokes, src_w, src_h, png_path, width_scale=width_scale
             )
             if not ok:
-                try:
-                    os.unlink(png_path)
-                except OSError:
-                    pass
-                continue
+                fail_overlay("stroke", group_index, png_path)
             png_paths.append(png_path)
             overlay_spec.append((input_idx, t_start, t_end))
             input_idx += 1
@@ -2113,7 +2119,7 @@ class VideoExportThread(QThread):
         # start_ms onward (no end; stays until end of video).
         if self._bubbles:
             from app.drawing import render_bubble_to_png
-            for bubble in self._bubbles:
+            for bubble_index, bubble in enumerate(self._bubbles):
                 t_start = _map_source_to_output(
                     int(bubble.start_ms), self._segments
                 )
@@ -2125,11 +2131,7 @@ class VideoExportThread(QThread):
                 os.close(fd)
                 ok = render_bubble_to_png(bubble, src_w, src_h, png_path)
                 if not ok:
-                    try:
-                        os.unlink(png_path)
-                    except OSError:
-                        pass
-                    continue
+                    fail_overlay("speech-bubble", bubble_index, png_path)
                 png_paths.append(png_path)
                 overlay_spec.append((input_idx, t_start, None))
                 input_idx += 1
@@ -2141,7 +2143,7 @@ class VideoExportThread(QThread):
         if self._stickers:
             from app.drawing import render_sticker_to_png
             ordered = sorted(self._stickers, key=lambda s: int(getattr(s, "z_index", 0)))
-            for sticker in ordered:
+            for sticker_index, sticker in enumerate(ordered):
                 t_start = _map_source_to_output(
                     int(sticker.start_ms), self._segments
                 )
@@ -2162,11 +2164,7 @@ class VideoExportThread(QThread):
                 os.close(fd)
                 ok = render_sticker_to_png(sticker, src_w, src_h, png_path)
                 if not ok:
-                    try:
-                        os.unlink(png_path)
-                    except OSError:
-                        pass
-                    continue
+                    fail_overlay("sticker", sticker_index, png_path)
                 png_paths.append(png_path)
                 overlay_spec.append((input_idx, t_start, t_end))
                 input_idx += 1

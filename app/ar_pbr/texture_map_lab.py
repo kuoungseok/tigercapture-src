@@ -27,7 +27,7 @@ from app.ar_pbr.pbr_math import (
 )
 
 
-SCHEMA_ID = "tigerstudio.ar_pbr.texture_map_lab.v1"
+SCHEMA_ID = "tigerstudio.ar_pbr.texture_map_lab.v3"
 DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
     "base_color",
     "normal",
@@ -40,6 +40,7 @@ DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
 )
 ANALYSIS_MAPS: tuple[str, ...] = (
     "base_color_source",
+    "base_color_estimate",
     "irradiance",
     "delight_shading",
 )
@@ -109,6 +110,11 @@ UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
         "compression": "Default",
         "usage": "Diagnostic source BaseColor before de-light/albedo recovery",
     },
+    "base_color_estimate": {
+        "sRGB": True,
+        "compression": "Default",
+        "usage": "Optional heuristic de-lit Base Color estimate; not a measured albedo",
+    },
     "irradiance": {
         "sRGB": False,
         "compression": "Grayscale",
@@ -156,6 +162,7 @@ class TextureMapLabSettings:
     metallic_threshold: float = 1.1
     metallic_softness: float = 0.08
     delight_enabled: bool = False
+    delight_apply_to_base_color: bool = False
     delight_strength: float = 0.65
     delight_radius_px: float = 42.0
     delight_contrast_preservation: float = 0.25
@@ -503,6 +510,10 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
         "metallic_threshold": clamp_float(raw.get("metallic_threshold"), 0.0, 1.5, defaults.metallic_threshold),
         "metallic_softness": clamp_float(raw.get("metallic_softness"), 0.001, 0.5, defaults.metallic_softness),
         "delight_enabled": bool_setting(raw.get("delight_enabled"), defaults.delight_enabled),
+        "delight_apply_to_base_color": bool_setting(
+            raw.get("delight_apply_to_base_color"),
+            defaults.delight_apply_to_base_color,
+        ),
         "delight_strength": clamp_float(raw.get("delight_strength"), 0.0, 1.0, defaults.delight_strength),
         "delight_radius_px": clamp_float(raw.get("delight_radius_px"), 1.0, 256.0, defaults.delight_radius_px),
         "delight_contrast_preservation": clamp_float(
@@ -592,6 +603,35 @@ def _to_l_image(array: Any) -> Image.Image:
     return Image.fromarray(_to_u8(array), mode="L")
 
 
+def texture_height_to_image16(value: Any) -> Image.Image:
+    """Encode a normalized Height field as a real 16-bit grayscale image."""
+    array = np.asarray(value, dtype=np.float32)
+    if array.ndim != 2 or array.size == 0:
+        raise ValueError("height must be a non-empty 2D array")
+    encoded = np.clip(array * 65535.0 + 0.5, 0.0, 65535.0).astype(np.uint16)
+    return Image.fromarray(encoded)
+
+
+def _srgb_to_linear(array: Any) -> np.ndarray:
+    """Decode IEC 61966-2-1 sRGB values into linear-light RGB."""
+    value = np.clip(np.asarray(array, dtype=np.float32), 0.0, 1.0)
+    return np.where(
+        value <= 0.04045,
+        value / 12.92,
+        np.power((value + 0.055) / 1.055, 2.4),
+    ).astype(np.float32)
+
+
+def _linear_to_srgb(array: Any) -> np.ndarray:
+    """Encode linear-light RGB using the IEC 61966-2-1 sRGB transfer curve."""
+    value = np.clip(np.asarray(array, dtype=np.float32), 0.0, 1.0)
+    return np.where(
+        value <= 0.0031308,
+        value * 12.92,
+        1.055 * np.power(value, 1.0 / 2.4) - 0.055,
+    ).astype(np.float32)
+
+
 def _array_from_l(image: Image.Image) -> np.ndarray:
     return np.asarray(image.convert("L"), dtype=np.float32) / 255.0
 
@@ -631,6 +671,40 @@ def _edge_aware_blur_float(
     edge_delta = np.abs(guide_arr - guide_blur)
     blur_weight = np.exp(-edge_delta * float(sensitivity)).astype(np.float32)
     return np.clip(source * (1.0 - blur_weight) + blurred * blur_weight, 0.0, 1.0).astype(np.float32)
+
+
+def _delight_gaussian_blur_float(array: np.ndarray, radius: float) -> np.ndarray:
+    """Match the CUDA De-lit 3-sigma Gaussian and replicate border on CPU."""
+    if radius <= 0.001:
+        return np.asarray(array, dtype=np.float32)
+    sigma = max(0.15, float(radius))
+    kernel_radius = max(1, int(math.ceil(sigma * 3.0)))
+    try:
+        import cv2  # type: ignore
+
+        return cv2.GaussianBlur(
+            np.asarray(array, dtype=np.float32),
+            (kernel_radius * 2 + 1, kernel_radius * 2 + 1),
+            sigmaX=sigma,
+            sigmaY=sigma,
+            borderType=cv2.BORDER_REPLICATE,
+        ).astype(np.float32)
+    except Exception:
+        # CPU fallback remains diagnostic-only when OpenCV is absent.
+        return _blur_float(np.asarray(array, dtype=np.float32), sigma)
+
+
+def _delight_edge_aware_blur_float(
+    value: np.ndarray,
+    guide: np.ndarray,
+    radius: float,
+    sensitivity: float,
+) -> np.ndarray:
+    blurred = _delight_gaussian_blur_float(value, radius)
+    guide_blur = _delight_gaussian_blur_float(guide, radius)
+    edge_delta = np.abs(np.asarray(guide, dtype=np.float32) - guide_blur)
+    weight = np.exp(-edge_delta * float(sensitivity))
+    return np.clip(value * (1.0 - weight) + blurred * weight, 0.0, 1.0).astype(np.float32)
 
 
 def _contrast_gray(array: np.ndarray, contrast: float, midpoint: float = 0.5) -> np.ndarray:
@@ -872,6 +946,68 @@ def _cavity_from_height(height: np.ndarray, settings: Mapping[str, Any], guide: 
     return np.clip(cavity, 0.0, 1.0).astype(np.float32)
 
 
+def normal_map_from_height(
+    height: np.ndarray,
+    settings: Mapping[str, Any] | None = None,
+) -> np.ndarray:
+    """Generate a convention-aware normal map from an authored height field."""
+    source = np.asarray(height, dtype=np.float32)
+    if source.ndim != 2 or source.size == 0:
+        raise ValueError("height must be a non-empty 2D array")
+    normalized = normalize_texture_map_settings(settings)
+    return _normal_from_height(np.clip(source, 0.0, 1.0), normalized)
+
+
+def ao_map_from_height(
+    height: np.ndarray,
+    settings: Mapping[str, Any] | None = None,
+    *,
+    realtime: bool = False,
+) -> np.ndarray:
+    """Generate AO from authored height, with a bounded live-preview mode."""
+    source = np.asarray(height, dtype=np.float32)
+    if source.ndim != 2 or source.size == 0:
+        raise ValueError("height must be a non-empty 2D array")
+    source = np.clip(source, 0.0, 1.0)
+    normalized = normalize_texture_map_settings(settings)
+    if realtime:
+        normalized["ao_algorithm"] = "legacy_blur"
+        normalized["ao_multiscale"] = False
+    return _ao_from_height(source, normalized, source)
+
+
+def generate_surface_maps_from_height(
+    height: np.ndarray,
+    settings: Mapping[str, Any] | None = None,
+    *,
+    realtime: bool = False,
+) -> dict[str, np.ndarray]:
+    """Run the shared Texture Lab surface stage on an authored height field.
+
+    Painter strokes author height from pressure, load, bristles, and brush
+    geometry. Texture Lab images author height from source luminance. Both
+    paths must use this same normal/AO/cavity/curvature conversion stage so
+    Unreal exports and the Painter preview agree.
+    """
+    source = np.asarray(height, dtype=np.float32)
+    if source.ndim != 2 or source.size == 0:
+        raise ValueError("height must be a non-empty 2D array")
+    source = np.clip(source, 0.0, 1.0).astype(np.float32, copy=False)
+    normalized = normalize_texture_map_settings(settings)
+    if realtime:
+        # Horizon AO is reserved for final Texture Lab/export generation.
+        # The legacy edge-aware blur path keeps live brush preview responsive.
+        normalized["ao_algorithm"] = "legacy_blur"
+        normalized["ao_multiscale"] = False
+    return {
+        "height": source,
+        "normal": normal_map_from_height(source, normalized),
+        "ao": ao_map_from_height(source, normalized, realtime=realtime),
+        "cavity": _cavity_from_height(source, normalized, source),
+        "curvature": _curvature_from_height(source, normalized),
+    }
+
+
 def _roughness_from_source(rgb: np.ndarray, height: np.ndarray, settings: Mapping[str, Any]) -> np.ndarray:
     luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
     local = _blur_float(luma, max(1.0, float(settings["normal_radius_px"]) * 2.5))
@@ -938,33 +1074,34 @@ def _delight_base_color(rgb: np.ndarray, settings: Mapping[str, Any]) -> tuple[n
     strength = float(settings.get("delight_strength", 0.65))
     if strength <= 0.001:
         return np.clip(rgb, 0.0, 1.0).astype(np.float32), np.ones(rgb.shape[:2], dtype=np.float32)
-    luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+    linear_rgb = _srgb_to_linear(rgb)
+    luma = linear_rgb[..., 0] * 0.2126 + linear_rgb[..., 1] * 0.7152 + linear_rgb[..., 2] * 0.0722
     radius = float(settings.get("delight_radius_px", 42.0))
     macro_radius = max(1.0, radius)
     broad_radius = max(macro_radius * 2.35, macro_radius + 8.0)
-    macro = _blur_float(luma, macro_radius)
-    broad = _blur_float(luma, broad_radius)
+    macro = _delight_gaussian_blur_float(luma, macro_radius)
+    broad = _delight_gaussian_blur_float(luma, broad_radius)
     illumination = broad * 0.72 + macro * 0.28
     if bool(settings.get("edge_aware_smoothing", True)):
-        edge_aware = _edge_aware_blur_float(
+        edge_aware = _delight_edge_aware_blur_float(
             luma,
             luma,
             macro_radius,
-            sensitivity=float(settings.get("edge_aware_sensitivity", 9.0)) * 0.18,
+            float(settings.get("edge_aware_sensitivity", 9.0)) * 0.18,
         )
         illumination = illumination * 0.86 + edge_aware * 0.14
     illumination = np.clip(illumination, 0.025, 1.0).astype(np.float32)
     neutral = float(np.median(illumination))
     neutral = max(0.05, min(0.95, neutral))
     correction = np.clip(neutral / illumination, 0.32, 3.10)
-    corrected = np.clip(rgb * np.power(correction[:, :, None], strength), 0.0, 1.0)
+    corrected = np.clip(linear_rgb * np.power(correction[:, :, None], strength), 0.0, 1.0)
     preserve = float(settings.get("delight_contrast_preservation", 0.25))
     if preserve > 0.001:
-        corrected_luma = corrected[..., 0] * 0.2126 + corrected[..., 1] * 0.7152 + corrected[..., 2] * 0.0722
-        original_detail = luma - _blur_float(luma, max(1.0, radius * 0.18))
+        original_detail = luma - _delight_gaussian_blur_float(luma, max(1.0, radius * 0.18))
         detail_gain = 1.0 + original_detail[:, :, None] * preserve
         corrected = np.clip(corrected * detail_gain, 0.0, 1.0)
         target_median = float(np.median(luma))
+        corrected_luma = corrected[..., 0] * 0.2126 + corrected[..., 1] * 0.7152 + corrected[..., 2] * 0.0722
         corrected_median = float(np.median(corrected_luma))
         if corrected_median > 1.0e-4:
             corrected = np.clip(corrected * ((target_median / corrected_median) ** 0.20), 0.0, 1.0)
@@ -974,7 +1111,7 @@ def _delight_base_color(rgb: np.ndarray, settings: Mapping[str, Any]) -> tuple[n
         shading_display = np.clip((illumination - low) / (high - low), 0.0, 1.0)
     else:
         shading_display = np.clip(illumination / max(0.05, float(np.percentile(illumination, 95.0))), 0.0, 1.0)
-    return corrected.astype(np.float32), shading_display.astype(np.float32)
+    return _linear_to_srgb(corrected), shading_display.astype(np.float32)
 
 
 def _base_color_from_source(image: Image.Image, settings: Mapping[str, Any]) -> np.ndarray:
@@ -1019,7 +1156,12 @@ def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any
     strength = float(settings.get("delight_strength", 0.65))
     if strength <= 0.001:
         return torch.clamp(base, 0.0, 1.0), torch.ones_like(base[..., 0])
-    luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
+    linear_base = torch.where(
+        base <= 0.04045,
+        base / 12.92,
+        torch.pow((base + 0.055) / 1.055, 2.4),
+    )
+    luma = linear_base[..., 0] * 0.2126 + linear_base[..., 1] * 0.7152 + linear_base[..., 2] * 0.0722
     radius = float(settings.get("delight_radius_px", 42.0))
     macro_radius = max(1.0, radius)
     broad_radius = max(macro_radius * 2.35, macro_radius + 8.0)
@@ -1039,16 +1181,16 @@ def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any
     neutral = torch.quantile(illumination.reshape(-1), 0.50)
     neutral = torch.clamp(neutral, 0.05, 0.95)
     correction = torch.clamp(neutral / illumination, 0.32, 3.10)
-    corrected = torch.clamp(base * torch.pow(correction[..., None], strength), 0.0, 1.0)
+    corrected = torch.clamp(linear_base * torch.pow(correction[..., None], strength), 0.0, 1.0)
     preserve = float(settings.get("delight_contrast_preservation", 0.25))
     if preserve > 0.001:
         local = _torch_gaussian_blur_2d(luma, max(1.0, radius * 0.18), torch)
         detail_gain = 1.0 + (luma - local)[..., None] * preserve
         corrected = torch.clamp(corrected * detail_gain, 0.0, 1.0)
         corrected_luma = corrected[..., 0] * 0.2126 + corrected[..., 1] * 0.7152 + corrected[..., 2] * 0.0722
-        target_mean = torch.clamp(torch.mean(luma), min=1.0e-4)
-        corrected_mean = torch.clamp(torch.mean(corrected_luma), min=1.0e-4)
-        corrected = torch.clamp(corrected * torch.pow(target_mean / corrected_mean, 0.20), 0.0, 1.0)
+        target_median = torch.clamp(torch.quantile(luma.reshape(-1), 0.50), min=1.0e-4)
+        corrected_median = torch.clamp(torch.quantile(corrected_luma.reshape(-1), 0.50), min=1.0e-4)
+        corrected = torch.clamp(corrected * torch.pow(target_median / corrected_median, 0.20), 0.0, 1.0)
     low = torch.quantile(illumination.reshape(-1), 0.02)
     high = torch.quantile(illumination.reshape(-1), 0.98)
     if bool((high > low + 1.0e-4).item()):
@@ -1056,7 +1198,12 @@ def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any
     else:
         high = torch.clamp(torch.quantile(illumination.reshape(-1), 0.95), min=0.05)
         shading_display = torch.clamp(illumination / high, 0.0, 1.0)
-    return corrected, shading_display
+    corrected_srgb = torch.where(
+        corrected <= 0.0031308,
+        corrected * 12.92,
+        1.055 * torch.pow(corrected, 1.0 / 2.4) - 0.055,
+    )
+    return torch.clamp(corrected_srgb, 0.0, 1.0), shading_display
 
 
 def _torch_shift_clamped(value: Any, dy: int, dx: int) -> Any:
@@ -1112,8 +1259,14 @@ def _generate_texture_maps_torch_cuda(
     base = torch.clamp(((base * (2.0 ** exposure)) - 0.5) * contrast + 0.5, 0.0, 1.0)
     base_source = torch.clamp(base, 0.0, 1.0)
     guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
-    base, delight_shading = _torch_delight_base_color(base, normalized, torch)
-    guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
+    base_estimate, delight_shading = _torch_delight_base_color(base_source, normalized, torch)
+    apply_estimate = bool(normalized.get("delight_apply_to_base_color", False)) and bool(
+        normalized.get("delight_enabled", False)
+    )
+    base = base_estimate if apply_estimate else base_source
+    # Surface inference remains tied to the adjusted input, not to the optional
+    # de-light estimate. A color-cleanup guess must not silently rewrite relief.
+    guide_luma = base_source[..., 0] * 0.2126 + base_source[..., 1] * 0.7152 + base_source[..., 2] * 0.0722
     height = torch.clamp((guide_luma - 0.5) * float(normalized["height_contrast"]) + 0.5, 0.0, 1.0)
     height_blur = float(normalized["height_blur_px"])
     if height_blur > 0.001:
@@ -1267,14 +1420,16 @@ def _generate_texture_maps_torch_cuda(
     metallic = torch.full_like(height, float(normalized["metallic_value"]))
     threshold = float(normalized["metallic_threshold"])
     if threshold < 1.0:
-        saturation = torch.max(base, dim=2).values - torch.min(base, dim=2).values
-        brightness = torch.max(base, dim=2).values
+        saturation = torch.max(base_source, dim=2).values - torch.min(base_source, dim=2).values
+        brightness = torch.max(base_source, dim=2).values
         metal_signal = torch.clamp((brightness - threshold) / float(normalized["metallic_softness"]), 0.0, 1.0)
         metal_signal = metal_signal * torch.clamp((0.32 - saturation) / 0.32, 0.0, 1.0)
         metallic = torch.clamp(torch.maximum(metallic, metal_signal), 0.0, 1.0)
 
     reflectance = float(normalized.get("substrate_reflectance", 0.5))
-    dielectric_f0 = 0.16 * reflectance * reflectance
+    # Keep the CUDA path identical to the shared CPU/renderer convention in
+    # dielectric_f0_from_reflectance(): 0 maps to 0.02 and 1 maps to 0.08.
+    dielectric_f0 = max(0.02, min(0.08, 0.02 + reflectance * 0.06))
     f0 = torch.clamp(dielectric_f0 * (1.0 - metallic[..., None]) + base * metallic[..., None], 0.0, 1.0)
 
     f90_strength = float(normalized.get("f90_mask_strength", 0.45))
@@ -1302,16 +1457,20 @@ def _generate_texture_maps_torch_cuda(
     def cpu(value: Any) -> np.ndarray:
         return value.detach().clamp(0.0, 1.0).cpu().numpy().astype(np.float32)
 
+    delight_shading_cpu = cpu(delight_shading)
     maps = {
         "base_color_source": cpu(base_source),
+        "base_color_estimate": cpu(base_estimate),
         "base_color": cpu(base),
         "height": cpu(height),
         "normal": cpu(normal),
         "ao": cpu(ao),
         "roughness": cpu(roughness),
         "metallic": cpu(metallic),
-        "irradiance": cpu(delight_shading),
-        "delight_shading": cpu(delight_shading),
+        # These are two names for the same estimated field. Sharing the array
+        # avoids a full-resolution duplicate in the preview/export cache.
+        "irradiance": delight_shading_cpu,
+        "delight_shading": delight_shading_cpu,
         "cavity": cpu(cavity),
         "curvature": cpu(curvature),
         "f0": cpu(f0),
@@ -1336,19 +1495,24 @@ def _generate_texture_maps_cpu(
 ) -> dict[str, Any]:
     image = image.convert("RGB")
     base_color_raw = _base_color_from_source(image, normalized)
-    base_color, delight_shading = _delight_base_color(base_color_raw, normalized)
-    guide_luma = base_color[..., 0] * 0.2126 + base_color[..., 1] * 0.7152 + base_color[..., 2] * 0.0722
-    height = _height_from_source(base_color, normalized)
+    base_color_estimate, delight_shading = _delight_base_color(base_color_raw, normalized)
+    apply_estimate = bool(normalized.get("delight_apply_to_base_color", False)) and bool(
+        normalized.get("delight_enabled", False)
+    )
+    base_color = base_color_estimate if apply_estimate else base_color_raw
+    guide_luma = base_color_raw[..., 0] * 0.2126 + base_color_raw[..., 1] * 0.7152 + base_color_raw[..., 2] * 0.0722
+    height = _height_from_source(base_color_raw, normalized)
     normal = _normal_from_height(height, normalized)
     ao = _ao_from_height(height, normalized, guide_luma)
     cavity = _cavity_from_height(height, normalized, guide_luma)
     curvature = _curvature_from_height(height, normalized)
-    roughness = _roughness_from_source(base_color, height, normalized)
-    metallic = _metallic_from_source(base_color, normalized)
+    roughness = _roughness_from_source(base_color_raw, height, normalized)
+    metallic = _metallic_from_source(base_color_raw, normalized)
     f0 = _f0_from_material_maps(base_color, metallic, normalized)
     f90_mask = _f90_mask_from_material_maps(base_color, height, roughness, curvature, ao, normalized)
     maps = {
         "base_color_source": base_color_raw,
+        "base_color_estimate": base_color_estimate,
         "base_color": base_color,
         "height": height,
         "normal": normal,
@@ -1412,6 +1576,18 @@ def generate_texture_maps_from_image(
     result["backend"] = selected_backend
     result["source_fingerprint"] = texture_source_fingerprint(resized)
     result["settings_fingerprint"] = texture_map_settings_fingerprint(normalized)
+    estimate_applied = bool(normalized.get("delight_enabled", False)) and bool(
+        normalized.get("delight_apply_to_base_color", False)
+    )
+    result["base_color_provenance"] = {
+        "export_source": "heuristic_de_lit_estimate" if estimate_applied else "adjusted_input_rgb",
+        "estimate_generated": bool(normalized.get("delight_enabled", False)),
+        "estimate_applied": estimate_applied,
+        "estimate_map": "base_color_estimate",
+        "surface_inference_source": "adjusted_input_rgb",
+        "classification": "heuristic_estimate_not_measured_albedo",
+        "confidence": None,
+    }
     return result
 
 
@@ -1475,8 +1651,18 @@ def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
         },
         "delight": {
             "enabled": bool(settings.get("delight_enabled", False)),
-            "method": "low_frequency_intrinsic_de_lighting",
-            "source": "base_color_luminance_edge_aware_illumination_field",
+            "implementation_version": "heuristic_linear_srgb_v2",
+            "classification": "heuristic_estimate_not_measured_albedo",
+            "method": "two_scale_luminance_illumination_division",
+            "source": "linear_srgb_luminance_edge_aware_illumination_field",
+            "working_color_space": "linear_srgb_iec_61966_2_1",
+            "retinex_reference_implementation": False,
+            "intrinsic_decomposition_model": None,
+            "validation": "not_photometrically_validated",
+            "confidence": None,
+            "applied_to_base_color": bool(settings.get("delight_apply_to_base_color", False))
+            and bool(settings.get("delight_enabled", False)),
+            "surface_maps_use_estimate": False,
             "strength": float(settings.get("delight_strength", 0.65)),
             "radius_px": float(settings.get("delight_radius_px", 42.0)),
             "contrast_preservation": float(settings.get("delight_contrast_preservation", 0.25)),
@@ -1680,6 +1866,11 @@ def _sphere_material_preview_array(maps: Mapping[str, np.ndarray], settings: Map
     metallic = _sample_map_nearest(np.asarray(maps["metallic"], dtype=np.float32), x_index, y_index)
     ao = _sample_map_nearest(np.asarray(maps["ao"], dtype=np.float32), x_index, y_index)
     detail = _sample_map_nearest(np.asarray(maps["normal"], dtype=np.float32), x_index, y_index) * 2.0 - 1.0
+    if str(settings.get("normal_format", "unreal_directx")).casefold() in {
+        "unreal_directx",
+        "directx",
+    }:
+        detail[..., 1] *= -1.0
 
     geom_normal = np.dstack([nx, ny, nz]).astype(np.float32)
     normal = geom_normal.copy()
@@ -1782,6 +1973,7 @@ def render_plane_preview_from_generated(
     height: int | None = None,
     source_path: str | Path | None = None,
     allow_cpu_preview: bool = True,
+    write_output: bool = True,
 ) -> dict[str, Any]:
     if not allow_cpu_preview:
         from app.ar_pbr.texture_map_gpu_preview import render_texture_lab_gpu_preview_from_generated
@@ -1795,6 +1987,7 @@ def render_plane_preview_from_generated(
             width=width,
             height=height,
             source_path=source_path,
+            write_output=write_output,
         )
     mode = str(preview_mode or "material").strip().lower()
     if mode not in PREVIEW_MODES:
@@ -1819,17 +2012,19 @@ def render_plane_preview_from_generated(
     target_h = h if h else max(64, int(round(preview_img.height * (target_w / max(1, preview_img.width)))))
     if preview_img.size != (target_w, target_h):
         preview_img = preview_img.resize((target_w, target_h), Image.Resampling.BICUBIC)
-    if output_path is None:
-        source = Path(str(source_path or generated.get("source_path") or "texture_source.png")).expanduser()
-        out = source.with_name(f"{source.stem}_pbr_{effective_shape}_preview_{mode}.png")
-    else:
-        out = Path(output_path).expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    preview_img.save(out)
-    return {
+    out: Path | None = None
+    if write_output:
+        if output_path is None:
+            source = Path(str(source_path or generated.get("source_path") or "texture_source.png")).expanduser()
+            out = source.with_name(f"{source.stem}_pbr_{effective_shape}_preview_{mode}.png")
+        else:
+            out = Path(output_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        preview_img.save(out)
+    result = {
         "schema_id": SCHEMA_ID,
         "source_path": str(source_path or generated.get("source_path") or ""),
-        "preview_path": str(out),
+        "preview_path": str(out or ""),
         "preview_mode": mode,
         "preview_shape": effective_shape,
         "requested_preview_shape": requested_shape,
@@ -1838,10 +2033,14 @@ def render_plane_preview_from_generated(
         "algorithms": generated["algorithms"],
         "diagnostics": generated["diagnostics"],
         "backend": generated.get("backend", select_texture_map_backend("cpu")),
+        "base_color_provenance": dict(generated.get("base_color_provenance") or {}),
         "source_fingerprint": generated.get("source_fingerprint", ""),
         "settings_fingerprint": generated.get("settings_fingerprint", ""),
         "substrate": substrate_export_plan(preview_settings),
     }
+    if not write_output:
+        result["preview_image"] = preview_img
+    return result
 
 
 def render_source_preview_image(
@@ -1935,10 +2134,10 @@ def _intrinsic_channels_preview_array(maps: Mapping[str, np.ndarray]) -> np.ndar
     gap = max(3, int(round(tile_w * 0.012)))
     panels: tuple[tuple[str, str], ...] = (
         ("Input", "base_color_source"),
-        ("Albedo", "base_color"),
+        ("De-lit Estimate", "base_color_estimate"),
         ("Normal", "normal"),
         ("Roughness", "roughness"),
-        ("Irradiance", "irradiance"),
+        ("Estimated Light", "irradiance"),
     )
     canvas_w = tile_w * len(panels) + gap * (len(panels) - 1)
     canvas_h = label_h + tile_h
@@ -1971,10 +2170,10 @@ def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[st
     if mode == "intrinsic_channels":
         return _intrinsic_channels_preview_array(maps)
     if mode == "albedo":
-        return np.asarray(maps["base_color"], dtype=np.float32)
+        return np.asarray(maps.get("base_color_estimate", maps["base_color"]), dtype=np.float32)
     if mode == "delight_compare":
         source = np.asarray(maps.get("base_color_source", maps["base_color"]), dtype=np.float32)
-        delighted = np.asarray(maps["base_color"], dtype=np.float32)
+        delighted = np.asarray(maps.get("base_color_estimate", maps["base_color"]), dtype=np.float32)
         diff = np.clip(np.abs(delighted - source) * 5.0, 0.0, 1.0)
         if diff.ndim == 2:
             diff = np.dstack([diff, diff, diff])
@@ -1993,6 +2192,11 @@ def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[st
     base = np.asarray(maps["base_color"], dtype=np.float32)
     normal_tex = np.asarray(maps["normal"], dtype=np.float32)
     normal = normal_tex * 2.0 - 1.0
+    if str(settings.get("normal_format", "unreal_directx")).casefold() in {
+        "unreal_directx",
+        "directx",
+    }:
+        normal[..., 1] *= -1.0
     normal /= np.maximum(np.linalg.norm(normal, axis=2, keepdims=True), 1.0e-6)
     az = math.radians(float(settings["preview_light_azimuth"]))
     el = math.radians(float(settings["preview_light_elevation"]))
@@ -2062,6 +2266,8 @@ def export_texture_maps(
     allow_cpu: bool = True,
 ) -> dict[str, Any]:
     path = Path(image_path).expanduser()
+    with Image.open(path) as source_image:
+        source_size = [int(source_image.width), int(source_image.height)]
     if output_dir is None:
         out_dir = path.with_name(f"{path.stem}_pbr_maps")
     else:
@@ -2076,12 +2282,17 @@ def export_texture_maps(
     map_names = _normalize_name_list(maps, default_maps)
     layout_names = _normalize_name_list(packed_layouts, DEFAULT_PACKED_LAYOUTS)
     files: dict[str, str] = {}
+    precision_files: dict[str, str] = {}
     for name in map_names:
         if name not in generated["maps"]:
             raise ValueError(f"unknown texture map: {name}")
         file_path = out_dir / f"{path.stem}_{name}.png"
         texture_map_to_image(name, generated["maps"][name]).save(file_path)
         files[name] = str(file_path)
+    if "height" in generated["maps"] and "height" in map_names:
+        height16_path = out_dir / f"{path.stem}_height_16.png"
+        texture_height_to_image16(generated["maps"]["height"]).save(height16_path)
+        precision_files["height_16"] = str(height16_path)
     packed_files: dict[str, str] = {}
     packed_meta: dict[str, Any] = {}
     for layout in layout_names:
@@ -2095,12 +2306,17 @@ def export_texture_maps(
         "source_path": str(path),
         "output_dir": str(out_dir),
         "size": generated["size"],
+        "source_size": source_size,
+        "processing_size": generated["size"],
+        "max_size": int(max_size) if max_size is not None else None,
+        "resampled": list(generated["size"]) != source_size,
         "settings": generated["settings"],
         "backend": generated.get("backend", select_texture_map_backend("cpu")),
         "source_fingerprint": generated.get("source_fingerprint", ""),
         "settings_fingerprint": generated.get("settings_fingerprint", ""),
         "algorithms": generated["algorithms"],
         "files": files,
+        "precision_files": precision_files,
         "packed_files": packed_files,
         "packed_layouts": packed_meta,
         "unreal_texture_import_settings": {
@@ -2109,6 +2325,8 @@ def export_texture_maps(
         "substrate": substrate_export_plan(generated["settings"]),
         "material_usage": {
             "height_map": files.get("height", ""),
+            "height_map_16": precision_files.get("height_16", ""),
+            "height_precision_bits": 16 if precision_files.get("height_16") else 8,
             "height_semantics": "black_low_white_high",
             "recommended_rendering": {
                 "parallax_mode": "pom",
@@ -2124,6 +2342,7 @@ def export_texture_maps(
             },
         },
         "diagnostics": generated["diagnostics"],
+        "base_color_provenance": dict(generated.get("base_color_provenance") or {}),
     }
     manifest_path = out_dir / f"{path.stem}_pbr_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2133,13 +2352,19 @@ def export_texture_maps(
         "output_dir": str(out_dir),
         "manifest_path": str(manifest_path),
         "files": files,
+        "precision_files": precision_files,
         "packed_files": packed_files,
         "size": generated["size"],
+        "source_size": source_size,
+        "processing_size": generated["size"],
+        "max_size": int(max_size) if max_size is not None else None,
+        "resampled": list(generated["size"]) != source_size,
         "settings": generated["settings"],
         "algorithms": generated["algorithms"],
         "substrate": manifest["substrate"],
         "material_usage": manifest["material_usage"],
         "diagnostics": generated["diagnostics"],
+        "base_color_provenance": manifest["base_color_provenance"],
     }
 
 

@@ -83,8 +83,14 @@ MMD_MODEL_EXTS = frozenset({
 MMD_MOTION_EXTS = frozenset({
     ".vmd",
 })
+MOTION_PROJECT_EXTS = frozenset({
+    ".tgmotion",
+})
 MMD_EXTS = MMD_MODEL_EXTS
-MEDIA_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | SPINE_EXTS | AR_PBR_EXTS | VRM_EXTS | MMD_EXTS
+MEDIA_EXTS = (
+    VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | SPINE_EXTS | AR_PBR_EXTS
+    | VRM_EXTS | MMD_EXTS | MOTION_PROJECT_EXTS
+)
 THREE_D_IMPORT_FILTER = (
     "3D / MMD Assets (*.fbx *.glb *.gltf *.obj *.usd *.usdz *.vrm *.pmx *.pmd *.pbx.json);;"
     "AR/PBR 3D Assets (*.fbx *.glb *.gltf *.obj *.usd *.usdz);;"
@@ -123,6 +129,7 @@ def _badge_label_for_path(kind: str, path: Path | None = None) -> str:
         "I": "IMG",
         "R": "VRM",
         "M": "MMD",
+        "G": "MOTION",
     }.get(kind, kind)
 
 
@@ -134,6 +141,8 @@ def _kind_for_path(p: Path) -> str:
         return "I"
     if suf in AUDIO_EXTS:
         return "A"
+    if suf in MOTION_PROJECT_EXTS:
+        return "G"
     if _is_mmd_package_path(p):
         return "M"
     if suf in SPINE_EXTS:

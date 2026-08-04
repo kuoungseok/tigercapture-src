@@ -7,6 +7,7 @@ into paint layers until the user explicitly bakes one.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
@@ -272,7 +273,7 @@ def extract_reference_palette(path: str, *, max_colors: int = 6) -> dict[str, An
     for y in range(sample.height()):
         for x in range(sample.width()):
             color = sample.pixelColor(x, y)
-            if color.alpha() < 16:
+            if color.alpha() <= 0:
                 continue
             bucket = (
                 int(round(color.red() / 24.0) * 24),
@@ -302,7 +303,7 @@ def extract_reference_palette(path: str, *, max_colors: int = 6) -> dict[str, An
 def _reference_index(reference_id: str) -> int:
     try:
         return int(str(reference_id or "").split(":", 1)[1])
-    except Exception:
+    except (IndexError, ValueError):
         return 0
 
 
@@ -312,8 +313,12 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 def _normalize_rotation(value: Any) -> float:
     try:
+        if isinstance(value, bool):
+            raise TypeError("boolean is not a rotation")
         degrees = float(value)
-    except Exception:
+        if not math.isfinite(degrees):
+            raise ValueError("rotation must be finite")
+    except (TypeError, ValueError, OverflowError):
         degrees = 0.0
     degrees = degrees % 360.0
     if degrees > 180.0:

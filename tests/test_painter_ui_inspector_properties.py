@@ -84,6 +84,34 @@ def test_inspector_emits_visual_and_typography_properties() -> None:
     app.processEvents()
 
 
+def test_inspector_preserves_figma_pixel_line_height_without_clamping() -> None:
+    app = _app()
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, row = _text_document()
+    document_row = next(
+        item for item in document["objects"] if item["id"] == row["id"]
+    )
+    document_row["style"]["line_height"] = 19.363636
+    document_row["style"]["line_height_unit"] = "px"
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    emitted: list[tuple[str, dict]] = []
+    inspector.properties_changed.connect(
+        lambda object_id, changes: emitted.append((object_id, changes))
+    )
+
+    assert inspector.line_height_spin.value() == 19.36
+    assert inspector.line_height_spin.suffix() == " px"
+    inspector._emit_properties()
+
+    assert emitted[-1][0] == row["id"]
+    assert emitted[-1][1]["style"]["line_height"] == 19.36
+    assert emitted[-1][1]["style"]["line_height_unit"] == "px"
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_disables_text_controls_for_non_text_and_empty_selection() -> None:
     app = _app()
     from app.painter_ui_document import add_ui_object, create_ui_document
@@ -183,7 +211,11 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     }
     inspector.set_document(document)
     assert inspector.design_context() == "multi"
-    assert inspector.visible_context_tabs() == ("design", "inspect")
+    assert inspector.visible_context_tabs() == (
+        "design",
+        "prototype",
+        "inspect",
+    )
     assert inspector.design_group_visible("arrange")
     assert not inspector.design_group_visible("geometry")
     assert not inspector.design_group_visible("appearance")
@@ -191,10 +223,10 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     document["selection"] = {"object_id": "", "object_ids": []}
     inspector.set_document(document)
     assert inspector.design_context() == "artboard"
-    assert inspector.visible_context_tabs() == ("design", "inspect")
-    assert not inspector.artboard_bar.isHidden()
+    assert inspector.visible_context_tabs() == ("design", "prototype")
+    assert inspector.artboard_bar.isHidden()
     assert inspector.title_label.text() == painter_text("UI DESIGN")
-    assert not inspector.artboard_settings_toggle.isHidden()
+    assert inspector.artboard_settings_toggle.isHidden()
     assert not any(
         inspector.design_group_visible(group)
         for group in inspector._design_context_rows
@@ -230,6 +262,292 @@ def test_inspector_motion_tab_forwards_binding_repair_requests() -> None:
 
     assert detached == ["button-1"]
     assert inspector.motion_binding_panel.status_badge.text() == "Ready"
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_exposes_component_set_properties_per_dimension() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        define_ui_component_variant_property,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(390, 844, name="Phone")
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Button",
+        width=120,
+        height=40,
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Button",
+    )
+    document, _inspection = define_ui_component_variant_property(
+        document,
+        component_id=component["id"],
+        property_name="State",
+        values=["Default", "Hover"],
+        default_value="Default",
+    )
+    document, _inspection = define_ui_component_variant_property(
+        document,
+        component_id=component["id"],
+        property_name="Size",
+        values=["Small", "Large"],
+        default_value="Small",
+    )
+    document, hover = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Button / Hover",
+        variant_properties={"State": "Hover", "Size": "Small"},
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        x=160,
+        y=80,
+    )
+    document["selection"] = {
+        "object_id": instance["root_object_id"],
+        "object_ids": [instance["root_object_id"]],
+    }
+
+    inspector = PainterUIInspector()
+    switched: list[tuple[str, dict[str, str]]] = []
+    inspector.component_instance_variant_values_set_requested.connect(
+        lambda object_id, values: switched.append((object_id, dict(values)))
+    )
+    inspector.set_document(document)
+
+    assert set(inspector.component_variant_property_combos) == {"State", "Size"}
+    assert inspector.component_variant_property_combos["State"].currentText() == "Default"
+    assert inspector.component_variant_property_combos["Size"].currentText() == "Small"
+    state_combo = inspector.component_variant_property_combos["State"]
+    state_combo.setCurrentIndex(state_combo.findData("Hover"))
+    app.processEvents()
+
+    assert switched == [
+        (
+            instance["root_object_id"],
+            {"State": "Hover", "Size": "Small"},
+        )
+    ]
+
+    document["selection"] = {
+        "object_id": hover["root_object_id"],
+        "object_ids": [hover["root_object_id"]],
+    }
+    changed: list[tuple[str, dict[str, str]]] = []
+    inspector.component_variant_values_set_requested.connect(
+        lambda component_id, values: changed.append((component_id, dict(values)))
+    )
+    inspector.set_document(document)
+    size_combo = inspector.component_variant_property_combos["Size"]
+    size_combo.setCurrentIndex(size_combo.findData("Large"))
+    app.processEvents()
+
+    assert changed == [
+        (hover["id"], {"State": "Hover", "Size": "Large"})
+    ]
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_edits_typed_instance_component_properties() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        define_ui_component_property,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(390, 844, name="Phone")
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+        width=220,
+        height=120,
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Card",
+    )
+    document, _definition = define_ui_component_property(
+        document,
+        component_id=component["id"],
+        property_name="Label",
+        definition={"type": "text", "default": "Default label"},
+    )
+    document, _definition = define_ui_component_property(
+        document,
+        component_id=component["id"],
+        property_name="Show icon",
+        definition={"type": "boolean", "default": True},
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        x=80,
+        y=120,
+    )
+    document["selection"] = {
+        "object_id": instance["root_object_id"],
+        "object_ids": [instance["root_object_id"]],
+    }
+
+    inspector = PainterUIInspector()
+    emitted: list[tuple[str, str, object]] = []
+    inspector.component_instance_property_set_requested.connect(
+        lambda object_id, name, value: emitted.append(
+            (object_id, name, value)
+        )
+    )
+    inspector.set_document(document)
+
+    assert set(inspector.component_instance_property_controls) == {
+        "Label",
+        "Show icon",
+    }
+    label = inspector.component_instance_property_controls["Label"]
+    label.setText("Updated label")
+    label.editingFinished.emit()
+    show_icon = inspector.component_instance_property_controls["Show icon"]
+    show_icon.setChecked(False)
+    app.processEvents()
+
+    assert emitted == [
+        (instance["root_object_id"], "Label", "Updated label"),
+        (instance["root_object_id"], "Show icon", False),
+    ]
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_lists_preferred_instance_swap_values_first() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        define_ui_component_property,
+        instantiate_ui_component,
+        set_ui_component_instance_swap_preferred_values,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(800, 600)
+    components = []
+    for name in ("Card", "Icon A", "Icon B"):
+        document, root = add_ui_object(
+            document,
+            kind="frame",
+            name=name,
+            width=80,
+            height=40,
+        )
+        document, component = convert_ui_object_to_component(
+            document,
+            root_object_id=root["id"],
+            name=name,
+        )
+        components.append(component)
+    card, icon_a, icon_b = components
+    document, _definition = define_ui_component_property(
+        document,
+        component_id=card["id"],
+        property_name="Icon",
+        definition={"type": "instance_swap", "default": icon_a["id"]},
+    )
+    document, _definition = set_ui_component_instance_swap_preferred_values(
+        document,
+        component_id=card["id"],
+        property_name="Icon",
+        preferred_component_ids=[icon_b["id"]],
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=card["id"],
+    )
+    document["selection"] = {
+        "object_id": instance["root_object_id"],
+        "object_ids": [instance["root_object_id"]],
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    assert inspector.selection_content_stack.currentWidget() is (
+        inspector.object_properties_scroll
+    )
+    assert inspector.component_instance_properties_frame.isVisibleTo(inspector)
+    combo = inspector.component_instance_property_controls["Icon"]
+    assert combo.itemData(0) == icon_b["id"]
+    assert combo.findData(icon_a["id"]) >= 0
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_main_component_opens_preferred_instance_editor() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        define_ui_component_property,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(800, 600)
+    components = []
+    for name in ("Card", "Icon"):
+        document, root = add_ui_object(
+            document,
+            kind="frame",
+            name=name,
+            width=80,
+            height=40,
+        )
+        document, component = convert_ui_object_to_component(
+            document,
+            root_object_id=root["id"],
+            name=name,
+        )
+        components.append(component)
+    card, icon = components
+    document, _definition = define_ui_component_property(
+        document,
+        component_id=card["id"],
+        property_name="Icon",
+        definition={"type": "instance_swap", "default": icon["id"]},
+    )
+    document["selection"] = {
+        "object_id": card["root_object_id"],
+        "object_ids": [card["root_object_id"]],
+    }
+
+    inspector = PainterUIInspector()
+    emitted: list[tuple[str, str]] = []
+    inspector.component_instance_swap_preferred_edit_requested.connect(
+        lambda component_id, property_name: emitted.append(
+            (component_id, property_name)
+        )
+    )
+    inspector.set_document(document)
+    control = inspector.component_definition_property_controls["Icon"]
+    assert control.text() == "Preferred instances (0)…"
+    control.click()
+    app.processEvents()
+
+    assert emitted == [(card["id"], "Icon")]
     inspector.deleteLater()
     app.processEvents()
 
@@ -487,6 +805,59 @@ def test_inspector_emits_image_fit_tile_and_nine_slice_properties() -> None:
     assert row["id"] == document["selection"]["object_id"]
     assert not inspector.image_fit_combo.isEnabled()
     assert inspector.nine_slice_controls["left"].isEnabled()
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_slot_control_reports_count_and_emits_reset() -> None:
+    app = _app()
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        define_ui_component_slot,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(800, 600)
+    document, root = add_ui_object(document, kind="frame", name="Card")
+    document, slot = add_ui_object(
+        document, kind="frame", name="Content", parent_id=root["id"]
+    )
+    document, _child = add_ui_object(
+        document, kind="text", name="Body", parent_id=slot["id"]
+    )
+    document, component = convert_ui_object_to_component(
+        document, root_object_id=root["id"], name="Card"
+    )
+    document, _ = define_ui_component_slot(
+        document,
+        component_id=component["id"],
+        source_object_id=slot["id"],
+        property_name="Content",
+        slot_settings={"min_children": 2},
+    )
+    document, instance = instantiate_ui_component(
+        document, component_id=component["id"], x=300, y=200
+    )
+    document["selection"] = {
+        "object_id": instance["root_object_id"],
+        "object_ids": [instance["root_object_id"]],
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    control = inspector.component_instance_property_controls["Content"]
+    summary = control.findChild(QLabel, "painterUISlotSummary")
+    assert summary is not None
+    assert summary.text() == "1 layer · below_min"
+    emitted: list[tuple[str, str]] = []
+    inspector.component_slot_reset_requested.connect(
+        lambda root_id, name: emitted.append((root_id, name))
+    )
+    control.findChild(QPushButton).click()
+    assert emitted == [(instance["root_object_id"], "Content")]
     inspector.deleteLater()
     app.processEvents()
 

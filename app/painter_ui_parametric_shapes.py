@@ -28,12 +28,17 @@ def normalize_parametric_shape_content(
         return result
     result["point_count"] = max(
         3,
-        min(64, int(round(_number(result.get("point_count"), 5.0)))),
+        min(60, int(round(_number(result.get("point_count"), 5.0)))),
     )
     result["rotation_offset"] = max(
         -360.0,
         min(360.0, _number(result.get("rotation_offset"), -90.0)),
     )
+    if shape_kind in {"polygon", "star"}:
+        result["corner_radius"] = max(
+            0.0,
+            min(10000.0, _number(result.get("corner_radius"), 0.0)),
+        )
     if shape_kind == "star":
         result["inner_radius"] = max(
             0.05,
@@ -44,9 +49,14 @@ def normalize_parametric_shape_content(
             -360.0,
             min(360.0, _number(result.get("start_angle"), -90.0)),
         )
-        result["sweep_angle"] = max(
-            1.0,
-            min(360.0, abs(_number(result.get("sweep_angle"), 270.0))),
+        sweep = max(
+            -360.0,
+            min(360.0, _number(result.get("sweep_angle"), 270.0)),
+        )
+        result["sweep_angle"] = (
+            sweep
+            if abs(sweep) >= 1.0
+            else -1.0 if sweep < 0.0 else 1.0
         )
         result["inner_radius"] = max(
             0.0,
@@ -94,12 +104,37 @@ def _polygon_points(
     return points
 
 
-def _append_polygon(path: QPainterPath, points: list[QPointF]) -> None:
+def _append_polygon(
+    path: QPainterPath,
+    points: list[QPointF],
+    corner_radius: float = 0.0,
+) -> None:
     if not points:
         return
-    path.moveTo(points[0])
-    for point in points[1:]:
-        path.lineTo(point)
+    radius = max(0.0, float(corner_radius))
+    if radius <= 0.0:
+        path.moveTo(points[0])
+        for point in points[1:]:
+            path.lineTo(point)
+        path.closeSubpath()
+        return
+
+    rounded: list[tuple[QPointF, QPointF, QPointF]] = []
+    for index, point in enumerate(points):
+        previous = points[index - 1]
+        following = points[(index + 1) % len(points)]
+        before = previous - point
+        after = following - point
+        before_length = max(0.0001, math.hypot(before.x(), before.y()))
+        after_length = max(0.0001, math.hypot(after.x(), after.y()))
+        cut = min(radius, before_length * 0.45, after_length * 0.45)
+        start = point + before * (cut / before_length)
+        end = point + after * (cut / after_length)
+        rounded.append((start, point, end))
+    path.moveTo(rounded[0][0])
+    for start, corner, end in rounded:
+        path.lineTo(start)
+        path.quadTo(corner, end)
     path.closeSubpath()
 
 
@@ -107,6 +142,8 @@ def parametric_shape_path(
     rect: QRectF,
     kind: str,
     content: Mapping[str, Any] | None = None,
+    *,
+    geometry_scale: float = 1.0,
 ) -> QPainterPath:
     shape_kind = str(kind or "").strip().casefold()
     normalized = normalize_parametric_shape_content(shape_kind, content)
@@ -119,6 +156,7 @@ def parametric_shape_path(
                 point_count=int(normalized["point_count"]),
                 rotation_offset=float(normalized["rotation_offset"]),
             ),
+            float(normalized["corner_radius"]) * max(0.0, geometry_scale),
         )
         return path
     if shape_kind == "star":
@@ -130,6 +168,7 @@ def parametric_shape_path(
                 rotation_offset=float(normalized["rotation_offset"]),
                 inner_radius=float(normalized["inner_radius"]),
             ),
+            float(normalized["corner_radius"]) * max(0.0, geometry_scale),
         )
         return path
     if shape_kind != "arc":
@@ -139,7 +178,7 @@ def parametric_shape_path(
     start = float(normalized["start_angle"])
     sweep = float(normalized["sweep_angle"])
     inner_radius = float(normalized["inner_radius"])
-    if sweep >= 359.999:
+    if abs(sweep) >= 359.999:
         path.addEllipse(rect)
         if inner_radius > 0.0:
             inner = QRectF(
@@ -152,32 +191,26 @@ def parametric_shape_path(
             path.setFillRule(Qt.FillRule.OddEvenFill)
         return path
 
-    segment_count = max(4, int(math.ceil(sweep / 6.0)))
-    path.moveTo(rect.center())
-    path.lineTo(_radial_point(rect, start))
-    for index in range(1, segment_count + 1):
-        path.lineTo(
-            _radial_point(rect, start + sweep * index / segment_count)
-        )
-    path.lineTo(rect.center())
-    path.closeSubpath()
+    outer_start = _radial_point(rect, start)
+    path.moveTo(rect.center() if inner_radius <= 0.0 else outer_start)
     if inner_radius <= 0.0:
+        path.lineTo(outer_start)
+    path.arcTo(rect, -start, -sweep)
+    if inner_radius <= 0.0:
+        path.lineTo(rect.center())
+        path.closeSubpath()
         return path
 
-    inner = QPainterPath()
-    inner.moveTo(rect.center())
-    inner.lineTo(_radial_point(rect, start, inner_radius))
-    for index in range(1, segment_count + 1):
-        inner.lineTo(
-            _radial_point(
-                rect,
-                start + sweep * index / segment_count,
-                inner_radius,
-            )
-        )
-    inner.lineTo(rect.center())
-    inner.closeSubpath()
-    return path.subtracted(inner)
+    inner_rect = QRectF(
+        rect.center().x() - rect.width() * inner_radius * 0.5,
+        rect.center().y() - rect.height() * inner_radius * 0.5,
+        rect.width() * inner_radius,
+        rect.height() * inner_radius,
+    )
+    path.lineTo(_radial_point(rect, start + sweep, inner_radius))
+    path.arcTo(inner_rect, -(start + sweep), sweep)
+    path.closeSubpath()
+    return path
 
 
 def parametric_shape_svg_path(

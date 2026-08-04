@@ -41,9 +41,10 @@ def test_parametric_shape_content_normalizes_and_round_trips() -> None:
         "star",
         {"point_count": 100, "inner_radius": -1, "rotation_offset": 999},
     ) == {
-        "point_count": 64,
+        "point_count": 60,
         "inner_radius": 0.05,
         "rotation_offset": 360.0,
+        "corner_radius": 0.0,
     }
     document, row = _shape_document(
         "arc",
@@ -55,6 +56,17 @@ def test_parametric_shape_content_normalizes_and_round_trips() -> None:
     assert saved["content"]["start_angle"] == -45.0
     assert saved["content"]["sweep_angle"] == 240.0
     assert saved["content"]["inner_radius"] == 0.62
+
+    negative_document, negative_row = _shape_document(
+        "arc",
+        {"start_angle": 0, "sweep_angle": -292, "inner_radius": 0.0},
+    )
+    negative_saved = next(
+        item
+        for item in normalize_ui_document(negative_document)["objects"]
+        if item["id"] == negative_row["id"]
+    )
+    assert negative_saved["content"]["sweep_angle"] == -292.0
 
 
 def test_parametric_shape_paths_have_distinct_real_geometry() -> None:
@@ -85,6 +97,45 @@ def test_parametric_shape_paths_have_distinct_real_geometry() -> None:
     assert not arc.isEmpty()
     assert polygon.elementCount() != star.elementCount()
     assert not arc.contains(rect.center() + QPointF(0, -5))
+    assert any(
+        arc.elementAt(index).isCurveTo()
+        for index in range(arc.elementCount())
+    )
+
+    negative_arc = parametric_shape_path(
+        rect,
+        "arc",
+        {"start_angle": 0, "sweep_angle": -270, "inner_radius": 0.0},
+    )
+    assert negative_arc.contains(QPointF(50, 40))
+    assert not negative_arc.contains(QPointF(150, 120))
+
+
+def test_star_corner_radius_is_editable_from_shape_inspector() -> None:
+    app = _app()
+    from app.painter_ui_shape_selection_panel import (
+        PainterUIShapeSelectionPanel,
+    )
+
+    document, row = _shape_document(
+        "star",
+        {
+            "point_count": 7,
+            "inner_radius": 0.38,
+            "corner_radius": 0.0,
+        },
+    )
+    panel = PainterUIShapeSelectionPanel()
+    panel.set_shape(row, document)
+    assert panel.points_spin.maximum() == 60
+    assert panel.radius_spin.isHidden() is False
+    changes: list[dict] = []
+    panel.properties_changed.connect(lambda value: changes.append(dict(value)))
+    panel.radius_spin.setValue(36.0)
+    panel._emit_properties()
+    assert changes[-1]["content"]["corner_radius"] == 36.0
+    panel.deleteLater()
+    app.processEvents()
 
 
 def test_parametric_shapes_render_and_export_as_svg_paths() -> None:
@@ -122,14 +173,18 @@ def test_parametric_shape_inspector_is_contextual_and_emits_content() -> None:
     )
 
     assert inspector.design_group_visible("shape")
-    assert inspector.shape_parameter_rows["points"].isVisibleTo(inspector)
-    assert inspector.shape_parameter_rows["inner_radius"].isVisibleTo(inspector)
-    assert not inspector.shape_parameter_rows["angles"].isVisibleTo(inspector)
+    panel = inspector.shape_selection_panel
+    assert inspector.selection_content_stack.currentWidget() is (
+        inspector.shape_selection_scroll
+    )
+    assert panel.points_spin.isVisibleTo(inspector)
+    assert panel.inner_spin.isVisibleTo(inspector)
+    assert not panel.start_spin.isVisibleTo(inspector)
 
-    inspector.shape_point_count_spin.setValue(9)
-    inspector.shape_inner_radius_spin.setValue(32)
-    inspector.shape_rotation_spin.setValue(-72)
-    inspector._emit_properties()
+    panel.points_spin.setValue(9)
+    panel.inner_spin.setValue(32)
+    panel.parameter_rotation_spin.setValue(-72)
+    panel._emit_properties()
 
     assert emitted[-1][0] == row["id"]
     assert emitted[-1][1]["content"]["point_count"] == 9

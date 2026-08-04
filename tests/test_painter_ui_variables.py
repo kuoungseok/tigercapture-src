@@ -13,7 +13,7 @@ def _app():
 
 
 def test_variable_collections_migrate_legacy_theme_tokens_and_artboards() -> None:
-    from app.painter_ui_document import normalize_ui_document
+    from app.painter_ui_document import UI_DOCUMENT_VERSION, normalize_ui_document
     from app.painter_ui_variables import (
         LEGACY_THEME_COLLECTION_ID,
         LEGACY_THEME_MODE_IDS,
@@ -40,7 +40,7 @@ def test_variable_collections_migrate_legacy_theme_tokens_and_artboards() -> Non
             ],
         }
     )
-    assert document["version"] == 22
+    assert document["version"] == UI_DOCUMENT_VERSION
     assert document["variable_collections"][0]["id"] == LEGACY_THEME_COLLECTION_ID
     assert (
         document["artboards"][0]["variable_modes"][LEGACY_THEME_COLLECTION_ID]

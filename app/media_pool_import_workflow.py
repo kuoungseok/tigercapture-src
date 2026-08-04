@@ -23,6 +23,7 @@ from app.media_pool import (
     LIST_THUMB_W,
     MEDIA_EXTS,
     MMD_MOTION_EXTS,
+    MOTION_PROJECT_EXTS,
     ROLE_MMD_BADGE,
     ROLE_PERFORMANCE_SOURCE,
     THUMB_SIZE,
@@ -42,6 +43,7 @@ from app.media_pool import (
     _make_image_list_thumbnail,
     _make_image_thumbnail,
     _make_mmd_thumbnail,
+    _make_motion_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
     _make_video_thumbnail,
@@ -138,6 +140,12 @@ def add_path(self, path: Path | str) -> bool:
             f"{_mmd_kind_name_for_path(p)} badge: {_mmd_badge_label_for_path(p)}\n"
             "MMD asset: PMX/PMD/PBX models and VMD motions can be paired on MMD tracks."
         )
+    elif kind == "G":
+        item.setData(Qt.ItemDataRole.UserRole + 8, "motion_actor_asset")
+        item.setToolTip(
+            f"{item.toolTip() or key}\n"
+            "Editable Motion Asset: drag to the timeline to create a Motion Actor."
+        )
     if self._view_mode == "list":
         item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         item.setSizeHint(QSize(0, LIST_ROW_H))
@@ -159,6 +167,8 @@ def add_path(self, path: Path | str) -> bool:
         base_thumb = _make_vrm_avatar_thumbnail()
     elif kind == "M":
         base_thumb = _make_mmd_thumbnail()
+    elif kind == "G":
+        base_thumb = _make_motion_thumbnail(p) or _placeholder_pixmap()
     elif kind == "3":
         base_thumb = _make_ar_pbr_thumbnail()
     else:

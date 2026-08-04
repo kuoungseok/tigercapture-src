@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMenu
 from app.audio_tracks import is_audio_path, is_video_path
 from app.effect_cards import SPINE_MIME_TYPE
 from app.i18n import tr
+from app.media_asset_routing import motion_project_paths_from_mime
 from app import video_editor_timeline_operations as _timeline_operations
 from app import video_editor_frame_repair_workflow as _frame_repair_workflow
 from app.video_editor_media_import_controller import dispatch_import_decision, route_tracks_host_drop
@@ -36,6 +37,7 @@ def _tracks_drop_accepts_mime(self, mime) -> bool:
         or SpineActorLaneRow._accepts(mime)
         or self._performance_source_paths_from_mime(mime)
         or self._mmd_paths_from_mime(mime)
+        or motion_project_paths_from_mime(mime)
         or self._ar_pbr_paths_from_mime(mime)
         or self._timeline_media_paths_from_mime(mime)
     )
@@ -47,6 +49,9 @@ def dragEnterEvent(self, event) -> None:
         event.acceptProposedAction()
         return
     if self._mmd_paths_from_mime(md):
+        event.acceptProposedAction()
+        return
+    if motion_project_paths_from_mime(md):
         event.acceptProposedAction()
         return
     if (

@@ -198,6 +198,135 @@ def test_figma_payload_imports_editable_layout_component_and_variables() -> None
     assert text["style"]["text_align"] == "center"
 
 
+def test_figma_text_import_preserves_pixel_line_height_and_auto_width() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    label = payload["document"]["children"][0]["children"][0]["children"][0][
+        "children"
+    ][0]
+    label["style"]["lineHeightPx"] = 19.363636
+    label["style"]["textAutoResize"] = "WIDTH_AND_HEIGHT"
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    text = next(row for row in document["objects"] if row["kind"] == "text")
+    assert text["style"]["line_height"] == 19.363636
+    assert text["style"]["line_height_unit"] == "px"
+    assert text["content"]["text_resize"] == "auto_width"
+
+
+def test_figma_remote_instance_fallback_detaches_expanded_descendants() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = {
+        "name": "Remote component snapshot",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "0:1",
+                    "type": "CANVAS",
+                    "name": "Page 1",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "FRAME",
+                            "name": "Board",
+                            "absoluteBoundingBox": {
+                                "x": 0,
+                                "y": 0,
+                                "width": 640,
+                                "height": 480,
+                            },
+                            "children": [
+                                {
+                                    "id": "2:1",
+                                    "type": "INSTANCE",
+                                    "name": "Remote card",
+                                    "componentId": "99:42",
+                                    "absoluteBoundingBox": {
+                                        "x": 40,
+                                        "y": 40,
+                                        "width": 320,
+                                        "height": 180,
+                                    },
+                                    "children": [
+                                        {
+                                            "id": "2:2",
+                                            "type": "RECTANGLE",
+                                            "name": "Background",
+                                            "absoluteBoundingBox": {
+                                                "x": 40,
+                                                "y": 40,
+                                                "width": 320,
+                                                "height": 180,
+                                            },
+                                        },
+                                        {
+                                            "id": "2:3",
+                                            "type": "TEXT",
+                                            "name": "Title",
+                                            "characters": "Remote card",
+                                            "absoluteBoundingBox": {
+                                                "x": 64,
+                                                "y": 64,
+                                                "width": 160,
+                                                "height": 24,
+                                            },
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    document, report = import_figma_payload(payload, source="GitHubSample")
+
+    assert report["ok"] is True
+    remote = next(row for row in document["objects"] if row["id"] == "figma-node-2-1")
+    descendants = [
+        row for row in document["objects"] if row["parent_id"] == remote["id"]
+    ]
+    assert remote["kind"] == "group"
+    assert remote["component_id"] == ""
+    assert remote["content"]["figma_component_id"] == "figma-component-99-42"
+    assert remote["content"]["remote_component"]["status"] == "missing"
+    assert descendants
+    assert all(row["component_id"] == "" for row in descendants)
+    assert (
+        "converted:figma-node-2-1:remote_component_instance_to_group"
+        in report["warnings"]
+    )
+
+
+def test_figma_corner_smoothing_imports_and_exports_as_editable_style(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+    )
+
+    payload = _figma_payload()
+    component = payload["document"]["children"][0]["children"][0]["children"][0]
+    component["cornerSmoothing"] = 0.72
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    button = next(row for row in document["objects"] if row["name"] == "Primary Button")
+    assert button["style"]["corner_smoothing"] == 0.72
+    export = export_figma_plugin_package(document, tmp_path / "smoothing")
+    code = (Path(export["output_dir"]) / "code.js").read_text("utf-8")
+    assert "node.cornerSmoothing=Math.max(0,Math.min(1" in code
+
+
 def test_figma_import_preserves_canvas_pages_and_page_scoped_artboards() -> None:
     from app.painter_ui_document import active_ui_page_document, set_active_ui_page
     from app.painter_ui_figma import import_figma_payload
@@ -278,6 +407,18 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
                     "type": "COMPONENT",
                     "name": "State=Default",
                     "variantProperties": {"State": "Default"},
+                    "reactions": [
+                        {
+                            "trigger": {"type": "ON_CLICK"},
+                            "actions": [
+                                {
+                                    "type": "NODE",
+                                    "destinationId": "10:4",
+                                    "navigation": "CHANGE_TO",
+                                }
+                            ],
+                        }
+                    ],
                     "absoluteBoundingBox": {
                         "x": 124,
                         "y": 260,
@@ -397,6 +538,10 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
         "Label": "Buy now",
         "Leading icon": False,
     }
+    change_to = document["interactions"][0]
+    assert change_to["action"] == "change_variant"
+    assert change_to["component_id"] == variant["id"]
+    assert change_to["target_object_id"] == family["root_object_id"]
     document, switched = switch_ui_component_instance_variant(
         document,
         instance_root_id=instance["id"],
@@ -425,6 +570,7 @@ def test_figma_nested_instance_swap_maps_scope_and_stable_component_ids() -> Non
     frame["children"] = [
         {
             "id": "20:1",
+            "key": "icon-square-key",
             "type": "COMPONENT",
             "name": "Square Icon",
             "absoluteBoundingBox": {
@@ -437,6 +583,7 @@ def test_figma_nested_instance_swap_maps_scope_and_stable_component_ids() -> Non
         },
         {
             "id": "20:2",
+            "key": "icon-round-key",
             "type": "COMPONENT",
             "name": "Round Icon",
             "absoluteBoundingBox": {
@@ -455,6 +602,9 @@ def test_figma_nested_instance_swap_maps_scope_and_stable_component_ids() -> Non
                 "Icon#21:9": {
                     "type": "INSTANCE_SWAP",
                     "defaultValue": "20:1",
+                    "preferredValues": [
+                        {"type": "COMPONENT", "key": "icon-round-key"}
+                    ],
                 }
             },
             "absoluteBoundingBox": {
@@ -495,6 +645,9 @@ def test_figma_nested_instance_swap_maps_scope_and_stable_component_ids() -> Non
         row for row in document["components"] if row["name"] == "Round Icon"
     )
     assert card["property_definitions"]["Icon"]["default"] == icon_a["id"]
+    assert card["property_definitions"]["Icon"]["preferred_values"] == [
+        icon_b["id"]
+    ]
     nested_source = next(
         row for row in document["objects"] if row["id"] == "figma-node-21-2"
     )
@@ -821,11 +974,155 @@ def test_figma_linear_and_radial_gradients_preserve_handles_and_stops() -> None:
         "end": {"x": 0.9, "y": 0.5},
         "width": {"x": 0.1, "y": 1.0},
         "stops": [
-            {"position": 0.0, "color": "#FF000080"},
-            {"position": 1.0, "color": "#0000FF66"},
+            {"position": 0.0, "color": "#FF0000FF"},
+            {"position": 1.0, "color": "#0000FFCC"},
         ],
     }
+    assert linear["style"]["fills"][0]["opacity"] == 0.5
+    assert linear["style"]["fills"][0]["gradient"]["stops"] == (
+        linear["style"]["fill_gradient"]["stops"]
+    )
     assert radial["style"]["fill_gradient"]["type"] == "radial"
+
+
+def test_figma_paint_opacity_round_trip_does_not_double_color_alpha(
+    tmp_path: Path,
+) -> None:
+    from PySide6.QtCore import QRectF
+
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+    )
+    from app.painter_ui_style_renderer import ui_fill_brush
+    from app.unreal_umg_material import painter_style_umg_material
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].extend(
+        [
+            {
+                "id": "9:41",
+                "type": "RECTANGLE",
+                "name": "Half solid and stroke",
+                "absoluteBoundingBox": {
+                    "x": 140,
+                    "y": 300,
+                    "width": 120,
+                    "height": 60,
+                },
+                "cornerRadius": 8,
+                "fills": [
+                    {
+                        "type": "SOLID",
+                        "opacity": 0.5,
+                        "color": {"r": 1, "g": 0, "b": 0, "a": 0.8},
+                    }
+                ],
+                "strokes": [
+                    {
+                        "type": "SOLID",
+                        "opacity": 0.5,
+                        "color": {"r": 0, "g": 0, "b": 1, "a": 0.6},
+                    }
+                ],
+                "strokeWeight": 2,
+                "strokeAlign": "INSIDE",
+            },
+            {
+                "id": "9:42",
+                "type": "RECTANGLE",
+                "name": "Half gradient",
+                "absoluteBoundingBox": {
+                    "x": 280,
+                    "y": 300,
+                    "width": 120,
+                    "height": 60,
+                },
+                "fills": [
+                    {
+                        "type": "GRADIENT_RADIAL",
+                        "opacity": 0.5,
+                        "gradientHandlePositions": [
+                            {"x": 0.5, "y": 0.5},
+                            {"x": 1.0, "y": 0.5},
+                            {"x": 0.5, "y": 1.0},
+                        ],
+                        "gradientStops": [
+                            {
+                                "position": 0,
+                                "color": {"r": 1, "g": 1, "b": 1, "a": 0.8},
+                            },
+                            {
+                                "position": 1,
+                                "color": {"r": 0, "g": 0, "b": 0, "a": 0.4},
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+    assert report["ok"] is True
+    by_name = {row["name"]: row for row in document["objects"]}
+    solid = by_name["Half solid and stroke"]
+    gradient = by_name["Half gradient"]
+
+    assert solid["style"]["fills"][0]["color"] == "#FF0000CC"
+    assert solid["style"]["fills"][0]["opacity"] == 0.5
+    assert solid["style"]["strokes"][0]["color"] == "#0000FF99"
+    assert solid["style"]["strokes"][0]["opacity"] == 0.5
+    assert gradient["style"]["fills"][0]["opacity"] == 0.5
+    assert [
+        row["color"]
+        for row in gradient["style"]["fills"][0]["gradient"]["stops"]
+    ] == ["#FFFFFFCC", "#00000066"]
+    assert gradient["style"]["fill_gradient"]["stops"] == (
+        gradient["style"]["fills"][0]["gradient"]["stops"]
+    )
+
+    # Painter consumes color alpha * paint opacity exactly once: 0.8 * 0.5.
+    assert ui_fill_brush(solid["style"]).color().alpha() == 102
+    gradient_brush = ui_fill_brush(
+        gradient["style"],
+        QRectF(0.0, 0.0, 120.0, 60.0),
+    )
+    assert [
+        color.alpha()
+        for _position, color in gradient_brush.gradient().stops()
+    ] == [102, 51]
+
+    solid_material = painter_style_umg_material(
+        solid["style"],
+        source_kind="rectangle",
+        size={"X": solid["width"], "Y": solid["height"]},
+    )
+    gradient_material = painter_style_umg_material(
+        gradient["style"],
+        source_kind="rectangle",
+        size={"X": gradient["width"], "Y": gradient["height"]},
+    )
+    assert solid_material is not None
+    assert solid_material["FillColor"] == "#FF0000CC"
+    assert solid_material["Opacity"] == 0.5
+    assert solid_material["Stroke"]["Color"] == "#0000FF4C"
+    assert gradient_material is not None
+    assert gradient_material["Kind"] == "RadialGradient"
+    assert gradient_material["Opacity"] == 0.5
+    assert gradient_material["Stops"][0]["Color"] == "#FFFFFFCC"
+
+    export = export_figma_plugin_package(document, tmp_path / "opacity")
+    exchange = json.loads(
+        (Path(export["output_dir"]) / "figma_exchange.json").read_text("utf-8")
+    )
+    exported = {row["name"]: row for row in exchange["document"]["objects"]}
+    assert exported["Half solid and stroke"]["style"]["fills"][0] == (
+        solid["style"]["fills"][0]
+    )
+    assert exported["Half gradient"]["style"]["fills"][0] == (
+        gradient["style"]["fills"][0]
+    )
 
 
 def test_painter_gradient_brush_and_vector_path_render_distinct_stop_colors() -> None:
@@ -1073,6 +1370,7 @@ def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> N
                     "type": "IMAGE",
                     "imageRef": "hero-ref",
                     "scaleMode": "FILL",
+                    "opacity": 0.65,
                 }
             ],
         }
@@ -1089,7 +1387,50 @@ def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> N
     assert image["content"]["source_path"] == str(image_path)
     assert image["content"]["image_fit"] == "fill"
     assert image["content"]["image_status"] == "ready"
+    assert image["style"]["fills"][0]["type"] == "image"
+    assert image["style"]["fills"][0]["opacity"] == 0.65
+    assert image["style"]["fills"][0]["source_path"] == ""
     assert report["resources"]["missing_image_count"] == 0
+
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    umg = painter_ui_to_umg_document(document)
+    layer = next(row for row in umg["Layers"] if row["Id"] == image["id"])
+    assert layer["Disposition"] == "Native"
+    assert layer["ImageFill"]["AssetId"] == layer["AssetId"]
+    assert layer["ImageFill"]["Mode"] == "Fill"
+    assert layer["ImageFill"]["Opacity"] == 0.65
+    assert umg["Resources"][0]["SourcePath"] == str(image_path)
+
+
+def test_figma_image_paint_preserves_tile_filters_and_crop_transform() -> None:
+    from app.painter_ui_figma import map_figma_plugin_paints
+
+    paint = map_figma_plugin_paints(
+        [
+            {
+                "type": "IMAGE",
+                "visible": True,
+                "opacity": 0.8,
+                "scaleMode": "CROP",
+                "scalingFactor": 1.5,
+                "rotation": 12,
+                "filters": {"contrast": 0.25, "saturation": -0.5},
+                "imageTransform": [[1, 0, 0.1], [0, 1, 0.2]],
+            }
+        ]
+    )[0]
+
+    assert paint["type"] == "image"
+    assert paint["fit"] == "crop"
+    assert paint["tile_scale"] == 1.5
+    assert paint["rotation"] == 12
+    assert paint["adjustments"]["contrast"] == 25
+    assert paint["adjustments"]["saturation"] == -50
+    assert paint["figma_image_transform"] == [
+        [1, 0, 0.1],
+        [0, 1, 0.2],
+    ]
 
 
 def test_figma_missing_images_and_fonts_are_reported() -> None:
@@ -1251,12 +1592,14 @@ def test_figma_export_creates_editable_plugin_bundle_with_embedded_image(
     assert "gradientHandlePositions" in code
     assert "INNER_SHADOW" in code
     assert "node.effects=effectRows(s)" in code
+    assert "node.cornerSmoothing=Math.max(0,Math.min(1" in code
 
 
 def test_figma_export_preserves_component_family_and_variant_properties(
     tmp_path: Path,
 ) -> None:
     from app.painter_ui_components import (
+        add_ui_component_change_to_interaction,
         bind_ui_component_property,
         convert_ui_object_to_component,
         create_ui_component_variant,
@@ -1335,6 +1678,12 @@ def test_figma_export_preserves_component_family_and_variant_properties(
         x=280,
         y=40,
     )
+    document, _change_to = add_ui_component_change_to_interaction(
+        document,
+        source_component_id=component["id"],
+        target_component_id=variant["id"],
+        trigger="click",
+    )
     document, _ = set_ui_instance_component_property(
         document,
         instance_root_id=instance["root_object_id"],
@@ -1380,6 +1729,8 @@ def test_figma_export_preserves_component_family_and_variant_properties(
     }
     code = (target / "code.js").read_text("utf-8")
     assert "node.componentPropertyReferences=references" in code
+    assert "'CHANGE_TO'" in code
+    assert "preferredValues:" in code
 
 
 def test_figma_export_blocks_unsupported_component_property_type(
@@ -1415,6 +1766,170 @@ def test_figma_export_blocks_unsupported_component_property_type(
     assert compatibility["objects"][-1]["id"] == f"{component['id']}:Slot"
     with pytest.raises(PainterUIFigmaError, match="blocked"):
         export_figma_plugin_package(document, tmp_path / "out")
+
+
+def test_figma_slot_import_and_export_preserve_native_slot_contract(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        define_ui_component_slot,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+        inspect_figma_compatibility,
+    )
+
+    payload = {
+        "name": "Slot import",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "0:1",
+                    "type": "CANVAS",
+                    "name": "Page 1",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "COMPONENT",
+                            "name": "Card",
+                            "componentPropertyDefinitions": {
+                                "Content#1:9": {
+                                    "type": "SLOT",
+                                    "defaultValue": "1:2",
+                                    "description": "Flexible card body",
+                                    "preferredValues": [],
+                                    "slotSettings": {
+                                        "stretchChildOnInsert": True,
+                                        "displayEmptyByDefault": True,
+                                        "minChildren": 0,
+                                        "maxChildren": 4,
+                                        "allowPreferredValuesOnly": False,
+                                    },
+                                }
+                            },
+                            "absoluteBoundingBox": {
+                                "x": 0,
+                                "y": 0,
+                                "width": 320,
+                                "height": 240,
+                            },
+                            "children": [
+                                {
+                                    "id": "1:2",
+                                    "type": "SLOT",
+                                    "name": "Content",
+                                    "absoluteBoundingBox": {
+                                        "x": 20,
+                                        "y": 20,
+                                        "width": 280,
+                                        "height": 180,
+                                    },
+                                    "children": [],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+        "components": {"1:1": {"key": "card-key", "name": "Card"}},
+    }
+    imported, report = import_figma_payload(payload, source="SlotFile123")
+    assert report["ok"] is True
+    imported_component = imported["components"][0]
+    imported_definition = imported_component["property_definitions"]["Content"]
+    assert imported_definition["type"] == "slot"
+    assert imported_definition["default"] == "figma-node-1-2"
+    assert imported_definition["slot_settings"]["max_children"] == 4
+    imported_slot = next(
+        row for row in imported["objects"] if row["id"] == "figma-node-1-2"
+    )
+    assert imported_slot["component_slot_property"] == "Content"
+
+    document = create_ui_document(640, 480, name="Slot export")
+    document, root = add_ui_object(document, kind="frame", name="Card")
+    document, slot = add_ui_object(
+        document,
+        kind="frame",
+        name="Content",
+        parent_id=root["id"],
+    )
+    document, component = convert_ui_object_to_component(
+        document, root_object_id=root["id"], name="Card"
+    )
+    document, _ = define_ui_component_slot(
+        document,
+        component_id=component["id"],
+        source_object_id=slot["id"],
+        property_name="Content",
+        description="Flexible card body",
+        slot_settings={"max_children": 4, "display_empty_by_default": True},
+    )
+    compatibility = inspect_figma_compatibility(document)
+    assert compatibility["counts"]["blocked"] == 0
+    target = tmp_path / "slot-plugin"
+    export_report = export_figma_plugin_package(document, target)
+    code = (Path(export_report["output_dir"]) / "code.js").read_text("utf-8")
+    assert "parent.createSlot()" in code
+    assert "type==='slot'" in code
+    assert "allowPreferredValuesOnly" in code
+
+
+def test_figma_shared_plugin_data_preserves_object_component_and_slot_ids() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = {
+        "name": "Stable roundtrip",
+        "document": {"id": "0:0", "type": "DOCUMENT", "children": [{
+            "id": "0:1", "type": "CANVAS", "name": "Page 1", "children": [{
+                "id": "1:1", "type": "FRAME", "name": "Board",
+                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 640, "height": 480},
+                "children": [{
+                    "id": "1:2", "type": "COMPONENT", "name": "Card",
+                    "sharedPluginData": {"tigerstudio": {
+                        "stable_id": "ui-object-card", "component_id": "ui-component-card",
+                    }},
+                    "componentPropertyDefinitions": {
+                        "Content#1:9": {"type": "SLOT", "defaultValue": "1:3"}
+                    },
+                    "absoluteBoundingBox": {"x": 20, "y": 20, "width": 280, "height": 180},
+                    "children": [{
+                        "id": "1:3", "type": "SLOT", "name": "Content",
+                        "sharedPluginData": {"tigerstudio": {"stable_id": "ui-object-slot"}},
+                        "absoluteBoundingBox": {"x": 40, "y": 40, "width": 240, "height": 120},
+                        "children": [],
+                    }],
+                }, {
+                    "id": "1:4", "type": "INSTANCE", "name": "Card Instance",
+                    "componentId": "1:2",
+                    "sharedPluginData": {"tigerstudio": {
+                        "stable_id": "ui-object-instance", "component_id": "ui-component-card",
+                    }},
+                    "absoluteBoundingBox": {"x": 320, "y": 20, "width": 280, "height": 180},
+                    "children": [],
+                }],
+            }],
+        }]},
+        "components": {"1:2": {"key": "card-key", "name": "Card"}},
+    }
+
+    imported, report = import_figma_payload(payload, source="StableFile123")
+
+    assert report["ok"] is True
+    assert {row["id"] for row in imported["objects"]} >= {
+        "ui-object-card", "ui-object-slot", "ui-object-instance",
+    }
+    component = next(row for row in imported["components"] if row["id"] == "ui-component-card")
+    assert component["root_object_id"] == "ui-object-card"
+    assert component["property_definitions"]["Content"]["default"] == "ui-object-slot"
+    instance = next(row for row in imported["objects"] if row["id"] == "ui-object-instance")
+    assert instance["component_id"] == "ui-component-card"
+    assert instance["component_source_object_id"] == "ui-object-card"
 
 
 def test_painter_publish_panel_exposes_figma_tab() -> None:

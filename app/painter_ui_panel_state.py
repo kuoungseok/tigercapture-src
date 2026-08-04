@@ -11,16 +11,16 @@ SETTINGS_APP = "TigerCapture"
 SETTINGS_GROUP = "painter/ui_design/panels"
 
 DEFAULT_PANEL_STATE = {
-    "navigator_width": 168,
+    "navigator_width": 248,
     "navigator_collapsed": False,
     "navigator_auto_hide": False,
     "navigator_user_override": False,
     "inspector_width": 268,
-    "inspector_collapsed": True,
-    "inspector_auto_hide": True,
+    "inspector_collapsed": False,
+    "inspector_auto_hide": False,
 }
 
-NAVIGATOR_MIN_WIDTH = 112
+NAVIGATOR_MIN_WIDTH = 190
 INSPECTOR_MIN_WIDTH = 180
 PERSISTED_PANEL_MAX_WIDTH = 16777215
 

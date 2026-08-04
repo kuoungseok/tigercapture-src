@@ -73,6 +73,30 @@ def _tigerstudio_plugin_json(
         return None
 
 
+def _tigerstudio_plugin_text(
+    node: Mapping[str, Any],
+    key: str,
+) -> str:
+    """Read a non-JSON Tiger Studio shared-plugin-data value."""
+    shared = node.get("sharedPluginData")
+    shared = shared if isinstance(shared, Mapping) else {}
+    namespace = shared.get("tigerstudio")
+    namespace = namespace if isinstance(namespace, Mapping) else {}
+    return str(namespace.get(str(key)) or "").strip()
+
+
+def _figma_node_stable_id(node: Mapping[str, Any], prefix: str = "node") -> str:
+    return _tigerstudio_plugin_text(node, "stable_id") or _stable_id(
+        prefix, node.get("id")
+    )
+
+
+def _figma_component_stable_id(node: Mapping[str, Any]) -> str:
+    return _tigerstudio_plugin_text(node, "component_id") or _stable_id(
+        "component", node.get("id")
+    )
+
+
 def _figma_component_property_definitions(
     *sources: object,
 ) -> dict[str, dict[str, Any]]:
@@ -82,6 +106,7 @@ def _figma_component_property_definitions(
         "TEXT": "text",
         "INSTANCE_SWAP": "instance_swap",
         "VARIANT": "enum",
+        "SLOT": "slot",
     }
     for source in sources:
         if not isinstance(source, Mapping):
@@ -96,11 +121,33 @@ def _figma_component_property_definitions(
                 if figma_type == "VARIANT"
                 else []
             )
+            slot_settings = raw_definition.get("slotSettings")
+            slot_settings = (
+                dict(slot_settings) if isinstance(slot_settings, Mapping) else {}
+            )
             result[name] = {
                 "type": type_map.get(figma_type, figma_type.casefold()),
                 "default": copy.deepcopy(raw_definition.get("defaultValue")),
                 "values": [str(value) for value in values],
+                "preferred_values": [
+                    str(item.get("key") or "")
+                    for item in raw_definition.get("preferredValues", [])
+                    if isinstance(item, Mapping) and str(item.get("key") or "")
+                ],
                 "description": str(raw_definition.get("description") or ""),
+                "slot_settings": {
+                    "stretch_child_on_insert": bool(
+                        slot_settings.get("stretchChildOnInsert", False)
+                    ),
+                    "display_empty_by_default": bool(
+                        slot_settings.get("displayEmptyByDefault", False)
+                    ),
+                    "min_children": slot_settings.get("minChildren"),
+                    "max_children": slot_settings.get("maxChildren"),
+                    "allow_preferred_values_only": bool(
+                        slot_settings.get("allowPreferredValuesOnly", False)
+                    ),
+                },
             }
     return result
 
@@ -147,7 +194,7 @@ def _figma_variant_source_map(node: Mapping[str, Any]) -> dict[str, str]:
     result: dict[str, str] = {}
 
     def visit(current: Mapping[str, Any], path: str) -> None:
-        result[path] = _stable_id("node", current.get("id"))
+        result[path] = _figma_node_stable_id(current)
         child_index = 0
         for child in current.get("children", []):
             if not isinstance(child, Mapping):
@@ -172,10 +219,11 @@ def _figma_component_set_index(
                 if isinstance(child, Mapping)
                 and str(child.get("type") or "").upper() == "COMPONENT"
             ]
-            component_ids = [
-                _stable_id("component", child.get("id")) for child in children
-            ]
-            family_id = component_ids[0] if component_ids else ""
+            component_ids = [_figma_component_stable_id(child) for child in children]
+            family_id = (
+                _tigerstudio_plugin_text(node, "component_family_id")
+                or (component_ids[0] if component_ids else "")
+            )
             set_row = {
                 "figma_node_id": str(node.get("id") or ""),
                 "name": str(node.get("name") or "Component Set"),
@@ -276,7 +324,6 @@ def _map_gradient(paint: Mapping[str, Any]) -> dict[str, Any]:
             "y": _number(value.get("y"), fallback[1]),
         }
 
-    opacity = max(0.0, min(1.0, _number(paint.get("opacity"), 1.0)))
     raw_stops = (
         paint.get("gradientStops")
         if isinstance(paint.get("gradientStops"), list)
@@ -289,7 +336,10 @@ def _map_gradient(paint: Mapping[str, Any]) -> dict[str, Any]:
                     0.0,
                     min(1.0, _number(stop.get("position"))),
                 ),
-                "color": _color_with_opacity(stop.get("color"), opacity),
+                # Figma paint opacity is independent from each stop's alpha.
+                # Preserve the stop color verbatim and keep paint opacity on
+                # the canonical paint row so render/export applies it once.
+                "color": _color(stop.get("color")),
             }
             for stop in raw_stops
             if isinstance(stop, Mapping)
@@ -350,10 +400,8 @@ def _map_paints(
                 "opacity": max(
                     0.0, min(1.0, _number(raw.get("opacity"), 1.0))
                 ),
-                "color": _color_with_opacity(
-                    raw.get("color"),
-                    raw.get("opacity", 1.0),
-                ),
+                # Keep color alpha and paint opacity as separate factors.
+                "color": _color(raw.get("color")),
             }
         elif paint_type in {"GRADIENT_LINEAR", "GRADIENT_RADIAL"}:
             gradient = _map_gradient(raw)
@@ -366,6 +414,67 @@ def _map_paints(
                 "color": "#FFFFFFFF",
                 "gradient": gradient,
             }
+        elif paint_type == "IMAGE":
+            scale_mode = str(raw.get("scaleMode") or "FILL").upper()
+            filters = (
+                raw.get("filters")
+                if isinstance(raw.get("filters"), Mapping)
+                else {}
+            )
+
+            def adjustment(name: str) -> float:
+                value = _number(filters.get(name), 0.0)
+                # Figma's REST/plugin image filters use normalized -1..1
+                # values; Painter stores the same controls as -100..100.
+                if abs(value) <= 1.0:
+                    value *= 100.0
+                return max(-100.0, min(100.0, value))
+
+            row = {
+                "type": "image",
+                "visible": bool(raw.get("visible", True)),
+                "opacity": max(
+                    0.0, min(1.0, _number(raw.get("opacity"), 1.0))
+                ),
+                "color": "#FFFFFFFF",
+                "blend_mode": str(
+                    raw.get("blendMode") or "NORMAL"
+                ).casefold(),
+                # The resolved local asset lives in object content. Keeping
+                # this field empty lets the provider-neutral adapter merge
+                # paint opacity/filters with content.source_path.
+                "source_path": "",
+                "fit": {
+                    "FIT": "fit",
+                    "FILL": "fill",
+                    "STRETCH": "stretch",
+                    "TILE": "tile",
+                    "CROP": "crop",
+                }.get(scale_mode, "fill"),
+                "rotation": _number(raw.get("rotation"), 0.0),
+                "tile_scale": max(
+                    0.05,
+                    min(16.0, _number(raw.get("scalingFactor"), 1.0)),
+                ),
+                "adjustments": {
+                    key: adjustment(key)
+                    for key in (
+                        "exposure",
+                        "contrast",
+                        "saturation",
+                        "temperature",
+                        "tint",
+                        "highlights",
+                    )
+                },
+            }
+            image_transform = raw.get("imageTransform")
+            if isinstance(image_transform, list):
+                # A Figma crop transform is not equivalent to a normalized UV
+                # rectangle in all cases (it may rotate/skew). Preserve it for
+                # inspection; CROP remains explicitly blocked until a safe
+                # rectangular crop can be supplied.
+                row["figma_image_transform"] = copy.deepcopy(image_transform)
         else:
             continue
         if stroke:
@@ -373,6 +482,17 @@ def _map_paints(
             row["align"] = str(align).casefold()
         rows.append(row)
     return rows
+
+
+def map_figma_plugin_paints(
+    paints: object,
+    *,
+    stroke: bool = False,
+    width: float = 1.0,
+    align: str = "center",
+) -> list[dict[str, Any]]:
+    """Map public Plugin API Paint rows through the canonical Figma importer."""
+    return _map_paints(paints, stroke=stroke, width=width, align=align)
 
 
 def _map_text_ranges(node: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -409,6 +529,8 @@ def _map_text_ranges(node: Mapping[str, Any]) -> list[dict[str, Any]]:
                 if figma_key == "textDecoration":
                     value = str(value).upper() == "UNDERLINE"
                 style[target_key] = copy.deepcopy(value)
+            if "lineHeightPx" in raw:
+                style["line_height_unit"] = "px"
             fill = _solid_paint(raw.get("fills"))
             if fill is not None:
                 style["color"] = _color_with_opacity(
@@ -434,7 +556,7 @@ def _box(node: Mapping[str, Any]) -> dict[str, float]:
 
 def _map_kind(node: Mapping[str, Any]) -> str:
     node_type = str(node.get("type") or "").upper()
-    if node_type in {"FRAME", "SECTION", "COMPONENT", "COMPONENT_SET"}:
+    if node_type in {"FRAME", "SECTION", "COMPONENT", "COMPONENT_SET", "SLOT"}:
         return "frame"
     if node_type in {"GROUP", "INSTANCE"}:
         return "group"
@@ -624,6 +746,15 @@ def _map_token_bindings(node: Mapping[str, Any]) -> dict[str, str]:
     return result
 
 
+def _figma_text_resize_mode(value: object) -> str:
+    return {
+        "WIDTH_AND_HEIGHT": "auto_width",
+        "HEIGHT": "auto_height",
+        "NONE": "fixed_size",
+        "TRUNCATE": "fixed_size",
+    }.get(str(value or "").strip().upper(), "")
+
+
 def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     fill = _solid_paint(node.get("fills"))
     gradient = _gradient_paint(node.get("fills"))
@@ -705,6 +836,10 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
             )
         ],
         "radius": fallback_radius,
+        "corner_smoothing": max(
+            0.0,
+            min(1.0, _number(node.get("cornerSmoothing"))),
+        ),
         "blend_mode": str(
             node.get("blendMode") or "NORMAL"
         ).casefold(),
@@ -742,6 +877,10 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     if str(node.get("type") or "").upper() == "TEXT":
         text_style = node.get("style")
         text_style = text_style if isinstance(text_style, Mapping) else {}
+        line_height = max(
+            0.0,
+            _number(text_style.get("lineHeightPx")),
+        )
         result.update(
             {
                 "text_color": result["fill"],
@@ -756,12 +895,14 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                 "text_align": str(
                     text_style.get("textAlignHorizontal") or "LEFT"
                 ).casefold(),
-                "line_height": max(
-                    0.0,
-                    _number(text_style.get("lineHeightPx")),
-                ),
+                "text_vertical_align": str(
+                    text_style.get("textAlignVertical") or "TOP"
+                ).casefold(),
+                "line_height": line_height,
             }
         )
+        if line_height > 0.0:
+            result["line_height_unit"] = "px"
         from app.painter_ui_typography import normalize_ui_font_axes
 
         axes = normalize_ui_font_axes(
@@ -799,6 +940,8 @@ def _map_content(
     if node_type == "TEXT":
         style = node.get("style")
         style = style if isinstance(style, Mapping) else {}
+        line_height = max(0.0, _number(style.get("lineHeightPx")))
+        text_resize = _figma_text_resize_mode(style.get("textAutoResize"))
         result.update(
             {
                 "text": str(node.get("characters") or ""),
@@ -806,10 +949,14 @@ def _map_content(
                 "font_size": max(1.0, _number(style.get("fontSize"), 16.0)),
                 "font_weight": int(_number(style.get("fontWeight"), 400)),
                 "text_align": str(style.get("textAlignHorizontal") or "LEFT").casefold(),
-                "line_height": max(0.0, _number(style.get("lineHeightPx"))),
+                "line_height": line_height,
                 "text_ranges": _map_text_ranges(node),
             }
         )
+        if line_height > 0.0:
+            result["line_height_unit"] = "px"
+        if text_resize:
+            result["text_resize"] = text_resize
     if node_type == "INSTANCE":
         component_key = str(
             node.get("componentId")
@@ -828,6 +975,7 @@ def _map_content(
     if node_type == "BOOLEAN_OPERATION":
         result["boolean"] = {
             "enabled": True,
+            "group": True,
             "operation": {
                 "UNION": "union",
                 "SUBTRACT": "subtract",
@@ -838,7 +986,7 @@ def _map_content(
                 "union",
             ),
             "operand_ids": [
-                _stable_id("node", child.get("id"))
+                _figma_node_stable_id(child)
                 for child in node.get("children", [])
                 if isinstance(child, Mapping)
             ],
@@ -853,6 +1001,7 @@ def _map_content(
             "FILL": "fill",
             "STRETCH": "stretch",
             "TILE": "tile",
+            "CROP": "crop",
         }.get(scale_mode, "fill")
         result.update(
             {
@@ -863,6 +1012,11 @@ def _map_content(
                 "image_mode": scale_mode.casefold(),
                 "image_fit": image_fit,
                 "image_status": "ready" if local_path else "missing",
+                "figma_image_transform": copy.deepcopy(
+                    image.get("imageTransform")
+                    if isinstance(image.get("imageTransform"), list)
+                    else []
+                ),
             }
         )
     fill_geometry = node.get("fillGeometry")
@@ -1000,7 +1154,7 @@ def import_figma_payload(
     component_set_index = _figma_component_set_index(root)
 
     for page in pages:
-        page_id = _stable_id("page", page.get("id"))
+        page_id = _figma_node_stable_id(page, "page")
         imported_pages.append(
             {
                 "id": page_id,
@@ -1011,7 +1165,7 @@ def import_figma_payload(
         for frame in _top_level_frames(page):
             frame_object_start = len(objects)
             frame_box = _box(frame)
-            frame_id = _stable_id("artboard", frame.get("id"))
+            frame_id = _figma_node_stable_id(frame, "artboard")
             background = _solid_paint(frame.get("backgrounds") or frame.get("fills"))
             artboards.append(
                 {
@@ -1045,6 +1199,7 @@ def import_figma_payload(
                 include_self: bool = True,
                 parent_layout_mode: str = "none",
                 definition_component_id: str = "",
+                instance_component_id: str = "",
             ) -> None:
                 nonlocal supported, skipped
                 node_type = str(node.get("type") or "").upper()
@@ -1056,7 +1211,7 @@ def import_figma_payload(
                 current_parent = parent_id
                 if include_self:
                     node_box = _box(node)
-                    object_id = _stable_id("node", node.get("id"))
+                    object_id = _figma_node_stable_id(node)
                     kind = _map_kind(node)
                     content = _map_content(node, images, local_images)
                     has_vector_geometry = bool(
@@ -1084,7 +1239,7 @@ def import_figma_payload(
                     component_scope_id = ""
                     component_scope_source_object_id = ""
                     if node_type == "COMPONENT":
-                        component_id = _stable_id("component", node.get("id"))
+                        component_id = _figma_component_stable_id(node)
                         role = "definition"
                         source_object_id = object_id
                         component_set = component_set_index.get(
@@ -1152,9 +1307,13 @@ def import_figma_payload(
                             }
                         )
                     elif node_type == "INSTANCE":
-                        component_id = _stable_id(
-                            "component",
-                            node.get("componentId") or node.get("mainComponent", ""),
+                        component_id = (
+                            _tigerstudio_plugin_text(node, "component_id")
+                            or _stable_id(
+                                "component",
+                                node.get("componentId")
+                                or node.get("mainComponent", ""),
+                            )
                         )
                         role = "instance"
                         if definition_component_id:
@@ -1164,6 +1323,15 @@ def import_figma_payload(
                         component_id = definition_component_id
                         role = "definition"
                         source_object_id = object_id
+                    elif instance_component_id:
+                        component_id = (
+                            _tigerstudio_plugin_text(node, "component_id")
+                            or instance_component_id
+                        )
+                        source_object_id = _tigerstudio_plugin_text(
+                            node, "component_source_object_id"
+                        )
+                        role = "instance" if source_object_id else "none"
                     objects.append(
                         {
                             "id": object_id,
@@ -1228,8 +1396,6 @@ def import_figma_payload(
                 ).casefold()
                 if child_parent_layout_mode not in {"horizontal", "vertical"}:
                     child_parent_layout_mode = "none"
-                if node_type == "INSTANCE":
-                    return
                 for child in node.get("children", []):
                     if isinstance(child, Mapping):
                         visit(
@@ -1241,12 +1407,17 @@ def import_figma_payload(
                                 if role == "definition"
                                 else definition_component_id
                             ),
+                            instance_component_id=(
+                                component_id
+                                if node_type == "INSTANCE"
+                                else instance_component_id
+                            ),
                         )
             if str(frame.get("type") or "").upper() == "SECTION":
                 section_objects = objects[frame_object_start:]
                 sections.append(
                     {
-                        "id": _stable_id("section", frame.get("id")),
+                        "id": _figma_node_stable_id(frame, "section"),
                         "name": str(frame.get("name") or "Section"),
                         "page_name": str(page.get("name") or ""),
                         "x": float(frame_box["x"]),
@@ -1284,19 +1455,52 @@ def import_figma_payload(
         )
         for row in components
     }
+    component_ids_by_figma_key = {
+        str((row.get("metadata") or {}).get("figma_key") or ""): str(row["id"])
+        for row in components
+        if str((row.get("metadata") or {}).get("figma_key") or "")
+    }
+    object_ids_by_figma_node = {
+        str(node.get("id") or ""): _figma_node_stable_id(node)
+        for node in _walk_figma_nodes(root)
+        if str(node.get("id") or "")
+    }
+    objects_by_id = {str(row["id"]): row for row in objects}
     for component in components:
-        for definition in component.get("property_definitions", {}).values():
-            if str(definition.get("type") or "") != "instance_swap":
+        for property_name, definition in component.get(
+            "property_definitions", {}
+        ).items():
+            property_type = str(definition.get("type") or "")
+            if property_type == "slot":
+                source_id = object_ids_by_figma_node.get(
+                    str(definition.get("default") or ""),
+                    str(definition.get("default") or ""),
+                )
+                definition["default"] = source_id
+                source = objects_by_id.get(source_id)
+                if source is not None:
+                    source["component_slot_property"] = str(property_name)
+                definition["preferred_values"] = [
+                    component_ids_by_figma_key.get(str(item), str(item))
+                    for item in definition.get("preferred_values", [])
+                ]
+                continue
+            if property_type != "instance_swap":
                 continue
             default_value = str(definition.get("default") or "")
             if default_value in component_ids_by_figma_node:
                 definition["default"] = component_ids_by_figma_node[
                     default_value
                 ]
+            definition["preferred_values"] = [
+                component_ids_by_figma_key.get(str(item), str(item))
+                for item in definition.get("preferred_values", [])
+            ]
     component_roots = {
         str(row["id"]): str(row["root_object_id"]) for row in components
     }
     component_by_id = {str(row["id"]): row for row in components}
+    missing_remote_component_ids: set[str] = set()
     for row in objects:
         if row.get("component_role") != "instance":
             continue
@@ -1323,6 +1527,7 @@ def import_figma_payload(
                 (component.get("metadata") or {}).get("variant_key") or ""
             )
             continue
+        missing_remote_component_ids.add(component_id)
         row["content"]["figma_component_id"] = component_id
         remote = dict(row["content"].get("remote_component") or {})
         remote["status"] = "missing"
@@ -1332,6 +1537,20 @@ def import_figma_payload(
         warnings.append(
             f"converted:{row['id']}:remote_component_instance_to_group"
         )
+    # REST snapshots expand an INSTANCE into editable descendant nodes. Those
+    # rows inherit the instance component id during traversal, but a remote
+    # component has no local definition that can own that id. Once its root is
+    # downgraded to a group, detach the inherited descendants as well so the
+    # resulting plain hierarchy has no dangling component references.
+    if missing_remote_component_ids:
+        for row in objects:
+            if (
+                row.get("component_role") == "none"
+                and str(row.get("component_id") or "")
+                in missing_remote_component_ids
+            ):
+                row["component_id"] = ""
+                row["component_source_object_id"] = ""
 
     figma_node_index = {
         str(node.get("id") or ""): node
@@ -1374,6 +1593,10 @@ def import_figma_payload(
                 "target_ids": targets,
             }
 
+    object_component_ids = {
+        str(row["id"]): str(row.get("component_id") or "")
+        for row in objects
+    }
     trigger_map = {
         "ON_CLICK": "click",
         "MOUSE_ENTER": "hover",
@@ -1406,6 +1629,8 @@ def import_figma_payload(
                     mapped_action = "close_overlay"
                 elif navigation in {"OVERLAY", "SWAP"}:
                     mapped_action = "open_overlay"
+                elif navigation == "CHANGE_TO":
+                    mapped_action = "change_variant"
                 elif action_type != "NODE":
                     warnings.append(
                         f"blocked_reaction:{source_object_id}:{action_type}"
@@ -1425,7 +1650,18 @@ def import_figma_payload(
                             target_id if target_kind == "artboard" else ""
                         ),
                         "target_object_id": (
-                            target_id if target_kind == "object" else ""
+                            (
+                                source_object_id
+                                if mapped_action == "change_variant"
+                                else target_id
+                            )
+                            if target_kind == "object"
+                            else ""
+                        ),
+                        "component_id": (
+                            object_component_ids.get(target_id, "")
+                            if mapped_action == "change_variant"
+                            else ""
                         ),
                         "parameters": {
                             "figma_transition": copy.deepcopy(
@@ -1995,7 +2231,7 @@ def inspect_figma_compatibility(
                     ),
                 }
             )
-    supported_property_types = {"enum", "boolean", "text", "instance_swap"}
+    supported_property_types = {"enum", "boolean", "text", "instance_swap", "slot"}
     for component in normalized["components"]:
         for property_name, definition in component[
             "property_definitions"
@@ -2015,6 +2251,18 @@ def inspect_figma_compatibility(
             ):
                 status = "blocked"
                 reason = "Instance-swap default does not reference a local component"
+            elif property_type == "slot":
+                source = next(
+                    (
+                        row
+                        for row in normalized["objects"]
+                        if row["id"] == str(definition.get("default") or "")
+                    ),
+                    None,
+                )
+                if source is None or source["component_slot_property"] != property_name:
+                    status = "blocked"
+                    reason = "Slot property does not reference its component Slot frame"
             rows.append(
                 {
                     "id": f"{component['id']}:{property_name}",
@@ -2118,6 +2366,14 @@ function isInstanceRoot(row) {{
   const parent=objectById.get(row.parent_id);
   return !parent || parent.component_role!=='instance';
 }}
+function containingInstanceRoot(row) {{
+  let current=row, result=null;
+  while(current) {{
+    if(isInstanceRoot(current)) result=current;
+    current=objectById.get(current.parent_id);
+  }}
+  return result;
+}}
 function componentFamilyId(componentId) {{
   const row=componentRecords.get(componentId);
   return row ? (row.base_component_id || row.id) : componentId;
@@ -2213,12 +2469,17 @@ function decode64(text) {{
   return new Uint8Array(out);
 }}
 function applyFrame(node,row) {{
-  node.name=row.name || row.id; node.x=Number(row.x)||0; node.y=Number(row.y)||0;
+  const parentRow=objectById.get(row.parent_id);
+  node.name=row.name || row.id;
+  node.x=(Number(row.x)||0)-(parentRow?(Number(parentRow.x)||0):0);
+  node.y=(Number(row.y)||0)-(parentRow?(Number(parentRow.y)||0):0);
   node.resize(Math.max(1,Number(row.width)||1),Math.max(1,Number(row.height)||1));
   node.rotation=Number(row.rotation)||0; node.opacity=Math.max(0,Math.min(1,Number(row.opacity ?? 1)));
   node.visible=row.visible !== false; node.locked=!!row.locked;
   if('clipsContent' in node) node.clipsContent=!!row.clip_content;
   node.setSharedPluginData('tigerstudio','stable_id',row.id);
+  if(row.component_id) node.setSharedPluginData('tigerstudio','component_id',row.component_id);
+  if(row.component_source_object_id) node.setSharedPluginData('tigerstudio','component_source_object_id',row.component_source_object_id);
   const s=row.style||{{}};
   node.setSharedPluginData('tigerstudio','font_axes',JSON.stringify(s.font_axes||{{}}));
   if('fills' in node) node.fills=Array.isArray(s.fills)&&s.fills.length?s.fills.map(stackPaint):[fillPaint(s)];
@@ -2228,6 +2489,7 @@ function applyFrame(node,row) {{
   if('strokeAlign' in node) node.strokeAlign=String(s.stroke_align||'CENTER').toUpperCase();
   if('blendMode' in node) node.blendMode=String(s.blend_mode||'NORMAL').toUpperCase();
   if('cornerRadius' in node && typeof node.cornerRadius==='number') node.cornerRadius=Math.max(0,Number(s.radius)||0);
+  if('cornerSmoothing' in node) node.cornerSmoothing=Math.max(0,Math.min(1,Number(s.corner_smoothing)||0));
   const radii=s.corner_radii||{{}};
   if('topLeftRadius' in node) {{
     node.topLeftRadius=Math.max(0,Number(radii.top_left??s.radius)||0);
@@ -2248,6 +2510,50 @@ function applyFrame(node,row) {{
       node.counterAxisAlignItems={{start:'MIN',center:'CENTER',end:'MAX',stretch:'MIN'}}[row.layout.cross_alignment]||'MIN';
     }}
   }}
+}}
+async function createAuthoredNode(row,parent) {{
+  let node;
+  if(isComponentRoot(row)) node=figma.createComponent();
+  else if(row.component_slot_property && parent.type==='COMPONENT' && parent.createSlot) node=parent.createSlot();
+  else if(row.kind==='ellipse') node=figma.createEllipse();
+  else if(row.kind==='line') node=figma.createLine();
+  else if(row.kind==='text') node=figma.createText();
+  else if(['frame','group','button','progress'].includes(row.kind)) node=figma.createFrame();
+  else node=figma.createRectangle();
+  parent.appendChild(node); applyFrame(node,row); created.set(row.id,node);
+  if(isComponentRoot(row)) components.set(row.component_id,node);
+  if(row.kind==='text') {{
+    const c=row.content||{{}}, s=row.style||{{}}; const font={{family:s.font_family||'Inter',style:'Regular'}};
+    try {{ await figma.loadFontAsync(font); node.fontName=font; }} catch (_) {{ await figma.loadFontAsync({{family:'Inter',style:'Regular'}}); }}
+    node.characters=String(c.text||''); node.fontSize=Math.max(1,Number(s.font_size)||16);
+    node.textAlignHorizontal=String(s.text_align||'LEFT').toUpperCase();
+    for(const range of c.text_ranges||[]) {{
+      const start=Math.max(0,Math.min(node.characters.length,Number(range.start)||0));
+      const end=Math.max(start,Math.min(node.characters.length,Number(range.end)||start));
+      const rs=range.style||{{}};
+      if(end<=start) continue;
+      if(rs.font_size) node.setRangeFontSize(start,end,Math.max(1,Number(rs.font_size)));
+      if(rs.color) node.setRangeFills(start,end,[paint(rs.color)]);
+      if(rs.underline) node.setRangeTextDecoration(start,end,'UNDERLINE');
+    }}
+  }}
+  const asset=exchange.assets[row.id];
+  if(asset && 'fills' in node) {{
+    const image=figma.createImage(decode64(asset.base64));
+    node.fills=[{{type:'IMAGE',scaleMode:String((row.content||{{}}).image_mode||'FILL').toUpperCase(),imageHash:image.hash}}];
+  }}
+  for(const [path,tokenId] of Object.entries(row.token_bindings||{{}})) {{
+    const variable=tokenVars.get(tokenId); if(!variable) continue;
+    try {{
+      if(path==='style.fill' && 'fills' in node && node.fills.length)
+        node.fills=[figma.variables.setBoundVariableForPaint(node.fills[0],'color',variable)];
+      else if(path==='style.stroke' && 'strokes' in node && node.strokes.length)
+        node.strokes=[figma.variables.setBoundVariableForPaint(node.strokes[0],'color',variable)];
+      else if(path==='opacity' && node.setBoundVariable) node.setBoundVariable('opacity',variable);
+      else if(path==='style.radius' && node.setBoundVariable) node.setBoundVariable('cornerRadius',variable);
+    }} catch (_) {{}}
+  }}
+  return node;
 }}
 async function main() {{
   const page=figma.currentPage;
@@ -2272,49 +2578,23 @@ async function main() {{
   }}
   const ordered=[...doc.objects].sort((a,b)=>(a.z_index||0)-(b.z_index||0));
   for(const row of ordered.filter(x => x.component_role !== 'instance' && !insideInstance(x))) {{
-    let node;
-    if(isComponentRoot(row)) node=figma.createComponent();
-    else if(row.kind==='ellipse') node=figma.createEllipse();
-    else if(row.kind==='line') node=figma.createLine();
-    else if(row.kind==='text') node=figma.createText();
-    else if(['frame','group','button','progress'].includes(row.kind)) node=figma.createFrame();
-    else node=figma.createRectangle();
     const parent=created.get(row.parent_id)||created.get(row.artboard_id)||page;
-    parent.appendChild(node); applyFrame(node,row); created.set(row.id,node);
-    if(isComponentRoot(row)) components.set(row.component_id,node);
-    if(row.kind==='text') {{
-      const c=row.content||{{}}, s=row.style||{{}}; const font={{family:s.font_family||'Inter',style:'Regular'}};
-      try {{ await figma.loadFontAsync(font); node.fontName=font; }} catch (_) {{ await figma.loadFontAsync({{family:'Inter',style:'Regular'}}); }}
-      node.characters=String(c.text||''); node.fontSize=Math.max(1,Number(s.font_size)||16);
-      node.textAlignHorizontal=String(s.text_align||'LEFT').toUpperCase();
-      for(const range of c.text_ranges||[]) {{
-        const start=Math.max(0,Math.min(node.characters.length,Number(range.start)||0));
-        const end=Math.max(start,Math.min(node.characters.length,Number(range.end)||start));
-        const rs=range.style||{{}};
-        if(end<=start) continue;
-        if(rs.font_size) node.setRangeFontSize(start,end,Math.max(1,Number(rs.font_size)));
-        if(rs.color) node.setRangeFills(start,end,[paint(rs.color)]);
-        if(rs.underline) node.setRangeTextDecoration(start,end,'UNDERLINE');
-      }}
-    }}
-    const asset=exchange.assets[row.id];
-    if(asset && 'fills' in node) {{
-      const image=figma.createImage(decode64(asset.base64));
-      node.fills=[{{type:'IMAGE',scaleMode:String((row.content||{{}}).image_mode||'FILL').toUpperCase(),imageHash:image.hash}}];
-    }}
-    for(const [path,tokenId] of Object.entries(row.token_bindings||{{}})) {{
-      const variable=tokenVars.get(tokenId); if(!variable) continue;
-      try {{
-        if(path==='style.fill' && 'fills' in node && node.fills.length)
-          node.fills=[figma.variables.setBoundVariableForPaint(node.fills[0],'color',variable)];
-        else if(path==='style.stroke' && 'strokes' in node && node.strokes.length)
-          node.strokes=[figma.variables.setBoundVariableForPaint(node.strokes[0],'color',variable)];
-        else if(path==='opacity' && node.setBoundVariable) node.setBoundVariable('opacity',variable);
-        else if(path==='style.radius' && node.setBoundVariable) node.setBoundVariable('cornerRadius',variable);
-      }} catch (_) {{}}
-    }}
+    await createAuthoredNode(row,parent);
   }}
-  for(const row of ordered.filter(row => (row.content||{{}}).boolean?.enabled)) {{
+  const booleanRows=ordered.filter(row => (row.content||{{}}).boolean?.enabled);
+  const booleanById=new Map(booleanRows.map(row=>[row.id,row]));
+  const booleanDepth=(row,stack=new Set())=>{{
+    if(stack.has(row.id)) throw new Error(`Boolean cycle includes ${{row.id}}`);
+    const next=new Set(stack); next.add(row.id);
+    let depth=0;
+    for(const operandId of ((row.content||{{}}).boolean?.operand_ids||[])) {{
+      const operand=booleanById.get(operandId);
+      if(operand) depth=Math.max(depth,1+booleanDepth(operand,next));
+    }}
+    return depth;
+  }};
+  booleanRows.sort((a,b)=>booleanDepth(a)-booleanDepth(b)||(a.z_index||0)-(b.z_index||0));
+  for(const row of booleanRows) {{
     const spec=row.content.boolean, nodes=(spec.operand_ids||[]).map(id=>created.get(id)).filter(Boolean);
     const placeholder=created.get(row.id), parent=placeholder?.parent||created.get(row.parent_id)||created.get(row.artboard_id)||page;
     if(nodes.length<2) throw new Error(`Boolean operands are missing for ${{row.id}}`);
@@ -2324,7 +2604,9 @@ async function main() {{
     else if(spec.operation==='exclude') result=figma.exclude(nodes,parent);
     else result=figma.union(nodes,parent);
     if(placeholder && placeholder!==result) placeholder.remove();
-    applyFrame(result,row); created.set(row.id,result);
+    applyFrame(result,row);
+    result.setSharedPluginData('tigerstudio','stable_id',row.id);
+    created.set(row.id,result);
   }}
   for(const section of doc.sections||[]) {{
     if(!figma.createSection) continue;
@@ -2363,9 +2645,19 @@ async function main() {{
     for(const propertyName of Object.keys(propertyOwner.componentPropertyDefinitions||{{}}))
       names.set(cleanPropertyName(propertyName),propertyName);
     for(const [propertyName,definition] of Object.entries(family.property_definitions||{{}})) {{
-      if(names.has(propertyName)) continue;
-      const type={{enum:'VARIANT',boolean:'BOOLEAN',text:'TEXT',instance_swap:'INSTANCE_SWAP'}}[definition.type];
+      if(names.has(propertyName)) {{
+        if(definition.type==='slot') {{
+          const actual=names.get(propertyName);
+          const preferredValues=(definition.preferred_values||[]).map(value=>components.get(String(value||''))).filter(Boolean).map(node=>({{type:'COMPONENT',key:node.key}}));
+          const settings=definition.slot_settings||{{}};
+          try {{ propertyOwner.editComponentProperty(actual,{{description:String(definition.description||''),preferredValues,slotSettings:{{stretchChildOnInsert:!!settings.stretch_child_on_insert,displayEmptyByDefault:!!settings.display_empty_by_default,minChildren:settings.min_children??null,maxChildren:settings.max_children??null,allowPreferredValuesOnly:!!settings.allow_preferred_values_only}}}}); }}
+          catch (error) {{ throw new Error(`Slot property failed for ${{family.id}}:${{propertyName}}: ${{error.message}}`); }}
+        }}
+        continue;
+      }}
+      const type={{enum:'VARIANT',boolean:'BOOLEAN',text:'TEXT',instance_swap:'INSTANCE_SWAP',slot:'SLOT'}}[definition.type];
       if(!type) continue;
+      if(type==='SLOT') throw new Error(`Slot node is missing for ${{family.id}}:${{propertyName}}`);
       let defaultValue=definition.default;
       if(type==='BOOLEAN') defaultValue=!!defaultValue;
       else if(type==='INSTANCE_SWAP') {{
@@ -2374,7 +2666,8 @@ async function main() {{
         defaultValue=target.id;
       }} else defaultValue=String(defaultValue??'');
       try {{
-        const actual=propertyOwner.addComponentProperty(propertyName,type,defaultValue);
+        const options=type==='INSTANCE_SWAP'?{{preferredValues:(definition.preferred_values||[]).map(value=>components.get(String(value||''))).filter(Boolean).map(node=>({{type:'COMPONENT',key:node.key}}))}}:undefined;
+        const actual=propertyOwner.addComponentProperty(propertyName,type,defaultValue,options);
         names.set(propertyName,actual);
       }} catch (error) {{
         throw new Error(`Component property failed for ${{family.id}}:${{propertyName}}: ${{error.message}}`);
@@ -2391,6 +2684,8 @@ async function main() {{
       const names=componentPropertyNames.get(familyId)||new Map();
       const values={{}};
       for(const [propertyName,value] of Object.entries(row.component_properties||{{}})) {{
+        const propertyDefinition=(componentRecords.get(familyId)?.property_definitions||{{}})[propertyName];
+        if(propertyDefinition?.type==='slot') continue;
         const actual=names.get(propertyName)||propertyName;
         const component=components.get(String(value||''));
         values[actual]=component ? component.id : value;
@@ -2400,6 +2695,36 @@ async function main() {{
         catch (error) {{ throw new Error(`Instance properties failed for ${{row.id}}: ${{error.message}}`); }}
       }}
     }}
+  }}
+  const usedInstanceClones=new Set();
+  for(const row of ordered.filter(row => row.component_role==='instance' && !isInstanceRoot(row))) {{
+    const rootRow=containingInstanceRoot(row), rootNode=rootRow?created.get(rootRow.id):null;
+    if(!rootNode || !rootNode.findAll) throw new Error(`Instance root is missing for ${{row.id}}`);
+    const sourceId=String(row.component_source_object_id||'');
+    const candidates=rootNode.findAll(node =>
+      !usedInstanceClones.has(node.id)
+      && node.getSharedPluginData
+      && node.getSharedPluginData('tigerstudio','stable_id')===sourceId
+    );
+    const node=candidates[0];
+    if(!node) throw new Error(`Instance sublayer is missing for ${{row.id}} from ${{sourceId}}`);
+    usedInstanceClones.add(node.id);
+    node.setSharedPluginData('tigerstudio','stable_id',row.id);
+    if(row.component_id) node.setSharedPluginData('tigerstudio','component_id',row.component_id);
+    if(sourceId) node.setSharedPluginData('tigerstudio','component_source_object_id',sourceId);
+    created.set(row.id,node);
+  }}
+  let pendingSlotRows=ordered.filter(row => insideInstance(row) && !created.has(row.id));
+  while(pendingSlotRows.length) {{
+    let progress=false; const deferred=[];
+    for(const row of pendingSlotRows) {{
+      const parent=created.get(row.parent_id);
+      if(!parent) {{ deferred.push(row); continue; }}
+      if(!('appendChild' in parent)) throw new Error(`Slot content parent cannot contain children: ${{row.id}}`);
+      await createAuthoredNode(row,parent); progress=true;
+    }}
+    if(!progress) throw new Error(`Slot-local hierarchy is unresolved: ${{deferred.map(row=>row.id).join(',')}}`);
+    pendingSlotRows=deferred;
   }}
   for(const row of ordered.filter(row => Object.keys(row.component_property_bindings||{{}}).length)) {{
     const node=created.get(row.id);
@@ -2418,10 +2743,11 @@ async function main() {{
     catch (error) {{ throw new Error(`Component property binding failed for ${{row.id}}: ${{error.message}}`); }}
   }}
   for(const link of doc.interactions) {{
-    const source=created.get(link.source_object_id), target=created.get(link.target_artboard_id||link.target_object_id);
+    const source=created.get(link.source_object_id), target=link.action==='change_variant'?components.get(link.component_id):created.get(link.target_artboard_id||link.target_object_id);
     if(!source || !target || !source.setReactionsAsync) continue;
     const trigger={{click:'ON_CLICK',double_click:'ON_CLICK',hover:'MOUSE_ENTER',press:'MOUSE_DOWN',focus:'ON_KEY_DOWN',keyboard:'ON_KEY_DOWN'}}[link.trigger]||'ON_CLICK';
-    const action=link.action==='back'?{{type:'BACK'}}:{{type:'NODE',destinationId:target.id,navigation:'NAVIGATE',transition:null,preserveScrollPosition:false}};
+    const navigation=link.action==='change_variant'?'CHANGE_TO':'NAVIGATE';
+    const action=link.action==='back'?{{type:'BACK'}}:{{type:'NODE',destinationId:target.id,navigation,transition:null,preserveScrollPosition:false}};
     try {{ await source.setReactionsAsync([{{trigger:{{type:trigger}},actions:[action]}}]); }} catch (_) {{}}
   }}
   figma.currentPage.selection=doc.artboards.map(x=>created.get(x.id)).filter(Boolean);
@@ -2499,5 +2825,6 @@ __all__ = [
     "import_figma_payload",
     "inspect_figma_resources",
     "inspect_figma_compatibility",
+    "map_figma_plugin_paints",
     "merge_figma_document",
 ]

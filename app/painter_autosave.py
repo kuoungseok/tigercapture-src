@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import time
+import zipfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Mapping
@@ -16,6 +17,40 @@ from app.paths import runtime_data_dir
 
 SCHEMA = "tigerstudio.painter.recovery.v1"
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="painter-recovery")
+RECOVERY_WRITER_CONTRACT = {
+    "schema": "tigerstudio.painter.recovery_writer.v1",
+    "max_workers": 1,
+    "reason": "serialize_atomic_snapshot_replacement_per_process",
+    "throughput_threshold_claim": False,
+    "universal_recovery_latency_claim": False,
+}
+
+
+def inspect_recovery_archive(path: str | Path) -> dict[str, Any]:
+    """Check ZIP structure/CRC before a snapshot is offered for restore."""
+    target = Path(path)
+    report = {
+        "schema": "tigerstudio.painter.recovery.integrity.v1",
+        "path": str(target.resolve()),
+        "valid": False,
+        "reason": "missing",
+        "bad_crc_entry": "",
+    }
+    if not target.is_file():
+        return report
+    try:
+        with zipfile.ZipFile(target, "r") as archive:
+            if "document.json" not in archive.namelist():
+                return {**report, "reason": "document_entry_missing"}
+            bad_entry = archive.testzip()
+            if bad_entry:
+                return {**report, "reason": "crc_failure", "bad_crc_entry": bad_entry}
+            payload = json.loads(archive.read("document.json").decode("utf-8"))
+            if not isinstance(payload, dict) or not str(payload.get("schema") or ""):
+                return {**report, "reason": "document_schema_missing"}
+    except (OSError, ValueError, UnicodeDecodeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
+        return {**report, "reason": f"{type(exc).__name__}: {exc}"}
+    return {**report, "valid": True, "reason": "ok"}
 
 
 def painter_recovery_dir(root: str | Path | None = None) -> Path:
@@ -36,7 +71,13 @@ def _paths(session_id: str, root: str | Path | None) -> tuple[Path, Path]:
     return base.with_suffix(".tspaint"), base.with_suffix(".json")
 
 
-def _content_hash(document: Mapping[str, Any], background_png: bytes | None) -> str:
+def _content_hash(
+    document: Mapping[str, Any],
+    background_png: bytes | None,
+    layer_raster_pngs: Mapping[str, bytes] | None = None,
+    layer_mask_pngs: Mapping[str, bytes] | None = None,
+    selection_mask_png: bytes | None = None,
+) -> str:
     encoded = json.dumps(
         document,
         ensure_ascii=False,
@@ -47,6 +88,15 @@ def _content_hash(document: Mapping[str, Any], background_png: bytes | None) -> 
     digest = hashlib.sha256(encoded)
     if background_png:
         digest.update(background_png)
+    for layer_id, data in sorted(dict(layer_raster_pngs or {}).items()):
+        digest.update(str(layer_id).encode("utf-8"))
+        digest.update(bytes(data))
+    for layer_id, data in sorted(dict(layer_mask_pngs or {}).items()):
+        digest.update(b"layer-mask:")
+        digest.update(str(layer_id).encode("utf-8"))
+        digest.update(bytes(data))
+    if selection_mask_png:
+        digest.update(bytes(selection_mask_png))
     return digest.hexdigest()
 
 
@@ -56,6 +106,9 @@ def save_recovery_snapshot(
     *,
     source_path: str = "",
     background_png: bytes | None = None,
+    layer_raster_pngs: Mapping[str, bytes] | None = None,
+    layer_mask_pngs: Mapping[str, bytes] | None = None,
+    selection_mask_png: bytes | None = None,
     root: str | Path | None = None,
     keep: int = 12,
 ) -> dict[str, Any]:
@@ -63,7 +116,9 @@ def save_recovery_snapshot(
 
     recovery_path, manifest_path = _paths(session_id, root)
     payload = copy.deepcopy(dict(document))
-    content_sha256 = _content_hash(payload, background_png)
+    content_sha256 = _content_hash(
+        payload, background_png, layer_raster_pngs, layer_mask_pngs, selection_mask_png
+    )
     if manifest_path.is_file() and recovery_path.is_file():
         try:
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -75,6 +130,9 @@ def save_recovery_snapshot(
         recovery_path,
         payload,
         background_png=background_png,
+        layer_raster_pngs=layer_raster_pngs,
+        layer_mask_pngs=layer_mask_pngs,
+        selection_mask_png=selection_mask_png,
     )
     saved_at = time.time()
     ui_document = payload.get("ui_document")
@@ -95,6 +153,7 @@ def save_recovery_snapshot(
         "bytes": int(save_report.get("bytes") or 0),
         "asset_count": int(save_report.get("asset_count") or 0),
         "skipped": False,
+        "writer_contract": dict(RECOVERY_WRITER_CONTRACT),
     }
     temporary = manifest_path.with_suffix(".json.tmp")
     temporary.write_text(
@@ -116,11 +175,24 @@ def submit_recovery_snapshot(
     payload = copy.deepcopy(dict(document))
     background = kwargs.pop("background_png", None)
     background = bytes(background) if background else None
+    raster_pngs = {
+        str(layer_id): bytes(data)
+        for layer_id, data in dict(kwargs.pop("layer_raster_pngs", None) or {}).items()
+    }
+    mask_pngs = {
+        str(layer_id): bytes(data)
+        for layer_id, data in dict(kwargs.pop("layer_mask_pngs", None) or {}).items()
+    }
+    selection_mask = kwargs.pop("selection_mask_png", None)
+    selection_mask = bytes(selection_mask) if selection_mask else None
     return _EXECUTOR.submit(
         save_recovery_snapshot,
         session_id,
         payload,
         background_png=background,
+        layer_raster_pngs=raster_pngs,
+        layer_mask_pngs=mask_pngs,
+        selection_mask_png=selection_mask,
         **kwargs,
     )
 
@@ -138,6 +210,10 @@ def list_recovery_snapshots(
         recovery_path = Path(str(row.get("recovery_path") or ""))
         if row.get("schema") != SCHEMA or not recovery_path.is_file():
             continue
+        integrity = inspect_recovery_archive(recovery_path)
+        if not integrity["valid"]:
+            continue
+        row["integrity"] = integrity
         row["manifest_path"] = str(manifest_path.resolve())
         rows.append(row)
     rows.sort(key=lambda row: float(row.get("saved_at") or 0), reverse=True)
@@ -189,6 +265,7 @@ __all__ = [
     "discard_recovery_snapshot",
     "list_recovery_snapshots",
     "load_recovery_snapshot",
+    "inspect_recovery_archive",
     "painter_recovery_dir",
     "prune_recovery_snapshots",
     "save_recovery_snapshot",

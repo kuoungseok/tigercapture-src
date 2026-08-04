@@ -22,6 +22,28 @@ _COMMANDS: tuple[dict[str, Any], ...] = (
         "operation": {"type": "tool", "tool": "frame"},
     },
     {
+        "id": "tool.comment",
+        "label": "Comment tool",
+        "detail": "Place or review canvas comments",
+        "keywords": "comment note review annotation c",
+        "shortcut": "C",
+        "operation": {"type": "tool", "tool": "comment"},
+    },
+    {
+        "id": "document.templates",
+        "label": "Open templates",
+        "detail": "Start from or insert a reusable design",
+        "keywords": "template gallery preset starter",
+        "operation": {"type": "template_gallery"},
+    },
+    {
+        "id": "document.assets",
+        "label": "Open assets",
+        "detail": "Browse components, styles, and variables",
+        "keywords": "assets components library styles variables resources",
+        "operation": {"type": "open_assets"},
+    },
+    {
         "id": "create.rectangle",
         "label": "Add rectangle",
         "detail": "Create on the active artboard",
