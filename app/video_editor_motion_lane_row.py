@@ -68,7 +68,11 @@ class MotionLaneRow(QWidget):
         painter.fillRect(QRect(0, 0, int(TimelineRuler.MARGIN), self.height()), QColor("#171a20"))
         painter.setPen(QColor("#aeb6c1"))
         painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
-        painter.drawText(QRect(12, 0, int(TimelineRuler.MARGIN) - 18, self.height()), Qt.AlignVCenter, "MOTION")
+        painter.drawText(
+            QRect(12, 0, int(TimelineRuler.MARGIN) - 18, self.height()),
+            Qt.AlignVCenter,
+            "MOTION ACTOR",
+        )
         rect = self._rect()
         painter.setPen(QPen(QColor("#7ce0bd") if self._selected else QColor("#397a68"), 1))
         painter.setBrush(QColor(38, 100, 85, 205 if self._selected else 150))
@@ -78,7 +82,7 @@ class MotionLaneRow(QWidget):
         badge = QRect(max(rect.left() + 4, rect.right() - 42), rect.top() + 4, 36, 14)
         painter.setBrush(QColor("#13241f"))
         painter.drawRoundedRect(badge, 3, 3)
-        painter.drawText(badge, Qt.AlignCenter, "MOT")
+        painter.drawText(badge, Qt.AlignCenter, "ACT")
         painter.setPen(QPen(QColor("#f4b860"), 1))
         x = self._x(self._playhead_ms)
         painter.drawLine(x, 0, x, self.height())

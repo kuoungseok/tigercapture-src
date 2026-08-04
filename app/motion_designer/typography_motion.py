@@ -1,13 +1,19 @@
-"""Qt-free selector and stagger evaluation for animated typography."""
+"""Selector and stagger evaluation for animated typography."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from math import ceil, floor, pi, sin
 import random
-import unicodedata
 from typing import Any, Mapping
 
 from app.typo_animations import GlyphTransform, get_animation
+
+from .text_boundaries import unicode_grapheme_spans
+from .text_selectors import (
+    evaluate_selector_weights,
+    is_standard_selector,
+    standard_units,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,19 +23,8 @@ class TextUnit:
 
 
 def grapheme_spans(text: str) -> list[TextUnit]:
-    """Return stable approximate grapheme spans without a GUI dependency."""
-    spans: list[TextUnit] = []
-    start = 0
-    join_next = False
-    for index, char in enumerate(text):
-        combining = bool(unicodedata.combining(char)) or char in {"\ufe0e", "\ufe0f"}
-        if index and not combining and not join_next and char != "\u200d":
-            spans.append(TextUnit(start, index))
-            start = index
-        join_next = char == "\u200d"
-    if text:
-        spans.append(TextUnit(start, len(text)))
-    return spans
+    """Return UAX #29 grapheme spans using the shared Unicode provider."""
+    return [TextUnit(span.start, span.end) for span in unicode_grapheme_spans(text)]
 
 
 def selector_units(text: str, unit: str) -> list[TextUnit]:
@@ -214,12 +209,28 @@ def _evaluate_single_animator(
 ) -> dict[int, GlyphTransform]:
     """Map source character indices to selector-aware glyph transforms."""
     config = config if isinstance(config, Mapping) else {}
-    units = selector_units(text, str(config.get("unit") or "character"))
-    selected = _selected_units(
-        units, float(config.get("selector_start", 0.0) or 0.0),
-        float(config.get("selector_end", 1.0) if config.get("selector_end", 1.0) is not None else 1.0),
-    )
-    selected = _ordered_units(selected, config)
+    standard = is_standard_selector(config)
+    selector_weights: dict[tuple[int, int], float] = {}
+    if standard:
+        units = standard_units(
+            text,
+            str(config.get("selector_based_on") or "characters"),
+            grapheme_factory=lambda value: selector_units(value, "character"),
+            word_factory=lambda value: selector_units(value, "word"),
+            line_factory=lambda value: selector_units(value, "line"),
+        )
+        weighted_units = evaluate_selector_weights(units, config)
+        selected = [unit for unit, weight in weighted_units if weight > 1e-9]
+        selector_weights = {(unit.start, unit.end): weight for unit, weight in weighted_units}
+        order_config = {**dict(config), "selector_offset": 0.0}
+        selected = _ordered_units(selected, order_config)
+    else:
+        units = selector_units(text, str(config.get("unit") or "character"))
+        selected = _selected_units(
+            units, float(config.get("selector_start", 0.0) or 0.0),
+            float(config.get("selector_end", 1.0) if config.get("selector_end", 1.0) is not None else 1.0),
+        )
+        selected = _ordered_units(selected, config)
     phase, animation_id, phase_time, phase_duration = _phase(config, time_ms, duration_ms)
     properties = config.get("properties")
     has_properties = isinstance(properties, Mapping) and bool(properties)
@@ -229,7 +240,8 @@ def _evaluate_single_animator(
     maximum_delay = stagger_ms * max(0, len(selected) - 1)
     active_duration = max(1.0, phase_duration - maximum_delay) if phase != "hold" else phase_duration
     intensity = max(0.0, float(config.get("intensity", 1.0) or 0.0))
-    smoothness = max(0.0, min(1.0, float(config.get("smoothness", 0.0) or 0.0)))
+    smoothing_key = "animation_smoothing" if standard else "smoothness"
+    smoothness = max(0.0, min(1.0, float(config.get(smoothing_key, 0.0) or 0.0)))
     property_transform = _property_transform(config)
     result: dict[int, GlyphTransform] = {}
     for order, unit in enumerate(selected):
@@ -251,10 +263,12 @@ def _evaluate_single_animator(
         )
         if has_properties:
             transform = _merge_transform(transform, property_transform)
-        transform = _weighted_transform(
-            transform,
-            _selector_influence(order, len(selected), config),
+        influence = (
+            selector_weights.get((unit.start, unit.end), 0.0)
+            if standard
+            else _selector_influence(order, len(selected), config)
         )
+        transform = _weighted_transform(transform, influence)
         for index in range(unit.start, unit.end):
             result[index] = transform
     return result

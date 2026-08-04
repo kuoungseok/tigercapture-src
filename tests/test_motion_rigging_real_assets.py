@@ -130,4 +130,9 @@ def test_real_character_parts_render_and_ten_minute_cache_stays_bounded(
         assert not frame.isNull()
         assert frame.hasAlphaChannel()
         assert renderer.cache.diagnostics()["size"] <= 12
-    assert renderer.cache.diagnostics() == {"size": 12, "capacity": 12}
+    diagnostics = renderer.cache.diagnostics()
+    assert diagnostics["size"] == 12
+    assert diagnostics["capacity"] == 12
+    assert diagnostics["current_bytes"] <= diagnostics["max_bytes"]
+    assert diagnostics["misses"] == 60
+    assert diagnostics["evictions"] == 48

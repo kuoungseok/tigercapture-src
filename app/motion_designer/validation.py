@@ -249,6 +249,112 @@ def _validate_vector_layer(layer, path: str, issues: list[ValidationIssue]) -> N
             issues.append(ValidationIssue("duplicate_keyframe_id", "Keyframe ids must be unique.", key_path))
 
 
+def _validate_text_selector(
+    selector: Mapping[str, Any],
+    path: str,
+    issues: list[ValidationIssue],
+) -> None:
+    from .text_selectors import STANDARD_RANGE_SELECTOR_CONTRACT
+
+    contract = str(selector.get("selector_contract") or "legacy_tiger_selector_v1")
+    if contract == STANDARD_RANGE_SELECTOR_CONTRACT:
+        units = str(selector.get("selector_units") or "percentage")
+        based_on = str(selector.get("selector_based_on") or "characters")
+        mode = str(selector.get("selector_mode") or "add")
+        shape = str(selector.get("selector_shape") or "square")
+        if units not in {"percentage", "index"}:
+            issues.append(ValidationIssue(
+                "invalid_typography_selector", f"Unsupported selector units: {units}",
+                f"{path}.selector_units",
+            ))
+        if based_on not in {"characters", "characters_excluding_spaces", "words", "lines"}:
+            issues.append(ValidationIssue(
+                "invalid_typography_selector", f"Unsupported selector basis: {based_on}",
+                f"{path}.selector_based_on",
+            ))
+        if mode not in {"add", "subtract", "intersect"}:
+            issues.append(ValidationIssue(
+                "invalid_typography_selector", f"Unsupported selector mode: {mode}",
+                f"{path}.selector_mode",
+            ))
+        if shape not in {"square", "ramp_up", "ramp_down", "triangle", "round", "smooth"}:
+            issues.append(ValidationIssue(
+                "invalid_typography_selector", f"Unsupported selector shape: {shape}",
+                f"{path}.selector_shape",
+            ))
+        for name in ("selector_start", "selector_end", "selector_offset"):
+            value = selector.get(name, 0.0)
+            if not isinstance(value, (int, float)) or not isfinite(float(value)):
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector", f"{name} must be finite.", f"{path}.{name}",
+                ))
+        for name, minimum, maximum in (
+            ("selector_smoothness", 0.0, 100.0),
+            ("selector_amount", 0.0, 100.0),
+            ("selector_ease_low", -100.0, 100.0),
+            ("selector_ease_high", -100.0, 100.0),
+        ):
+            value = selector.get(name, 0.0 if name != "selector_amount" else 100.0)
+            if not isinstance(value, (int, float)) or not minimum <= float(value) <= maximum:
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector",
+                    f"{name} must be between {minimum:g} and {maximum:g}.",
+                    f"{path}.{name}",
+                ))
+        nested = selector.get("selectors")
+        if nested is not None:
+            if not isinstance(nested, list) or not nested:
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector", "selectors must be a non-empty array.",
+                    f"{path}.selectors",
+                ))
+            else:
+                for index, child in enumerate(nested):
+                    if not isinstance(child, Mapping):
+                        issues.append(ValidationIssue(
+                            "invalid_typography_selector", "Each selector must be an object.",
+                            f"{path}.selectors[{index}]",
+                        ))
+                    else:
+                        _validate_text_selector(
+                            {**dict(selector), **dict(child), "selectors": None},
+                            f"{path}.selectors[{index}]",
+                            issues,
+                        )
+        return
+
+    unit = str(selector.get("unit") or "character")
+    if unit not in {"character", "word", "line"}:
+        issues.append(ValidationIssue(
+            "invalid_typography_selector", f"Unsupported typography selector unit: {unit}",
+            f"{path}.unit",
+        ))
+    start = selector.get("selector_start", 0.0)
+    end = selector.get("selector_end", 1.0)
+    if not all(
+        isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0
+        for value in (start, end)
+    ) or float(start) > float(end):
+        issues.append(ValidationIssue(
+            "invalid_typography_selector",
+            "Legacy Tiger selector range must satisfy 0 <= start <= end <= 1.",
+            path,
+        ))
+    smoothness = selector.get("smoothness", 0.0)
+    if not isinstance(smoothness, (int, float)) or not 0.0 <= float(smoothness) <= 1.0:
+        issues.append(ValidationIssue(
+            "invalid_typography_selector",
+            "Legacy Tiger animation smoothing must be between 0 and 1.",
+            f"{path}.smoothness",
+        ))
+    shape = str(selector.get("selector_shape") or "square")
+    if shape not in {"square", "ramp_up", "ramp_down", "triangle", "round"}:
+        issues.append(ValidationIssue(
+            "invalid_typography_selector", f"Unsupported Text Animator selector shape: {shape}",
+            f"{path}.selector_shape",
+        ))
+
+
 def _validate_typography_layer(layer, path: str, issues: list[ValidationIssue]) -> None:
     if layer.layer_type != "text":
         return
@@ -291,19 +397,9 @@ def _validate_typography_layer(layer, path: str, issues: list[ValidationIssue]) 
                     "invalid_typography_animation", f"Unknown typography animation: {animation_id}",
                     f"{path}.source.params.text_animation.{phase}",
                 ))
-        unit = str(animation.get("unit") or "character")
-        if unit not in {"character", "word", "line"}:
-            issues.append(ValidationIssue(
-                "invalid_typography_selector", f"Unsupported typography selector unit: {unit}",
-                f"{path}.source.params.text_animation.unit",
-            ))
-        start = animation.get("selector_start", 0.0)
-        end = animation.get("selector_end", 1.0)
-        if not all(isinstance(value, (int, float)) and 0 <= float(value) <= 1 for value in (start, end)) or float(start) > float(end):
-            issues.append(ValidationIssue(
-                "invalid_typography_selector", "Typography selector range must satisfy 0 <= start <= end <= 1.",
-                f"{path}.source.params.text_animation",
-            ))
+        _validate_text_selector(
+            animation, f"{path}.source.params.text_animation", issues,
+        )
         for name in ("in_duration_ms", "out_duration_ms", "stagger_ms"):
             value = animation.get(name, 0)
             if not isinstance(value, (int, float)) or float(value) < 0:
@@ -344,40 +440,7 @@ def _validate_typography_layer(layer, path: str, issues: list[ValidationIssue]) 
                     f"{item_path}.id",
                 ))
             ids.add(animator_id)
-            unit = str(animator.get("unit") or "character")
-            if unit not in {"character", "word", "line"}:
-                issues.append(ValidationIssue(
-                    "invalid_typography_selector",
-                    f"Unsupported typography selector unit: {unit}",
-                    f"{item_path}.unit",
-                ))
-            start = animator.get("selector_start", 0.0)
-            end = animator.get("selector_end", 1.0)
-            if not all(
-                isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0
-                for value in (start, end)
-            ) or float(start) > float(end):
-                issues.append(ValidationIssue(
-                    "invalid_typography_selector",
-                    "Text Animator range must satisfy 0 <= start <= end <= 1.",
-                    item_path,
-                ))
-            smoothness = animator.get("smoothness", 0.0)
-            if not isinstance(smoothness, (int, float)) or not 0.0 <= float(smoothness) <= 1.0:
-                issues.append(ValidationIssue(
-                    "invalid_typography_selector",
-                    "Text Animator smoothness must be between 0 and 1.",
-                    f"{item_path}.smoothness",
-                ))
-            selector_shape = str(animator.get("selector_shape") or "square")
-            if selector_shape not in {
-                "square", "ramp_up", "ramp_down", "triangle", "round",
-            }:
-                issues.append(ValidationIssue(
-                    "invalid_typography_selector",
-                    f"Unsupported Text Animator selector shape: {selector_shape}",
-                    f"{item_path}.selector_shape",
-                ))
+            _validate_text_selector(animator, item_path, issues)
     for name in TYPOGRAPHY_ANIMATED_PARAMS:
         value = params.get(name)
         if not isinstance(value, Mapping) or not ("default" in value or "keyframes" in value):
@@ -960,6 +1023,15 @@ def _validate_puppet_mesh(
                 "Puppet pin radius and strength are outside supported bounds.",
                 pin_path,
             ))
+        if not (
+            0.0 <= pin.rest_position[0] <= 1.0
+            and 0.0 <= pin.rest_position[1] <= 1.0
+        ):
+            issues.append(ValidationIssue(
+                "invalid_puppet_pin_position",
+                "Puppet pin rest positions must be normalized inside the source image.",
+                f"{pin_path}.rest_position",
+            ))
         driver = pin.metadata.get("rig_driver")
         if isinstance(driver, Mapping):
             from .rigging import composition_rigs
@@ -982,6 +1054,13 @@ def _validate_puppet_mesh(
                     f"{pin_path}.metadata.rig_driver",
                 ))
     diagnostics = puppet_mesh_diagnostics(mesh)
+    if diagnostics["coincident_pin_pairs"]:
+        issues.append(ValidationIssue(
+            "coincident_puppet_pins",
+            "Two or more puppet pins occupy the same rest position and may produce unstable deformation.",
+            f"{path}.metadata.puppet_mesh.pins",
+            severity="warning",
+        ))
     if diagnostics["degenerate_triangle_count"]:
         issues.append(ValidationIssue(
             "invalid_puppet_triangles",
@@ -1297,7 +1376,7 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
             if arrangement not in {"line", "grid", "radial"}:
                 issues.append(ValidationIssue(
                     "invalid_layer_replicator_arrangement",
-                    "Replicator arrangement must be line, grid, or radial.",
+                    "Tiger Repeater arrangement must be line, grid, or radial.",
                     f"{path}.metadata.replicator.arrangement",
                 ))
             try:
@@ -1308,13 +1387,13 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
             if not 1 <= repeat_count <= 256:
                 issues.append(ValidationIssue(
                     "invalid_layer_replicator",
-                    "Generic layer Replicator count must be between 1 and 256.",
+                    "Tiger Repeater count must be between 1 and 256.",
                     f"{path}.metadata.replicator.count",
                 ))
             if not 1 <= columns <= 256:
                 issues.append(ValidationIssue(
                     "invalid_layer_replicator_columns",
-                    "Replicator columns must be between 1 and 256.",
+                    "Tiger Repeater columns must be between 1 and 256.",
                     f"{path}.metadata.replicator.columns",
                 ))
         blur = layer.metadata.get("motion_blur")

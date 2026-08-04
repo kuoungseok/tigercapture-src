@@ -804,6 +804,71 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             highlight = np.clip(centered / width_px, -1.0, 1.0) * ridge
             shade = 1.0 + highlight * strength
             rgba[..., :3] = rgb * shade[..., None]
+        elif kind == "paper_crumple":
+            amount = max(0.0, min(1.0, float(
+                _value(effect, "amount", time_ms, 0.0)
+            )))
+            density = max(1, min(12, int(round(float(
+                _value(effect, "crease_density", time_ms, 7.0)
+            )))))
+            sharpness = max(1.0, min(24.0, float(
+                _value(effect, "sharpness", time_ms, 10.0)
+            )))
+            depth = max(0.0, min(100.0, float(
+                _value(effect, "depth", time_ms, 28.0)
+            )))
+            residual = max(0.0, min(1.0, float(
+                _value(effect, "residual_wrinkle", time_ms, 0.0)
+            )))
+            seed = int(float(_value(effect, "seed", time_ms, 17.0)))
+            deformation = min(1.0, amount + residual * (1.0 - amount))
+            if deformation > 0.0001 and depth > 0.0001:
+                height, width = rgba.shape[:2]
+                yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+                nx = xx / max(1, width - 1) - 0.5
+                ny = yy / max(1, height - 1) - 0.5
+                field = np.zeros((height, width), dtype=np.float32)
+                crease_width = 0.11 - (sharpness - 1.0) / 23.0 * 0.095
+
+                def paper_hash(value: float) -> float:
+                    raw = np.sin(value * 12.9898 + 78.233) * 43758.5453
+                    return float(raw - np.floor(raw))
+
+                for index in range(density):
+                    step_seed = float(seed) + float(index) * 31.73
+                    angle = paper_hash(step_seed + 7.19) * np.pi
+                    offset = (paper_hash(step_seed + 19.41) - 0.5) * 0.84
+                    signed = nx * np.cos(angle) + ny * np.sin(angle) - offset
+                    ridge = np.exp(-np.square(signed / max(0.006, crease_width)))
+                    polarity = -1.0 if index % 2 else 1.0
+                    weight = 0.55 + paper_hash(step_seed + 43.11) * 0.45
+                    field += ridge * polarity * weight
+                field /= max(1.0, np.sqrt(float(density)))
+                grad_y, grad_x = np.gradient(field)
+                warp_scale = depth * deformation * 0.72
+                map_x = xx - grad_x.astype(np.float32) * warp_scale
+                map_y = yy - grad_y.astype(np.float32) * warp_scale
+                rgba = cv2.remap(
+                    rgba,
+                    map_x,
+                    map_y,
+                    cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(0, 0, 0, 0),
+                )
+                lighting = np.clip(
+                    1.0
+                    + (grad_x * -0.42 + grad_y * -0.72)
+                    * deformation
+                    * min(2.2, depth / 18.0)
+                    + field
+                    * deformation
+                    * min(2.2, depth / 18.0)
+                    * 0.32,
+                    0.48,
+                    1.38,
+                )
+                rgba[..., :3] *= lighting[..., None]
         elif kind == "scan_cleanup":
             white_balance = max(0.0, min(1.0, float(
                 _value(effect, "white_balance", time_ms, 0.8)

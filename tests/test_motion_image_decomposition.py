@@ -14,6 +14,7 @@ from app.motion_designer.image_decomposition import (
     decompose_image,
 )
 from app.motion_designer.schema import MotionComposition
+from app.motion_designer.render_graph import build_render_graph
 
 
 def _source(path: Path) -> Path:
@@ -78,6 +79,15 @@ def test_decomposition_compiles_staggered_parallax_layers(tmp_path: Path) -> Non
     )
     assert layers[0].metadata["image_decomposition"]["role"] == "background"
     assert layers[0].metadata["image_motion_validation"]["ok"] is True
+    preflight = layers[0].metadata["restoration_preflight"]
+    assert preflight["schema"] == "tigerstudio.motion.restoration_preflight.v1"
+    assert preflight["status"] != "blocked"
+    contact_layers = [
+        layer for layer in layers
+        if layer.metadata.get("contact_composite_role") == "shadow"
+    ]
+    assert len(contact_layers) == 1
+    assert Path(contact_layers[0].source.uri).is_file()
     subjects = [
         layer for layer in layers
         if layer.metadata["image_decomposition"]["role"] != "background"
@@ -89,6 +99,22 @@ def test_decomposition_compiles_staggered_parallax_layers(tmp_path: Path) -> Non
     assert all(layer.behaviors[0].params["hold_before"] for layer in subjects)
     delays = [layer.behaviors[0].start_ms for layer in subjects]
     assert delays == sorted(delays)
+
+    compiled = MotionComposition(width=320, height=180, duration_ms=2400)
+    compiled.layers = layers
+    preview_graph = build_render_graph(compiled, 600, render_quality="preview")
+    export_graph = build_render_graph(compiled, 600, render_quality="export")
+    preview_assets = {
+        node.layer_id: node.source_layer.source.uri
+        for node in preview_graph.nodes
+        if node.source_layer is not None
+    }
+    export_assets = {
+        node.layer_id: node.source_layer.source.uri
+        for node in export_graph.nodes
+        if node.source_layer is not None
+    }
+    assert preview_assets == export_assets
 
 
 def test_sparse_primary_mask_is_motion_locked_to_preserve_rigid_objects(tmp_path: Path) -> None:
@@ -195,9 +221,12 @@ def test_motion_image_decomposition_action_is_registered_and_callable(tmp_path: 
         "motion.ai.background.replace",
         "motion.ai.text.reconstruct",
         "motion.ai.choreography.plan",
+        "motion.ai.choreography.candidates",
+        "motion.ai.choreography.candidate.apply",
         "motion.ai.choreography.apply",
         "motion.ai.candidate.preview",
         "motion.ai.cutout.quality.validate",
+        "motion.ai.layer.readiness.inspect",
         "motion.ai.integrity.validate",
     }
     assert expected <= action_ids
@@ -232,6 +261,12 @@ def test_motion_image_decomposition_action_is_registered_and_callable(tmp_path: 
     assert quality.ok
     assert quality.result["schema"] == "tigerstudio.motion.cutout_quality.v1"
     assert quality.result["accepted"] is True
+    readiness = registry.execute("motion.ai.layer.readiness.inspect", {
+        "decomposition": execution.result,
+    })
+    assert readiness.ok
+    assert readiness.result["schema"] == "tigerstudio.motion.layer_readiness.v1"
+    assert readiness.result["status"] in {"ready", "review"}
     choreography = registry.execute("motion.ai.choreography.plan", {
         "decomposition": execution.result,
         "duration_ms": 2400,
@@ -269,3 +304,23 @@ def test_motion_image_decomposition_action_is_registered_and_callable(tmp_path: 
     assert applied.ok
     assert applied.result["added_layers"] >= 2
     assert owner._motion_compositions[composition.id].revision == composition.revision + 1
+
+    candidates = registry.execute("motion.ai.choreography.candidates", {
+        "decomposition": execution.result,
+        "duration_ms": 2400,
+        "prompt": "product orbit launch",
+    })
+    assert candidates.ok
+    recommended = candidates.result["recommended_candidate_id"]
+    selected = registry.execute("motion.ai.choreography.candidate.apply", {
+        "composition_id": composition.id,
+        "decomposition": execution.result,
+        "director_plan": candidates.result,
+        "candidate_id": recommended,
+        "approved": True,
+        "in_ms": 0,
+        "out_ms": 2400,
+        "base_revision": owner._motion_compositions[composition.id].revision,
+    })
+    assert selected.ok
+    assert selected.result["director_selection"]["candidate_id"] == recommended

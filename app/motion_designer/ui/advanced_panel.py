@@ -46,19 +46,37 @@ class AdvancedMotionPanel(QWidget):
         form.addRow("Shadow Strength", self.shadow_strength)
         form.addRow("Shadow Softness", self.shadow_softness)
 
-        blur_title = QLabel("Motion Blur", self)
+        blur_title = QLabel("Fast Translation Vector Blur", self)
         blur_title.setObjectName("MotionInspectorSection")
+        blur_title.setToolTip(
+            "Fast blur from the layer's previous-to-current translation. "
+            "Rotation, scale, deformation, shutter angle, and shutter phase are not sampled."
+        )
         form.addRow(blur_title)
         self.blur_enabled = QCheckBox("Enabled", self)
+        self.blur_mode = QComboBox(self)
+        self.blur_mode.addItem("Temporal Shutter Samples", "temporal_shutter_samples_v1")
+        self.blur_mode.addItem("Fast Translation Vector", "fast_translation_vector_blur_v1")
         self.blur_samples = QSpinBox(self)
         self.blur_samples.setRange(2, 32)
         self.blur_shutter = self._double(0.0, 2.0, 0.05)
+        self.blur_angle = self._double(0.0, 720.0, 15.0)
+        self.blur_phase = self._double(-720.0, 720.0, 15.0)
         form.addRow(self.blur_enabled)
+        form.addRow("Mode", self.blur_mode)
         form.addRow("Samples", self.blur_samples)
-        form.addRow("Shutter", self.blur_shutter)
+        self.blur_shutter.setToolTip(
+            "Legacy blur-length multiplier. The stored key remains 'shutter' for project compatibility."
+        )
+        form.addRow("Blur Length", self.blur_shutter)
+        form.addRow("Shutter Angle", self.blur_angle)
+        form.addRow("Shutter Phase", self.blur_phase)
 
-        repeat_title = QLabel("Replicator", self)
+        repeat_title = QLabel("Tiger Repeater", self)
         repeat_title.setObjectName("MotionInspectorSection")
+        repeat_title.setToolTip(
+            "Tiger line, grid, and radial copy pattern. This is not Apple Motion Replicator compatibility."
+        )
         form.addRow(repeat_title)
         self.repeat_enabled = QCheckBox("Enabled", self)
         self.repeat_count = QSpinBox(self)
@@ -93,7 +111,7 @@ class AdvancedMotionPanel(QWidget):
         for control in (
             self.depth, self.rotation_x, self.rotation_y,
             self.shadow_strength, self.shadow_softness,
-            self.blur_samples, self.blur_shutter,
+            self.blur_samples, self.blur_shutter, self.blur_angle, self.blur_phase,
             self.repeat_count, self.repeat_x, self.repeat_y, self.repeat_rotation,
             self.repeat_scale, self.repeat_opacity, self.repeat_jitter,
         ):
@@ -106,6 +124,7 @@ class AdvancedMotionPanel(QWidget):
             control.toggled.connect(lambda _value: self._emit())
         self.matte_layer.currentIndexChanged.connect(lambda _index: self._emit())
         self.matte_mode.currentTextChanged.connect(lambda _text: self._emit())
+        self.blur_mode.currentIndexChanged.connect(lambda _index: self._emit())
 
     def _double(self, minimum: float, maximum: float, step: float) -> QDoubleSpinBox:
         control = QDoubleSpinBox(self)
@@ -144,8 +163,13 @@ class AdvancedMotionPanel(QWidget):
             blur = metadata.get("motion_blur")
             blur = blur if isinstance(blur, Mapping) else {}
             self.blur_enabled.setChecked(bool(blur.get("enabled", False)))
+            contract = str(blur.get("contract") or "fast_translation_vector_blur_v1")
+            mode_index = self.blur_mode.findData(contract)
+            self.blur_mode.setCurrentIndex(max(0, mode_index))
             self.blur_samples.setValue(int(blur.get("samples", 8) or 8))
             self.blur_shutter.setValue(float(blur.get("shutter", 0.65) or 0.0))
+            self.blur_angle.setValue(float(blur.get("shutter_angle", 180.0) or 0.0))
+            self.blur_phase.setValue(float(blur.get("shutter_phase", -90.0) or 0.0))
             repeat = metadata.get("replicator")
             repeat = repeat if isinstance(repeat, Mapping) else {}
             self._replicator_extra = dict(repeat)
@@ -187,9 +211,18 @@ class AdvancedMotionPanel(QWidget):
                 "enabled": self.blur_enabled.isChecked(),
                 "samples": self.blur_samples.value(),
                 "shutter": self.blur_shutter.value(),
+                "contract": str(self.blur_mode.currentData()),
+                "shutter_angle": self.blur_angle.value(),
+                "shutter_phase": self.blur_phase.value(),
+                "parameter_semantics": {
+                    "shutter": "blur_length_multiplier",
+                    "shutter_angle": "degrees_of_frame_exposure",
+                    "shutter_phase": "degrees_relative_to_frame_time",
+                },
             },
             "replicator": {
                 **self._replicator_extra,
+                "contract": "tiger_repeater_v2",
                 "enabled": self.repeat_enabled.isChecked(),
                 "count": self.repeat_count.value(),
                 "offset": [self.repeat_x.value(), self.repeat_y.value()],

@@ -309,6 +309,39 @@ float fractal_value(vec2 uv) {
     return total / max(0.0001, weight);
 }
 
+float paper_crumple_hash(float value) {
+    return fract(sin(value * 12.9898 + 78.233) * 43758.5453);
+}
+
+float paper_crumple_height(vec2 uv) {
+    float density = clamp(u_effect_values_a.y, 1.0, 12.0);
+    float sharpness = clamp(u_effect_values_a.z, 1.0, 24.0);
+    float crease_width = mix(0.11, 0.015, (sharpness - 1.0) / 23.0);
+    float total = 0.0;
+    for (int index = 0; index < 12; ++index) {
+        if (float(index) < density) {
+            float step_seed = u_effect_values_b.y + float(index) * 31.73;
+            float angle = paper_crumple_hash(step_seed + 7.19) * 3.14159265;
+            float offset = (
+                paper_crumple_hash(step_seed + 19.41) - 0.5
+            ) * 0.84;
+            vec2 direction = vec2(cos(angle), sin(angle));
+            float signed_distance = dot(uv - vec2(0.5), direction) - offset;
+            float ridge = exp(
+                -pow(signed_distance / max(0.006, crease_width), 2.0)
+            );
+            float polarity = mod(float(index), 2.0) < 1.0 ? 1.0 : -1.0;
+            float weight = mix(
+                0.55,
+                1.0,
+                paper_crumple_hash(step_seed + 43.11)
+            );
+            total += ridge * polarity * weight;
+        }
+    }
+    return total / sqrt(max(1.0, density));
+}
+
 vec4 common_effect_pixel(int backdrop_input) {
     vec2 uv = v_uv;
     if (u_effect_kind == 12) {
@@ -319,6 +352,20 @@ vec4 common_effect_pixel(int backdrop_input) {
             cos(v_uv.x / max(u_texel.x * u_effect_values_a.y, u_texel.x)
                 * 6.28318 - phase * 0.73) * u_effect_values_a.x * u_texel.y
         );
+    } else if (u_effect_kind == 13) {
+        float deformation = clamp(
+            u_effect_values_a.x
+            + u_effect_values_b.x * (1.0 - u_effect_values_a.x),
+            0.0,
+            1.0
+        );
+        vec2 sample_step = max(u_texel * 2.0, vec2(0.0005));
+        float left = paper_crumple_height(v_uv - vec2(sample_step.x, 0.0));
+        float right = paper_crumple_height(v_uv + vec2(sample_step.x, 0.0));
+        float up = paper_crumple_height(v_uv - vec2(0.0, sample_step.y));
+        float down = paper_crumple_height(v_uv + vec2(0.0, sample_step.y));
+        vec2 gradient = vec2(right - left, down - up);
+        uv -= gradient * u_effect_values_a.w * u_texel * deformation * 0.72;
     }
     vec4 source = effect_input(uv, backdrop_input);
     vec3 rgb = straight_rgb(source);
@@ -405,6 +452,33 @@ vec4 common_effect_pixel(int backdrop_input) {
             }
         }
         return accumulated / float(samples);
+    } else if (u_effect_kind == 13) {
+        float deformation = clamp(
+            u_effect_values_a.x
+            + u_effect_values_b.x * (1.0 - u_effect_values_a.x),
+            0.0,
+            1.0
+        );
+        vec2 sample_step = max(u_texel * 2.0, vec2(0.0005));
+        float left = paper_crumple_height(v_uv - vec2(sample_step.x, 0.0));
+        float right = paper_crumple_height(v_uv + vec2(sample_step.x, 0.0));
+        float up = paper_crumple_height(v_uv - vec2(0.0, sample_step.y));
+        float down = paper_crumple_height(v_uv + vec2(0.0, sample_step.y));
+        vec2 gradient = vec2(right - left, down - up);
+        float height_field = paper_crumple_height(v_uv);
+        float light = clamp(
+            1.0
+            + dot(gradient, vec2(-0.42, -0.72))
+            * deformation
+            * min(2.2, u_effect_values_a.w / 18.0)
+            + height_field
+            * deformation
+            * min(2.2, u_effect_values_a.w / 18.0)
+            * 0.32,
+            0.48,
+            1.38
+        );
+        rgb *= light;
     }
     return vec4(clamp(rgb, 0.0, 1.0) * source.a, source.a);
 }

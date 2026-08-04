@@ -496,3 +496,21 @@ def test_explicit_tear_repair_clamps_excessive_local_edge_stretch() -> None:
     assert report["render_safe"] is True
     assert repaired[0] == torn[0]
     assert repaired[12] != torn[12]
+
+
+def test_puppet_diagnostics_report_coincident_and_out_of_bounds_pins() -> None:
+    composition, layer = _composition()
+    create_grid_puppet_mesh(layer, columns=2, rows=2)
+    add_puppet_pin(layer, kind="position", position=[0.5, 0.5], name="A")
+    add_puppet_pin(layer, kind="bend", position=[0.5, 0.5], name="B")
+    add_puppet_pin(layer, kind="position", position=[1.25, 0.5], name="Outside")
+    mesh = layer_puppet_mesh(layer)
+    assert mesh is not None
+    diagnostics = puppet_mesh_diagnostics(mesh)
+    assert diagnostics["contract"] == "tiger_puppet_mesh_stability_v1"
+    assert len(diagnostics["coincident_pin_pairs"]) == 1
+    assert len(diagnostics["out_of_bounds_pin_ids"]) == 1
+    assert diagnostics["valid"] is False
+    report = validate_composition(composition)
+    assert any(issue.code == "invalid_puppet_pin_position" for issue in report.issues)
+    assert any(issue.code == "coincident_puppet_pins" and issue.severity == "warning" for issue in report.issues)

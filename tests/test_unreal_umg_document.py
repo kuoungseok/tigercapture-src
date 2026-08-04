@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.motion_designer.interactive_button import ButtonAction, create_button_component
 from app.actions.registry import ActionRegistry
-from app.motion_designer.schema import Keyframe, MotionComposition, MotionLayer, SourceRef
+from app.motion_designer.schema import Keyframe, MotionBehaviorRef, MotionComposition, MotionLayer, SourceRef
 from app.unreal_umg_document import (
     TIGER_UMG_SCHEMA_VERSION,
     motion_composition_to_umg_document,
@@ -56,7 +56,7 @@ def test_motion_umg_document_keeps_resources_animation_and_click_actions(
     )
 
     document = motion_composition_to_umg_document(composition)
-    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 4
+    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 11
     assert document["Layers"][0]["Kind"] == "Button"
     assert document["Animations"][0]["Property"] == "position"
     assert [row["Type"] for row in document["Interactions"][0]["Actions"]] == [
@@ -196,6 +196,7 @@ def test_umg_preflight_marks_new_motion_effects_for_deterministic_bake() -> None
             MotionEffectRef(kind="craft_style"),
             MotionEffectRef(kind="tiger_glass"),
             MotionEffectRef(kind="painterly_look"),
+            MotionEffectRef(kind="paper_crumple"),
         ],
     )
     document = motion_composition_to_umg_document(
@@ -211,6 +212,7 @@ def test_umg_preflight_marks_new_motion_effects_for_deterministic_bake() -> None
         "effect_requires_bake:craft_style",
         "effect_requires_bake:tiger_glass",
         "effect_requires_bake:painterly_look",
+        "effect_requires_bake:paper_crumple",
     } <= set(payload["umg_block_reasons"])
     preflight = preflight_umg_document(document)
     assert preflight["ok"] is False
@@ -266,3 +268,118 @@ def test_umg_preflight_never_silently_drops_motion_color_management() -> None:
         "motion_feature_requires_bake:color_management"
         in payload["umg_block_reasons"]
     )
+
+
+def test_material_preflight_requires_v6_but_native_v4_v5_remain_compatible() -> None:
+    material = {
+        "Schema": "tigerstudio.umg.ui_material.v1",
+        "Generator": "tiger_ui_gradient_custom_hlsl_v1",
+        "Kind": "LinearGradient",
+        "CoordinateSpace": "LocalUV",
+        "Start": {"X": 0.0, "Y": 0.5},
+        "End": {"X": 1.0, "Y": 0.5},
+        "Width": {"X": 0.0, "Y": 1.0},
+        "Stops": [
+            {"Position": 0.0, "Color": "#FFFFFFFF"},
+            {"Position": 1.0, "Color": "#000000FF"},
+        ],
+        "Opacity": 1.0,
+    }
+
+    for schema_version in (4, 5):
+        native = {
+            "Id": "native",
+            "Name": "Native",
+            "Kind": "Image",
+            "Disposition": "Native",
+        }
+        native_result = preflight_umg_document(
+            {
+                "SchemaVersion": schema_version,
+                "Layers": [native],
+            }
+        )
+        assert native_result["ok"] is True
+        assert native_result["blockers"] == []
+        assert native_result["counts"]["Native"] == 1
+
+        material_result = preflight_umg_document(
+            {
+                "SchemaVersion": schema_version,
+                "Layers": [
+                    native,
+                    {
+                        "Id": "gradient",
+                        "Name": "Gradient",
+                        "Kind": "Image",
+                        "Disposition": "Material",
+                        "Material": material,
+                    },
+                ],
+            }
+        )
+        assert material_result["ok"] is False
+        assert material_result["counts"]["Native"] == 1
+        assert material_result["counts"]["Material"] == 1
+        assert material_result["blockers"] == [
+            {
+                "layer_id": "gradient",
+                "name": "Gradient",
+                "reasons": ["ui_material_requires_schema_6"],
+            }
+        ]
+
+
+def test_rounded_card_material_preflight_requires_document_schema_v8() -> None:
+    from app.unreal_umg_material import normalize_umg_rounded_card
+
+    material = normalize_umg_rounded_card(
+        {"fill": "#224466FF", "radius": 12},
+        size={"X": 120, "Y": 48},
+    )
+    layer = {
+        "Id": "rounded-card",
+        "Name": "Rounded Card",
+        "Kind": "Image",
+        "Disposition": "Material",
+        "Material": material,
+    }
+
+    schema_7 = preflight_umg_document(
+        {"SchemaVersion": 7, "Layers": [layer]}
+    )
+    assert schema_7["ok"] is False
+    assert schema_7["blockers"] == [
+        {
+            "layer_id": "rounded-card",
+            "name": "Rounded Card",
+            "reasons": ["ui_material_requires_schema_8"],
+        }
+    ]
+    schema_8 = preflight_umg_document(
+        {"SchemaVersion": 8, "Layers": [layer]}
+    )
+    assert schema_8["ok"] is True
+    assert schema_8["blockers"] == []
+
+
+def test_motion_umg_preflight_never_silently_drops_new_runtime_contracts() -> None:
+    layer = MotionLayer(id="advanced", layer_type="shape", out_ms=1000)
+    layer.metadata.update({
+        "replicator": {"contract": "tiger_repeater_v2", "enabled": True, "count": 4},
+        "motion_blur": {"contract": "temporal_shutter_samples_v1", "enabled": True},
+        "puppet_mesh": {"schema": "tigerstudio.motion.puppet_mesh.v1"},
+        "expressions": {"rotation": {"op": "time"}},
+    })
+    layer.behaviors.append(MotionBehaviorRef(kind="spin"))
+    document = motion_composition_to_umg_document(
+        MotionComposition(id="advanced-runtime", duration_ms=1000, layers=[layer])
+    )
+    reasons = set(json.loads(document["Layers"][0]["PayloadJson"])["umg_block_reasons"])
+    assert {
+        "motion_feature_requires_bake:replicator",
+        "motion_feature_requires_bake:motion_blur",
+        "motion_feature_requires_bake:puppet_mesh",
+        "motion_feature_requires_bake:expressions",
+        "motion_feature_requires_bake:behaviors",
+    } <= reasons

@@ -11,6 +11,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.motion_designer.schema import MotionLayer
+from app.motion_designer.text_selectors import (
+    STANDARD_RANGE_SELECTOR_CONTRACT,
+    convert_legacy_selector,
+    is_standard_selector,
+)
 from app.motion_designer.vector_shapes import default_pen_path
 
 
@@ -29,6 +34,7 @@ class TypographyPanel(QWidget):
         self._loading = False
         self._params: dict = {}
         self._animators: list[dict] = []
+        self._standard_selector = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         self.scroll = QScrollArea(self)
@@ -45,6 +51,7 @@ class TypographyPanel(QWidget):
             surface.setPalette(palette)
             surface.setAutoFillBackground(True)
         form = QFormLayout(content)
+        self._form = form
         form.setContentsMargins(7, 7, 7, 7)
         self.scroll.setWidget(content)
         root.addWidget(self.scroll)
@@ -119,9 +126,22 @@ class TypographyPanel(QWidget):
         self.selector_offset = self._spin(-1, 1, .01)
         self.selector_smoothness = self._spin(0, 1, .05)
         self.selector_shape = self._combo([
-            "square", "ramp_up", "ramp_down", "triangle", "round",
+            "square", "ramp_up", "ramp_down", "triangle", "round", "smooth",
         ])
         self.selector_amount = self._spin(0, 1, .05)
+        self.selector_contract = QLabel("Legacy Tiger Selector", self)
+        self.selector_convert = QPushButton("Convert to Standard Range", self)
+        self.selector_convert.setToolTip(
+            "Explicitly converts legacy normalized ranges. Order Offset cannot be "
+            "preserved and is reported as a conversion warning."
+        )
+        self.selector_units = self._combo(["percentage", "index"])
+        self.selector_based_on = self._combo([
+            "characters", "characters_excluding_spaces", "words", "lines",
+        ])
+        self.selector_mode = self._combo(["add", "subtract", "intersect"])
+        self.selector_ease_low = self._spin(-100, 100, 5)
+        self.selector_ease_high = self._spin(-100, 100, 5)
         self.reverse = QCheckBox("Reverse order", self)
         self.randomize = QCheckBox("Random order", self)
         self.ping_pong = QCheckBox("Ping-pong order", self)
@@ -130,14 +150,31 @@ class TypographyPanel(QWidget):
         form.addRow("HOLD", self.hold_animation)
         form.addRow("OUT", self.out_animation)
         form.addRow("OUT Duration (ms)", self.out_duration)
-        form.addRow("Selector", self.unit)
+        self.unit.setToolTip(
+            "Tiger Selector. Character boundaries follow Unicode grapheme clusters. "
+            "Range Offset and Smoothness retain legacy Tiger semantics until conversion is available."
+        )
+        form.addRow("Selector Contract", self.selector_contract)
+        form.addRow(self.selector_convert)
+        form.addRow("Tiger Selector", self.unit)
+        form.addRow("Units", self.selector_units)
+        form.addRow("Based On", self.selector_based_on)
+        form.addRow("Mode", self.selector_mode)
         form.addRow("Stagger (ms)", self.stagger)
         form.addRow("Range Start", self.selector_start)
         form.addRow("Range End", self.selector_end)
-        form.addRow("Range Offset", self.selector_offset)
-        form.addRow("Smoothness", self.selector_smoothness)
+        self.selector_offset.setToolTip(
+            "Legacy order rotation, not a standard Range Selector offset."
+        )
+        self.selector_smoothness.setToolTip(
+            "Legacy animation-progress smoothing, not Square range-edge smoothness."
+        )
+        form.addRow("Legacy Order Offset", self.selector_offset)
+        form.addRow("Animation Smoothing", self.selector_smoothness)
         form.addRow("Shape", self.selector_shape)
         form.addRow("Amount", self.selector_amount)
+        form.addRow("Ease Low", self.selector_ease_low)
+        form.addRow("Ease High", self.selector_ease_high)
         form.addRow(self.reverse)
         form.addRow(self.randomize)
         form.addRow(self.ping_pong)
@@ -186,13 +223,15 @@ class TypographyPanel(QWidget):
         self.axis_width.valueChanged.connect(lambda _value: self._emit_axes())
         for control in (
             self.in_animation, self.hold_animation, self.out_animation, self.unit,
-            self.selector_shape,
+            self.selector_shape, self.selector_units, self.selector_based_on,
+            self.selector_mode,
         ):
             control.currentTextChanged.connect(lambda _value: self._emit_animation())
         for control in (
             self.in_duration, self.out_duration, self.stagger,
             self.selector_start, self.selector_end, self.selector_offset,
             self.selector_smoothness, self.selector_amount,
+            self.selector_ease_low, self.selector_ease_high,
             self.glyph_x, self.glyph_y,
             self.glyph_scale_x, self.glyph_scale_y, self.glyph_rotation,
             self.glyph_opacity, self.glyph_tracking, self.glyph_blur,
@@ -201,6 +240,7 @@ class TypographyPanel(QWidget):
         self.reverse.toggled.connect(lambda _value: self._emit_animation())
         self.randomize.toggled.connect(lambda _value: self._emit_animation())
         self.ping_pong.toggled.connect(lambda _value: self._emit_animation())
+        self.selector_convert.clicked.connect(self._convert_selector)
         self.glyph_fill.editingFinished.connect(self._emit_animation)
         self.animator_list.currentIndexChanged.connect(self._select_animator)
         self.animator_add.clicked.connect(self._add_animator)
@@ -265,6 +305,7 @@ class TypographyPanel(QWidget):
         self._loading = False
 
     def _load_animation_config(self, config: Mapping[str, object]) -> None:
+        self._configure_selector_contract(config)
         self.in_animation.setCurrentText(str(config.get("in") or "none"))
         self.hold_animation.setCurrentText(str(config.get("hold") or "none"))
         self.out_animation.setCurrentText(str(config.get("out") or "none"))
@@ -275,9 +316,21 @@ class TypographyPanel(QWidget):
         self.selector_start.setValue(float(config.get("selector_start", 0.0) or 0.0))
         self.selector_end.setValue(float(config.get("selector_end", 1.0) if config.get("selector_end", 1.0) is not None else 1.0))
         self.selector_offset.setValue(float(config.get("selector_offset", 0.0) or 0.0))
-        self.selector_smoothness.setValue(float(config.get("smoothness", 0.0) or 0.0))
+        self.selector_smoothness.setValue(float(
+            config.get("selector_smoothness", 100.0)
+            if self._standard_selector
+            else config.get("smoothness", 0.0)
+            or 0.0
+        ))
         self.selector_shape.setCurrentText(str(config.get("selector_shape") or "square"))
-        self.selector_amount.setValue(float(config.get("selector_amount", 1.0) or 0.0))
+        self.selector_amount.setValue(float(
+            config.get("selector_amount", 100.0 if self._standard_selector else 1.0) or 0.0
+        ))
+        self.selector_units.setCurrentText(str(config.get("selector_units") or "percentage"))
+        self.selector_based_on.setCurrentText(str(config.get("selector_based_on") or "characters"))
+        self.selector_mode.setCurrentText(str(config.get("selector_mode") or "add"))
+        self.selector_ease_low.setValue(float(config.get("selector_ease_low", 0.0) or 0.0))
+        self.selector_ease_high.setValue(float(config.get("selector_ease_high", 0.0) or 0.0))
         self.reverse.setChecked(bool(config.get("reverse", False)))
         self.randomize.setChecked(bool(config.get("randomize_order", False)))
         self.ping_pong.setChecked(bool(config.get("ping_pong", False)))
@@ -312,14 +365,13 @@ class TypographyPanel(QWidget):
             }})
 
     def _animation_value(self) -> dict:
-        return {
+        value = {
             "in": self.in_animation.currentText(), "hold": self.hold_animation.currentText(),
             "out": self.out_animation.currentText(), "in_duration_ms": self.in_duration.value(),
             "out_duration_ms": self.out_duration.value(), "unit": self.unit.currentText(),
             "stagger_ms": self.stagger.value(), "selector_start": self.selector_start.value(),
             "selector_end": self.selector_end.value(), "reverse": self.reverse.isChecked(),
             "selector_offset": self.selector_offset.value(),
-            "smoothness": self.selector_smoothness.value(),
             "selector_shape": self.selector_shape.currentText(),
             "selector_amount": self.selector_amount.value(),
             "randomize_order": self.randomize.isChecked(),
@@ -335,6 +387,83 @@ class TypographyPanel(QWidget):
             },
             "intensity": 1.0,
         }
+        if self._standard_selector:
+            value.update({
+                "selector_contract": STANDARD_RANGE_SELECTOR_CONTRACT,
+                "selector_units": self.selector_units.currentText(),
+                "selector_based_on": self.selector_based_on.currentText(),
+                "selector_mode": self.selector_mode.currentText(),
+                "selector_smoothness": self.selector_smoothness.value(),
+                "selector_ease_low": self.selector_ease_low.value(),
+                "selector_ease_high": self.selector_ease_high.value(),
+            })
+        else:
+            value["smoothness"] = self.selector_smoothness.value()
+        return value
+
+    def _configure_selector_contract(self, config: Mapping[str, object]) -> None:
+        self._standard_selector = is_standard_selector(config)
+        self.selector_contract.setText(
+            "Standard Range Selector v1" if self._standard_selector else "Legacy Tiger Selector"
+        )
+        self.selector_convert.setVisible(not self._standard_selector)
+        self.unit.setEnabled(not self._standard_selector)
+        for control in (
+            self.selector_units, self.selector_based_on, self.selector_mode,
+            self.selector_ease_low, self.selector_ease_high,
+        ):
+            control.setVisible(self._standard_selector)
+            label = self._form.labelForField(control)
+            if label is not None:
+                label.setVisible(self._standard_selector)
+        if self._standard_selector:
+            self.selector_start.setRange(-10000.0, 10000.0)
+            self.selector_end.setRange(-10000.0, 10000.0)
+            self.selector_offset.setRange(-10000.0, 10000.0)
+            self.selector_smoothness.setRange(0.0, 100.0)
+            self.selector_amount.setRange(0.0, 100.0)
+            self.selector_start.setSingleStep(1.0)
+            self.selector_end.setSingleStep(1.0)
+            self.selector_offset.setSingleStep(1.0)
+            self.selector_smoothness.setSingleStep(5.0)
+            self.selector_amount.setSingleStep(5.0)
+            offset_label = "Range Offset"
+            smoothing_label = "Square Smoothness"
+        else:
+            self.selector_start.setRange(0.0, 1.0)
+            self.selector_end.setRange(0.0, 1.0)
+            self.selector_offset.setRange(-1.0, 1.0)
+            self.selector_smoothness.setRange(0.0, 1.0)
+            self.selector_amount.setRange(0.0, 1.0)
+            for control in (
+                self.selector_start, self.selector_end, self.selector_offset,
+                self.selector_smoothness, self.selector_amount,
+            ):
+                control.setSingleStep(0.05 if control in {self.selector_smoothness, self.selector_amount} else 0.01)
+            offset_label = "Legacy Order Offset"
+            smoothing_label = "Animation Smoothing"
+        offset_widget = self._form.labelForField(self.selector_offset)
+        smooth_widget = self._form.labelForField(self.selector_smoothness)
+        if isinstance(offset_widget, QLabel):
+            offset_widget.setText(offset_label)
+        if isinstance(smooth_widget, QLabel):
+            smooth_widget.setText(smoothing_label)
+
+    def _convert_selector(self) -> None:
+        if self._loading or self._standard_selector:
+            return
+        converted, warnings = convert_legacy_selector(self._animation_value())
+        if warnings:
+            converted["selector_conversion_warnings"] = warnings
+        self._loading = True
+        self._load_animation_config(converted)
+        self._loading = False
+        index = self.animator_list.currentIndex() - 1
+        if 0 <= index < len(self._animators):
+            self._animators[index] = {**self._animators[index], **converted}
+            self.source_changed.emit({"text_animators": list(self._animators)})
+        else:
+            self.source_changed.emit({"text_animation": converted})
 
     def _emit_animation(self) -> None:
         if self._loading:
@@ -369,11 +498,12 @@ class TypographyPanel(QWidget):
             return
         from uuid import uuid4
 
+        standard_value, _warnings = convert_legacy_selector(self._animation_value())
         animator = {
             "id": f"animator_{uuid4().hex[:10]}",
             "name": f"Animator {len(self._animators) + 1}",
             "enabled": True,
-            **self._animation_value(),
+            **standard_value,
         }
         self._animators.append(animator)
         self.animator_list.addItem(animator["name"])

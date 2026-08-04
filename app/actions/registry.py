@@ -259,6 +259,9 @@ class ActionRegistry:
         from app.actions.motion_namespace import register_motion_actions
 
         register_motion_actions(self)
+        from app.actions.motion_aep_namespace import register_motion_aep_actions
+
+        register_motion_aep_actions(self)
         from app.actions.motion_tracking_namespace import (
             register_motion_tracking_actions,
         )

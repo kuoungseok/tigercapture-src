@@ -39,12 +39,13 @@ def _rgba(image: QImage) -> np.ndarray:
     ).copy()
 
 
-def test_trend_catalog_has_eight_supported_products():
-    assert len(TREND_IDS) == 8
-    assert len(set(TREND_IDS)) == 8
+def test_trend_catalog_has_original_and_hot_2026_products():
+    assert len(TREND_IDS) == 18
+    assert len([template_id for template_id in TREND_IDS if template_id.startswith("hot_2026_")]) == 10
+    assert len(set(TREND_IDS)) == 18
     for template_id in TREND_IDS:
         template = get_template(template_id)
-        assert template.category == "2026 Trends"
+        assert template.category in {"2026 Trends", "Hot Motion 2026"}
         assert template.scene_count >= 3
         assert len(template.tutorial_steps) >= 4
         assert template.replace_items
@@ -55,8 +56,8 @@ def test_trend_catalog_has_eight_supported_products():
     assert capabilities["notes"][0]["scope"] == "provider_neutral_post_render"
     preflight = preflight_trend_templates()
     assert preflight["ok"] is True
-    assert preflight["summary"]["template_count"] == 8
-    assert preflight["summary"]["variant_count"] == 19
+    assert preflight["summary"]["template_count"] == 18
+    assert preflight["summary"]["variant_count"] == 47
 
 
 def test_trend_templates_are_valid_editable_and_have_complete_scene_ranges():

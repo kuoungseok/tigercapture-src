@@ -40,6 +40,7 @@ def test_template_catalog_has_stable_entries_controls_and_tutorial_guides() -> N
             "accent_color",
             "surface_color",
             "duration_ms",
+            "background_image",
         } <= set(control_ids)
         assert row["default_duration_ms"] >= 250
         assert row["scene_count"] >= 1
@@ -47,6 +48,100 @@ def test_template_catalog_has_stable_entries_controls_and_tutorial_guides() -> N
     tutorials = [row for row in rows if row["is_tutorial"]]
     assert len(tutorials) >= 5
     assert all(row["features"] and row["tutorial_steps"] for row in tutorials)
+
+
+def test_popular_template_catalog_contains_the_requested_100_types() -> None:
+    rows = [
+        row for row in list_templates()
+        if str(row["id"]).startswith("popular_")
+    ]
+    categories = {}
+    for row in rows:
+        categories[row["category"]] = categories.get(row["category"], 0) + 1
+
+    assert len(rows) == 100
+    assert categories == {
+        "Logo Reveals": 15,
+        "Lower Thirds": 10,
+        "Titles & Typography": 15,
+        "Transitions": 15,
+        "Intros & Openers": 10,
+        "Slideshows": 10,
+        "Infographics & Data": 10,
+        "Social Media & YouTube": 10,
+        "Production Essentials": 5,
+    }
+    assert rows[0]["name"] == "Clean Logo Reveal"
+    assert rows[-1]["name"] == "Broadcast News Package"
+
+
+def test_popular_template_top_10_is_separate_and_stably_ranked() -> None:
+    featured = sorted(
+        (
+            row for row in list_templates()
+            if int(row.get("featured_rank", 0) or 0) > 0
+        ),
+        key=lambda row: int(row["featured_rank"]),
+    )
+
+    assert len(featured) == 10
+    assert [row["featured_rank"] for row in featured] == list(range(1, 11))
+    assert featured[0]["name"] == "Clean Logo Reveal"
+    assert featured[-1]["name"] == "Product Promo / App Promo"
+
+
+def test_logo_templates_use_layered_brand_marks_with_optional_logo_images() -> None:
+    logo_rows = [
+        row
+        for row in list_templates()
+        if row["id"] == "logo_reveal" or row["category"] == "Logo Reveals"
+    ]
+
+    assert len(logo_rows) == 16
+    for row in logo_rows:
+        logo_control = next(
+            control
+            for control in row["published_controls"]
+            if control["id"] == "logo_image"
+        )
+        assert logo_control["value_type"] == "media"
+        assert logo_control["default"] == ""
+        composition = instantiate_template(row["id"], variant="16:9")
+        logo = next(
+            layer
+            for layer in composition.layers
+            if layer.metadata.get("template_role") == "logo_slot"
+        )
+        assert logo.layer_type == "shape"
+        assert logo.metadata["replaceable"] == "logo_image"
+        assert logo.metadata["optional_media_control"] is True
+        assert any(layer.metadata.get("template_role") == "brand_plate" for layer in composition.layers)
+        assert any(layer.name == "Editable Brand Name" for layer in composition.layers)
+
+        replacement = str(
+            (
+                os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)),
+                    "resources",
+                    "motion_templates",
+                    "sample_logos",
+                    "prism_ribbon.png",
+                )
+            )
+        )
+        replaced = instantiate_template(
+            row["id"],
+            variant="16:9",
+            controls={"logo_image": replacement},
+        )
+        logo_image = next(
+            layer
+            for layer in replaced.layers
+            if layer.metadata.get("template_role") == "logo_slot"
+        )
+        assert logo_image.layer_type == "image"
+        assert logo_image.source.uri == replacement
+        assert logo_image.source.params["fit"] == "contain"
 
 
 @pytest.mark.parametrize(
@@ -118,6 +213,7 @@ def test_every_template_instantiates_an_animated_valid_composition(template_id: 
         composition = instantiate_template(template_id, variant=variant)
         assert validate_composition(composition).ok
         assert composition.layers
+        assert any(layer.layer_type == "image" for layer in composition.layers)
         assert any(layer.behaviors for layer in composition.layers)
         assert composition.metadata["last_applied_template"]["variant"] == variant
 
@@ -131,6 +227,122 @@ def test_template_preview_changes_over_time() -> None:
     assert np.any(first != later)
     assert np.any(later[..., 3] > 0)
     app.processEvents()
+
+
+def test_paper_crumple_template_is_complete_and_animated() -> None:
+    app = QApplication.instance() or QApplication([])
+    composition = instantiate_template(
+        "paper_crumple_unfold",
+        variant="16:9",
+        controls={
+            "headline": "PAPER TEST",
+            "subtitle": "FOLD AND RELEASE",
+            "paper_color": "#f0e6d2",
+            "ink_color": "#17202a",
+            "accent_color": "#ef6848",
+            "surface_color": "#10151c",
+            "duration_ms": 2400,
+        },
+    )
+    group = next(
+        layer for layer in composition.layers
+        if layer.metadata.get("template_role") == "paper_group"
+    )
+    assert group.effects[0].kind == "paper_crumple"
+    assert len(group.transform.scale.keyframes) == 6
+    assert {
+        layer.metadata.get("template_role")
+        for layer in composition.layers
+    } >= {
+        "background",
+        "shadow",
+        "paper_group",
+        "paper_sheet",
+        "headline",
+        "subtitle",
+    }
+    renderer = MotionExportRenderer(cache_capacity=4)
+    flat = _rgba(renderer.render_frame(composition, 0, width=480, height=270))
+    crumpled = _rgba(
+        renderer.render_frame(
+            composition,
+            int(composition.duration_ms * 0.28),
+            width=480,
+            height=270,
+        )
+    )
+    unfolded = _rgba(
+        renderer.render_frame(
+            composition,
+            composition.duration_ms - 1,
+            width=480,
+            height=270,
+        )
+    )
+    assert not np.array_equal(flat, crumpled)
+    assert not np.array_equal(crumpled, unfolded)
+    assert np.any(unfolded[..., 3] > 0)
+    app.processEvents()
+
+
+@pytest.mark.parametrize(
+    "template_id",
+    (
+        "product_callout",
+        "studio_city_after_rain",
+        "studio_artisan_coffee",
+        "studio_alpine_journal",
+    ),
+)
+def test_studio_original_templates_use_real_replaceable_photography(
+    template_id: str,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    template = TEMPLATE_CATALOG[template_id]
+    media_control = next(
+        control for control in template.controls
+        if control.id == "background_image"
+    )
+    assert media_control.value_type == "media"
+    assert os.path.isfile(str(media_control.default))
+
+    composition = instantiate_template(template_id, variant="16:9")
+    hero = next(
+        layer for layer in composition.layers
+        if layer.metadata.get("template_role") == "media_slot"
+    )
+    assert hero.layer_type == "image"
+    assert hero.source.params["fit"] == "cover"
+    assert hero.metadata["replaceable"] == "background_image"
+
+    renderer = MotionExportRenderer(cache_capacity=2)
+    frame = _rgba(
+        renderer.render_frame(
+            composition,
+            min(1200, composition.duration_ms - 1),
+            width=480,
+            height=270,
+            use_cache=False,
+        )
+    )
+    assert np.any(frame[..., 3] > 0)
+    assert float(np.std(frame[..., :3])) > 18.0
+    app.processEvents()
+
+
+def test_product_callout_photo_can_be_removed_by_clearing_media_control() -> None:
+    composition = instantiate_template(
+        "product_callout",
+        variant="16:9",
+        controls={"background_image": ""},
+    )
+    media = next(
+        layer
+        for layer in composition.layers
+        if layer.metadata.get("replaceable") == "background_image"
+    )
+    assert media.layer_type == "image"
+    assert media.source.uri == ""
 
 
 @pytest.mark.parametrize(
@@ -231,6 +443,12 @@ def test_repeated_template_selection_replaces_previous_instance_without_growth()
                 "template_instance_id"
             ]
         }
+        expected_duration = next(
+            row["default_duration_ms"]
+            for row in list_templates()
+            if row["id"] == template_id
+        )
+        assert composition.duration_ms == expected_duration
 
 
 def test_template_replacement_preserves_user_layers_and_can_be_disabled() -> None:

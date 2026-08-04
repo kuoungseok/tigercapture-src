@@ -7,6 +7,7 @@ _BINDINGS = tuple((name, "app.video_editor_motion_workflow", name, False) for na
     "_on_motion_lane_changed", "_open_motion_designer", "_open_motion_designer_entry", "_on_motion_composition_changed",
     "_on_motion_autosave_requested",
     "_on_motion_lane_double_clicked", "_place_motion_clip", "_duplicate_motion_clip", "_delete_motion_clip",
+    "_import_motion_actor_from_path",
 ))
 
 

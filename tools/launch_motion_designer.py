@@ -16,7 +16,6 @@ from PySide6.QtWidgets import QApplication
 
 from app.motion_designer.ui.window import MotionDesignerWindow
 from app.window_placement import install_global_window_placement
-from tools.qa_motion_ui import build_demo_composition
 
 
 def main() -> int:
@@ -24,7 +23,7 @@ def main() -> int:
     install_global_window_placement(app)
     project_path = sys.argv[1] if len(sys.argv) > 1 else None
     window = MotionDesignerWindow(
-        None if project_path else build_demo_composition(),
+        None,
         project_path=project_path,
         standalone_document=True,
     )

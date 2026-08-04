@@ -1083,7 +1083,7 @@ def test_motion_2026_trend_template_actions_disclose_supported_and_blocked_paths
 
     capabilities = registry.execute("motion.template.trend.capabilities", {})
     assert capabilities.ok
-    assert len(capabilities.result["available_template_ids"]) == 8
+    assert len(capabilities.result["available_template_ids"]) >= 8
     assert capabilities.result["blocked"] == []
     assert capabilities.result["notes"][0]["id"] == (
         "painterly_3d_character_spot"

@@ -18,6 +18,9 @@ if str(ROOT) not in sys.path:
 
 from app.motion_designer.export_renderer import MotionExportRenderer
 from app.motion_designer.advanced_presets import apply_advanced_preset
+from app.motion_designer.choreography_director import plan_choreography_candidates
+from app.motion_designer.contact_composite import prepare_contact_composite
+from app.motion_designer.performance_gate import run_motion_performance_gate
 from app.motion_designer.schema import (
     AnimatedProperty,
     Keyframe,
@@ -326,6 +329,17 @@ def build_composition() -> MotionComposition:
         missing = [str(path) for path in (NEWSPAPER, TRUMP) if not path.is_file()]
         raise FileNotFoundError(", ".join(missing))
 
+    contact = prepare_contact_composite(
+        foreground_path=TRUMP,
+        background_path=NEWSPAPER,
+        output_dir=OUTPUT_DIR / "contact_composite",
+        edge_strength=0.88,
+        light_match_strength=0.20,
+        shadow_opacity=0.24,
+    )
+    contact_foreground = Path(contact["foreground_path"])
+    contact_shadow = Path(contact["shadow_path"])
+
     clip_specs = [
         ("POWER RESHAPES THE AGENDA", 51, "#B12018"),
         ("MARKETS BRACE FOR VOLATILITY", 52, "#23201C"),
@@ -401,16 +415,60 @@ def build_composition() -> MotionComposition:
         opacity_keys=((0, 0.0), (500, 0.0), (900, 1.0), (2100, 1.0), (2450, 0.0)),
     ))
 
+    portrait_position_keys = (
+        (0, [640, 665]),
+        (1150, [640, 665]),
+        (2050, [640, 435]),
+        (7800, [640, 428]),
+        (9000, [640, 440]),
+    )
+    portrait_scale_keys = (
+        (0, [0.50, 0.50]),
+        (1150, [0.50, 0.50]),
+        (2050, [0.79, 0.79]),
+        (2600, [0.75, 0.75]),
+        (7800, [0.80, 0.80]),
+    )
+    portrait_rotation_keys = (
+        (0, -2.0),
+        (1150, -2.0),
+        (2050, 0.8),
+        (2600, 0.0),
+        (7800, -0.6),
+    )
+    portrait_opacity_keys = ((0, 0.0), (1000, 0.0), (1500, 1.0), (10_000, 1.0))
+    composition.layers.append(_image_layer(
+        "Donald Trump Contact Shadow",
+        contact_shadow,
+        position=(640, 435),
+        position_keys=portrait_position_keys,
+        scale=(0.76, 0.76),
+        scale_keys=portrait_scale_keys,
+        rotation_keys=portrait_rotation_keys,
+        opacity_keys=portrait_opacity_keys,
+        metadata={
+            "role": "subject_contact_shadow",
+            "contact_composite_schema": contact["schema"],
+            "preview_export_assets_shared": True,
+        },
+    ))
     composition.layers.append(_image_layer(
         "Donald Trump Portrait",
-        TRUMP,
+        contact_foreground,
         position=(640, 435),
-        position_keys=((0, [640, 665]), (1150, [640, 665]), (2050, [640, 435]), (7800, [640, 428]), (9000, [640, 440])),
+        position_keys=portrait_position_keys,
         scale=(0.76, 0.76),
-        scale_keys=((0, [0.50, 0.50]), (1150, [0.50, 0.50]), (2050, [0.79, 0.79]), (2600, [0.75, 0.75]), (7800, [0.80, 0.80])),
-        rotation_keys=((0, -2.0), (1150, -2.0), (2050, 0.8), (2600, 0.0), (7800, -0.6)),
-        opacity_keys=((0, 0.0), (1000, 0.0), (1500, 1.0), (10_000, 1.0)),
-        metadata={"role": "central_subject", "person": "Donald Trump"},
+        scale_keys=portrait_scale_keys,
+        rotation_keys=portrait_rotation_keys,
+        opacity_keys=portrait_opacity_keys,
+        metadata={
+            "role": "central_subject",
+            "person": "Donald Trump",
+            "contact_composite_schema": contact["schema"],
+            "edge_decontaminated": True,
+            "local_light_matched": True,
+            "preview_export_assets_shared": True,
+        },
     ))
 
     headline_specs = [
@@ -669,6 +727,32 @@ def render_showcase() -> dict[str, Any]:
     scenario_path = OUTPUT_DIR / "scenario.json"
     scenario_path.write_text(json.dumps(scenario, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    choreography_elements = [
+        {
+            "id": layer.id,
+            "metadata": {
+                "role": layer.metadata.get("role"),
+                "depth_z": layer.metadata.get("depth_z", 0.0),
+            },
+        }
+        for layer in composition.layers
+        if layer.metadata.get("role") in {"central_subject", "torn_newspaper_clipping"}
+    ]
+    choreography = plan_choreography_candidates(
+        choreography_elements,
+        duration_ms=DURATION_MS,
+        max_camera_travel_ratio=0.018,
+        prompt="Trump newspaper headline editorial cutout collage",
+        motion_style="dynamic craft collage",
+        audio_hits_ms=(1600, 2300, 3000, 3700, 4400, 5100, 5800, 6500, 7200, 9000),
+        max_simultaneous_motion=3,
+    )
+    choreography_path = OUTPUT_DIR / "choreography_candidates.json"
+    choreography_path.write_text(
+        json.dumps(choreography, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     renderer = MotionExportRenderer()
     frames = [
         renderer.save_png(composition, time_ms, OUTPUT_DIR / f"frame_{time_ms:05d}ms.png")
@@ -684,20 +768,51 @@ def render_showcase() -> dict[str, Any]:
         OUTPUT_DIR / "trump_headline_collage_10s.mp4",
         fps=FPS,
     )
+    performance = run_motion_performance_gate(
+        composition,
+        sample_times_ms=(1200, 4700, 7900, 9400),
+        iterations=2,
+        width=320,
+        height=180,
+        cache_max_bytes=32 * 1024 * 1024,
+    )
+    performance_path = OUTPUT_DIR / "performance_gate.json"
+    performance_path.write_text(
+        json.dumps(performance, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     report = {
-        "schema": "tigerstudio.motion.trump_headline_collage.v1",
-        "ok": video.is_file() and video.stat().st_size > 0,
+        "schema": "tigerstudio.motion.trump_headline_collage.v2",
+        "ok": video.is_file() and video.stat().st_size > 0 and performance["ok"],
         "composition": str(composition_path.resolve()),
         "scenario": str(scenario_path.resolve()),
         "video": str(video.resolve()),
         "video_bytes": video.stat().st_size if video.is_file() else 0,
         "contact_sheet": str(contact_sheet.resolve()),
+        "choreography_candidates": str(choreography_path.resolve()),
+        "choreography_recommended_candidate_id": choreography["recommended_candidate_id"],
+        "performance_gate": str(performance_path.resolve()),
+        "performance_ok": performance["ok"],
+        "render_backend_counts": performance["backend_counts"],
+        "render_fallback_reason_counts": performance["fallback_reason_counts"],
         "frames": [str(path.resolve()) for path in frames],
         "frame_times_ms": FRAME_TIMES,
         "duration_ms": DURATION_MS,
         "fps": FPS,
         "layer_count": len(composition.layers),
         "torn_article_count": 8,
+        "latest_pipeline_features": [
+            "edge_decontamination",
+            "local_light_match",
+            "separate_contact_shadow",
+            "track_matte",
+            "generic_replicator",
+            "paper_fold",
+            "2_5d_camera_parallax",
+            "kinetic_typography",
+            "choreography_candidate_review",
+            "deterministic_performance_gate",
+        ],
     }
     (OUTPUT_DIR / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2),

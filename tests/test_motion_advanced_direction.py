@@ -204,6 +204,58 @@ def test_distortion_and_paper_effects_share_the_layer_effect_path() -> None:
     app.processEvents()
 
 
+def test_paper_crumple_deforms_and_unfolds_with_residual_wrinkles() -> None:
+    app = _app()
+    layer = _box(x=60, color="#e8dfce")
+    from app.motion_designer.paper_crumple import make_crumple_unfold_effect
+
+    effect = make_crumple_unfold_effect(
+        start_ms=0,
+        crumple_duration_ms=500,
+        hold_duration_ms=100,
+        unfold_duration_ms=500,
+        seed=41,
+        residual_wrinkle=0.12,
+    )
+    layer.effects.append(effect)
+    composition = MotionComposition(
+        width=120,
+        height=120,
+        duration_ms=1200,
+        layers=[layer],
+    )
+    renderer = MotionExportRenderer()
+    flat = renderer.render_rgba_array(composition, 0)
+    crumpled = renderer.render_rgba_array(composition, 500)
+    unfolded = renderer.render_rgba_array(composition, 1100)
+    assert not np.array_equal(flat, crumpled)
+    assert not np.array_equal(crumpled, unfolded)
+    assert not np.array_equal(flat, unfolded)
+    assert crumpled[..., 3].max() > 200
+    app.processEvents()
+
+
+def test_paper_crumple_unfold_preset_is_editable() -> None:
+    layer = _box(x=60, color="#e8dfce")
+    composition = MotionComposition(
+        width=120,
+        height=120,
+        duration_ms=2400,
+        layers=[layer],
+    )
+    result = apply_advanced_preset(
+        composition,
+        "paper_crumple_unfold",
+        layer_ids=[layer.id],
+        start_ms=100,
+    )
+    assert result["affected_layer_ids"] == [layer.id]
+    effect = layer.effects[-1]
+    assert effect.kind == "paper_crumple"
+    assert len(effect.params["amount"].keyframes) == 6
+    assert effect.params["seed"].default == 17.0
+
+
 def test_direction_presets_build_editable_camera_paper_and_impact_layers() -> None:
     image = _box()
     image.layer_type = "image"

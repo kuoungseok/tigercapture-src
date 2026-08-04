@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -29,11 +29,53 @@ from .style import MOTION_DESIGNER_QSS
 
 
 THUMBNAIL_SIZE = QSize(240, 135)
+_THUMBNAIL_CACHE: dict[tuple[str, str], QPixmap] = {}
+
+
+def _template_placeholder(template_id: str, variant: str) -> QPixmap:
+    template = get_template(template_id)
+    palette = {
+        "Logo Reveals": ("#172129", "#43d7b5"),
+        "Lower Thirds": ("#18202a", "#5b8cff"),
+        "Titles & Typography": ("#1d1924", "#d987ff"),
+        "Transitions": ("#211b1b", "#ff7657"),
+        "Intros & Openers": ("#171d29", "#f2c14e"),
+        "Slideshows": ("#172320", "#70d6a5"),
+        "Infographics & Data": ("#17212b", "#57c7ff"),
+        "Social Media & YouTube": ("#25191d", "#ff5d7d"),
+        "Production Essentials": ("#1f2023", "#c7ccd4"),
+    }
+    background, accent = palette.get(template.category, ("#171b21", "#43d7b5"))
+    pixmap = QPixmap(THUMBNAIL_SIZE)
+    pixmap.fill(QColor(background))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.fillRect(QRect(0, 0, 8, THUMBNAIL_SIZE.height()), QColor(accent))
+    painter.setPen(QColor("#f4f6f8"))
+    painter.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
+    painter.drawText(
+        QRect(22, 22, THUMBNAIL_SIZE.width() - 38, 62),
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+        template.name,
+    )
+    painter.setPen(QColor(accent))
+    painter.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+    painter.drawText(
+        QRect(22, 96, THUMBNAIL_SIZE.width() - 38, 20),
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        f"{template.category.upper()}  /  {variant}",
+    )
+    painter.end()
+    return pixmap
 
 
 def motion_template_thumbnail(template_id: str, variant: str = "16:9") -> QPixmap:
     template = get_template(template_id)
     chosen = variant if variant in template.variants else template.variants[0]
+    key = (template.id, chosen)
+    cached = _THUMBNAIL_CACHE.get(key)
+    if cached is not None and not cached.isNull():
+        return QPixmap(cached)
     composition = instantiate_template(template.id, variant=chosen)
     image = MotionExportRenderer(cache_capacity=2).render_frame(
         composition,
@@ -42,7 +84,9 @@ def motion_template_thumbnail(template_id: str, variant: str = "16:9") -> QPixma
         height=THUMBNAIL_SIZE.height(),
         use_cache=False,
     )
-    return QPixmap.fromImage(image)
+    pixmap = QPixmap.fromImage(image)
+    _THUMBNAIL_CACHE[key] = QPixmap(pixmap)
+    return pixmap
 
 
 class MotionTemplateGalleryDialog(QDialog):
@@ -53,14 +97,23 @@ class MotionTemplateGalleryDialog(QDialog):
         self.resize(1180, 760)
         self.setStyleSheet(MOTION_DESIGNER_QSS)
         self.selected_template_id = ""
+        self._thumbnail_generation = 0
+        self._thumbnail_queue: list[tuple[str, str]] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 16)
         root.setSpacing(10)
-        title = QLabel("Start with a template", self)
-        title.setObjectName("MotionGalleryTitle")
-        root.addWidget(title)
+        self.title = QLabel("Start with a template", self)
+        self.title.setObjectName("MotionGalleryTitle")
+        root.addWidget(self.title)
+        catalog_rows = list_templates()
+        popular_count = sum(
+            1 for row in catalog_rows
+            if str(row.get("id") or "").startswith("popular_")
+        )
         caption = QLabel(
+            f"{popular_count} production staples plus "
+            f"{len(catalog_rows) - popular_count} Tiger Studio and learning templates. "
             "Choose a complete animated layout, then replace its text, media, "
             "character, and colors in the Inspector.",
             self,
@@ -75,6 +128,7 @@ class MotionTemplateGalleryDialog(QDialog):
         self.category = QComboBox(self)
         categories = sorted({str(row["category"]) for row in list_templates()})
         self.category.addItem("All")
+        self.category.addItem("Top 10")
         self.category.addItems(categories)
         self.variant = QComboBox(self)
         for key in TEMPLATE_VARIANTS:
@@ -96,6 +150,12 @@ class MotionTemplateGalleryDialog(QDialog):
         self.items.setGridSize(QSize(286, 220))
         self.items.setSpacing(12)
         self.items.itemDoubleClicked.connect(lambda _item: self.accept())
+        self.items.verticalScrollBar().valueChanged.connect(
+            lambda _value: QTimer.singleShot(
+                0,
+                lambda: self._queue_visible_thumbnails(self._thumbnail_generation),
+            )
+        )
         content = QHBoxLayout()
         content.setSpacing(14)
         content.addWidget(self.items, 1)
@@ -163,12 +223,24 @@ class MotionTemplateGalleryDialog(QDialog):
         return requested if requested in template.variants else template.variants[0]
 
     def _populate(self, *_args) -> None:
+        self._thumbnail_generation += 1
+        generation = self._thumbnail_generation
+        self._thumbnail_queue.clear()
         query = self.search.text().strip().lower()
         category = self.category.currentText()
         selected = self.selected_template_id
         self.items.clear()
-        for row in list_templates():
-            if category != "All" and row["category"] != category:
+        rows = list_templates()
+        if category == "Top 10":
+            rows = sorted(
+                (
+                    row for row in rows
+                    if int(row.get("featured_rank", 0) or 0) > 0
+                ),
+                key=lambda row: int(row.get("featured_rank", 0) or 0),
+            )
+        for row in rows:
+            if category not in {"All", "Top 10"} and row["category"] != category:
                 continue
             haystack = " ".join([
                 str(row["name"]),
@@ -180,14 +252,27 @@ class MotionTemplateGalleryDialog(QDialog):
             ]).lower()
             if query and query not in haystack:
                 continue
-            pixmap = motion_template_thumbnail(
-                str(row["id"]),
-                self.selected_variant,
+            template_id = str(row["id"])
+            template = get_template(template_id)
+            requested_variant = str(self.variant.currentData() or "16:9")
+            chosen_variant = (
+                requested_variant
+                if requested_variant in template.variants
+                else template.variants[0]
             )
+            cache_key = (template_id, chosen_variant)
+            pixmap = _THUMBNAIL_CACHE.get(cache_key)
+            if pixmap is None:
+                pixmap = _template_placeholder(template_id, chosen_variant)
             item = QListWidgetItem(
                 QIcon(pixmap),
                 (
-                    f"{row['name']}\n"
+                    (
+                        f"TOP {int(row.get('featured_rank', 0))}  "
+                        if int(row.get("featured_rank", 0) or 0) > 0
+                        else ""
+                    )
+                    + f"{row['name']}\n"
                     f"{row['category']}  |  "
                     f"{int(row.get('default_duration_ms', 0)) // 1000}s  |  "
                     f"{int(row.get('scene_count', 1))} scenes"
@@ -201,6 +286,55 @@ class MotionTemplateGalleryDialog(QDialog):
                 self.items.setCurrentItem(item)
         if self.items.count() and self.items.currentRow() < 0:
             self.items.setCurrentRow(0)
+        self.title.setText(f"Start with a template  ({self.items.count()})")
+        QTimer.singleShot(0, lambda: self._queue_visible_thumbnails(generation))
+
+    def _queue_visible_thumbnails(self, generation: int) -> None:
+        if generation != self._thumbnail_generation:
+            return
+        requested_variant = str(self.variant.currentData() or "16:9")
+        viewport_rect = self.items.viewport().rect()
+        visible: list[tuple[str, str]] = []
+        current = self.items.currentItem()
+        ordered_items = (
+            ([current] if current is not None else [])
+            + [
+                self.items.item(index)
+                for index in range(self.items.count())
+                if self.items.item(index) is not current
+            ]
+        )
+        for item in ordered_items:
+            if item is None or (
+                item is not current
+                and not self.items.visualItemRect(item).intersects(viewport_rect)
+            ):
+                continue
+            template_id = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            template = get_template(template_id)
+            chosen_variant = (
+                requested_variant
+                if requested_variant in template.variants
+                else template.variants[0]
+            )
+            if (template_id, chosen_variant) not in _THUMBNAIL_CACHE:
+                visible.append((template_id, chosen_variant))
+        self._thumbnail_queue = visible
+        if self._thumbnail_queue:
+            QTimer.singleShot(0, lambda: self._render_next_thumbnail(generation))
+
+    def _render_next_thumbnail(self, generation: int) -> None:
+        if generation != self._thumbnail_generation or not self._thumbnail_queue:
+            return
+        template_id, variant = self._thumbnail_queue.pop(0)
+        pixmap = motion_template_thumbnail(template_id, variant)
+        for index in range(self.items.count()):
+            item = self.items.item(index)
+            if str(item.data(Qt.ItemDataRole.UserRole) or "") == template_id:
+                item.setIcon(QIcon(pixmap))
+                break
+        if self._thumbnail_queue:
+            QTimer.singleShot(0, lambda: self._render_next_thumbnail(generation))
 
     def _selection_changed(self) -> None:
         item = self.items.currentItem()

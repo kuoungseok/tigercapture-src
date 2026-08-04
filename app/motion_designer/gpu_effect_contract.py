@@ -31,6 +31,7 @@ _EFFECT_MODES = {
     "posterize": 10,
     "directional_blur": 11,
     "displacement": 12,
+    "paper_crumple": 13,
 }
 
 
@@ -162,6 +163,22 @@ def gpu_effect_parameters(
             min(1000.0, max(2.0, _value(effect, "scale", time_ms, 120.0)))
             * scale,
             _value(effect, "speed", time_ms, 0.0),
+        ]
+    elif kind == "paper_crumple":
+        values[:] = [
+            min(1.0, max(0.0, _value(effect, "amount", time_ms, 0.0))),
+            min(12.0, max(1.0, round(
+                _value(effect, "crease_density", time_ms, 7.0)
+            ))),
+            min(24.0, max(1.0, _value(
+                effect, "sharpness", time_ms, 10.0
+            ))),
+            min(100.0, max(0.0, _value(effect, "depth", time_ms, 28.0)))
+            * scale,
+            min(1.0, max(0.0, _value(
+                effect, "residual_wrinkle", time_ms, 0.0
+            ))),
+            _value(effect, "seed", time_ms, 17.0),
         ]
     return GpuEffectParameters(
         kind=kind,

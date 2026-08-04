@@ -11,10 +11,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-from .schema import Keyframe, MotionBehaviorRef, MotionComposition, MotionLayer, SourceRef
+from .schema import (
+    Keyframe,
+    MotionBehaviorRef,
+    MotionComposition,
+    MotionLayer,
+    SourceRef,
+    new_motion_id,
+)
 
 
 IMAGE_DECOMPOSITION_SCHEMA = "tigerstudio.motion.image_decomposition.v1"
@@ -297,10 +305,24 @@ def decompose_image(
                 json.loads(manifest_path.read_text(encoding="utf-8"))
             )
             if cached.algorithm == IMAGE_DECOMPOSITION_ALGORITHM and cached.assets_ready():
-                from .cutout_quality import evaluate_decomposition_cutout_quality
+                from .layer_readiness import assess_layer_motion_readiness
 
-                evaluate_decomposition_cutout_quality(cached)
+                from .cache_budget import (
+                    DEFAULT_DECOMPOSITION_CACHE_BYTES,
+                    enforce_directory_cache_budget,
+                )
+
+                assess_layer_motion_readiness(cached)
                 cached.diagnostics["cache_hit"] = True
+                try:
+                    os.utime(target, None)
+                except OSError:
+                    pass
+                cached.diagnostics["persistent_cache"] = enforce_directory_cache_budget(
+                    root,
+                    max_bytes=DEFAULT_DECOMPOSITION_CACHE_BYTES,
+                    protected_paths=(target,),
+                )
                 return cached
         except (OSError, ValueError, json.JSONDecodeError):
             pass
@@ -624,6 +646,19 @@ def decompose_image(
         *validation.warnings,
         *[f"Validation error: {item}" for item in validation.errors],
     ]))
+    from .layer_readiness import assess_layer_motion_readiness
+
+    assess_layer_motion_readiness(result)
+    from .cache_budget import (
+        DEFAULT_DECOMPOSITION_CACHE_BYTES,
+        enforce_directory_cache_budget,
+    )
+
+    result.diagnostics["persistent_cache"] = enforce_directory_cache_budget(
+        root,
+        max_bytes=DEFAULT_DECOMPOSITION_CACHE_BYTES,
+        protected_paths=(target,),
+    )
     manifest_path.write_text(
         json.dumps(result.to_dict(), ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -732,6 +767,13 @@ def compile_decomposition_layers(
         motion_style=motion_style,
         audio_hits_ms=tuple(int(value) for value in audio_hits_ms),
     )
+    from .restoration_preflight import assess_decomposition_restoration_preflight
+
+    restoration_preflight = assess_decomposition_restoration_preflight(
+        normalized,
+        camera_dx_ratio=float(choreography.camera.end_offset_ratio[0]),
+        camera_dy_ratio=float(choreography.camera.end_offset_ratio[1]),
+    )
     cues_by_id = choreography.by_element_id()
     common_metadata = {
         "ai_beat_id": beat_id,
@@ -755,6 +797,7 @@ def compile_decomposition_layers(
                 normalized, reference_id=reference_id, element=None,
             ),
             "motion_choreography": choreography.to_dict(),
+            "restoration_preflight": restoration_preflight,
         },
     )
     background.transform.position.default = [center_x, center_y]
@@ -782,17 +825,37 @@ def compile_decomposition_layers(
         float(item.depth),
         -float(item.area_ratio),
     ))
+    contact_assets: dict[str, dict[str, Any]] = {}
+    primary = next(
+        (item for item in visual_elements if item.role == "primary_subject"),
+        visual_elements[0] if visual_elements else None,
+    )
+    if primary is not None:
+        try:
+            from .contact_composite import prepare_contact_composite
+
+            output_dir = Path(primary.rgba_path).parent / "contact_composite" / primary.id
+            contact_assets[primary.id] = prepare_contact_composite(
+                foreground_path=primary.rgba_path,
+                background_path=normalized.background_path,
+                output_dir=output_dir,
+            )
+        except Exception as exc:
+            restoration_preflight.setdefault("warnings", []).append(
+                f"Contact composite fallback kept the original foreground: {exc}"
+            )
     layers_by_element_id: dict[str, MotionLayer] = {}
     for element in visual_elements:
         cue = cues_by_id.get(element.id)
         if cue is None:
             continue
+        contact = contact_assets.get(element.id)
         layer = MotionLayer(
             name=f"{name} / {element.label}",
             layer_type="image",
             source=SourceRef(
                 kind="image",
-                uri=element.rgba_path,
+                uri=str(contact.get("foreground_path") if contact else element.rgba_path),
                 params={"width": width, "height": height, "fit": "contain"},
             ),
             in_ms=int(in_ms),
@@ -803,6 +866,7 @@ def compile_decomposition_layers(
                     normalized, reference_id=reference_id, element=element,
                 ),
                 "motion_choreography": cue.to_dict(),
+                "contact_composite": dict(contact or {}),
             },
         )
         pivot = list(element.metadata.get("pivot") or [
@@ -885,6 +949,23 @@ def compile_decomposition_layers(
                     end_ms=min(end_time, cue.start_ms + 220),
                     params={"direction": "in", "hold_before": True, "hold_after": True},
                 ))
+        if contact:
+            shadow = MotionLayer.from_dict(layer.to_dict())
+            shadow.id = new_motion_id("motion_layer")
+            shadow.name = f"{name} / {element.label} / Contact Shadow"
+            shadow.source = SourceRef(
+                kind="image",
+                uri=str(contact["shadow_path"]),
+                params={"width": width, "height": height, "fit": "contain"},
+            )
+            shadow.metadata = dict(shadow.metadata)
+            shadow.metadata["image_decomposition"] = {
+                **dict(shadow.metadata.get("image_decomposition") or {}),
+                "role": "contact_shadow",
+                "source_element_id": element.id,
+            }
+            shadow.metadata["contact_composite_role"] = "shadow"
+            layers.append(shadow)
         layers.append(layer)
         layers_by_element_id[element.id] = layer
 

@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Mapping
 
 from .particles import create_particle_layer
+from .popular_templates import (
+    POPULAR_TEMPLATE_BY_ID,
+    POPULAR_TEMPLATE_SPECS,
+    is_popular_template,
+)
 from .schema import (
     AnimatedProperty,
     Keyframe,
     MotionBehaviorRef,
     MotionComposition,
+    MotionEffectRef,
     MotionLayer,
     SourceRef,
     new_motion_id,
@@ -60,6 +67,7 @@ class MotionTemplate:
     workflow: str = "Quick graphic"
     replace_items: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
+    featured_rank: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +85,7 @@ class MotionTemplate:
             "workflow": self.workflow,
             "replace_items": list(self.replace_items),
             "tags": list(self.tags),
+            "featured_rank": int(self.featured_rank),
             "default_duration_ms": int(
                 next(
                     (
@@ -97,6 +106,73 @@ COMMON_CONTROLS = (
     PublishedControl("surface_color", "Surface", "color", "#10151c"),
     PublishedControl("duration_ms", "Duration", "integer", 4000),
 )
+LOGO_CONTROLS = (
+    PublishedControl("headline", "Headline", "string", "CREMA"),
+    PublishedControl("subtitle", "Subtitle", "string", "COFFEE CLUB / EST. 2026"),
+    PublishedControl("accent_color", "Accent", "color", "#c91f2d"),
+    PublishedControl("surface_color", "Surface", "color", "#f3efe6"),
+    PublishedControl("duration_ms", "Duration", "integer", 4000),
+)
+
+PAPER_CRUMPLE_CONTROLS = (
+    PublishedControl("headline", "Headline", "string", "MAKE SOME NOISE"),
+    PublishedControl(
+        "subtitle",
+        "Subtitle",
+        "string",
+        "CRUMPLE / RELEASE / REVEAL",
+    ),
+    PublishedControl("paper_color", "Paper", "color", "#eee5d2"),
+    PublishedControl("ink_color", "Ink", "color", "#182028"),
+    PublishedControl("accent_color", "Accent", "color", "#ef6848"),
+    PublishedControl("surface_color", "Surface", "color", "#10151c"),
+    PublishedControl("duration_ms", "Duration", "integer", 3200),
+)
+
+_STUDIO_ORIGINALS_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "resources"
+    / "motion_templates"
+    / "studio_originals"
+)
+_BRAND_TEXTURE_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "resources"
+    / "motion_templates"
+    / "brand_textures"
+)
+_HOT_2026_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "resources"
+    / "motion_templates"
+    / "hot_2026"
+)
+
+
+def _visual_controls(
+    *,
+    headline: str,
+    subtitle: str,
+    cta: str,
+    accent: str,
+    surface: str,
+    image_name: str,
+    duration_ms: int = 6000,
+) -> tuple[PublishedControl, ...]:
+    return (
+        PublishedControl("headline", "Headline", "string", headline),
+        PublishedControl("subtitle", "Subtitle", "string", subtitle),
+        PublishedControl("cta", "Call to action", "string", cta),
+        PublishedControl(
+            "background_image",
+            "Background image",
+            "media",
+            str((_STUDIO_ORIGINALS_ROOT / image_name).resolve(strict=False)),
+        ),
+        PublishedControl("accent_color", "Accent", "color", accent),
+        PublishedControl("surface_color", "Surface", "color", surface),
+        PublishedControl("duration_ms", "Duration", "integer", duration_ms),
+    )
 
 
 def _production_controls(
@@ -111,13 +187,295 @@ def _production_controls(
     )
 
 
+def _trend_controls(spec: Mapping[str, Any]) -> tuple[PublishedControl, ...]:
+    asset_name = str(spec.get("asset_name") or "")
+    if asset_name:
+        palettes = {
+            "prompt_playground.png": ("#f2c94c", "#162f67"),
+            "reality_warp.png": ("#ff7d73", "#101820"),
+            "explorecore.png": ("#b9d7b2", "#20312c"),
+            "texture_check.png": ("#ffb09e", "#5b161d"),
+            "notes_app_chic.png": ("#b5e600", "#252629"),
+            "opt_out_era.png": ("#e8dfcf", "#24221f"),
+            "drama_club.png": ("#d93a45", "#16090c"),
+            "local_craft.png": ("#d8784a", "#233c67"),
+            "variable_kinetic_type.png": ("#ff4d00", "#111111"),
+            "liquid_glass_next.png": ("#dcff68", "#16323d"),
+        }
+        accent, surface = palettes[asset_name]
+        controls = [
+            PublishedControl("headline", "Headline", "string", str(spec["scenes"][0][1])),
+            PublishedControl("subtitle", "Subtitle", "string", str(spec["scenes"][0][2])),
+            PublishedControl("accent_color", "Accent", "color", accent),
+            PublishedControl("surface_color", "Surface", "color", surface),
+            PublishedControl("cta", "Call to action", "string", str(spec["cta"])),
+            PublishedControl("duration_ms", "Duration", "integer", int(spec["duration_ms"])),
+        ]
+    else:
+        controls = list(_production_controls(
+            int(spec["duration_ms"]),
+            cta=str(spec["cta"]),
+        ))
+    if asset_name:
+        controls.append(PublishedControl(
+            "background_image",
+            "Background image",
+            "media",
+            str((_HOT_2026_ROOT / asset_name).resolve(strict=False)),
+        ))
+    return tuple(controls)
+
+
+_LOGO_BRAND_PROFILES: dict[str, dict[str, str]] = {
+    "clean": {
+        "brand": "CREMA",
+        "descriptor": "COFFEE DELIVERY / EST. 2026",
+        "accent": "#c91f2d",
+        "surface": "#f3efe6",
+    },
+    "minimal": {
+        "brand": "MELLO",
+        "descriptor": "GELATO HOUSE",
+        "accent": "#e92d3f",
+        "surface": "#fffaf0",
+    },
+    "glitch": {
+        "brand": "REDLINE",
+        "descriptor": "SIGNAL WORKS",
+        "accent": "#e00019",
+        "surface": "#f8f6f1",
+    },
+    "particle": {
+        "brand": "VELORA",
+        "descriptor": "BEAUTY ATELIER",
+        "accent": "#b5102a",
+        "surface": "#f4eee4",
+    },
+    "liquid": {
+        "brand": "RING DAY",
+        "descriptor": "DONUT CLUB",
+        "accent": "#ee2438",
+        "surface": "#fff7e8",
+    },
+    "3d": {
+        "brand": "NORTHLINE",
+        "descriptor": "FOOTWEAR COMPANY",
+        "accent": "#d7192d",
+        "surface": "#f4f1e9",
+    },
+    "fast": {
+        "brand": "SWIFT",
+        "descriptor": "EXPRESS GOODS",
+        "accent": "#e00019",
+        "surface": "#fffaf0",
+    },
+    "elegant": {
+        "brand": "CREMA",
+        "descriptor": "COFFEE CLUB / EST. 2026",
+        "accent": "#1b1917",
+        "surface": "#f1ece1",
+    },
+    "brush": {
+        "brand": "KAIRO",
+        "descriptor": "TEA HOUSE",
+        "accent": "#c31e2e",
+        "surface": "#f2ede2",
+    },
+    "neon": {
+        "brand": "NIGHT RING",
+        "descriptor": "DONUTS & CO.",
+        "accent": "#ff263b",
+        "surface": "#120e12",
+    },
+    "light": {
+        "brand": "SOLARA",
+        "descriptor": "DAYLIGHT GOODS",
+        "accent": "#e5212f",
+        "surface": "#f8f2e7",
+    },
+    "paper": {
+        "brand": "CUT & CO.",
+        "descriptor": "PAPER STUDIO",
+        "accent": "#d7192d",
+        "surface": "#efe9dd",
+    },
+    "smoke": {
+        "brand": "EMBER",
+        "descriptor": "ROAST HOUSE",
+        "accent": "#b71d2b",
+        "surface": "#171313",
+    },
+    "glass": {
+        "brand": "LUCENT",
+        "descriptor": "OBJECT LAB",
+        "accent": "#d7192d",
+        "surface": "#f2f1ed",
+    },
+    "kinetic": {
+        "brand": "BOLD",
+        "descriptor": "MOTION CLUB",
+        "accent": "#e00019",
+        "surface": "#faf7f0",
+    },
+}
+
+
+def _popular_controls(spec: Mapping[str, Any]) -> tuple[PublishedControl, ...]:
+    logo_profile = _LOGO_BRAND_PROFILES.get(str(spec["style"])) if spec["category"] == "Logo Reveals" else None
+    return (
+        PublishedControl(
+            "headline",
+            "Headline",
+            "string",
+            str(logo_profile["brand"] if logo_profile else spec["name"]).upper(),
+        ),
+        PublishedControl(
+            "subtitle",
+            "Subtitle",
+            "string",
+            str(logo_profile["descriptor"] if logo_profile else spec["category"]).upper(),
+        ),
+        PublishedControl(
+            "accent_color",
+            "Accent",
+            "color",
+            str(logo_profile["accent"] if logo_profile else "#43d7b5"),
+        ),
+        PublishedControl(
+            "surface_color",
+            "Surface",
+            "color",
+            str(logo_profile["surface"] if logo_profile else "#10151c"),
+        ),
+        PublishedControl("duration_ms", "Duration", "integer", int(spec["duration_ms"])),
+    )
+
+
 _TEMPLATES = (
     MotionTemplate("clean_lower_third", "Clean Lower Third", "Titles", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
     MotionTemplate("character_nameplate", "Character Nameplate", "Character", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
-    MotionTemplate("logo_reveal", "Logo Reveal", "Brand", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
-    MotionTemplate("product_callout", "Product Callout", "Commerce", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
+    MotionTemplate("logo_reveal", "Logo Reveal", "Brand", tuple(TEMPLATE_VARIANTS), LOGO_CONTROLS),
+    MotionTemplate(
+        "product_callout",
+        "Product Callout",
+        "Commerce",
+        tuple(TEMPLATE_VARIANTS),
+        _visual_controls(
+            headline="MORNING, MADE SLOW",
+            subtitle="SMALL BATCH / DAILY RITUAL",
+            cta="DISCOVER THE ROAST",
+            accent="#e8a65d",
+            surface="#21140d",
+            image_name="artisan_coffee.png",
+            duration_ms=5000,
+        ),
+        description=(
+            "A ready-to-edit product callout with real studio photography, "
+            "an animated information card, and a clear action."
+        ),
+        features=(
+            "Original product photography",
+            "Replaceable media",
+            "Animated callout card",
+            "Headline, subtitle, and CTA",
+        ),
+        workflow="Product promotion",
+        replace_items=(
+            "Background image",
+            "Headline",
+            "Subtitle",
+            "Call to action",
+        ),
+        tags=("product", "commerce", "photo", "callout", "advertising"),
+    ),
     MotionTemplate("stream_stinger", "Stream Stinger", "Broadcast", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS, "cached"),
     MotionTemplate("music_beat_title", "Music Beat Title", "Music", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS, "cached"),
+    MotionTemplate(
+        "studio_city_after_rain",
+        "City After Rain",
+        "Studio Originals",
+        tuple(TEMPLATE_VARIANTS),
+        _visual_controls(
+            headline="AFTER DARK",
+            subtitle="CITY EDITORIAL / BLUE HOUR",
+            cta="EXPLORE THE NIGHT",
+            accent="#50d7e7",
+            surface="#07111d",
+            image_name="city_after_rain.png",
+        ),
+        description="A cinematic city campaign with a full-bleed photo, editorial type, and restrained motion.",
+        features=("Original full-bleed photography", "Ken Burns camera move", "Editorial typography", "Replaceable media", "CTA"),
+        workflow="Editorial opener",
+        replace_items=("Background image", "Headline", "Subtitle", "Call to action"),
+        tags=("city", "editorial", "photo", "campaign", "night"),
+    ),
+    MotionTemplate(
+        "studio_artisan_coffee",
+        "Artisan Coffee Launch",
+        "Studio Originals",
+        tuple(TEMPLATE_VARIANTS),
+        _visual_controls(
+            headline="MORNING, MADE SLOW",
+            subtitle="SMALL BATCH / DAILY RITUAL",
+            cta="DISCOVER THE ROAST",
+            accent="#e8a65d",
+            surface="#21140d",
+            image_name="artisan_coffee.png",
+        ),
+        description="A tactile product campaign built around warm photography and quiet premium typography.",
+        features=("Original product photography", "Slow camera push", "Warm color treatment", "Replaceable media", "CTA"),
+        workflow="Product advertisement",
+        replace_items=("Background image", "Headline", "Subtitle", "Call to action"),
+        tags=("coffee", "product", "lifestyle", "photo", "advertising"),
+    ),
+    MotionTemplate(
+        "studio_alpine_journal",
+        "Alpine Travel Journal",
+        "Studio Originals",
+        tuple(TEMPLATE_VARIANTS),
+        _visual_controls(
+            headline="FIND THE LONG WAY",
+            subtitle="ALPINE JOURNAL / 06:10",
+            cta="BEGIN THE JOURNEY",
+            accent="#f0b866",
+            surface="#101923",
+            image_name="alpine_road.png",
+        ),
+        description="A cinematic travel opener using a photographic landscape, route line, and magazine typography.",
+        features=("Original landscape photography", "Parallax-style push", "Route accent", "Replaceable media", "CTA"),
+        workflow="Travel campaign",
+        replace_items=("Background image", "Headline", "Subtitle", "Call to action"),
+        tags=("travel", "mountain", "landscape", "photo", "opener"),
+    ),
+    MotionTemplate(
+        "paper_crumple_unfold",
+        "Paper Crumple & Unfold",
+        "Mixed Media",
+        tuple(TEMPLATE_VARIANTS),
+        PAPER_CRUMPLE_CONTROLS,
+        description=(
+            "An editable printed paper card that crumples, holds, unfolds, "
+            "and settles with residual creases."
+        ),
+        features=(
+            "GPU paper crumple",
+            "Deterministic crease seed",
+            "Crumple and unfold keyframes",
+            "Residual wrinkles",
+            "Editable print colors and copy",
+        ),
+        tutorial_steps=(
+            "Play once to see the paper gather, hold, and unfold.",
+            "Select Printed Paper Group and open Effects to edit Amount and Depth.",
+            "Change Crease Density or Seed to produce a different paper surface.",
+            "Edit the published headline, subtitle, paper, ink, and accent controls.",
+        ),
+        difficulty="Starter",
+        estimated_minutes=3,
+        workflow="Mixed-media title reveal",
+        replace_items=("Headline", "Subtitle", "Paper color", "Ink color"),
+        tags=("paper", "crumple", "unfold", "mixed media", "title"),
+    ),
     MotionTemplate("vertical_shorts_hook", "Vertical Shorts Hook", "Shorts", ("9:16", "1:1"), COMMON_CONTROLS),
     MotionTemplate("anime_character_intro", "Anime Character Intro", "Character", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
     MotionTemplate("mmd_dance_title", "MMD Dance Title", "Character", tuple(TEMPLATE_VARIANTS), COMMON_CONTROLS),
@@ -190,16 +548,16 @@ _TEMPLATES = (
     ),
     MotionTemplate(
         "learn_generators_replicators",
-        "Learn 05 - Generators and Replicators",
+        "Learn 05 - Generators and Tiger Repeaters",
         "Learn",
         tuple(TEMPLATE_VARIANTS),
         COMMON_CONTROLS,
         description="A procedural background and radial pattern that remain fully editable.",
-        features=("Procedural Generator", "Radial Replicator", "Per-copy scale", "Opacity falloff"),
+        features=("Procedural Generator", "Radial Tiger Repeater", "Per-copy scale", "Opacity falloff"),
         tutorial_steps=(
             "Select Procedural Gradient and open the Generator inspector.",
             "Switch Gradient to Grid, Noise, or Rays and adjust Scale.",
-            "Select Replicated Star and open the Replicator inspector.",
+            "Select Replicated Star and open the Tiger Repeater inspector.",
             "Compare Line, Grid, and Radial arrangements, then change Copies and Offset.",
         ),
         estimated_minutes=4,
@@ -380,10 +738,33 @@ _TEMPLATES = (
             str(spec["name"]),
             str(spec["category"]),
             tuple(str(item) for item in spec["variants"]),
-            _production_controls(
-                int(spec["duration_ms"]),
-                cta=str(spec["cta"]),
+            _popular_controls(spec),
+            "cached" if str(spec["style"]) in {"particle", "smoke", "glass", "overlay"} else "realtime",
+            description=str(spec["description"]),
+            features=tuple(str(item) for item in spec["features"]),
+            tutorial_steps=(
+                "Replace the headline, subtitle, and media or logo placeholders.",
+                "Adjust the accent, surface, duration, and style-specific layers.",
+                "Play the complete in/out animation and refine timing in the Graph Editor.",
+                "Export the aspect-ratio variant required by the target platform.",
             ),
+            difficulty="Starter",
+            estimated_minutes=6,
+            scene_count=int(spec["scene_count"]),
+            workflow=str(spec["workflow"]),
+            replace_items=tuple(str(item) for item in spec["replace_items"]),
+            tags=tuple(str(item) for item in spec["tags"]),
+            featured_rank=int(spec["featured_rank"]),
+        )
+        for spec in POPULAR_TEMPLATE_SPECS
+    ),
+    *(
+        MotionTemplate(
+            str(spec["id"]),
+            str(spec["name"]),
+            str(spec["category"]),
+            tuple(str(item) for item in spec["variants"]),
+            _trend_controls(spec),
             "cached" if spec["style"] in {"glass", "collage"} else "realtime",
             description=str(spec["description"]),
             features=tuple(str(item) for item in spec["features"]),
@@ -403,6 +784,68 @@ _TEMPLATES = (
         for spec in TREND_TEMPLATE_SPECS
     ),
 )
+
+
+def _default_demo_image_path(template: MotionTemplate) -> str:
+    category = template.category
+    tags = {tag.casefold() for tag in template.tags}
+    if category in {
+        "Commerce",
+        "Advertising",
+        "UI & Product",
+        "Production Essentials",
+    } or tags.intersection({"product", "commerce", "saas", "app"}):
+        name = "artisan_coffee.png"
+    elif category in {
+        "Intros & Openers",
+        "Slideshows",
+        "Social Media & YouTube",
+        "Shorts",
+        "Education",
+    } or tags.intersection({"travel", "slideshow", "vertical", "education"}):
+        name = "alpine_road.png"
+    else:
+        name = "city_after_rain.png"
+    return str((_STUDIO_ORIGINALS_ROOT / name).resolve(strict=False))
+
+
+def _with_demo_media_control(template: MotionTemplate) -> MotionTemplate:
+    controls = list(template.controls)
+    known = {control.id for control in controls}
+    if "background_image" not in known:
+        is_logo_template = template.id == "logo_reveal" or template.category == "Logo Reveals"
+        controls.append(
+            PublishedControl(
+                "background_image",
+                "Background image",
+                "media",
+                (
+                    str((_BRAND_TEXTURE_ROOT / "ivory_cotton_paper.png").resolve(strict=False))
+                    if is_logo_template
+                    else _default_demo_image_path(template)
+                ),
+            )
+        )
+    if (
+        template.id == "logo_reveal"
+        or template.category == "Logo Reveals"
+        or "logo" in {str(tag).casefold() for tag in template.tags}
+    ) and "logo_image" not in known:
+        controls.append(
+            PublishedControl(
+                "logo_image",
+                "Logo image",
+                "media",
+                "",
+            )
+        )
+    return replace(
+        template,
+        controls=tuple(controls),
+    )
+
+
+_TEMPLATES = tuple(_with_demo_media_control(template) for template in _TEMPLATES)
 TEMPLATE_CATALOG = {item.id: item for item in _TEMPLATES}
 
 
@@ -444,6 +887,16 @@ def _behavior(kind: str, duration: int, **params: Any) -> MotionBehaviorRef:
     return MotionBehaviorRef(kind=kind, start_ms=0, end_ms=max(1, min(duration, 700)), params=params)
 
 
+def _effect(kind: str, **params: Any) -> MotionEffectRef:
+    return MotionEffectRef(
+        kind=kind,
+        params={
+            str(key): AnimatedProperty(value_type="number", default=deepcopy(value))
+            for key, value in params.items()
+        },
+    )
+
+
 def _keyframed(default: Any, value_type: str, rows: list[tuple[int, Any, str]]) -> AnimatedProperty:
     return AnimatedProperty(
         value_type=value_type,
@@ -469,6 +922,31 @@ def _shape(name: str, width: float, height: float, x: float, y: float, color: st
     return layer
 
 
+def _image(name: str, uri: str, width: float, height: float, x: float, y: float,
+           duration: int, *, role: str = "media_slot") -> MotionLayer:
+    layer = MotionLayer(
+        name=name,
+        layer_type="image",
+        out_ms=duration,
+        source=SourceRef(
+            kind="image",
+            uri=str(uri),
+            params={
+                "width": max(1, int(round(width))),
+                "height": max(1, int(round(height))),
+                "fit": "cover",
+            },
+        ),
+        metadata={
+            "template_role": role,
+            "replaceable": "background_image",
+            "asset_provenance": "Tiger Studio Original",
+        },
+    )
+    layer.transform.position.default = [x, y]
+    return layer
+
+
 def _text(name: str, text: str, x: float, y: float, size: float, color: str,
           duration: int, *, role: str, align: str = "left") -> MotionLayer:
     layer = MotionLayer(
@@ -486,6 +964,168 @@ def _text(name: str, text: str, x: float, y: float, size: float, color: str,
     layer.transform.position.default = [x, y]
     layer.behaviors.append(_behavior("fade", duration, direction="in", hold_after=True))
     return layer
+
+
+def _translucent_color(value: Any, alpha: int = 154) -> str:
+    color = str(value or "#10151c").strip()
+    if color.startswith("#") and len(color) == 7:
+        return f"#{max(0, min(255, int(alpha))):02x}{color[1:]}"
+    if color.startswith("#") and len(color) == 9:
+        return f"#{max(0, min(255, int(alpha))):02x}{color[3:]}"
+    return color
+
+
+def _template_demo_image_paths(template: MotionTemplate) -> tuple[str, ...]:
+    if template.category == "Hot Motion 2026":
+        background = next(
+            (
+                str(control.default)
+                for control in template.controls
+                if control.id == "background_image"
+            ),
+            "",
+        )
+        if background:
+            return (background,)
+    primary = _default_demo_image_path(template)
+    candidates = (
+        primary,
+        str((_STUDIO_ORIGINALS_ROOT / "city_after_rain.png").resolve(strict=False)),
+        str((_STUDIO_ORIGINALS_ROOT / "artisan_coffee.png").resolve(strict=False)),
+        str((_STUDIO_ORIGINALS_ROOT / "alpine_road.png").resolve(strict=False)),
+    )
+    return tuple(dict.fromkeys(candidates))
+
+
+def _decorate_template_with_demo_media(
+    template: MotionTemplate,
+    layers: list[MotionLayer],
+    *,
+    width: int,
+    height: int,
+    duration: int,
+    controls: Mapping[str, Any],
+) -> list[MotionLayer]:
+    image_paths = _template_demo_image_paths(template)
+    background_uri = str(controls.get("background_image") or "")
+    prefix: list[MotionLayer] = []
+    use_photo_background = not (
+        template.id == "logo_reveal" or template.category == "Logo Reveals"
+    )
+    if use_photo_background and not any(layer.layer_type == "image" for layer in layers):
+        background = _image(
+            "Demo Background",
+            background_uri,
+            width,
+            height,
+            width * .5,
+            height * .5,
+            duration,
+            role="background_media",
+        )
+        background.metadata.update({
+            "demo_media": True,
+            "replaceable": "background_image",
+        })
+        background.behaviors.append(
+            _behavior("scale", duration, **{"from": 1.04, "hold_after": True})
+        )
+        shade = _shape(
+            "Demo Image Shade",
+            width,
+            height,
+            width * .5,
+            height * .5,
+            "#52070a0f",
+            duration,
+            role="demo_photo_overlay",
+        )
+        prefix.extend((background, shade))
+
+    decorated: list[MotionLayer] = []
+    media_index = 0
+    for layer in layers:
+        params = layer.source.params
+        role = str(layer.metadata.get("template_role") or "")
+        if controls.get("logo_image") and layer.metadata.get("logo_slot_dependent"):
+            continue
+        layer_width = float(params.get("width", 0.0) or 0.0)
+        layer_height = float(params.get("height", 0.0) or 0.0)
+        placeholder_control = {
+            "media_slot": f"media_slot_{media_index + 1}",
+            "logo_slot": "logo_image",
+        }.get(role, "")
+        is_media_placeholder = (
+            layer.layer_type == "shape"
+            and bool(placeholder_control)
+            and layer_width > 0
+            and layer_height > 0
+        )
+        if is_media_placeholder:
+            is_logo = role == "logo_slot"
+            logo_uri = str(controls.get("logo_image") or "") if is_logo else ""
+            if is_logo and not logo_uri:
+                layer.metadata.update({
+                    "replaceable": "logo_image",
+                    "optional_media_control": True,
+                })
+                decorated.append(layer)
+                continue
+            media = _image(
+                layer.name,
+                (
+                    logo_uri
+                    if is_logo
+                    else image_paths[media_index % len(image_paths)]
+                ),
+                layer_width,
+                layer_height,
+                float(layer.transform.position.default[0]),
+                float(layer.transform.position.default[1]),
+                max(1, layer.out_ms - layer.in_ms),
+                role=role,
+            )
+            if is_logo:
+                media.source.params.update({
+                    "fit": "contain",
+                })
+            media.id = layer.id
+            media.in_ms = layer.in_ms
+            media.out_ms = layer.out_ms
+            media.source_in_ms = layer.source_in_ms
+            media.time_scale = layer.time_scale
+            media.reverse = layer.reverse
+            media.parent_id = layer.parent_id
+            media.transform = deepcopy(layer.transform)
+            media.behaviors = deepcopy(layer.behaviors)
+            media.effects = deepcopy(layer.effects)
+            media.masks = deepcopy(layer.masks)
+            media.blend_mode = layer.blend_mode
+            media.locked = layer.locked
+            media.visible = layer.visible
+            media.solo = layer.solo
+            media.extras = deepcopy(layer.extras)
+            media.metadata.update(deepcopy(layer.metadata))
+            media.metadata.update({
+                "demo_media": True,
+                "replaceable": placeholder_control,
+            })
+            decorated.append(media)
+            if not is_logo:
+                media_index += 1
+            continue
+        if (
+            layer.layer_type == "shape"
+            and role in {"background", "surface"}
+            and layer_width >= width * .9
+            and layer_height >= height * .9
+        ):
+            params["fill"] = _translucent_color(
+                params.get("fill"),
+                88 if template.category == "Hot Motion 2026" else 154,
+            )
+        decorated.append(layer)
+    return [*prefix, *decorated]
 
 
 _PRODUCTION_STORYBOARDS: dict[str, tuple[tuple[str, str, str], ...]] = {
@@ -989,6 +1629,448 @@ def _build_production_storyboard(
     return layers
 
 
+def _logo_badge_layers(
+    *,
+    template_id: str,
+    style: str,
+    width: int,
+    height: int,
+    duration: int,
+    headline: str,
+    subtitle: str,
+    accent: str,
+) -> list[MotionLayer]:
+    """Build an editable commercial logo system instead of a baked logo picture."""
+    cx, cy = width * .5, height * .46
+    unit = min(width, height)
+    ink = "#171514"
+    paper = "#fffaf0"
+    dark_surface = style in {"neon", "smoke"}
+    primary_text = "#ffffff" if dark_surface else ink
+    wordmark_styles = {"minimal", "glitch", "fast", "kinetic"}
+    layers: list[MotionLayer] = []
+
+    if style in wordmark_styles:
+        plate_w, plate_h = unit * .78, unit * .27
+        shadow = _shape(
+            "Wordmark Shadow", plate_w, plate_h, cx + unit * .018, cy + unit * .022,
+            "#35171514", duration, role="brand_shadow",
+        )
+        plate = _shape(
+            "Wordmark Plate", plate_w, plate_h, cx, cy, accent, duration,
+            role="brand_plate",
+        )
+        icon = _shape(
+            "Replaceable Brand Symbol", plate_h * .58, plate_h * .58,
+            cx - plate_w * .35, cy, paper, duration, shape="ellipse", role="logo_slot",
+        )
+        icon.source.params.update({"stroke": ink, "stroke_width": max(2.0, unit * .004)})
+        icon.behaviors.append(_behavior("impact", duration, **{"from": .1, "overshoot": .16, "hold_after": True}))
+        brand = _text(
+            "Editable Brand Name", headline, cx + plate_w * .07, cy - plate_h * .06,
+            unit * .082, paper, duration, role="headline", align="center",
+        )
+        brand.source.params.update({
+            "font_family": "Arial Black",
+            "font_weight": 900,
+            "width": plate_w * .68,
+            "height": plate_h * .62,
+        })
+        descriptor = _text(
+            "Editable Brand Descriptor", subtitle, cx + plate_w * .07, cy + plate_h * .30,
+            unit * .021, paper, duration, role="subtitle", align="center",
+        )
+        descriptor.source.params.update({"width": plate_w * .66, "font_weight": 700})
+        monogram = _text(
+            "Brand Monogram", headline[:1] or "B", cx - plate_w * .35, cy,
+            unit * .052, ink, duration, role="logo_detail", align="center",
+        )
+        monogram.source.params.update({
+            "font_family": "Georgia",
+            "font_weight": 900,
+            "width": plate_h * .5,
+            "height": plate_h * .5,
+        })
+        monogram.metadata["logo_slot_dependent"] = True
+        plate.behaviors.append(_behavior("impact" if style != "minimal" else "pop", duration,
+                                           **{"from": .2, "overshoot": .08, "hold_after": True}))
+        layers.extend((shadow, plate, icon, monogram, brand, descriptor))
+        if style == "glitch":
+            for name, offset, color in (
+                ("Glitch Red Echo", [-unit * .018, 0], "#d7192d88"),
+                ("Glitch Dark Echo", [unit * .018, 0], "#17151488"),
+            ):
+                echo = _shape(name, plate_w, plate_h * .18, cx + offset[0], cy + offset[1],
+                              color, duration, role="effect_overlay")
+                echo.blend_mode = "screen"
+                echo.behaviors.append(_behavior("wiggle", duration, amount=unit * .012, frequency=14.0))
+                layers.append(echo)
+        elif style == "kinetic":
+            for index in range(4):
+                bar = _shape(
+                    f"Kinetic Bar {index + 1}", plate_w * (.34 - index * .035),
+                    max(5.0, unit * .012), cx - plate_w * .26 + index * unit * .05,
+                    cy - plate_h * .72 + index * unit * .035,
+                    accent if index % 2 == 0 else ink, duration, role="kinetic_accent",
+                )
+                bar.behaviors.append(_behavior("slide", duration, direction="in",
+                                                distance=[(-1 if index % 2 else 1) * unit * .24, 0],
+                                                hold_after=True))
+                layers.append(bar)
+        elif style == "fast":
+            for index in range(3):
+                trail = _shape(
+                    f"Speed Trail {index + 1}", plate_w * (.28 - index * .05),
+                    max(4.0, unit * .009), cx - plate_w * .52 - index * unit * .045,
+                    cy + (index - 1) * unit * .035, accent, duration, role="speed_trail",
+                )
+                trail.behaviors.append(_behavior("slide", duration, direction="in",
+                                                  distance=[-unit * .34, 0], hold_after=True))
+                layers.append(trail)
+        return layers
+
+    badge_size = unit * .62
+    outer = _shape(
+        "Outer Badge", badge_size, badge_size, cx, cy, accent, duration,
+        shape="ellipse", role="badge_outer",
+    )
+    inner = _shape(
+        "Inner Badge", badge_size * .88, badge_size * .88, cx, cy, paper, duration,
+        shape="ellipse", role="badge_inner",
+    )
+    ring = _shape(
+        "Badge Rule", badge_size * .79, badge_size * .79, cx, cy, "#00000000", duration,
+        shape="ellipse", role="badge_rule",
+    )
+    ring.source.params.update({"stroke": ink, "stroke_width": max(2.0, unit * .005)})
+    band = _shape(
+        "Brand Ribbon", badge_size * 1.02, badge_size * .26, cx, cy + badge_size * .02,
+        ink, duration, role="brand_plate",
+    )
+    symbol = _shape(
+        "Replaceable Brand Symbol", badge_size * .12, badge_size * .19,
+        cx, cy - badge_size * .22, accent, duration, shape="ellipse", role="logo_slot",
+    )
+    symbol.transform.rotation.default = -24.0
+    symbol.source.params.update({"stroke": ink, "stroke_width": max(2.0, unit * .004)})
+    bean_crease = _shape(
+        "Coffee Bean Crease", max(2.0, unit * .006), badge_size * .12,
+        cx, cy - badge_size * .22, paper, duration, role="logo_detail",
+    )
+    bean_crease.transform.rotation.default = -24.0
+    bean_crease.metadata["logo_slot_dependent"] = True
+    brand = _text(
+        "Editable Brand Name", headline, cx, cy + badge_size * .015,
+        unit * .075, paper, duration, role="headline", align="center",
+    )
+    brand.source.params.update({
+        "font_family": "Georgia",
+        "font_weight": 900,
+        "width": badge_size * .94,
+        "height": badge_size * .25,
+    })
+    descriptor = _text(
+        "Editable Brand Descriptor", subtitle, cx, cy + badge_size * .27,
+        unit * .022, ink, duration, role="subtitle", align="center",
+    )
+    descriptor.source.params.update({"width": badge_size * .74, "font_weight": 800})
+    top_copy = _text(
+        "Badge Category", "ORIGINAL GOODS", cx, cy - badge_size * .34,
+        unit * .021, ink, duration, role="brand_category", align="center",
+    )
+    top_copy.source.params.update({"width": badge_size * .67, "font_weight": 800})
+    for layer in (outer, inner, ring, band, symbol):
+        layer.behaviors.append(_behavior("pop", duration, **{"from": .15, "overshoot": .1, "hold_after": True}))
+    layers.extend((outer, inner, ring, band, symbol, bean_crease, top_copy, brand, descriptor))
+
+    if style in {"particle", "smoke"}:
+        particles = create_particle_layer(width=width, height=height, duration_ms=duration, params={
+            "seed": 20260731,
+            "birth_rate": 10 if style == "smoke" else 18,
+            "bursts": [{"time_ms": 180, "count": 34}],
+            "lifetime_ms": 1500,
+            "velocity": {"speed": 72.0, "speed_variance": .45, "angle_deg": -90.0, "spread_deg": 300.0},
+            "gravity": [0.0, -8.0],
+            "particle": {
+                "shape": "circle", "size_start": 12 if style == "particle" else 34,
+                "size_end": 3 if style == "particle" else 70,
+                "opacity_start": .72, "opacity_end": 0.0,
+                "color_start": accent, "color_end": f"{accent[:7]}00",
+                "rotation_speed": 28.0, "sprite_uri": "",
+            },
+            "max_particles": 180,
+        })
+        particles.name = "Brand Particles" if style == "particle" else "Roast Smoke"
+        particles.metadata["template_role"] = "effect_overlay"
+        particles.blend_mode = "screen"
+        layers.append(particles)
+    if style in {"light", "glass", "3d"}:
+        outer.effects.append(_effect("light_sweep", amount=0.75, angle=-22.0, width=.18, softness=.32))
+    if style == "neon":
+        for layer in (outer, symbol):
+            layer.blend_mode = "screen"
+            layer.effects.append(_effect("glow", radius=26.0, intensity=1.15, threshold=.18))
+    if style == "paper":
+        inner.effects.append(_effect("paper_fold", amount=.32, angle=18.0, softness=.4))
+        band.effects.append(_effect("drop_shadow", distance=9.0, angle=52.0, blur=12.0, opacity=.5))
+    if style == "brush":
+        band.transform.rotation.default = -3.0
+        band.effects.append(_effect("fractal_noise", amount=.2, scale=18.0, evolution=0.0))
+    if style == "liquid":
+        outer.effects.append(_effect("displacement", amount=7.0, scale=32.0, evolution=0.0))
+    if style == "3d":
+        band.effects.append(_effect("drop_shadow", distance=18.0, angle=45.0, blur=8.0, opacity=.62))
+    return layers
+
+
+def _build_popular_template_layers(
+    template_id: str,
+    width: int,
+    height: int,
+    controls: Mapping[str, Any],
+) -> list[MotionLayer]:
+    spec = POPULAR_TEMPLATE_BY_ID[template_id]
+    category = str(spec["category"])
+    style = str(spec["style"])
+    duration = int(controls["duration_ms"])
+    headline = str(controls["headline"])
+    subtitle = str(controls["subtitle"])
+    accent = str(controls["accent_color"])
+    surface = str(controls["surface_color"])
+    landscape = width >= height
+    title_size = max(38.0, min(width, height) * (.078 if landscape else .062))
+    layers: list[MotionLayer] = []
+
+    background = _shape(
+        "Background",
+        width,
+        height,
+        width * .5,
+        height * .5,
+        surface,
+        duration,
+        role="background",
+    )
+    background.behaviors.append(_behavior("fade", duration, direction="in", hold_after=True))
+    background.metadata["popular_template_style"] = style
+    layers.append(background)
+
+    if category == "Logo Reveals":
+        texture = _image(
+            "Replaceable Brand Backdrop",
+            str(controls.get("background_image") or ""),
+            width,
+            height,
+            width * .5,
+            height * .5,
+            duration,
+            role="background_media",
+        )
+        texture.metadata.update({"replaceable": "background_image", "demo_media": True})
+        texture.transform.opacity.default = .34 if style in {"neon", "smoke"} else .72
+        layers.append(texture)
+        layers.extend(_logo_badge_layers(
+            template_id=template_id,
+            style=style,
+            width=width,
+            height=height,
+            duration=duration,
+            headline=headline,
+            subtitle=subtitle,
+            accent=accent,
+        ))
+    elif category == "Lower Thirds":
+        plate_w = width * (.64 if landscape else .88)
+        plate_h = height * (.18 if landscape else .12)
+        x = width * (.07 if landscape else .06) + plate_w * .5
+        y = height - height * .08 - plate_h * .5
+        plate = _shape("Lower Third Surface", plate_w, plate_h, x, y, "#17212bcc",
+                       duration, role="surface")
+        plate.behaviors.append(_behavior(
+            "slide" if style not in {"glitch", "dynamic"} else "impact",
+            duration,
+            direction="in",
+            distance=[-width * .16, 0],
+            hold_after=True,
+        ))
+        accent_bar = _shape("Accent", max(8, width * .008), plate_h, x - plate_w * .5,
+                            y, accent, duration, role="accent")
+        layers.extend([
+            plate,
+            accent_bar,
+            _text("Headline", headline, x - plate_w * .42, y - plate_h * .15,
+                  title_size * .48, "#ffffff", duration, role="headline"),
+            _text("Subtitle", subtitle, x - plate_w * .42, y + plate_h * .23,
+                  title_size * .23, "#b8c1cc", duration, role="subtitle"),
+        ])
+    elif category == "Titles & Typography":
+        title = _text("Headline", headline, width * .5, height * .46, title_size,
+                      "#ffffff", duration, role="headline", align="center")
+        title.source.params["text_animation"].update({
+            "in": "typewriter-in" if style == "typewriter" else (
+                "pop-in" if style in {"pop", "kinetic", "glitch"} else "slide-up-in"
+            ),
+            "unit": "character" if style in {"typewriter", "wave", "split", "kinetic"} else "word",
+            "stagger_ms": 45 if style in {"kinetic", "wave"} else 70,
+        })
+        title.behaviors.append(_behavior("impact" if style in {"glitch", "kinetic"} else "slide",
+                                         duration, direction="in", distance=[0, height * .08],
+                                         hold_after=True))
+        accent_line = _shape("Title Accent", width * .36, max(5, height * .008),
+                             width * .5, height * .61, accent, duration, role="accent")
+        accent_line.behaviors.append(_behavior("scale", duration, **{"from": .04, "hold_after": True}))
+        layers.extend([
+            accent_line,
+            title,
+            _text("Subtitle", subtitle, width * .5, height * .70, title_size * .26,
+                  "#bac5cf", duration, role="subtitle", align="center"),
+        ])
+    elif category == "Transitions":
+        scene_a = _shape("Scene A", width, height, width * .5, height * .5,
+                         "#22303d", duration, role="media_slot")
+        scene_b = _shape("Scene B", width, height, width * .5, height * .5,
+                         "#34495e", duration, role="media_slot")
+        scene_a.metadata["replaceable"] = "outgoing_media"
+        scene_b.metadata["replaceable"] = "incoming_media"
+        wipe_vertical = style == "vertical"
+        wipe = _shape(
+            "Transition Matte",
+            width * (1.35 if not wipe_vertical else 1.0),
+            height * (1.0 if not wipe_vertical else 1.35),
+            width * (-.2 if not wipe_vertical else .5),
+            height * (.5 if not wipe_vertical else -.2),
+            accent,
+            duration,
+            shape="ellipse" if style in {"liquid", "ink", "zoom"} else "rectangle",
+            role="transition_matte",
+        )
+        transition_behavior = {
+            "spin": "wiggle",
+            "zoom": "scale",
+            "shake": "wiggle",
+        }.get(style, "slide")
+        wipe.behaviors.append(_behavior(
+            transition_behavior,
+            duration,
+            direction="in",
+            distance=[width * 1.4 if not wipe_vertical else 0, height * 1.4 if wipe_vertical else 0],
+            hold_after=True,
+        ))
+        layers.extend([
+            scene_a,
+            scene_b,
+            wipe,
+            _text("Headline", headline, width * .5, height * .48, title_size * .55,
+                  "#ffffff", duration, role="headline", align="center"),
+        ])
+    elif category in {"Intros & Openers", "Slideshows"}:
+        scene_count = int(spec["scene_count"])
+        scene_duration = max(1, duration // scene_count)
+        for index in range(scene_count):
+            start = index * scene_duration
+            end = duration if index == scene_count - 1 else (index + 1) * scene_duration
+            local_duration = end - start
+            columns = 2 if style == "grid" else 1
+            slot_w = width * (.40 if columns == 2 else (.62 if landscape else .84))
+            slot_h = height * (.58 if landscape else .48)
+            slot_x = width * (.30 + (index % columns) * .42) if columns == 2 else width * .5
+            slot = _shape(
+                f"Media {index + 1}",
+                slot_w,
+                slot_h,
+                slot_x,
+                height * .49,
+                "#273440",
+                local_duration,
+                role="media_slot",
+            )
+            slot.source.params.update({"stroke": f"{accent[:7]}99", "stroke_width": 3})
+            slot.behaviors.append(_behavior(
+                "scale" if style in {"ken_burns", "3d", "parallax"} else "slide",
+                local_duration,
+                **({"from": .84, "hold_after": True} if style in {"ken_burns", "3d", "parallax"}
+                   else {"direction": "in", "distance": [width * .08, 0], "hold_after": True}),
+            ))
+            _scene_layer(slot, start_ms=start, end_ms=end, scene_index=index + 1,
+                         scene_name=f"Scene {index + 1}")
+            layers.append(slot)
+        layers.extend([
+            _text("Headline", headline, width * .5, height * .16, title_size * .72,
+                  "#ffffff", duration, role="headline", align="center"),
+            _text("Subtitle", subtitle, width * .5, height * .84, title_size * .25,
+                  accent, duration, role="subtitle", align="center"),
+        ])
+    elif category == "Infographics & Data":
+        layers.extend([
+            _text("Headline", headline, width * .08, height * .14, title_size * .62,
+                  "#ffffff", duration, role="headline"),
+            _text("Subtitle", subtitle, width * .08, height * .23, title_size * .24,
+                  "#b8c1cc", duration, role="subtitle"),
+        ])
+        for index, value in enumerate((.42, .68, .88)):
+            x = width * (.25 + index * .25)
+            bar_h = height * value * .48
+            bar = _shape(f"Data Bar {index + 1}", width * .11, bar_h, x,
+                         height * .74 - bar_h * .5, accent if index == 2 else "#45647a",
+                         duration, role="data_series")
+            bar.behaviors.append(_behavior("scale", duration, **{"from": .02, "hold_after": True}))
+            bar.metadata["data_value"] = int(value * 100)
+            layers.append(bar)
+            layers.append(_text(
+                f"Value {index + 1}",
+                f"{int(value * 100)}%",
+                x,
+                height * .80,
+                title_size * .28,
+                "#ffffff",
+                duration,
+                role="data_label",
+                align="center",
+            ))
+    elif category == "Social Media & YouTube":
+        safe_w = width * (.78 if landscape else .88)
+        card = _shape("Platform Safe Area", safe_w, height * .66, width * .5, height * .48,
+                      "#202d39", duration, role="media_slot")
+        card.behaviors.append(_behavior("pop", duration, **{"from": .9, "overshoot": .05, "hold_after": True}))
+        cta = _shape("CTA Button", safe_w * .42, height * .09, width * .5,
+                     height * .78, accent, duration, role="cta_button")
+        cta.behaviors.append(_behavior("pulse", duration, amount=.08, hold_after=True))
+        layers.extend([
+            card,
+            cta,
+            _text("Headline", headline, width * .5, height * .24, title_size * .68,
+                  "#ffffff", duration, role="headline", align="center"),
+            _text("Subtitle", subtitle, width * .5, height * .55, title_size * .25,
+                  "#c7d0d8", duration, role="subtitle", align="center"),
+            _text("CTA Label", "WATCH NOW", width * .5, height * .78, title_size * .25,
+                  "#07110f", duration, role="cta_label", align="center"),
+        ])
+    else:
+        if style == "countdown":
+            center = _shape("Countdown Ring", min(width, height) * .38, min(width, height) * .38,
+                            width * .5, height * .5, accent, duration, shape="ellipse",
+                            role="countdown")
+            center.behaviors.append(_behavior("pulse", duration, amount=.12, hold_after=True))
+            layers.append(center)
+        else:
+            band = _shape("Essential Overlay", width * .82, height * .22, width * .5,
+                          height * .72, f"{accent[:7]}bb", duration, role="overlay")
+            band.behaviors.append(_behavior("slide", duration, direction="in",
+                                            distance=[0, height * .18], hold_after=True))
+            layers.append(band)
+        layers.extend([
+            _text("Headline", headline, width * .5, height * .43, title_size * .72,
+                  "#ffffff", duration, role="headline", align="center"),
+            _text("Subtitle", subtitle, width * .5, height * .56, title_size * .26,
+                  "#d3dae0", duration, role="subtitle", align="center"),
+        ])
+
+    for layer in layers:
+        layer.metadata.setdefault("popular_template_category", category)
+        layer.metadata.setdefault("popular_template_style", style)
+    return layers
+
+
 def _build_layers(template_id: str, width: int, height: int, controls: Mapping[str, Any]) -> list[MotionLayer]:
     duration = int(controls["duration_ms"])
     headline, subtitle = controls["headline"], controls["subtitle"]
@@ -997,6 +2079,8 @@ def _build_layers(template_id: str, width: int, height: int, controls: Mapping[s
     safe_x, safe_y = width * .07, height * .08
     title_size = max(42.0, min(width, height) * (.09 if landscape else .075))
     layers: list[MotionLayer] = []
+    if is_popular_template(template_id):
+        return _build_popular_template_layers(template_id, width, height, controls)
     if is_trend_template(template_id):
         return build_trend_template_layers(template_id, width, height, controls)
     if template_id in _PRODUCTION_STORYBOARDS:
@@ -1006,6 +2090,275 @@ def _build_layers(template_id: str, width: int, height: int, controls: Mapping[s
             height,
             controls,
         )
+    if template_id in {
+        "product_callout",
+        "studio_city_after_rain",
+        "studio_artisan_coffee",
+        "studio_alpine_journal",
+    }:
+        image = _image(
+            "Hero Photograph",
+            str(controls["background_image"]),
+            width,
+            height,
+            width * .5,
+            height * .5,
+            duration,
+        )
+        image.behaviors.append(
+            _behavior(
+                "scale",
+                duration,
+                **{
+                    "from": 1.08 if template_id != "studio_alpine_journal" else 1.12,
+                    "hold_after": True,
+                },
+            )
+        )
+        shade = _shape(
+            "Photographic Shade",
+            width,
+            height,
+            width * .5,
+            height * .5,
+            "#b305080d",
+            duration,
+            role="photo_overlay",
+        )
+        if template_id == "studio_alpine_journal":
+            text_x = width * (.58 if landscape else .12)
+            text_y = height * (.34 if landscape else .24)
+            align = "left"
+            shade.source.params["fill"] = "#66101923"
+        else:
+            text_x = width * (.075 if landscape else .09)
+            text_y = height * (.36 if landscape else .22)
+            align = "left"
+        accent_line = _shape(
+            "Editorial Rule",
+            width * (.18 if landscape else .34),
+            max(5.0, height * .007),
+            text_x + width * (.09 if landscape else .17),
+            text_y - title_size * .82,
+            accent,
+            duration,
+            role="accent",
+        )
+        accent_line.behaviors.append(
+            _behavior("scale", duration, **{"from": .04, "hold_after": True})
+        )
+        kicker = _text(
+            "Editorial Kicker",
+            subtitle,
+            text_x,
+            text_y - title_size * .52,
+            title_size * .23,
+            accent,
+            duration,
+            role="subtitle",
+            align=align,
+        )
+        title = _text(
+            "Campaign Headline",
+            headline,
+            text_x,
+            text_y,
+            title_size * (.88 if landscape else .72),
+            "#ffffff",
+            duration,
+            role="headline",
+            align=align,
+        )
+        title.source.params["font_weight"] = 800
+        title.source.params["text_animation"].update(
+            {"in": "slide-up-in", "unit": "word", "stagger_ms": 95}
+        )
+        if template_id != "studio_alpine_journal" or not landscape:
+            kicker.transform.anchor.default = [0.0, 0.5]
+            title.transform.anchor.default = [0.0, 0.5]
+        cta_width = width * (.24 if landscape else .56)
+        cta_height = max(54.0, height * .065)
+        cta_x = text_x + cta_width * .5
+        cta_y = text_y + title_size * (1.45 if landscape else 1.2)
+        cta_plate = _shape(
+            "Campaign CTA",
+            cta_width,
+            cta_height,
+            cta_x,
+            cta_y,
+            f"#d9{surface.lstrip('#')[:6]}",
+            duration,
+            role="cta_button",
+        )
+        cta_plate.source.params.update(
+            {
+                "radius": min(width, height) * .008,
+                "stroke": f"#cc{accent.lstrip('#')[:6]}",
+                "stroke_width": max(2.0, min(width, height) * .002),
+            }
+        )
+        cta_plate.behaviors.append(
+            _behavior("slide", duration, direction="in", distance=[0, height * .05], hold_after=True)
+        )
+        cta_label = _text(
+            "CTA Label",
+            str(controls["cta"]),
+            cta_x,
+            cta_y,
+            title_size * .19,
+            "#ffffff",
+            duration,
+            role="cta_label",
+            align="center",
+        )
+        layers.extend([image, shade, accent_line, kicker, title, cta_plate, cta_label])
+        return layers
+    if template_id == "paper_crumple_unfold":
+        from app.motion_designer.paper_crumple import (
+            make_crumple_unfold_effect,
+        )
+
+        paper = str(controls["paper_color"])
+        ink = str(controls["ink_color"])
+        peak = max(1, int(duration * 0.28))
+        hold = max(0, int(duration * 0.12))
+        unfold = max(1, duration - peak - hold)
+        crumple_effect = make_crumple_unfold_effect(
+            start_ms=0,
+            crumple_duration_ms=peak,
+            hold_duration_ms=hold,
+            unfold_duration_ms=unfold,
+            seed=53,
+            residual_wrinkle=0.13,
+        )
+        crumple_effect.params["crease_density"].default = 12.0
+        crumple_effect.params["sharpness"].default = 18.0
+        crumple_effect.params["depth"].default = 80.0
+        group = MotionLayer(
+            name="Printed Paper Group",
+            layer_type="group",
+            out_ms=duration,
+            effects=[crumple_effect],
+            metadata={
+                "template_role": "paper_group",
+                "effect_group": {
+                    "enabled": True,
+                    "mode": "descendants",
+                    "layer_ids": [],
+                },
+                "motion_blur": {
+                    "enabled": True,
+                    "samples": 8,
+                    "shutter": 0.64,
+                },
+            },
+        )
+        group.transform.position.default = [width * 0.5, height * 0.5]
+        settle = max(peak + hold, duration - min(180, max(1, unfold // 3)))
+        rebound = max(settle, duration - min(70, max(1, unfold // 8)))
+        group.transform.scale = _keyframed(
+            [1.0, 1.0],
+            "vector2",
+            [
+                (0, [1.0, 1.0], "bezier"),
+                (peak, [0.62, 0.62], "bezier"),
+                (peak + hold, [0.62, 0.62], "bezier"),
+                (settle, [1.0, 1.0], "bezier"),
+                (rebound, [1.035, 0.975], "bezier"),
+                (duration, [1.0, 1.0], "bezier"),
+            ],
+        )
+        group.transform.rotation = _keyframed(
+            0.0,
+            "scalar",
+            [
+                (0, -1.0, "bezier"),
+                (peak, 5.5, "bezier"),
+                (peak + hold, 5.5, "bezier"),
+                (settle, -0.8, "bezier"),
+                (duration, 0.0, "bezier"),
+            ],
+        )
+        paper_width = width * (0.64 if landscape else 0.82)
+        paper_height = height * (0.58 if landscape else 0.46)
+        shadow = _shape(
+            "Paper Shadow",
+            paper_width,
+            paper_height,
+            width * 0.5 + width * 0.018,
+            height * 0.5 + height * 0.026,
+            "#00000066",
+            duration,
+            role="shadow",
+        )
+        shadow.transform.scale = _keyframed(
+            [1.0, 1.0],
+            "vector2",
+            [
+                (0, [1.0, 1.0], "bezier"),
+                (peak, [0.66, 0.66], "bezier"),
+                (peak + hold, [0.66, 0.66], "bezier"),
+                (settle, [1.0, 1.0], "bezier"),
+                (duration, [1.0, 1.0], "bezier"),
+            ],
+        )
+        sheet = _shape(
+            "Paper Sheet",
+            paper_width,
+            paper_height,
+            0.0,
+            0.0,
+            paper,
+            duration,
+            role="paper_sheet",
+        )
+        sheet.parent_id = group.id
+        sheet.source.params.update({
+            "stroke": f"{accent[:7]}aa",
+            "stroke_width": max(2.0, min(width, height) * 0.004),
+        })
+        headline_layer = _text(
+            "Printed Headline",
+            headline,
+            0.0,
+            -paper_height * 0.08,
+            title_size * 0.72,
+            ink,
+            duration,
+            role="headline",
+            align="center",
+        )
+        headline_layer.parent_id = group.id
+        subtitle_layer = _text(
+            "Printed Subtitle",
+            subtitle,
+            0.0,
+            paper_height * 0.18,
+            title_size * 0.25,
+            accent,
+            duration,
+            role="subtitle",
+            align="center",
+        )
+        subtitle_layer.parent_id = group.id
+        layers.extend([
+            _shape(
+                "Background",
+                width,
+                height,
+                width * 0.5,
+                height * 0.5,
+                surface,
+                duration,
+                role="background",
+            ),
+            shadow,
+            group,
+            sheet,
+            headline_layer,
+            subtitle_layer,
+        ])
+        return layers
     if template_id == "learn_keyframes_graph":
         background = _shape("Tutorial Background", width, height, width * .5, height * .5,
                             surface, duration, role="background")
@@ -1205,7 +2558,31 @@ def _build_layers(template_id: str, width: int, height: int, controls: Mapping[s
             _text("Headline", headline, x - plate_width * .4, y - plate_height * .14, title_size * .55, "#ffffff", duration, role="headline"),
             _text("Subtitle", subtitle, x - plate_width * .4, y + plate_height * .22, title_size * .26, "#b8c1cc", duration, role="subtitle"),
         ])
-    elif template_id in {"logo_reveal", "music_beat_title"}:
+    elif template_id == "logo_reveal":
+        texture = _image(
+            "Replaceable Brand Backdrop",
+            str(controls.get("background_image") or ""),
+            width,
+            height,
+            width * .5,
+            height * .5,
+            duration,
+            role="background_media",
+        )
+        texture.metadata.update({"replaceable": "background_image", "demo_media": True})
+        texture.transform.opacity.default = .72
+        layers.append(texture)
+        layers.extend(_logo_badge_layers(
+            template_id=template_id,
+            style="clean",
+            width=width,
+            height=height,
+            duration=duration,
+            headline=headline,
+            subtitle=subtitle,
+            accent=accent,
+        ))
+    elif template_id == "music_beat_title":
         center = (width * .5, height * .5)
         ring = _shape("Reveal Mark", min(width, height) * .3, min(width, height) * .3,
                       *center, accent, duration, shape="ellipse", role="accent")
@@ -1231,20 +2608,6 @@ def _build_layers(template_id: str, width: int, height: int, controls: Mapping[s
         particles.blend_mode = "screen"
         layers.extend([wipe, particles, _text("Headline", headline, width * .5, height * .5, title_size,
                                               "#ffffff", duration, role="headline", align="center")])
-    elif template_id == "product_callout":
-        card_width, card_height = width * (.38 if landscape else .78), height * .52
-        x, y = width - safe_x - card_width * .5, height * .5
-        plate = _shape("Callout", card_width, card_height, x, y, surface, duration, role="surface")
-        plate.behaviors.append(_behavior("slide", duration, direction="in", distance=[width * .15, 0], hold_after=True))
-        layers.extend([
-            plate,
-            _shape("Product Window", card_width * .78, card_height * .42, x, y - card_height * .18,
-                   "#26313c", duration, role="media_slot"),
-            _text("Headline", headline, x - card_width * .39, y + card_height * .15, title_size * .52,
-                  "#ffffff", duration, role="headline"),
-            _text("Subtitle", subtitle, x - card_width * .39, y + card_height * .31, title_size * .28,
-                  accent, duration, role="subtitle"),
-        ])
     else:
         vertical = template_id == "vertical_shorts_hook"
         x = width * (.5 if vertical else .12)
@@ -1300,6 +2663,14 @@ def apply_template_to_composition(composition: MotionComposition, template_id: s
             if layer.id not in removed and layer.parent_id not in removed
         ]
     layers = _build_layers(template.id, candidate.width, candidate.height, values)
+    layers = _decorate_template_with_demo_media(
+        template,
+        layers,
+        width=candidate.width,
+        height=candidate.height,
+        duration=int(values["duration_ms"]),
+        controls=values,
+    )
     instance_id = new_motion_id("template_instance")
     id_map = {layer.id: new_motion_id("layer") for layer in layers}
     for index, layer in enumerate(layers):

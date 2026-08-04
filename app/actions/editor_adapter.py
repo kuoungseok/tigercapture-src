@@ -42,6 +42,7 @@ from app.actions.editor_adapter_motion_broadcast import MotionBroadcastAdapterMi
 from app.actions.editor_adapter_motion_export import MotionExportAdapterMixin
 from app.actions.editor_adapter_motion_umg import MotionUMGAdapterMixin
 from app.actions.editor_adapter_motion_interchange import MotionInterchangeAdapterMixin
+from app.actions.editor_adapter_motion_aep import MotionAepAdapterMixin
 from app.actions.editor_adapter_motion_release import MotionReleaseAdapterMixin
 from app.actions.editor_adapter_motion_relink import MotionRelinkAdapterMixin
 from app.actions.editor_adapter_motion_recovery import MotionRecoveryAdapterMixin
@@ -72,6 +73,7 @@ class EditorAdapter(
     MotionRecoveryAdapterMixin,
     MotionRelinkAdapterMixin,
     MotionReleaseAdapterMixin,
+    MotionAepAdapterMixin,
     MotionInterchangeAdapterMixin,
     MotionExportAdapterMixin,
     MotionBroadcastAdapterMixin,

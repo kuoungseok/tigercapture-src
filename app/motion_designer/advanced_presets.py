@@ -6,12 +6,14 @@ from typing import Iterable
 from .ar_pbr_source import create_camera_layer
 from .cut_paper import build_cut_paper_rig
 from .paper_composite import build_paper_paste_rig
+from .paper_crumple import make_crumple_unfold_effect
 from .schema import AnimatedProperty, Keyframe, MotionBehaviorRef, MotionComposition, MotionLayer
 
 
 ADVANCED_PRESETS = {
     "headline_slam",
     "paper_rip_reveal",
+    "paper_crumple_unfold",
     "cutout_collage",
     "editorial_camera_push",
     "beat_synced_montage",
@@ -82,6 +84,20 @@ def apply_advanced_preset(
         insert_at = composition.layers.index(source) + 1
         composition.layers[insert_at:insert_at] = rig.layers
         added.extend(rig.layers)
+    elif preset == "paper_crumple_unfold":
+        if not layers:
+            raise ValueError("paper crumple and unfold requires a source layer")
+        for index, layer in enumerate(layers):
+            effect = make_crumple_unfold_effect(
+                start_ms=start + index * 120,
+                seed=17.0 + index * 31.0,
+            )
+            layer.effects.append(effect)
+            layer.metadata["motion_blur"] = {
+                "enabled": True,
+                "samples": 8,
+                "shutter": 0.64,
+            }
     elif preset == "cutout_collage":
         for index, layer in enumerate(layers):
             layer.metadata["depth_z"] = -1.6 + index * 0.42

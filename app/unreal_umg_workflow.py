@@ -72,6 +72,15 @@ payload = {{
     "imported_asset_paths": [
         str(item) for item in (read_property(result, "imported_asset_paths") or [])
     ],
+    "generated_material_paths": [
+        str(item) for item in (read_property(result, "generated_material_paths") or [])
+    ],
+    "generated_widget_classes": {{
+        str(key): str(value)
+        for key, value in dict(
+            read_property(result, "generated_widget_classes") or {{}}
+        ).items()
+    }},
     "warnings": [str(item) for item in (read_property(result, "warnings") or [])],
     "errors": [str(item) for item in (read_property(result, "errors") or [])],
 }}

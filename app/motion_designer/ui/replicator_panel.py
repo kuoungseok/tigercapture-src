@@ -25,6 +25,7 @@ class ReplicatorPanel(QWidget):
         self.setObjectName("MotionReplicatorPanel")
         self._loading = False
         self._layer_id = ""
+        self._extra: dict = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         self.scroll = QScrollArea(self)
@@ -37,8 +38,13 @@ class ReplicatorPanel(QWidget):
         form.setSpacing(6)
 
         self.enabled = QCheckBox("Enabled", content)
+        self.enabled.setToolTip(
+            "Tiger Repeater v2: deterministic line, grid, radial, spiral, or path copies."
+        )
         self.arrangement = QComboBox(content)
-        self.arrangement.addItems(("line", "grid", "radial"))
+        self.arrangement.addItems(("line", "grid", "radial", "spiral", "path"))
+        self.order = QComboBox(content)
+        self.order.addItems(("normal", "reverse", "random"))
         self.count = self._int(1, 256)
         self.columns = self._int(1, 256)
         self.offset_x = self._double(-10000, 10000, 1)
@@ -51,9 +57,13 @@ class ReplicatorPanel(QWidget):
         self.jitter_x = self._double(0, 5000, 1)
         self.jitter_y = self._double(0, 5000, 1)
         self.seed = self._int(-2147483647, 2147483647)
+        self.sequence_offset = self._double(0, 600000, 10)
+        self.sequence_fade = self._double(0, 600000, 10)
+        self.turns = self._double(-100, 100, .25)
         for label, control in (
             ("", self.enabled),
             ("Arrangement", self.arrangement),
+            ("Copy Order", self.order),
             ("Copies", self.count),
             ("Columns", self.columns),
             ("Offset X / Radius", self.offset_x),
@@ -66,6 +76,9 @@ class ReplicatorPanel(QWidget):
             ("Jitter X", self.jitter_x),
             ("Jitter Y", self.jitter_y),
             ("Random Seed", self.seed),
+            ("Stagger / copy (ms)", self.sequence_offset),
+            ("Reveal Fade (ms)", self.sequence_fade),
+            ("Spiral Turns", self.turns),
         ):
             form.addRow(label, control)
         self.scroll.setWidget(content)
@@ -73,6 +86,7 @@ class ReplicatorPanel(QWidget):
 
         self.enabled.toggled.connect(self._emit)
         self.arrangement.currentTextChanged.connect(self._emit)
+        self.order.currentTextChanged.connect(self._emit)
         for control in (
             self.count,
             self.columns,
@@ -86,6 +100,9 @@ class ReplicatorPanel(QWidget):
             self.jitter_x,
             self.jitter_y,
             self.seed,
+            self.sequence_offset,
+            self.sequence_fade,
+            self.turns,
         ):
             control.valueChanged.connect(self._emit)
         self.setEnabled(False)
@@ -108,16 +125,19 @@ class ReplicatorPanel(QWidget):
         })
         self.setEnabled(active)
         self._layer_id = layer.id if active and layer is not None else ""
+        self._extra = {}
         if not active or layer is None:
             return
         self._loading = True
         config = layer.metadata.get("replicator")
         config = config if isinstance(config, Mapping) else {}
+        self._extra = dict(config)
         offset = list(config.get("offset") or [80.0, 0.0])
         scale = list(config.get("scale") or [1.0, 1.0])
         jitter = list(config.get("jitter") or [0.0, 0.0])
         self.enabled.setChecked(bool(config.get("enabled", False)))
         self.arrangement.setCurrentText(str(config.get("arrangement") or "line"))
+        self.order.setCurrentText(str(config.get("order") or "normal"))
         self.count.setValue(int(config.get("count", 5) or 5))
         self.columns.setValue(int(config.get("columns", 5) or 5))
         self.offset_x.setValue(float(offset[0] if offset else 80.0))
@@ -130,20 +150,28 @@ class ReplicatorPanel(QWidget):
         self.jitter_x.setValue(float(jitter[0] if jitter else 0.0))
         self.jitter_y.setValue(float(jitter[1] if len(jitter) > 1 else 0.0))
         self.seed.setValue(int(config.get("seed", 0) or 0))
+        self.sequence_offset.setValue(float(config.get("sequence_offset_ms", 0.0) or 0.0))
+        self.sequence_fade.setValue(float(config.get("sequence_fade_ms", 0.0) or 0.0))
+        self.turns.setValue(float(config.get("turns", 2.0) or 2.0))
         self._loading = False
         self._update_visibility()
 
     def _update_visibility(self) -> None:
         self.columns.setEnabled(self.arrangement.currentText() == "grid")
         self.offset_y.setEnabled(self.arrangement.currentText() != "radial")
+        self.turns.setEnabled(self.arrangement.currentText() == "spiral")
 
     def _emit(self, *_args) -> None:
         self._update_visibility()
         if self._loading or not self._layer_id:
             return
-        self.settings_changed.emit({
+        arrangement = self.arrangement.currentText()
+        payload = {
+            **self._extra,
+            "contract": "tiger_repeater_v2",
             "enabled": self.enabled.isChecked(),
-            "arrangement": self.arrangement.currentText(),
+            "arrangement": arrangement,
+            "order": self.order.currentText(),
             "count": self.count.value(),
             "columns": self.columns.value(),
             "offset": [self.offset_x.value(), self.offset_y.value()],
@@ -153,7 +181,16 @@ class ReplicatorPanel(QWidget):
             "opacity_end": self.opacity_end.value(),
             "jitter": [self.jitter_x.value(), self.jitter_y.value()],
             "seed": self.seed.value(),
-        })
+            "sequence_offset_ms": self.sequence_offset.value(),
+            "sequence_fade_ms": self.sequence_fade.value(),
+            "turns": self.turns.value(),
+        }
+        if arrangement == "path" and not payload.get("path_points"):
+            payload["path_points"] = [
+                [0.0, 0.0],
+                [self.offset_x.value(), self.offset_y.value()],
+            ]
+        self.settings_changed.emit(payload)
 
 
 __all__ = ["ReplicatorPanel"]

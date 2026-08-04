@@ -140,6 +140,7 @@ def plan_motion_choreography(
     prompt: str = "",
     motion_style: str = "",
     audio_hits_ms: Sequence[int] = (),
+    max_simultaneous_motion: int = 3,
 ) -> MotionChoreographyPlan:
     variant = infer_motion_variant(
         requested=requested_variant,
@@ -173,9 +174,11 @@ def plan_motion_choreography(
         },
     }
     profile = profiles[variant]
+    camera_direction_length = math.hypot(1.0, 0.5)
     camera_travel = min(
         float(profile["camera"]),
-        max(0.0, min(0.12, float(max_camera_travel_ratio))),
+        max(0.0, min(0.12, float(max_camera_travel_ratio)))
+        / camera_direction_length,
     )
     camera = CameraMotionCue(
         end_offset_ratio=(-camera_travel, camera_travel * 0.5),
@@ -282,6 +285,24 @@ def plan_motion_choreography(
     warnings: list[str] = []
     if len(independent) > 1 and len(signatures) == 1:
         warnings.append("Independent layers received identical motion signatures.")
+    limit = max(1, int(max_simultaneous_motion))
+    active: list[int] = []
+    for cue in sorted(independent, key=lambda item: (item.start_ms, item.element_id)):
+        active = [value for value in active if value > cue.start_ms]
+        if len(active) >= limit:
+            original_duration = max(1, cue.settle_ms - cue.start_ms)
+            cue.start_ms = min(active)
+            cue.settle_ms = min(
+                max(1, int(duration_ms) - 1),
+                cue.start_ms + original_duration,
+            )
+            active = [value for value in active if value > cue.start_ms]
+        active.append(cue.settle_ms)
+    if any(
+        sum(row.start_ms <= time_ms < row.settle_ms for row in independent) > limit
+        for time_ms in sorted({row.start_ms for row in independent})
+    ):
+        warnings.append("Simultaneous motion limit could not be satisfied within the shot duration.")
     return MotionChoreographyPlan(
         variant=variant,
         camera=camera,

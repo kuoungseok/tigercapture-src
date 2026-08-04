@@ -14,6 +14,8 @@ class MotionToolbar(QToolBar):
     open_project_requested = Signal()
     save_project_requested = Signal()
     save_project_as_requested = Signal()
+    open_package_requested = Signal()
+    export_package_requested = Signal()
     add_layer_requested = Signal(str)
     behavior_requested = Signal(str)
     effect_requested = Signal(str)
@@ -69,6 +71,16 @@ class MotionToolbar(QToolBar):
         self.save_as_action = QAction("Save As", self)
         self.save_as_action.setShortcut("Ctrl+Shift+S")
         self.save_as_action.triggered.connect(self.save_project_as_requested)
+        self.open_package_action = QAction("Open Portable Package", self)
+        self.open_package_action.setToolTip(
+            "Verify and open a .tgmotionpkg project with embedded resources"
+        )
+        self.open_package_action.triggered.connect(self.open_package_requested)
+        self.export_package_action = QAction("Export Portable Package", self)
+        self.export_package_action.setToolTip(
+            "Collect the Motion project and local resources into one verified package"
+        )
+        self.export_package_action.triggered.connect(self.export_package_requested)
         file_button = QToolButton(self)
         file_button.setText("File")
         file_button.setIcon(style.standardIcon(QStyle.SP_DialogOpenButton))
@@ -78,6 +90,9 @@ class MotionToolbar(QToolBar):
         file_menu.addAction(self.open_action)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.open_package_action)
+        file_menu.addAction(self.export_package_action)
         file_button.setMenu(file_menu)
         self.addWidget(file_button)
         self.parent_action = QAction(

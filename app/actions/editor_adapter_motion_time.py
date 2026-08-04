@@ -148,6 +148,49 @@ class MotionTimeAdapterMixin:
         self._motion_sync_owner()
         return result.to_dict()
 
+    def motion_graph_spatial_tangent_update(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        property_name: str,
+        keyframe_id: str,
+        mode: str = "auto",
+        in_tangent: Sequence[float] | None = None,
+        out_tangent: Sequence[float] | None = None,
+    ) -> dict[str, Any]:
+        from app.motion_designer.graph_editing import update_keyframe_spatial_tangent
+        from app.motion_designer.schema import MotionLayer
+
+        service = self._motion_service()
+        composition = service.get(composition_id)
+        layer = next((row for row in composition.layers if row.id == layer_id), None)
+        if layer is None:
+            raise ValueError(f"Unknown layer: {layer_id}")
+        candidate = MotionLayer.from_dict(layer.to_dict())
+        keyframe = update_keyframe_spatial_tangent(
+            candidate,
+            property_name,
+            keyframe_id,
+            mode=mode,
+            in_tangent=in_tangent,
+            out_tangent=out_tangent,
+        )
+        result = service.update_layer(
+            composition_id,
+            layer_id,
+            {
+                "transform": candidate.transform.to_dict(),
+                "source": candidate.source.to_dict(),
+                "metadata": candidate.metadata,
+            },
+        )
+        result.undo_label = "Update Spatial Path Tangent"
+        result.payload["keyframe"] = keyframe
+        self._motion_commit(service)
+        self._motion_sync_owner()
+        return result.to_dict()
+
     def motion_time_remap_set(
         self,
         *,

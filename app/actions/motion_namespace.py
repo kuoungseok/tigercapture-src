@@ -315,7 +315,10 @@ def register_motion_actions(registry: Any) -> None:
             "keyframe_id": {"type": "string"},
             "mode": {
                 "type": "string",
-                "enum": ["auto", "continuous", "broken", "linear", "hold"],
+                "enum": [
+                    "standard_auto", "continuous", "broken", "tiger_smooth",
+                    "auto", "linear", "hold",
+                ],
             },
             "in_tangent": {
                 "type": "array",
@@ -363,6 +366,24 @@ def register_motion_actions(registry: Any) -> None:
         dry_summary="Selected keyframes would be redistributed in time",
     )
     registry.register_adapter_action(
+        "motion.graph.spatial_tangent.update",
+        "Update Position spatial Bezier path tangents independently of temporal easing.",
+        "motion",
+        "motion_graph_spatial_tangent_update",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "property_name": {"type": "string"},
+            "keyframe_id": {"type": "string"},
+            "mode": {"type": "string", "enum": ["auto", "continuous", "broken", "linear"]},
+            "in_tangent": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 3},
+            "out_tangent": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 3},
+        }, required=("composition_id", "layer_id", "property_name", "keyframe_id")),
+        required=("composition_id", "layer_id", "property_name", "keyframe_id"),
+        undo_label="Update Spatial Path Tangent",
+        dry_summary="Position motion-path tangent would be updated",
+    )
+    registry.register_adapter_action(
         "motion.project.save", "Save a composition as an independent .tgmotion project.",
         "motion", "motion_project_save",
         params_schema=schema_object({
@@ -380,6 +401,31 @@ def register_motion_actions(registry: Any) -> None:
         required=("path",), mutating=True, changed=True,
         undo_label="Load Motion Project",
         dry_summary="The Motion project would be validated and loaded",
+    )
+    registry.register_adapter_action(
+        "motion.package.export", "Export a portable Motion project with embedded assets.",
+        "motion", "motion_package_export",
+        params_schema=schema_object({**cid, "path": {"type": "string"}},
+                                    required=("composition_id", "path")),
+        required=("composition_id", "path"), mutating=False, changed=False,
+        dry_summary="A hash-verified portable Motion package would be written",
+    )
+    registry.register_adapter_action(
+        "motion.package.inspect", "Inspect and verify a portable Motion package.",
+        "motion", "motion_package_inspect",
+        params_schema=schema_object({"path": {"type": "string"}}, required=("path",)),
+        required=("path",), mutating=False, changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.package.load", "Verify, extract, and load a portable Motion package.",
+        "motion", "motion_package_load",
+        params_schema=schema_object({
+            "path": {"type": "string"}, "extract_dir": {"type": "string"},
+            "replace_existing": {"type": "boolean"},
+        }, required=("path", "extract_dir")),
+        required=("path", "extract_dir"), mutating=True, changed=True,
+        undo_label="Load Motion Package",
+        dry_summary="The package would be verified, extracted, and loaded",
     )
     registry.register_adapter_action(
         "motion.layer.list", "List layers in a Motion Designer composition.", "motion", "motion_layer_list",
@@ -938,19 +984,37 @@ def register_motion_actions(registry: Any) -> None:
             "motion.blur.set", "motion_blur_set",
             {**lid, "enabled": {"type": "boolean"},
              "samples": {"type": "integer", "minimum": 2, "maximum": 32},
-             "shutter": {"type": "number", "minimum": 0, "maximum": 2}},
+             "mode": {"type": "string", "enum": [
+                 "temporal_shutter_samples_v1", "fast_translation_vector_blur_v1",
+             ]},
+             "shutter_angle": {"type": "number", "minimum": 0, "maximum": 720},
+             "shutter_phase": {"type": "number", "minimum": -720, "maximum": 720},
+             "shutter": {
+                 "type": "number", "minimum": 0, "maximum": 2,
+                 "description": (
+                     "Legacy key for the Fast Translation Vector Blur length multiplier; "
+                     "not shutter angle or phase."
+                 ),
+             }},
             ("composition_id", "layer_id"),
         ),
         (
             "motion.replicator.set", "motion_replicator_set",
             {**lid, "enabled": {"type": "boolean"},
-             "arrangement": {"type": "string", "enum": ["line", "grid", "radial"]},
+             "arrangement": {
+                 "type": "string", "enum": ["line", "grid", "radial", "spiral", "path"],
+                 "description": "Tiger Repeater v2 arrangement.",
+             },
              "count": {"type": "integer", "minimum": 1, "maximum": 256},
              "columns": {"type": "integer", "minimum": 1, "maximum": 256},
              "offset": {"type": "array"}, "rotation": {"type": "number"},
              "scale": {"type": "array"}, "opacity_start": {"type": "number"},
              "opacity_end": {"type": "number"}, "jitter": {"type": "array"},
-             "seed": {"type": "integer"}},
+             "seed": {"type": "integer"},
+             "order": {"type": "string", "enum": ["normal", "reverse", "random"]},
+             "sequence_offset_ms": {"type": "number", "minimum": 0},
+             "sequence_fade_ms": {"type": "number", "minimum": 0},
+             "turns": {"type": "number"}, "path_points": {"type": "array"}},
             ("composition_id", "layer_id", "count"),
         ),
         (
@@ -999,6 +1063,17 @@ def register_motion_actions(registry: Any) -> None:
             ("composition_id", "layer_id", "animator_id"),
         ),
         (
+            "motion.text.animator.selector.convert",
+            "motion_text_animator_selector_convert",
+            {**lid, "animator_id": {
+                "type": "string",
+                "description": (
+                    "Optional stack animator id. Omit to convert the legacy single animator."
+                ),
+            }},
+            ("composition_id", "layer_id"),
+        ),
+        (
             "motion.camera.2_5d.set", "motion_camera_2_5d_set",
             {**lid, "enabled": {"type": "boolean"},
              "parallax_strength": {"type": "number", "minimum": 0, "maximum": 4},
@@ -1015,7 +1090,8 @@ def register_motion_actions(registry: Any) -> None:
         (
             "motion.advanced_preset.apply", "motion_advanced_preset_apply",
             {**cid, "preset_id": {"type": "string", "enum": [
-                "headline_slam", "paper_rip_reveal", "cutout_collage",
+                "headline_slam", "paper_rip_reveal",
+                "paper_crumple_unfold", "cutout_collage",
                 "editorial_camera_push", "beat_synced_montage",
             ]}, "layer_ids": {"type": "array"},
              "start_ms": {"type": "integer", "minimum": 0},
@@ -1031,6 +1107,22 @@ def register_motion_actions(registry: Any) -> None:
             mutating=True, changed=True, undo_label=title,
             dry_summary=f"{title} would run",
         )
+    registry.register_adapter_action(
+        "motion.reference.gate.compare",
+        "Compare Motion Frame to Reference",
+        "motion",
+        "motion_reference_gate_compare",
+        params_schema=schema_object(
+            {**cid, "reference_path": {"type": "string"},
+             "time_ms": {"type": "integer", "minimum": 0},
+             "reference_source": {"type": "string"}, "thresholds": {"type": "object"}},
+            required=("composition_id", "reference_path"),
+        ),
+        required=("composition_id", "reference_path"),
+        mutating=False,
+        changed=False,
+        dry_summary="the current Motion frame would be compared with the supplied reference",
+    )
     registry.register_adapter_action(
         "motion.key.diagnostics",
         "Measure the current Motion keyer alpha result.",
@@ -1180,6 +1272,7 @@ def register_motion_actions(registry: Any) -> None:
         ("motion.keyframe.delete", "motion_keyframe_delete", {**lid, "property_name": {"type": "string"}, "keyframe_id": {"type": "string"}}, ("composition_id", "layer_id", "property_name", "keyframe_id"), True),
         ("motion.curve.update", "motion_curve_update", {**lid, "property_name": {"type": "string"}, "keyframe_id": {"type": "string"}, "interpolation": {"type": "string"}, "in_tangent": {"type": "array"}, "out_tangent": {"type": "array"}}, ("composition_id", "layer_id", "property_name", "keyframe_id"), True),
         ("motion.behavior.list", "motion_behavior_list", lid, ("composition_id", "layer_id"), False),
+        ("motion.behavior.contract.inspect", "motion_behavior_contract_inspect", {"kind": {"type": "string"}}, (), False),
         ("motion.behavior.add", "motion_behavior_add", {**lid, "behavior": {"type": "object"}}, ("composition_id", "layer_id", "behavior"), True),
         ("motion.behavior.update", "motion_behavior_update", {**lid, "behavior_id": {"type": "string"}, "changes": {"type": "object"}}, ("composition_id", "layer_id", "behavior_id", "changes"), True),
         ("motion.behavior.delete", "motion_behavior_delete", {**lid, "behavior_id": {"type": "string"}}, ("composition_id", "layer_id", "behavior_id"), True),
@@ -1855,6 +1948,23 @@ def register_motion_actions(registry: Any) -> None:
         required=("composition_id",), mutating=False, changed=False,
     )
     registry.register_adapter_action(
+        "motion.performance.gate", "Measure deterministic rendering, timing, cache budgets, GPU fallback, and template-switch stability.",
+        "motion", "motion_performance_gate",
+        params_schema=schema_object({
+            **cid,
+            "sample_times_ms": {"type": "array", "items": {"type": "number", "minimum": 0}},
+            "iterations": {"type": "integer", "minimum": 1, "maximum": 100},
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1},
+            "max_p95_ms": {"type": "number", "minimum": 0},
+            "require_gpu": {"type": "boolean"},
+            "cache_max_bytes": {"type": "integer", "minimum": 1},
+            "template_ids": {"type": "array", "items": {"type": "string"}},
+            "template_switch_iterations": {"type": "integer", "minimum": 0, "maximum": 1000},
+        }, required=("composition_id",)),
+        required=("composition_id",), mutating=False, changed=False,
+    )
+    registry.register_adapter_action(
         "motion.ar_pbr.add", "Add a GPU-rendered AR/PBR asset to a Motion composition.",
         "motion", "motion_ar_pbr_add",
         params_schema=schema_object({
@@ -2108,6 +2218,7 @@ def register_motion_actions(registry: Any) -> None:
             dry_summary=f"{title} would run",
         )
     clip_ops = (
+        ("motion.actor.import", "motion_actor_import", {"path": {"type": "string"}, "start_ms": {"type": "integer", "minimum": 0}}, ("path",), True),
         ("motion.clip.create_from_timeline", "motion_clip_create_from_timeline", {"name": {"type": "string"}, "start_ms": {"type": "integer"}, "duration_ms": {"type": "integer", "minimum": 1}}, (), True),
         ("motion.clip.place", "motion_clip_place", {**cid, "start_ms": {"type": "integer"}, "duration_ms": {"type": "integer"}, "loop": {"type": "boolean"}}, ("composition_id",), True),
         ("motion.clip.update", "motion_clip_update", {"clip_id": {"type": "string"}, "changes": {"type": "object"}}, ("clip_id", "changes"), True),

@@ -417,6 +417,55 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         requires_owner=False,
     )
     registry.register_adapter_action(
+        "motion.ai.choreography.candidate.apply",
+        "Apply one explicitly approved choreography candidate to the target composition.",
+        "motion",
+        "motion_ai_choreography_candidate_apply",
+        params_schema=schema_object({
+            "composition_id": {"type": "string"},
+            "decomposition": DECOMPOSITION_SCHEMA,
+            "director_plan": {"type": "object"},
+            "candidate_id": {"type": "string"},
+            "approved": {"type": "boolean"},
+            "in_ms": {"type": "integer", "minimum": 0},
+            "out_ms": {"type": "integer", "minimum": 1},
+            "reference_id": {"type": "string"},
+            "name": {"type": "string"},
+            "center": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+            "size": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 2, "maxItems": 2},
+            "base_revision": {"type": "integer", "minimum": 0},
+            "allow_quality_override": {"type": "boolean"},
+        }, required=(
+            "composition_id", "decomposition", "director_plan", "candidate_id",
+            "approved", "in_ms", "out_ms",
+        )),
+        required=(
+            "composition_id", "decomposition", "director_plan", "candidate_id",
+            "approved", "in_ms", "out_ms",
+        ),
+        mutating=True,
+        changed=True,
+        undo_label="Apply Choreography Candidate",
+    )
+    registry.register_adapter_action(
+        "motion.ai.choreography.candidates",
+        "Generate three comparable choreography candidates with repetition, concurrency, readability, and complexity metrics.",
+        "motion",
+        "motion_ai_choreography_candidates",
+        params_schema=schema_object({
+            "decomposition": DECOMPOSITION_SCHEMA,
+            "duration_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+            "prompt": {"type": "string"},
+            "motion_style": {"type": "string"},
+            "audio_hits_ms": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+            "max_simultaneous_motion": {"type": "integer", "minimum": 1, "maximum": 12},
+        }, required=("decomposition", "duration_ms")),
+        required=("decomposition", "duration_ms"),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
         "motion.ai.choreography.plan",
         "Plan Clean, Dynamic, or Collage motion while preserving rigid and parent locks.",
         "motion",
@@ -452,6 +501,53 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         "Measure opaque-background leakage, bright edge spill, detached fragments, and source-frame crop risk.",
         "motion",
         "motion_ai_cutout_quality_validate",
+        params_schema=schema_object({
+            "decomposition": DECOMPOSITION_SCHEMA,
+        }, required=("decomposition",)),
+        required=("decomposition",),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.contact_composite.prepare",
+        "Create a decontaminated foreground and separate soft contact-shadow asset for shared Preview/export use.",
+        "motion",
+        "motion_ai_contact_composite_prepare",
+        params_schema=schema_object({
+            "foreground_path": {"type": "string"},
+            "background_path": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "edge_strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "light_match_strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "shadow_opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        }, required=("foreground_path", "background_path", "output_dir")),
+        required=("foreground_path", "background_path", "output_dir"),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.restoration.preflight",
+        "Build a restoration-risk heatmap and clamp unsafe camera travel directly from a layered decomposition.",
+        "motion",
+        "motion_ai_restoration_preflight",
+        params_schema=schema_object({
+            "decomposition": DECOMPOSITION_SCHEMA,
+            "camera_dx_ratio": {"type": "number"},
+            "camera_dy_ratio": {"type": "number"},
+            "grid_size": {"type": "integer", "minimum": 2, "maximum": 32},
+        }, required=("decomposition",)),
+        required=("decomposition",),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.layer.readiness.inspect",
+        "Gate layered-image motion using cutout, reconstruction, restoration, and provider evidence with an ordered repair plan.",
+        "motion",
+        "motion_ai_layer_readiness_inspect",
         params_schema=schema_object({
             "decomposition": DECOMPOSITION_SCHEMA,
         }, required=("decomposition",)),

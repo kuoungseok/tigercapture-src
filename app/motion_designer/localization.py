@@ -53,7 +53,7 @@ _KO = {
     "Properties": "속성",
     "Motion": "모션",
     "Generator": "제너레이터",
-    "Replicator": "리플리케이터",
+    "Tiger Repeater": "타이거 리피터",
     "Image": "이미지",
     "Shape": "도형",
     "Text": "텍스트",

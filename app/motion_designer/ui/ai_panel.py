@@ -752,12 +752,25 @@ class MotionAIPanel(QWidget):
                 for report in decompositions
                 if bool((report.get("diagnostics") or {}).get("validation", {}).get("ok"))
             )
+            readiness_rows = [
+                (report.get("diagnostics") or {}).get("layer_readiness") or {}
+                for report in decompositions
+            ]
+            readiness_states = list(dict.fromkeys(
+                str(row.get("status") or "unknown")
+                for row in readiness_rows
+            ))
+            readiness_score = min(
+                (float(row.get("score", 0.0) or 0.0) for row in readiness_rows),
+                default=0.0,
+            )
             lines.extend([
                 "",
                 "Layer extraction:",
                 f"- Provider: {', '.join(providers)}",
                 f"- Background locks: {locked_count}",
                 f"- Integrity: {valid_count}/{len(decompositions)} passed",
+                f"- Production gate: {', '.join(readiness_states)} / {readiness_score:.0f}",
                 f"- Motion: {analysis.get('motion_variant', self.extraction.variant.currentText())}",
             ])
         self.repair_button.setEnabled(bool(decompositions))

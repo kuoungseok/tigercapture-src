@@ -9,9 +9,21 @@ from typing import Any, Iterable, Mapping
 
 from app.motion_designer.interactive_button import button_component
 from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionLayer
+from app.unreal_umg_layout import (
+    TIGER_UMG_SCHEMA_VERSION,
+    motion_layer_layout,
+)
+from app.unreal_umg_image_fill import (
+    UMGImageFillConversion,
+    motion_image_fill_conversion,
+    validate_umg_image_fill_record,
+)
+from app.unreal_umg_material import (
+    motion_shape_gradient_material,
+    validate_umg_material_record,
+)
 
 
-TIGER_UMG_SCHEMA_VERSION = 4
 SUPPORTED_NATIVE_LAYERS = {"group", "shape", "text", "image"}
 
 
@@ -104,12 +116,25 @@ def _static_number(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
-def _umg_block_reasons(layer: MotionLayer) -> list[str]:
+def _umg_block_reasons(
+    layer: MotionLayer,
+    image_fill: UMGImageFillConversion | None = None,
+) -> list[str]:
     if layer.layer_type not in SUPPORTED_NATIVE_LAYERS:
         return [f"unsupported_layer_type:{layer.layer_type}"]
     params = layer.source.params
-    reasons: list[str] = []
+    reasons: list[str] = list(
+        image_fill.block_reasons if image_fill is not None else []
+    )
     if layer.layer_type == "shape":
+        gradient_material = (
+            None
+            if image_fill is not None
+            else motion_shape_gradient_material(
+                params,
+                layer_type=layer.layer_type,
+            )
+        )
         primitive = str(
             params.get("shape")
             or params.get("primitive")
@@ -118,17 +143,33 @@ def _umg_block_reasons(layer: MotionLayer) -> list[str]:
         if primitive != "rectangle":
             reasons.append(f"shape_primitive_requires_bake:{primitive}")
         radius = params.get("radius", 0.0)
-        if _static_number(radius) > 0.0:
+        if _static_number(radius) > 0.0 and image_fill is None:
             reasons.append("rounded_shape_requires_bake")
         for key in (
-            "path", "boolean", "trim", "offset_path", "repeater", "gradient",
+            "path", "boolean", "trim", "offset_path", "repeater",
             "stroke_gradient", "dash", "stroke_taper",
         ):
             value = params.get(key)
             if value not in (None, {}, [], 0, 0.0, False):
                 reasons.append(f"shape_operator_requires_bake:{key}")
+        if (
+            params.get("gradient") not in (None, {}, [], False)
+            and gradient_material is None
+        ):
+            reasons.append(
+                "multiple_shape_fills_require_ui_material_or_bake"
+                if image_fill is not None
+                else "shape_operator_requires_bake:gradient"
+            )
         if _static_number(params.get("stroke_width", 0.0)) > 0.0:
             reasons.append("shape_stroke_requires_bake")
+        if gradient_material is not None:
+            reasons.extend(
+                validate_umg_material_record(
+                    gradient_material,
+                    layer_kind="Shape",
+                )
+            )
     elif layer.layer_type == "text":
         for key in (
             "text_animation", "text_animators", "text_path", "font_axes",
@@ -153,10 +194,16 @@ def _umg_block_reasons(layer: MotionLayer) -> list[str]:
         "effect_group",
         "collage_item",
         "collage_attachment",
+        "replicator",
+        "motion_blur",
+        "puppet_mesh",
+        "expressions",
     ):
         value = layer.metadata.get(metadata_key)
         if value not in (None, {}, [], False):
             reasons.append(f"motion_feature_requires_bake:{metadata_key}")
+    if layer.behaviors:
+        reasons.append("motion_feature_requires_bake:behaviors")
     stop_motion = layer.metadata.get("stop_motion")
     if (
         isinstance(stop_motion, Mapping)
@@ -237,17 +284,37 @@ def motion_composition_to_umg_document(
     for layer in composition.layers:
         component = button_component(layer)
         layer_kind = "Button" if component is not None else layer.layer_type.title()
+        image_fill_conversion = motion_image_fill_conversion(layer)
+        material_record = (
+            None
+            if image_fill_conversion is not None
+            else motion_shape_gradient_material(
+                layer.source.params,
+                layer_type=layer.layer_type,
+            )
+        )
         block_reasons = sorted(set([
-            *_umg_block_reasons(layer),
+            *_umg_block_reasons(layer, image_fill_conversion),
             *document_block_reasons,
         ]))
-        disposition = "Blocked" if block_reasons else "Native"
+        disposition = (
+            "Blocked"
+            if block_reasons
+            else "Material"
+            if material_record is not None
+            else "Native"
+        )
         if layer.layer_type not in SUPPORTED_NATIVE_LAYERS:
             layer_kind = "Unsupported"
 
         asset_id = ""
-        if layer.layer_type == "image":
-            asset_id = register_resource(layer.source.uri, "texture")
+        image_fill_record: dict[str, Any] = {}
+        if image_fill_conversion is not None:
+            asset_id = register_resource(
+                image_fill_conversion.source_path,
+                "texture",
+            )
+            image_fill_record = image_fill_conversion.bind_asset(asset_id)
         font_file = str(layer.source.params.get("font_file") or "")
         font_asset_id = register_resource(font_file, "font") if font_file else ""
 
@@ -256,10 +323,20 @@ def motion_composition_to_umg_document(
         anchor = _vector2(layer.transform.anchor.default, (0.5, 0.5))
         width = float(layer.source.params.get("width", 100.0) or 100.0)
         height = float(layer.source.params.get("height", 100.0) or 100.0)
+        layout_fields = motion_layer_layout(
+            position=position,
+            size=(width, height),
+            anchor=anchor,
+        )
         payload = _layer_payload(layer)
         payload["font_asset_id"] = font_asset_id
+        payload["image_fill"] = dict(image_fill_record)
         payload["umg_mapping"] = (
-            "blocked_preflight" if block_reasons else "native"
+            "blocked_preflight"
+            if block_reasons
+            else "ui_material_custom_hlsl"
+            if disposition == "Material"
+            else "native"
         )
         payload["umg_block_reasons"] = block_reasons
 
@@ -271,13 +348,15 @@ def motion_composition_to_umg_document(
                 "Kind": layer_kind,
                 "Disposition": disposition,
                 "BlockReasons": block_reasons,
-                "Position": position,
-                "Size": {"X": width, "Y": height},
+                **layout_fields,
                 "Scale": scale,
-                "Anchor": anchor,
                 "RotationDegrees": float(layer.transform.rotation.default or 0.0),
                 "Opacity": float(layer.transform.opacity.default or 0.0),
                 "AssetId": asset_id,
+                "ImageFill": image_fill_record,
+                "Material": (
+                    material_record if disposition == "Material" else {}
+                ),
                 "PayloadJson": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
             }
         )
@@ -410,6 +489,7 @@ def motion_composition_to_umg_document(
 
 
 def preflight_umg_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    schema_version = int(document.get("SchemaVersion", 0) or 0)
     counts = {"Native": 0, "Material": 0, "Baked": 0, "Blocked": 0}
     blockers: list[dict[str, Any]] = []
     for row in document.get("Layers", []):
@@ -417,20 +497,40 @@ def preflight_umg_document(document: Mapping[str, Any]) -> dict[str, Any]:
             continue
         disposition = str(row.get("Disposition") or "Blocked")
         counts[disposition] = counts.get(disposition, 0) + 1
-        if disposition != "Blocked":
-            continue
-        reasons = [
-            str(reason)
-            for reason in row.get("BlockReasons", [])
-            if str(reason)
-        ]
+        image_reasons = validate_umg_image_fill_record(
+            row.get("ImageFill"),
+            layer_asset_id=str(row.get("AssetId") or ""),
+        )
+        if disposition == "Material":
+            reasons = [
+                *image_reasons,
+                *validate_umg_material_record(
+                    row.get("Material"),
+                    layer_kind=str(row.get("Kind") or ""),
+                    document_schema_version=schema_version,
+                ),
+            ]
+            if not reasons:
+                continue
+        elif disposition == "Baked":
+            reasons = ["baked_generation_unavailable"]
+        elif disposition == "Blocked":
+            reasons = [
+                str(reason)
+                for reason in row.get("BlockReasons", [])
+                if str(reason)
+            ] or ["unsupported_layer"]
+        else:
+            reasons = image_reasons
+            if not reasons:
+                continue
         blockers.append({
             "layer_id": str(row.get("Id") or ""),
             "name": str(row.get("Name") or ""),
-            "reasons": reasons or ["unsupported_layer"],
+            "reasons": reasons,
         })
     return {
-        "schema_version": int(document.get("SchemaVersion", 0) or 0),
+        "schema_version": schema_version,
         "ok": not blockers,
         "counts": counts,
         "blockers": blockers,

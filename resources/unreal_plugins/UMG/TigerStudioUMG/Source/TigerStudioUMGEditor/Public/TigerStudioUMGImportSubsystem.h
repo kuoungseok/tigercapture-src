@@ -59,6 +59,12 @@ struct FTigerStudioUMGGenerationResult
     TArray<FString> ImportedAssetPaths;
 
     UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> GeneratedMaterialPaths;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
+    TMap<FString, FString> GeneratedWidgetClasses;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
     TArray<FString> Warnings;
 
     UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")

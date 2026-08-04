@@ -795,6 +795,19 @@ def puppet_mesh_diagnostics(
     )
     flipped = int(repair["flipped_triangle_count"])
     degenerate = int(repair["degenerate_triangle_count"])
+    out_of_bounds_pins = [
+        pin.id for pin in mesh.pins
+        if not (0.0 <= pin.rest_position[0] <= 1.0 and 0.0 <= pin.rest_position[1] <= 1.0)
+    ]
+    coincident_pairs: list[list[str]] = []
+    for index, pin in enumerate(mesh.pins):
+        for other in mesh.pins[index + 1:]:
+            distance_sq = (
+                (pin.rest_position[0] - other.rest_position[0]) ** 2
+                + (pin.rest_position[1] - other.rest_position[1]) ** 2
+            )
+            if distance_sq <= 1e-8:
+                coincident_pairs.append([pin.id, other.id])
     return {
         "schema": PUPPET_SCHEMA,
         "vertex_count": len(mesh.vertices),
@@ -802,12 +815,15 @@ def puppet_mesh_diagnostics(
         "pin_count": len(mesh.pins),
         "flipped_triangle_count": flipped,
         "degenerate_triangle_count": degenerate,
-        "valid": not flipped and not degenerate,
+        "valid": not flipped and not degenerate and not out_of_bounds_pins,
         "stabilization_amount": stable_amount,
         "torn_triangle_count": int(repair["torn_triangle_count"]),
         "repair_required": repair["mode"] != "none",
         "repair": repair,
         "render_safe": bool(repair["render_safe"]),
+        "out_of_bounds_pin_ids": out_of_bounds_pins,
+        "coincident_pin_pairs": coincident_pairs,
+        "contract": "tiger_puppet_mesh_stability_v1",
     }
 
 

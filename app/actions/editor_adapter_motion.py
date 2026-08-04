@@ -167,6 +167,75 @@ class MotionAdapterMixin:
             "composition": composition.to_dict(),
         }
 
+    def motion_package_export(self, *, composition_id: str, path: str) -> dict[str, Any]:
+        from app.motion_designer.runtime_package import export_motion_package
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        return {"exported": True, "composition_id": composition.id,
+                **export_motion_package(composition, path)}
+
+    def motion_package_inspect(self, *, path: str) -> dict[str, Any]:
+        from app.motion_designer.runtime_package import inspect_motion_package
+
+        return inspect_motion_package(path)
+
+    def motion_package_load(
+        self, *, path: str, extract_dir: str, replace_existing: bool = True,
+    ) -> dict[str, Any]:
+        from app.motion_designer.runtime_package import load_motion_package
+
+        composition = load_motion_package(path, extract_dir)
+        store = self._motion_store()
+        if composition.id in store and not bool(replace_existing):
+            raise ValueError(f"motion composition already exists: {composition.id}")
+        store[composition.id] = composition
+        self._motion_sync_owner()
+        return {"loaded": True, "composition": composition.to_dict(), "path": str(path)}
+
+    def motion_actor_import(self, *, path: str, start_ms: int = 0) -> dict[str, Any]:
+        """Import a .tgmotion project and place one editable timeline actor."""
+        owner = self._require_owner()
+        importer = getattr(owner, "_import_motion_actor_from_path", None)
+        if callable(importer):
+            return dict(importer(path, start_ms=max(0, int(start_ms))))
+
+        from app.motion_designer.project_io import load_motion_project
+        from app.motion_designer.schema import new_motion_id
+
+        source_path = Path(path).expanduser().resolve(strict=False)
+        composition = load_motion_project(source_path)
+        composition.metadata = dict(composition.metadata or {})
+        composition.metadata["source_project_path"] = str(source_path)
+        store = self._motion_store()
+        existing = store.get(composition.id)
+        if existing is not None:
+            existing_source = str((existing.metadata or {}).get("source_project_path") or "")
+            if existing_source and Path(existing_source) != source_path:
+                composition.id = new_motion_id("motion_comp")
+        store[composition.id] = composition
+        clip = MotionClip(
+            composition_id=composition.id,
+            name=composition.name,
+            start_ms=max(0, int(start_ms)),
+            duration_ms=composition.duration_ms,
+            metadata={
+                "actor_kind": "motion_actor",
+                "source_project_path": str(source_path),
+                "composition_revision": int(composition.revision),
+            },
+        )
+        self._motion_clip_store().append(clip.to_dict())
+        self._motion_sync_owner()
+        return {
+            "loaded": True,
+            "path": str(source_path),
+            "composition_id": composition.id,
+            "clip": clip.to_dict(),
+            "undo_label": "Import Motion Actor",
+        }
+
     def motion_layer_list(self, *, composition_id: str) -> dict[str, Any]:
         composition = self._motion_service().get(composition_id)
         return {"composition_id": composition.id, "count": len(composition.layers),
@@ -731,11 +800,27 @@ class MotionAdapterMixin:
         return {"changed": bool(count), "undo_label": "Retime Motion Curve", "retimed": count}
 
     def motion_behavior_list(self, *, composition_id: str, layer_id: str) -> dict[str, Any]:
+        from app.motion_designer.behaviors import behavior_contract
+
         composition = self._motion_store().get(composition_id)
         if composition is None:
             raise ValueError(f"motion composition not found: {composition_id}")
-        rows = [item.to_dict() for item in find_layer(composition, layer_id).behaviors]
+        rows = []
+        for item in find_layer(composition, layer_id).behaviors:
+            row = item.to_dict()
+            row["contract"] = behavior_contract(item.kind)
+            rows.append(row)
         return {"count": len(rows), "behaviors": rows}
+
+    def motion_behavior_contract_inspect(self, *, kind: str = "") -> dict[str, Any]:
+        from app.motion_designer.behaviors import BEHAVIOR_CONTRACTS, behavior_contract
+
+        if kind:
+            return behavior_contract(kind)
+        return {
+            "contract": "tiger_parameter_behavior_v1",
+            "behaviors": [behavior_contract(name) for name in sorted(BEHAVIOR_CONTRACTS)],
+        }
 
     def motion_behavior_add(self, *, composition_id: str, layer_id: str, behavior: Mapping[str, Any]) -> dict[str, Any]:
         composition = self._motion_store().get(composition_id)
@@ -1193,6 +1278,16 @@ class MotionAdapterMixin:
             roi=roi,
         )
         cache = generate_tracking_cache(request)
+        from app.motion_designer.temporal_matte_quality import (
+            finalize_tracked_motion_mask,
+        )
+
+        cache = finalize_tracked_motion_mask(
+            item,
+            width=int(request.target_size[0]),
+            height=int(request.target_size[1]),
+            tracking=cache,
+        )
         item.metadata[TRACKING_METADATA_KEY] = cache.to_dict()
         composition.revision += 1
         self._motion_sync_owner()
@@ -1202,6 +1297,9 @@ class MotionAdapterMixin:
             "tracking": cache.to_dict(),
             "sample_count": len(cache.samples),
             "diagnostics": dict(cache.metadata),
+            "temporal_matte_quality": dict(
+                cache.metadata.get("temporal_matte_quality") or {}
+            ),
         }
 
     def motion_mask_tracking_clear(self, *, composition_id: str, layer_id: str,

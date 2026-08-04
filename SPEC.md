@@ -1,6 +1,6 @@
 ﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-28
+Last updated: 2026-08-04
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -725,6 +725,20 @@ Start here when changing a feature:
   Slab and AO remains a material/root occlusion input. Advanced Substrate maps
   such as second roughness, anisotropy/tangent, fuzz, and glint remain future
   optional generators rather than guessed from a single image.
+  Texture Lab schema v3 treats photographic de-lighting honestly: the existing
+  multiscale lighting cleanup is a heuristic `base_color_estimate`, not a
+  measured albedo. Input Base Color remains the default export, applying the
+  estimate requires a second explicit opt-in, and Height/Normal/AO/Roughness/
+  Metallic inference never consumes the estimate. Preview/action/export
+  payloads report provenance, no physical confidence score, and the
+  `not_photometrically_validated` status.
+  The v3 research audit confirms this is not NASA Multiscale Retinex and not a
+  trained intrinsic-decomposition model. Its two-scale luminance division now
+  runs in IEC 61966-2-1 linear-light sRGB, and CPU/OpenCV and CUDA use matching
+  3-sigma Gaussian kernels, replicate borders, and median normalization. The
+  official Marigold IID/IntrinsicDiffusion class of learned decomposers remains
+  a separate optional-model integration because its checkpoints, license, and
+  runtime footprint must not be silently bundled.
   Texture Lab preview must avoid full-resolution PNG round trips where an
   in-memory source is available, cache generated maps by source/settings
   fingerprint, and re-shade preview-only light changes without regenerating
@@ -762,7 +776,7 @@ Start here when changing a feature:
     Metallic maps in the OpenGL shader instead of displaying an unmapped
     placeholder.
   - Sphere preview uses longitude/latitude UV mapping and transforms sampled
-    tangent-space normals into the curved sphere basis. Selecting Albedo,
+    tangent-space normals into the curved sphere basis. Selecting De-lit Estimate,
     Normal, AO, Roughness, Metallic, Height, Cavity, or a packed-map view must
     preserve the selected sphere shape. Only explicitly multi-panel diagnostic
     views such as Intrinsic Channels and Delight Compare may force a plane.
@@ -770,7 +784,11 @@ Start here when changing a feature:
     must remain visible among the first Texture Lab thumbnails even in compact
     layouts. Separate-map export writes the Height PNG and records it in the
     material manifest instead of treating it as an internal Normal/AO
-    intermediate.
+    intermediate. Texture Lab export also writes a 16-bit grayscale Height PNG
+    and records `height_map_16` / `height_precision_bits=16`; the 8-bit Height
+    remains for compatibility. The interactive window defaults large exports
+    to a maximum 4K processing size, offers explicit Original/2K/1K choices,
+    and records source versus processing size and resampling in the manifest.
   - Texture Lab Material preview binds Height to GPU Parallax Occlusion Mapping
     (POM). The user can enable/invert Height and adjust POM strength, depth,
     and 4-64 ray-march steps; the default preview uses 24 steps. Plane and
@@ -794,7 +812,9 @@ Start here when changing a feature:
   - Animate Light moves the key only across the upper hemisphere. It requests
     updates with a precise 16 ms timer, uses a 256-pixel GPU preview while
     moving, skips map and thumbnail regeneration, and restores a 960-pixel
-    settled frame when animation stops. Actual frame rate remains bounded by
+    settled frame when animation stops. Interactive preview and thumbnail
+    display transfer through in-memory image objects instead of writing and
+    reopening temporary PNG files. Actual frame rate remains bounded by
     GPU render completion rather than being claimed as guaranteed 60 fps.
   - Native window move/resize suspends heavy preview work and resumes with one
     settled refresh, while normal widget repainting remains enabled so the
@@ -5770,7 +5790,7 @@ AI Script Edit MVP integration:
   icons, Windows conventions, AI workspace, character actors, and Unreal Link.
 - Selecting a layer changes the left side from Add/Library to the contextual
   Inspector and chooses the relevant Text, Image, Shape, Generator, Actor,
-  MMD, VRM, 3D, or Particle page. Replicator has its own Inspector page and
+  MMD, VRM, 3D, or Particle page. Tiger Repeater has its own Inspector page and
   toolbar command because it is a layer pattern system, not a Transform
   property. Re-selecting the same layer preserves the user's current inspector
   subpage. Clearing selection returns to Add.
@@ -5815,12 +5835,17 @@ AI Script Edit MVP integration:
   per-layer brightness/contrast, saturation, Gaussian and directional blur,
   glow, unsharp, vignette, drop shadow, light sweep, deterministic animated
   fractal noise, posterize, displacement, corner pin, mesh warp, paper fold,
-  and keying effects; and adjustment layers. Effect and mask parameters are
-  serializable animated properties. Vector and typography GPU renderers must
-  reject an active effect stack and use the shared raster graph rather than
-  drawing an unfiltered layer. Unreal UMG preflight reports these raster
-  effects as explicit deterministic-bake requirements; it never silently
-  removes them from generated output.
+  deterministic paper crumple/unfold, and keying effects; and adjustment
+  layers. Paper crumple uses a stable seed, animated amount, crease density,
+  sharpness, depth, and residual-wrinkle controls. Its supplied direction
+  preset animates `0 -> 1 -> 0` and leaves only the authored residual wrinkle
+  after unfolding. Single-effect preview uses the shared OpenGL effect path;
+  file export uses the matching deterministic raster implementation. Effect
+  and mask parameters are serializable animated properties. Vector and
+  typography GPU renderers must reject an active effect stack and use the
+  shared raster graph rather than drawing an unfiltered layer. Unreal UMG
+  preflight reports these raster effects as explicit deterministic-bake
+  requirements; it never silently removes them from generated output.
 - Adjustment layers default to the backward-compatible `all_below` scope.
   Their Effects inspector can switch to `selected_layers_below` and check
   specific renderable layers below the adjustment. Selected scope effects are
@@ -6249,6 +6274,10 @@ AI Script Edit MVP integration:
   Anime Character Intro, MMD Dance Title, and VRM Stream Starting/Ending with
   supported 16:9/9:16/1:1 variants. Published IDs are stable:
   `headline`, `subtitle`, `accent_color`, `surface_color`, and `duration_ms`.
+  Product Callout additionally publishes `background_image` and `cta`; its
+  default is a complete photo-led product advertisement rather than an empty
+  color placeholder. The image remains an ordinary editable media layer, so
+  users can replace it or clear it while retaining the typography and motion.
   `tools/qa_motion_template_catalog.py` production-renders all ten templates and
   verifies animation, validation, and control IDs.
 - `broadcast_bridge.py` grades a composition `realtime`, `cached`, or
@@ -6359,14 +6388,19 @@ AI Script Edit MVP integration:
   `depth_z`, FOV, camera position, roll, and parallax strength. AR/PBR camera
   behavior is unchanged because `apply_to_2d` is off by default.
 - Any renderable image, text, vector, actor, or particle layer may use the
-  renderer-neutral metadata `replicator` contract. The independent Replicator
+  renderer-neutral metadata `replicator` contract. The independent Tiger Repeater
   Inspector and Library presets expose line, grid, and radial arrangements,
   count, grid columns, offset/radius, per-copy rotation and scale, opacity
-  falloff, deterministic jitter, and seed. This is separate from the existing
+  falloff, deterministic jitter, and seed. This is the versioned
+  `tiger_repeater_v1` subset, not an Apple Motion Replicator compatibility
+  claim. It is separate from the existing
   vector-path Repeater and is composited before track matte output. Canvas,
   OpenGL Preview, file export, and main-timeline Motion Clip rendering consume
-  the same evaluated instance list. Per-layer movement-derived motion blur uses
-  bounded temporal samples and shutter values in the same shared render graph.
+  the same evaluated instance list. Per-layer movement-derived blur is the
+  `fast_translation_vector_blur_v1` path: it samples previous-to-current X/Y
+  translation and treats the legacy `shutter` key as a blur-length multiplier.
+  It does not implement shutter angle, phase, rotation, scale, or deformation
+  temporal sampling.
 - Motion Designer supports independent procedural Generator layers for solid
   color, two-color linear gradient, checkerboard, grid, deterministic noise,
   and radial rays. Generator dimensions, colors, scale, angle, offset, seed,
@@ -6376,7 +6410,8 @@ AI Script Edit MVP integration:
   `motion.generator.create` and `motion.generator.update`.
 - Alpha and luma track mattes remain stable layer-ID references and now have
   dedicated `motion.matte.set/clear` actions and `Motion` Inspector controls.
-  The Motion Inspector exposes 2.5D depth and motion blur; Replicator is a
+  The Motion Inspector exposes 2.5D depth and Fast Translation Vector Blur;
+  Tiger Repeater is a
   dedicated page while the former compact controls remain compatibility
   aliases that preserve new arrangement fields. Text character/word/line
   animation continues to use the existing typography selector/stagger renderer
@@ -6397,7 +6432,7 @@ AI Script Edit MVP integration:
   `Beat-Synced Montage`. Equivalent automation is available through
   `motion.advanced_preset.apply`, `motion.paper_paste.create`,
   `motion.camera.2_5d.set`, `motion.layer.depth.set`, `motion.blur.set`, and
-  `motion.replicator.set`. `Learn 05 - Generators and Replicators` is a
+  `motion.replicator.set`. `Learn 05 - Generators and Tiger Repeaters` is a
   complete editable tutorial template for the two independent feature paths.
 - Motion Designer layers and groups may be converted into reusable interactive
   button components through `app/motion_designer/interactive_button.py`.
@@ -6461,13 +6496,53 @@ AI Script Edit MVP integration:
 - Native conversion currently creates Group/Text/Image/Button widget trees,
   imports referenced textures and sounds, normalizes textures for the UI LOD
   group, and converts position/rotation/scale/opacity tracks to
-  `UWidgetAnimation`. `UTigerStudioButton` executes clicked/hovered/
-  unhovered/pressed/released action records for named event emission,
-  animation playback, sound playback, visibility, opacity, and material-scalar
-  changes. Font assignment, complete per-state button styling, arbitrary UI
-  Material construction, and deterministic mask/effect baking remain explicit
-  follow-up scope; unsupported content must fail preflight or be reported as
-  baked and must never be silently omitted.
+  `UWidgetAnimation`. Tiger UMG schema v7 retains the schema-v6 leaf rectangle
+  gradient mapping and additionally gives Group layers an explicit `PanelKind`
+  plus per-child `FlowSlot`. Painter frames without Auto Layout generate a
+  `UCanvasPanel`; supported Horizontal/Vertical/Grid Auto Layout generates a native
+  `UHorizontalBox`/`UVerticalBox`/`UGridPanel`, with padding, gap, cross-axis alignment, and
+  child main-axis Auto/Fill sizing applied to the corresponding box slot.
+  Tiger UMG schema v9 records Grid row, column, row span, and column span in
+  the provider-neutral FlowSlot and generates matching `UGridSlot` records.
+  Tiger UMG schema v10 adds provider-neutral `ScrollOverflow` and
+  `ScrollPosition`. Horizontal and Vertical generate native `UScrollBox`;
+  Both nests vertical and horizontal ScrollBoxes. Each scroll Frame uses an
+  outer `UOverlay` with a scrolling content panel and a fixed `UCanvasPanel`,
+  so `Fixed` children remain outside the scrolling content. Sticky remains an
+  explicit runtime-binding blocker.
+  Unsupported Wrap, non-Start main-axis distribution, and absolute flow
+  children are explicit preflight blockers rather than silent layout loss.
+  Schema v6 maps a leaf rectangle's
+  linear or radial gradient from either Motion Designer or Painter to the same
+  provider-neutral UI Material record. The record accepts only Local UV,
+  2-16 validated stops, opacity, and the fixed
+  `tiger_ui_gradient_custom_hlsl_v1` generator; Unreal builds one translucent
+  `MD_UI` Material with a single generated Custom HLSL expression and assigns
+  it to a native `UImage` brush. Schema v8 adds the strict
+  `tigerstudio.umg.ui_material.v2` `RoundedCard` record for fixed-geometry leaf
+  rectangles. It carries solid/linear/radial fill, uses all three Figma handles
+  for radial-axis reconstruction, fits TL/TR/BR/BL radii, applies
+  continuous-corner smoothing, supports one solid
+  inside/center/outside stroke, one normal-blend drop shadow, one normal-blend
+  inner shadow, and deterministic visual padding. The fixed
+  `tiger_ui_rounded_card_sdf_custom_hlsl_v1` generator emits one validated
+  Custom expression; a stable layer `UCanvasPanel` owns layout and animation,
+  while its `<LayerId>_Visual` `UImage` expands by the declared padding so
+  outside pixels are not clipped. Stretch/scale anchors and flow/grid size
+  allocation are explicitly blocked with
+  `rounded_card_runtime_resize_requires_dynamic_size_binding` until runtime
+  material-size binding exists. Multiple fills or strokes, gradient strokes,
+  additional shadows, non-normal effect blending, layer/background blur, and
+  rounded Button/Frame/Image backgrounds remain explicit bake/native follow-up
+  scope. User-authored/arbitrary HLSL, arbitrary Material graphs, shader fills,
+  and gradients on other widget shapes are not accepted by this path and must
+  never be silently omitted. `UTigerStudioButton` executes
+  clicked/hovered/unhovered/pressed/
+  released action records for named event emission, animation playback, sound
+  playback, visibility, opacity, and material-scalar changes. Font assignment,
+  complete per-state button styling, and deterministic mask/effect baking also
+  remain explicit follow-up scope; unsupported content must fail preflight or
+  be reported as baked and must never be silently omitted.
 - UMG generation follows one deterministic UE 5.8 pipeline:
   1. validate the Tiger UMG document and resolve stable source IDs;
   2. create or load the destination package and create a `UWidgetBlueprint`
@@ -6514,6 +6589,17 @@ AI Script Edit MVP integration:
   compiler or generation errors. The reproducible command is
   `tools/qa_unreal_umg_generation.py`; disposable evidence is written below
   `debugCapture/unreal_umg_generation_qa`.
+- Schema v6 UI Material acceptance uses the real-engine path
+  `tools/qa_painter_ui_unreal_umg.py --capture-ui`, not the local compatibility
+  preview alone. The QA generates the Painter-authored Widget Blueprint and
+  gradient Material, closes and reopens them in UE 5.8, verifies that the asset
+  is `MD_UI`, that its graph contains exactly one `MaterialExpressionCustom`,
+  and that the generated Widget Blueprint retains the Material through either
+  the `UImage` brush resource or the serialized package reference. It also
+  rejects Material shader-compile errors and captures the reopened Unreal
+  Editor result; the JSON report and visual evidence are disposable outputs
+  under `debugCapture/painter_ui_designer/unreal_umg`. These checks are required
+  before this gradient path may be claimed as supported.
 - Motion Designer exposes a top-level `Templates` action beside its authoring
   tools. `MotionTemplateGalleryDialog` presents production-rendered thumbnails,
   category/search filters, and 16:9, 9:16, and 1:1 variants before applying a
@@ -6535,6 +6621,40 @@ AI Script Edit MVP integration:
   offer, and CTA beats. Education templates separate module/objective,
   numbered demo, comparison/check, recap, and next-lesson beats. Each scene is
   composed of normal editable Motion layers rather than a flattened preview.
+- `Mixed Media > Paper Crumple & Unfold` is a complete editable template, also
+  available from `Add > Templates`. It publishes headline, subtitle, paper,
+  ink, accent, surface, and duration controls. Its grouped paper, print, and
+  shadow layers animate through crumple, hold, unfold, rebound, and residual
+  wrinkle stages using the shared deterministic CPU/GPU paper effect.
+- `Studio Originals` provides three photo-led starter templates instead of
+  shape-only placeholders: `City After Rain`, `Artisan Coffee Launch`, and
+  `Alpine Travel Journal`. Each ships with an original full-bleed image,
+  responsive 16:9/9:16/1:1 composition, photographic shade, editorial
+  typography, accent rule, CTA, and camera-push motion. The hero image is a
+  published `media` control and remains a normal replaceable image layer.
+  Bundled provenance is recorded under
+  `resources/motion_templates/studio_originals`.
+- All 136 built-in templates include visible demonstration media rather than
+  relying on white or shape-only placeholder frames. Existing photo templates
+  retain their authored images; the remaining templates receive a
+  category-appropriate bundled image and shade treatment. Template media-slot
+  shapes are instantiated as normal replaceable image layers, and every
+  template publishes a `background_image` media control so the user can
+  replace or clear the demonstration image without flattening the composition.
+- The basic Logo Reveal and all 15 `Logo Reveals` catalog templates are
+  editable commercial brand systems rather than a colored-circle or baked
+  sample-logo placeholder. Their default samples use original fictional brand
+  names, a restrained ivory paper backdrop, badge/wordmark geometry, symbol,
+  brand name, descriptor, rules, and style-specific motion/effect layers.
+  Vintage seal, bold red wordmark, glitch, particle, liquid, dimensional,
+  fast, elegant, brush, neon, light, paper, smoke, glass, and kinetic variants
+  remain structurally distinct. `background_image` replaces the paper stock;
+  optional `logo_image` replaces only the symbol while retaining the editable
+  typography, badge construction, timing, effects, and animation layers.
+- At the exact composition duration, the Motion Designer viewer holds the last
+  valid frame instead of displaying a white frame. The timeline timecode and
+  duration remain unchanged; only the interactive canvas/realtime-preview
+  sample is clamped to the final frame interval.
 - Selecting a card shows its included features, intended workflow, duration,
   scene count, difficulty, estimated edit time, and replacement checklist.
   Learning cards additionally show ordered hands-on steps. Applying a learning
@@ -6890,6 +7010,30 @@ AI Script Edit MVP integration:
   Motion workspace side panels now have bounded working widths and long
   Library descriptions elide instead of forcing the Canvas into a narrow
   column.
+- The gallery additionally exposes exactly ten commercial motion packages under
+  `Hot Motion 2026`: Command Grid Kinetic Opener, Chrome Type Flow, Dynamic
+  Poster Atlas, Carousel Macro Rush, Replay Rewind Collage, Nostalgic Future
+  Editorial, Overdrive Stomp Opener, Stamp-On Pattern Intro, 3D Kinetic Punk
+  Type, and Liquid Glass Titles. These do not replace the original eight M28
+  products. Each package has its own scene grammar, generated plate under
+  `resources/motion_templates/hot_2026`, editable text/media/color/duration
+  controls, three to four complete scenes, and a distinct 7-11 second runtime.
+- Hot Motion packages use effect/transition-first commercial opener grammar,
+  not one shared text-and-image layout. The authored differences include UI
+  pulse grids, refractive/displaced chrome type, poster stacks, carousel crops,
+  rewind transport echoes, posterized editorial texture, stomp hits, staggered
+  print tiles, multicolor pseudo-3D type depth, and swept glass title cards.
+  Every scene retains one canonical replaceable media slot while derived visual
+  layers remain independently editable.
+- Hot Motion media placeholders reuse detail crops from their own durable
+  plate instead of unrelated generic demo photography. The generated atlas is
+  retained for provenance and can be deterministically split again with
+  `tools/build_hot_motion_2026_assets.py`. Visual QA is
+  `tools/qa_hot_motion_2026_templates.py`, which renders early/middle/late
+  frames from all ten actual compositions and writes a 30-frame contact sheet
+  plus machine-readable report. `tests/test_motion_hot_2026_templates.py`
+  guards the exact ten-item
+  catalog, durable asset boundary, editability, and duration diversity.
 - The complete 2026 trend claim surface is machine-auditable through
   `tigerstudio.motion.trend_capability_audit.v1` and the non-mutating
   `motion.trend.capabilities.inspect` action. The audit maps all ten trend
@@ -7131,15 +7275,22 @@ AI Script Edit MVP integration:
   `motion.vector.offset_path.set`, `motion.vector.path_morph.set`, and
   `motion.vector.stroke.set`. Variable-width strokes explicitly fall back from
   the vector GPU packet to the shared painter render path.
-- Tiger UMG schema v4 blocks advanced Text/Shape/Glass features that do not yet
-  have native UMG or deterministic bake output and serializes exact
-  per-layer `BlockReasons`. Python packaging stops before Unreal generation
-  when blocked content is present. The UE 5.8 plugin was rebuilt successfully;
-  the source-free bundle generated and reloaded a real Widget Blueprint with
-  one native button and one animation. A second real UE preflight rejected
-  Tiger Glass with the exact
-  `glass:effect_requires_bake:tiger_glass` reason. No Motion feature is
-  silently omitted from Widget Blueprint generation.
+- Tiger UMG schema v10 retains v4-v9 import compatibility, the legacy validated
+  gradient path, schema-v8 Rounded Card materials, native schema-v9 Grid
+  panels, and schema-v10 ScrollBox/Fixed Overlay panels. It still blocks
+  Sticky and advanced Text/Shape/Glass or responsive-material
+  features that have neither a native UMG mapping, the restricted UI Material
+  mapping, nor deterministic bake output. Exact per-layer `BlockReasons` stop
+  Python packaging before Unreal generation when blocked content is present.
+  On 2026-08-03 the shared plugin `0.9.0` passed canonical UE 5.8 Editor,
+  Development, and Shipping builds. Real Painter QA then generated, compiled,
+  saved, reopened, and captured a 14-widget Blueprint containing HorizontalBox,
+  GridPanel, and one Rounded Card `MD_UI` Material. Reopen inspection found one
+  `MaterialExpressionCustom`, the serialized Widget Blueprint→Material
+  reference, and no material shader compile error. A separate real UE preflight
+  continues to reject Tiger Glass with the exact
+  `glass:effect_requires_bake:tiger_glass` reason. No Motion or Painter delivery
+  feature may be silently omitted from Widget Blueprint generation.
 - `motion.typography.character_3d.prepare` stores versioned, non-rendering
   per-grapheme source spans, extrusion depth, bevel, material slot, and 3-axis
   transform intent for the M19 renderer. Its payload explicitly reports
@@ -7332,6 +7483,63 @@ AI Script Edit MVP integration:
   is `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md`; keep future detailed UX,
   brush, layer, reference, 3D blockout, action parity, and QA planning there
   instead of duplicating large prose in this file.
+- Painter Painting M0-M8 is an automated implementation baseline as of
+  2026-08-03; its earlier product-acceptance label was withdrawn by the
+  2026-08-04 evidence audit. UI Design mode is explicitly outside this scope.
+  The historical milestone is `docs/PAINTER_PAINTING_MILESTONES_KO.md`; the
+  active correction order and official reference set is
+  `docs/PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md`. Evidence kinds
+  and claim-specific provenance are enforced by
+  `app/painter_evidence_contract.py`; the machine-readable baseline gate is
+  `app/painter_product_readiness.py`. Regenerable M8 synthetic evidence is
+  produced by `tools/qa_painter_painting_m8.py` under
+  `debugCapture/painter/painting_m8`. A future Painting release claim requires every
+  character line/flat/render, background thumbnail/block-in/detail, Material
+  Paint impasto, reference, perspective, selection transform, group, clipping,
+  mask, save/recovery/reopen, exchange, display/input, and stress stage to be
+  present. File existence alone is not sufficient evidence.
+- The accepted Painting interchange boundary is `.tspaint` as the editable
+  native document; PNG and TIFF at 8/16-bit with alpha and embedded sRGB ICC;
+  JPEG at 8-bit without alpha; WebP at 8-bit with alpha; and layered PSD for
+  paint layers, groups, visibility, opacity, and supported blend modes.
+  Adjustment layers, clipping, masks, Material Paint layers, and unsupported
+  PSD blends must be blocked or explicitly baked, never silently omitted.
+  Saved PSD output must immediately pass premultiplied-visible RGBA composite
+  parity with a maximum two-level 8-bit rounding tolerance. Painter and
+  `psd-tools` layer collections use bottom-to-top paint order; reversing that
+  order is invalid because an opaque bottom layer then hides the artwork above.
+- M8 automated evidence includes three editable `.tspaint` synthetic
+  documents with reopen pixel parity, PNG/TIFF/PSD output, crash-recovery pixel
+  parity and cleanup, four offscreen Painter-window captures at logical 760x560 and
+  1920x1080 plus background and Material views at simulated DPR 1.5, a 3840x2160 canvas
+  represented by 135 retained 256-pixel tiles, 240 dirty-tile updates, and a
+  3,000-point bristle stroke. Tablet persistence requires pressure, signed tilt
+  X/Y, rotation, and tangential pressure to survive save/reopen. The final
+  automated regression baseline was 169 UI-Design-excluded Painter tests plus
+  five architecture/debug-boundary tests. Constructed `Stroke` values do not
+  certify physical tablet input; `QT_SCALE_FACTOR` does not certify native DPI;
+  an in-process save/restore does not certify crash recovery; and the 240-update
+  microbenchmark does not certify long-session stability.
+- The 2026-08-04 correction baseline passes 180 UI-Design-excluded Painter
+  tests and five architecture/debug-boundary guards, while remaining
+  `automated_baseline_only` and `release_ready=false`. Native Windows evidence
+  proves Korean glyph coverage, a Qt OpenGL FBO, and the bounded basic round-
+  stroke DrawingCanvas GPU path. The available display is DPR 1.0 and exposes
+  no physical tablet, so native high-DPI and physical-tablet claims remain
+  blocked. A real child-process termination and next-process recovery now pass
+  full RGBA parity after correcting persisted brush widths to document-pixel
+  units; truncated recovery ZIPs are rejected by document-entry/schema/CRC
+  preflight.
+- Product language must not claim full Photoshop, Clip Studio Paint, or Corel
+  Painter parity. The accepted limitations are: interactive canvas storage is
+  8-bit even though validated high-precision export paths exist; the working
+  and output boundary is sRGB with no native CMYK conversion; proprietary ABR
+  rendering parity is not supported beyond validated metadata interchange;
+  advanced PSD features follow block-or-bake policy; physical tablet driver
+  compatibility remains device-specific; and environments unable to create a
+  real OpenGL context use the verified QPainter fallback. Headless evidence may
+  also lack installed Korean UI glyphs, which is a capture-environment limit
+  rather than proof of localized desktop rendering.
 - Painter UX references are role-based, not a one-app clone:
   Photoshop defines the base mental model (left tool rail, top tool options,
   Layers/Channels/Paths, selection/mask/layer workflow, and shortcuts);
@@ -7494,7 +7702,7 @@ AI Script Edit MVP integration:
   click samples the displayed merged canvas color and records it in color
   history. Quick Palette controls and palette persistence must remain outside
   the per-tablet-sample render path.
-- Painter brush size supports `1..2048` document pixels consistently in the
+- Painter brush size supports `1..5000` document pixels consistently in the
   canvas, top-bar spin box, Brush Selector, Quick Palette, document restore, and
   user presets. Brush pressure response is a saved `25..250%` curve applied to
   normalized tablet pressure before the stroke is committed; `100%` is linear.
@@ -7543,10 +7751,15 @@ AI Script Edit MVP integration:
 - Print canvases display non-exporting output guides inside the same Canvas Pose
   transform: a dashed magenta trim line and a dotted cyan safe-area line. The
   default print safe margin is 5 mm. Output preflight reports effective PPI and
-  compares it with intent targets (300 PPI color/general, 600 PPI line art/manga,
-  150 PPI large format), warns when bleed is absent or an sRGB printer profile
-  must be confirmed, blocks dimensions beyond Painter's 16384-pixel canvas
-  limit, and is available before export from `Image > Output Preflight`.
+  compares it with sourced guidance values: Adobe's general 300 PPI high-quality
+  print guidance, Clip Studio's 600 PPI monochrome-manga guidance, and a Tiger-
+  authored 150 PPI large-format starting point. These values are advisory, never
+  a print-quality pass/fail threshold; every report says to confirm the required
+  resolution with the printer or print service. Missing bleed and an sRGB
+  printer-profile intent remain warnings. Dimensions beyond 16384 pixels per
+  axis are blocked only as Tiger Painter's current authored runtime capacity,
+  explicitly not as a Qt, PNG, TIFF, or PSD format limit. The preflight remains
+  available before export from `Image > Output Preflight`.
 - PNG print export writes PPI metadata and returns the same output-preflight
   report without changing document pixels. Screen exports remain pixel-only.
   Output guides are never rasterized into export. Native CMYK editing,
@@ -7595,7 +7808,7 @@ AI Script Edit MVP integration:
   first-tier textured Painter-style brushes (`loaded_oil`, `impasto_oil`,
   `oil_smear`, `soft_oil_glaze`, `real_wet_oil`, `bristle_oil`, `dry_oil`,
   `palette_knife`, `textured_chalk`) that render in both the Qt preview and the
-  PIL/MP4 export path from the same `brush_style` field. Oil brushes simulate
+  PIL/MP4 export path from the same `brush_style` field. Oil brushes render stylized
   loaded-paint chunks, impasto ridge highlights/shadows, smear/glaze passes,
   bristle lanes, and palette-knife scrape marks. This is an expressive
   textured-stroke engine, not a full Corel Painter-style wet media simulation
@@ -7647,6 +7860,244 @@ AI Script Edit MVP integration:
   keeping native material relief channels intact. Device calibration curves,
   persistent GPU wet-canvas fluid simulation, and validated physical pigment
   mixing remain later engine work.
+- The 2026-08-04 R5 measurement pass classifies Smudge, Wet Canvas, and
+  Material Paint as deterministic stylized models, not physical-media
+  simulations. Smudge now has independently rendered Color Rate, Smudge
+  Length, and Smudge Radius controls in the brush engine, Inspector, saved
+  dynamics payload, and `paint.brush.set`. The fixed synthetic response corpus
+  in `app/painter_media_response.py` measures those controls plus Wet Canvas
+  Mix/Bleed/Pickup/drying and Material load/thickness/wetness/gloss/roughness.
+  `tools/qa_painter_media_response.py` writes raw metrics and boolean
+  metamorphic responses to
+  `debugCapture/painter/media_response/report.json`; it explicitly sets
+  `quality_threshold_claim=false` and `physical_media_validation=false`.
+  Current/all-layer Smudge sampling is an explicit Overlay toggle. Overlay
+  captures per-dab RGBA from the full committed projection and persists those
+  samples with the stroke, so later lower-layer edits cannot silently change
+  the authored smear. Smear and Dulling are separate modes; Smudge Radius is
+  applied only to Dulling, matching the documented Krita behavior.
+  Material Plow now displaces intersected existing signed relief toward the
+  knife normal, while Negative Depth writes excavation rather than merely
+  reducing positive height. PBR merge identifies excavated output as
+  `signed_neutral_0_5`. Automatic brush Resaturation is a separate persisted
+  control that replenishes depleted selected-color/paint load; authored
+  per-point load recovery remains separately reported.
+  Live Smudge/Mixer/Pickup preview now samples a separately rendered committed
+  current-layer image while keeping the live overlay transparent; pen-down and
+  pen-up output are bounded to one 8-bit premultiplied-alpha rounding step.
+  The current full automated gate passes 207 Painting tests and 5 architecture/
+  debug-boundary tests, but remains `automated_baseline_only` and
+  `release_ready=false`.
+- The 2026-08-04 R6 interchange pass separates promoted 8-bit data from native
+  uint16/float sources and always reports `new_precision_created=false`.
+  `app/painter_color_management.py` validates ICC header size/signature and v2
+  or v4 payloads through LittleCMS, performs actual RGB profile conversion and
+  CMYK soft proofing, and preserves alpha. A non-identity 16-bit transform is
+  blocked because the current Pillow bridge would quantize it to 8-bit.
+  PNG inspection verifies every chunk CRC, order, and IEND; TIFF inspection
+  verifies byte order, magic, IFD bounds, and complete decode; PSD inspection
+  verifies header/version/depth, composite decode, ICC, and layers. Layered PSD
+  export embeds a validated sRGB ICC profile. Corrupted or truncated files do
+  not pass these gates.
+  `tools/qa_painter_color_management.py` measured a non-identity installed-RGB
+  transform and installed RSWOP CMYK proof with changed pixels and preserved
+  alpha. `tools/qa_painter_photoshop_interop.py` plus the Photoshop JSX runner
+  opened Tiger PNG8, native PNG16/TIFF16, and a three-layer PSD in actual Adobe
+  Photoshop 26.11.6, saved Photoshop-produced PSD copies, and verified fresh
+  nonce, bit depth, ICC recognition, alpha parity, layer order, and artifact
+  hashes. `app/painter_interop_evidence.py` prevents an internal reader from
+  being labeled as external evidence. This is measured support for that exact
+  Photoshop corpus, not a claim of CMYK generation, 16-bit non-identity ICC
+  conversion, or untested Clip Studio/Corel compatibility.
+- The 2026-08-04 R7 large-canvas correction makes retained tiles a consumed
+  display path instead of upload-only telemetry. A complete tile set is drawn
+  from its actual GL texture handles into a Qt-owned FBO and the resulting
+  image becomes the Canvas raster input. Incomplete LRU coverage explicitly
+  falls back to the source QImage; it never displays a partial reconstruction.
+  Native semi-transparent 512x256 evidence records eight texture reads and
+  premultiplied-alpha parity. `MaterialTileExecutor` processes actual derived
+  map tile bytes and hashes on a worker with per-kind revisions; stale and
+  cancelled results cannot replace the current revision.
+  `tools/qa_painter_large_canvas_runtime.py` measures raw 4K three-layer and
+  8K two-layer upload, 25/100/400% Canvas zoom, one-pixel dirty update,
+  material processing, PNG save/reopen, Windows process resources, and GL
+  texture counts without a timing PASS threshold. Its v3 corpus uses a spatial
+  gradient/checker/line pattern, feeds runtime-reconstructed tile images into
+  the actual Canvas, compares it against a direct source Canvas at the same
+  view poses, and uses nonuniform sampling only as a blank-capture guard. The
+  earlier solid-color/nonblank-byte probe and authored RGB variance/quadrant/
+  color-count gates are
+  invalid evidence and must not be used. On the measured host 4K had
+  3/3 complete cached layers and 409 textures; 8K with a 256MB total tile
+  budget had 1/2 complete layers, one GPU display and one explicit source
+  fallback. Latest observed working-set deltas were 513,875,968 bytes and
+  867,106,816 bytes; private-usage deltas were 719,589,376 and 1,273,016,320
+  bytes. These are local measurements, not universal limits.
+  `budget_plan` derives full-coverage requirements from
+  `width*height*4*raster_layers / 0.60` and reports fallback when the configured
+  cache is smaller. Zero-readback widget-native display remains future work.
+- The 2026-08-04 R8 aggregator is
+  `tools/qa_painter_product_reapproval.py`, backed by
+  `app/painter_product_reapproval.py`. It preserves evidence classes, verifies
+  claim-bearing artifact fingerprints, and combines M8, native Qt/OpenGL,
+  real process crash, soak, Photoshop 26.11.6, and corrected 4K/8K reports.
+  Current `debugCapture/painter/product_reapproval/report.json` is structurally
+  valid but `release_ready=false`. Missing release evidence is native high-DPI,
+  physical tablet input, an actual disk-full recovery run, a >=7200-second
+  single native soak survival result, a repeated long-soak resource envelope,
+  and independent human visual review. An independent QA agent
+  review cannot satisfy the `independent_manual` evidence kind.
+  The current UI-Design-excluded Painter plus architecture/debug-boundary gate
+  passes 244 tests; this is automated regression evidence, not a substitute for
+  any missing release evidence class above.
+- Painter numeric and capacity limits must expose their provenance and claim
+  boundary. The current 16,384-pixel canvas dimension is a Tiger runtime policy,
+  not a Qt, PNG, TIFF, or PSD format limit; Corel Painter's documented 16,382-pixel
+  maximum is a product reference, not the source of Tiger's value. Brush size is
+  accepted and persisted through 5,000 document pixels, following Adobe's
+  documented Photoshop maximum, while performance at that maximum is not claimed.
+  The 256-pixel tile size, 192 MiB tile cache, 256 MiB logical undo budget,
+  serialized recovery writer, archive guards, queue capacities, and palette
+  history sizes are Tiger-authored resource policies with runtime telemetry or
+  explicit failure behavior. They are not universal hardware, format, quality,
+  or process-memory guarantees. References:
+  [Corel Painter document dimensions](https://product.corel.com/help/Painter/540213829/Main/EN/Win-Documentation/Corel-Painter-Creating-Documents.html),
+  [Adobe Photoshop brush maximum](https://helpx.adobe.com/pdf/cs6/photoshop_reference.pdf),
+  [Qt QImage](https://doc.qt.io/qt-6/qimage.html), and
+  [W3C PNG 3](https://www.w3.org/TR/png-3/).
+- The Painting evidence audit includes the Paint Actions namespace/adapter and
+  inventories numeric `min`/`max` clamps with class/function context; a
+  path-wide catch-all classification is invalid. The corrected scan covers 45
+  Painting app modules and currently 251 test functions. It exposed and removed a hidden
+  256-dab per-segment cap: dynamic dabs are now placed by whole-polyline arc
+  length, so collinear paths with 2 and 33 input controls produce the same dab
+  count. `.tspaint` archive entries reject POSIX traversal, Windows backslash
+  traversal, drive/UNC absolute paths, NTFS alternate-data-stream colons, and
+  any final resolved path outside the extraction root. `paint.stroke.draw`
+  limits of 512 strokes and 2,048 input points per stroke are explicitly scoped
+  to one atomic Action/Undo request, not document capacity; its brush width
+  domain matches the persisted 5,000-pixel brush domain.
+- Audit v2 records a decision basis for every classified row. A 2026-08-04
+  audit-of-the-auditor found that broad path/function patterns had promoted
+  hundreds of numeric literals to `reviewed_*` without an explicit source or
+  policy ledger. Those matches are now unresolved
+  `candidate_explicit_ledger_*` rows. The current Painting-only inventory
+  contains 1,710 decisions; 368 remain unresolved and therefore block product
+  reapproval. Of these, 335 require an explicit source/invariant/Tiger-policy
+  ledger link and 33 are hidden pressure/rotation and canvas-size fabrication,
+  suppressed operational failures, sample-count-based paint depletion, or a
+  36-vs-64 explicit bristle-capacity mismatch. The visible
+  and canvas-size fabrication plus suppressed operational failures. The visible
+  New Canvas `Full HD 16:9` preset is an explicit Tiger starting policy; resize,
+  compositor, export, automation, and document-load paths must not silently
+  substitute that preset for missing or invalid dimensions.
+- Painter Magic Select exposes and accepts the documented RGB tolerance domain
+  directly as 0-255. The former 0-100 UI plus 2.55 conversion was an
+  unsupported local scale and is removed. Current Tiger max-channel RGBA
+  matching remains an explicitly local selection metric, not a claim of Adobe's
+  unpublished internal matching algorithm.
+- PSD composite verification derives its quantization budget from the exported
+  graph: at most one 8-bit code unit per visible pixel-layer alpha-over stage
+  when implementations round at different points. Reports identify this as
+  `8bit_one_lsb_per_visible_alpha_over_stage` with
+  `byte_identical_claim=false`. A fixed one-LSB attempt was contradicted by a
+  measured two-LSB multi-layer M8 background result; neither that attempt nor
+  the former unexplained fixed two-level visual tolerance is retained.
+  This bound is an explicit Tiger inference from the W3C source-over recurrence
+  and the 0..255 8-bit sample domain, not wording quoted from either standard.
+  A three-visible-layer contract test and the measured M8 multi-layer result
+  guard the derivation.
+- Painter AI Study comparison values are diagnostics, not artwork acceptance.
+  The former uncalibrated MAE 32, luminance-correlation 0.86, edge-F1 0.42,
+  focus-MAE 28, and 1,000-stroke readiness gates are removed. Reports always
+  identify the authored planner as
+  `tiger_authored_reference_study_planner_v1`, use `status=diagnostic_only`,
+  and set both quality-threshold and release-readiness claims to false.
+- AI Study edge diagnostics publish mean and p95 rather than an uncalibrated
+  `edge >= 0.22` coverage. Material response measurements use continuous
+  coverage-weighted means instead of a `coverage > 0.1` sample cutoff, and the
+  Material preview deadband is limited to the explicit 8-bit `1/255`
+  quantization boundary.
+- M8 correctness stress no longer converts locally chosen 15-second tile and
+  5-second stroke timings into PASS. Timing remains raw measurement; tile
+  cardinality, bounded cache state, and an actually painted stroke pixel are
+  the correctness facts. Large Canvas QA v3 removes RGB-variance/quadrant/color
+  count cutoffs and compares runtime-reconstructed Canvas output against a
+  direct source Canvas at 25/100/400% with the declared premultiplied 1-LSB
+  bound. Nonuniform sampling is only a blank-capture guard, not a quality gate.
+- M7 likewise removes its local three-second 4K upload and 2,000-point stroke
+  PASS limits. Those timings remain observations; retained-tile cardinality,
+  dirty/hash behavior, configured-budget enforcement, fallback parity, and an
+  actually painted stroke pixel form the correctness result.
+- Painter readiness v2 renames the misleading M8 `long_stroke_session` and
+  `bounded_memory` booleans to `large_stroke_render` and
+  `bounded_tile_cache`. The probe is one 3,000-point stroke and a configured
+  tile-cache bound; it is not long-session or process-memory evidence.
+- Painter readiness v3 also replaces generic `high_dpi`, `tablet`, `canvas_4k`,
+  and window flags with `simulated_high_dpi_layout`,
+  `synthetic_tablet_channel_roundtrip`, `4k_tile_cardinality`, and explicit
+  offscreen-window names. These automated-baseline facts cannot satisfy native
+  monitor, physical tablet, or retained-display release claims.
+- Material brush capability identifies style-dependent thickness, wetness, and
+  roughness coefficients as `tiger_authored_stylized_relief_v1` with an
+  authored-not-measured source. It sets physical-media and external-brush
+  parity claims false; unsupported styles use the explicit
+  `stylized_reduced_relief` fallback name.
+- Brush Dynamics reports
+  `tiger_authored_deterministic_dab_dynamics_v1`. Its pressure, stabilization,
+  scatter, jitter, buildup, size, and alpha coefficients support deterministic
+  replay only; physical-media, driver-latency, and external-engine parity
+  claims are explicitly false in `paint.state`.
+- OKLCH conversion follows CSS Color 4 powerless-hue handling at
+  `C <= 0.000004`. Achromatic conversions return a missing hue and harmony
+  generation stays neutral; floating-point noise can no longer be amplified by
+  the authored minimum chroma into an arbitrary colored gray palette.
+  The former 0.025 chroma floor is also removed for low-chroma colors. State
+  reports `harmony_chroma_floor=0.0` and `css_gamut_mapping_claim=false`; the
+  current binary chroma reduction is a Tiger gamut policy, not CSS gamut-map
+  algorithm parity.
+- A separate read-only QA agent report at
+  `debugCapture/painter/independent_threshold_qa/report.json` validates the
+  threshold-removal scope with 43 focused tests and hashed evidence. R8 checks
+  its schema, read-only role, and non-release assessment; it never upgrades the
+  agent result to human `visual_product_review` evidence.
+- `paint.selection.modify` honors the full declared radius instead of silently
+  truncating Expand/Contract/Border to Pillow's 99-pixel single-kernel limit.
+  Square morphology is composed in exact radius-at-most-49 passes; a 120-pixel
+  single-point expansion is guarded as a 241-by-241 result.
+- Hue/Saturation uses Hue directly in degrees from -180 to 180; Saturation and
+  Lightness remain relative percentages from -100 to 100. The prior hidden
+  -100..100-to-half-turn scale is removed. `paint.state` publishes adjustment
+  parameter ranges, units, renderer model IDs, and
+  `photoshop_algorithm_parity_claim=false` for every current adjustment.
+- OKLCH harmony colors are Tiger-authored suggestions. Standard hue-angle
+  relationships are kept distinct from unmeasured shade/tint lightness and
+  chroma weights; `paint.state.palette` reports
+  `harmony_quality_claim=false` and the authored-preset source.
+- Undo budget telemetry schema v2 is logical payload accounting, not process
+  memory. It measures `QImage.sizeInBytes`, QPixmap raster payload, and CPython
+  owned object/container sizes recursively with shared references counted once.
+  It reports `process_memory_claim=false`; Windows working set/private usage
+  remains the only process-memory evidence.
+- Native disk-full evidence requires an actual Windows write failure matching
+  `ERROR_DISK_FULL` 112 or errno 28. `tools/qa_painter_disk_full.py` creates
+  only a unique disposable VHD under `debugCapture/painter/disk_full`, verifies
+  preservation/error surfacing/retry, and never substitutes a monkeypatched
+  exception. On the current host DiskPart requires UAC elevation (WinError 740),
+  so this release claim remains failed and no physical disk was modified.
+- A completed raw native soak is reviewed by `app/painter_soak_acceptance.py`.
+  Acceptance requires at least 7,200 measured seconds, at least 1,000 monotonic
+  resource samples covering the run, complete actual Windows working-set,
+  private-usage, process-handle, GDI and USER measurements, a cyclic Painter
+  workload, and zero operation errors. Passing proves only
+  `single_native_two_hour_survival`; it explicitly does not prove leak freedom,
+  universal performance, or a latency threshold. A separate
+  `three_run_two_hour_resource_envelope` claim requires three distinct accepted
+  7,200-second runs. It publishes min/max/median/MAD for resource deltas,
+  slopes, and latency percentiles without a leak or performance threshold.
+  `tools/run_painter_long_soak_series.py` waits for the active first report,
+  runs two additional sessions sequentially, then performs series acceptance
+  and R8 reaggregation without user intervention.
 - The 2026-07-26 standalone Painter persistence pass adds the versioned
   `.tspaint` single-file format (`tigerstudio.painter.document.v1`). It stores
   background pixels, ordered layers/masks, editable strokes and tablet
@@ -7680,6 +8131,15 @@ AI Script Edit MVP integration:
   Controls. Painter numeric controls use the shared
   `StudioSlider`; hue/saturation/value controls remain dedicated color
   gradients because the gradient itself conveys the edited channel.
+  The disabled `Dual Brush`, `Noise`, `Wet Edges`, and `Protect Texture` rows
+  are explicit unsupported Painting features, not decorative or simulated
+  controls. Their evidence-driven implementation is tracked in R4B of
+  `docs/PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md`. Adobe defines
+  Dual Brush as the intersection of primary and secondary tips and Protect
+  Texture as shared texture settings; Corel grain/water documentation is the
+  parameter-response reference for texture and wet-media separation. Until
+  those contracts pass persistence, replay, and export tests the buttons stay
+  disabled and no parity claim is made.
   The initial library is `Tiger Studio Brushes`; external Painter libraries,
   Painter brush packs, and ABR/captured-dab import remain separate future
   ingestion work and must not be simulated as installed content.
@@ -7734,10 +8194,29 @@ AI Script Edit MVP integration:
   provider-neutral multi-selection and `paint.ui.object.arrange` for
   selection-bound alignment or horizontal/vertical distribution. The canvas
   and Layers panel share the same ordered selection contract; Ctrl toggles,
-  Shift adds, group movement is one Undo transaction, and only the primary
-  object exposes resize/rotation handles. Phone and desktop artboards preserve
+  Shift adds, and group movement is one Undo transaction. Ordinary multi-
+  selection exposes resize/rotation handles on the primary object. A uniform
+  Figma-style Smart selection is the explicit exception: pink center rings mark
+  one or more layers without leaving the selection; marked layers can reorder,
+  duplicate, delete, or resize while the remaining layers reflow at the captured
+  horizontal/vertical gaps. 1D double-click marks all layers. In 2D,
+  Shift+double-click marks the same visual row and a following double-click marks
+  the full selection. Windows Ctrl+D duplicates marked layers, Delete/Backspace
+  removes them, and each committed spacing/reorder/mutation is one Undo batch.
+  Painter's deterministic 2D row/column calculation is an internal reproduction
+  rule, not a claim about unpublished Figma internals. Phone and desktop artboards preserve
   their document aspect ratio while fitting the available UI Design workspace
   rather than stretching to the underlying paint-canvas dimensions.
+- Painter UI selection/tutorial M1 is `Complete v1` as of 2026-08-03 against
+  the official Figma selection, transform, alignment, Tidy up, and Smart
+  selection help flows enumerated in
+  `docs/PAINTER_UI_M1_TUTORIAL_EVIDENCE_KO.md`. Completion includes 1D/2D
+  Smart spacing, reorder, duplicate, delete, single-2D/multiple-1D resize
+  reflow, marking escalation, stale-mark cleanup, and one-batch Undo boundaries.
+  This is a bounded external-behavior claim, not full Figma parity or a claim
+  to reproduce unpublished Figma layout internals. The next tutorial audit is
+  M2 Auto Layout: entry, direction, gap, padding, alignment, Fixed/Hug/Fill,
+  and Wrap, in official documentation order over the existing implementation.
 - Painter UI Design uses a three-column desktop authoring workspace:
   provider-neutral `Pages` and the canonical draggable `Layers` hierarchy live
   in the left navigator, artboards own the center canvas, and static
@@ -8297,3 +8776,604 @@ AI Script Edit MVP integration:
   `app/video_editor_popouts.py`; Screen Studio Auto Polish lives in
   `app/video_editor_screenstudio_dialogs.py`. New popout/studio/dialog code
   should extend those modules instead of regrowing `video_editor_window.py`.
+
+## Motion Designer Production Gap Gate (2026-08-02)
+
+- Remaining layered-motion product work is tracked in
+  `docs/MOTION_DESIGNER_PRODUCTION_GAPS_KO.md` as PG1-PG5, avoiding collision
+  with the existing 2026 trend M21-M28 milestones.
+- PG1 is Complete v1. `tigerstudio.motion.layer_readiness.v1` combines cutout
+  quality, first-frame reconstruction, background restoration confidence,
+  camera-travel limits, and segmentation-provider evidence.
+- The gate returns `ready`, `review`, `repair_required`, or `fallback_only`,
+  plus ordered Action repair steps and an explicit source-preserving
+  single-layer fallback. It is exposed as
+  `motion.ai.layer.readiness.inspect` and is attached to fresh and cached image
+  decompositions.
+- PG1 does not claim universal automatic decomposition. PG2 temporal matte
+  stability, PG3 restoration/contact compositing, PG4 choreography direction,
+  and PG5 GPU/cache/release qualification are Complete v1 within their recorded
+  evidence boundaries.
+- PG2 core validation is implemented as
+  `tigerstudio.motion.temporal_matte_quality.v1` and the ownerless
+  `motion.matte.temporal.validate` Action. It measures inter-frame IoU,
+  boundary IoU, area flicker, centroid drift, and confidence loss, returning
+  the first unsafe propagation time and correction-key times. Both the Action
+  and UI tracking paths invoke it automatically. Unsafe samples are trimmed or
+  disabled, timeline error/warning markers expose stop and correction times,
+  and correction keys restore the original samples before recalculating the
+  report. These behaviors complete PG2 v1.
+- PG3 begins with `tigerstudio.motion.restoration_preflight.v1`. It unions the
+  saved foreground masks, combines them with the recorded inpaint confidence,
+  emits a restoration-risk heatmap, and compares requested normalized camera
+  travel against the decomposition's safe travel limit. Unsafe vectors are
+  direction-preservingly clamped and accompanied by a clean-plate repair
+  action. `motion.ai.restoration.preflight` consumes a decomposition directly;
+  `motion.restoration.preflight` remains the ownerless raw-mask QA surface.
+- `motion.ai.contact_composite.prepare` creates a corrected foreground and a
+  separate soft contact-shadow PNG. The foreground pass decontaminates
+  semitransparent pixels against the supplied background and applies a bounded
+  local light-color gain. Preview and export are required to consume the same
+  generated assets rather than recomputing divergent edge or shadow results.
+- Layered-image compilation now runs the restoration preflight against the
+  planned camera vector, stores the report on the background layer, and emits
+  corrected foreground/contact-shadow image layers for the principal visual
+  element. The choreography clamp is based on the complete 2D vector length,
+  not only its X component. Preview and export render graphs reference the
+  same generated asset paths. Regenerable H.264 evidence at
+  `debugCapture/motion_designer/contact_composite_qa/report.json` verifies six
+  decoded nonblank frames and one contact-shadow layer. H.264 is not presented
+  as an alpha delivery format; alpha parity ends at the shared graph and
+  alpha-capable outputs. These behaviors complete PG3 v1.
+- PG4 starts with `tigerstudio.motion.choreography_director.v1` and the
+  ownerless `motion.ai.choreography.candidates` Action. It infers production
+  grammar (headline burst, product orbit, puppet greeting, editorial cutout,
+  or layered reveal), generates Clean/Dynamic/Collage alternatives, limits
+  simultaneous layer entrances in the actual cue times, and reports motion
+  repetition, peak concurrency, readability, and complexity before review.
+- `motion.ai.choreography.candidate.apply` verifies the decomposition source
+  hash and explicit approval before compiling the selected variant into the
+  composition. Regenerable product-orbit evidence at
+  `debugCapture/motion_designer/choreography_director_qa/report.json` records
+  the three ranked candidates and a decoded 36-frame H.264 result. The selected
+  Clean candidate has zero repeated motion signatures, peak concurrency two,
+  and readability 96.696. These behaviors complete PG4 v1.
+- PG5 bounds Motion frame caching by both entry count and estimated image
+  bytes. Diagnostics expose current/max bytes, hits, misses, and evictions.
+  Export reports expose graph, GPU-attempt, CPU-paint, and total timings plus
+  the exact backend and fallback reason. Generated decomposition, matte, depth,
+  and inpaint directories share a protected 2 GiB directory-level LRU budget.
+- `motion.performance.gate` measures deterministic frame hashes, p50/p95 render
+  timing, optional GPU enforcement, cache budget/hit behavior, and repeated
+  template switching without mutating the stored composition. Evidence at
+  `debugCapture/motion_designer/pg5_release_gate/report.json` verifies 16:9,
+  9:16, and 1:1 cases and links the real 30-minute OpenGL run and packaged
+  installer smoke evidence. CPU export fallback remains explicit when an
+  effect is not supported by the GPU renderer. These behaviors complete PG5 v1.
+
+## Motion Designer Reference Alignment and Portable Projects (2026-08-04)
+
+- The canonical implementation status is
+  `docs/MOTION_DESIGNER_REFERENCE_IMPLEMENTATION_STATUS_2026-08-04.md`; it
+  supersedes pre-implementation observations in the reference audit without
+  turning internal parity into an Adobe or Apple compatibility claim.
+- Standard text selectors, neighbor-derived temporal tangents, Position spatial
+  Bezier paths, temporal shutter samples, Tiger Behavior contracts, Tiger
+  Repeater v2, Puppet stability diagnostics, and RGBA/SSIM reference comparison
+  use shared evaluator and Action contracts.
+- `.tgmotionpkg` is the portable Motion project format. The File menu and
+  `motion.package.export`, `motion.package.inspect`, and `motion.package.load`
+  Actions embed local resources, deduplicate them by SHA-256, validate archive
+  paths and hashes, and relink extracted resources. Plain `.tgmotion` remains
+  the normal editable project format.
+- Unsupported UMG semantics are explicit deterministic-bake preflight results;
+  repeaters, motion blur, Puppet deformation, expressions, and behaviors must
+  never disappear silently during Unreal generation.
+
+## Motion Designer AEP Inspection (2026-08-03)
+
+- Tiger Studio now owns a dependency-free, bounded AEP structural parser under
+  `app/motion_designer/aep`; its contract is documented in
+  `docs/SPEC_MOTION_AEP_IMPORT.md`.
+- `motion.aep.inspect` and `tools/qa_motion_aep_parser.py` validate the
+  `RIFX/Egg!` tree, preserve unknown chunk metadata, identify linked-media path
+  candidates, inspect trailing XMP, and report features that require After
+  Effects or deterministic baking.
+- Expressions, scripts, plug-ins, fonts, linked footage, Dynamic Link, and
+  Cineware are never executed during inspection.
+- This is structural compatibility, not visual AEP playback, editable native
+  conversion, `.aep` writing, or After Effects render parity. Those claims
+  remain blocked until conversion and render evidence exist.
+
+# Painter UI Boolean Figma-parity roadmap (Implemented / parity completion gates pending, 2026-08-04)
+
+- Schema 18 Union/Subtract/Intersect/Exclude, stable operand IDs,
+  non-destructive Release, Action parity, and shared Canvas/PNG/SVG geometry
+  are the implemented baseline, not a full-Figma parity claim.
+- `docs/PAINTER_UI_BOOLEAN_PARITY_MILESTONES_KO.md` is the focused canonical
+  roadmap for M1B.1-M1B.8. Work proceeds in order through operand/style
+  correctness, full fill+stroke geometry, direct operand editing,
+  commands/shortcuts, nested Boolean, Outline/Flatten, import/export/UMG, and
+  performance/accessibility/release QA.
+- M1B.1 must align operand eligibility with the public Figma contract: Shape,
+  Vector Path, and Text are supported; Frame and Section are not. Union,
+  Intersect, and Exclude inherit the top operand style while Subtract inherits
+  the bottom operand style. All mutation paths use one shared eligibility rule.
+- M1B.2 must include visible stroke width/alignment in Boolean input geometry;
+  fill-only results cannot satisfy the parity gate.
+- No M1B stage is complete without real desktop UI capture, round-trip and
+  one-step Undo evidence, Canvas/PNG/editable-SVG parity, focused regressions,
+  the full Painter UI suite, and the architecture guard. Unreal UMG remains
+  explicitly Blocked until native, material, or deterministic-bake generation
+  passes real Widget Blueprint compile and capture.
+- Implemented evidence now covers Figma-eligible operands, operation-specific
+  style inheritance, fill+visible-stroke geometry, editable child hierarchy,
+  official Windows shortcuts, nested Boolean groups, Outline, destructive
+  Flatten with dangling-reference cleanup, and dependency-ordered nested Figma
+  export. Focused Boolean/Figma/menu/release-corpus/architecture regressions
+  pass (`63 passed`), and both normal-scale and 150% high-DPI Painter capture
+  probes pass.
+- Editable SVG evidence is rendered back through Qt SVG and compared against
+  the Canvas PNG with a 2% changed-pixel ceiling. SVG output now separates
+  Painter RGBA colors into SVG-compatible RGB plus fill/stroke opacity and
+  emits numeric background viewport dimensions.
+- UMG Boolean output remains explicitly `Blocked` with
+  `painter_ui_boolean_requires_deterministic_bake`; this is not an Unreal
+  support claim. The full Painter regression gate now passes all 106 isolated
+  `test_painter_ui_*.py` files and the delivery release corpus passes all seven
+  cases. Full parity is still pending because a light-UI capture is missing,
+  the measured 10,000-node resolve cost is 161.675 ms, and no deterministic
+  Boolean UMG bake plus real Widget Blueprint compile/capture exists. Exact
+  evidence is recorded in the canonical milestone document.
+
+# Painter UI Figma replacement execution milestones (Active, 2026-08-04)
+
+- `docs/PAINTER_UI_FIGMA_REPLACEMENT_MILESTONES_2026_KO.md` is the canonical
+  ordered product roadmap. It replaces ad-hoc feature sequencing with the
+  fixed dependency order M0 evidence baseline, M1 core authoring, M2 layout,
+  M3 components, M4 variables/design systems, M5 prototype runtime, M6 assets,
+  M7 Dev/delivery, and M8 scale/release.
+- A feature is not complete because its button or data field exists. Each
+  milestone requires an official Figma tutorial reference, observable Canvas /
+  Layers / Inspector behavior, shared mutation and Undo/Redo, persistence,
+  accessibility, actual desktop/compact/high-DPI capture, task-completion
+  tests, and honest delivery preflight.
+- Third-party plugins, widgets, Community marketplace operations, real-time
+  multiplayer editing, and cloud branch/permission services remain outside the
+  user-approved scope. Local review metadata, package export, Figma plugin
+  exchange, and the provider-neutral TigerStudioUMG path remain in scope.
+- M1 core authoring and the bounded M2.1-M2.8 Auto Layout workflows are the
+  current Complete-v1 baseline. Current execution is M3
+  Component/Instance/Variant; large-scene and full supported-theme evidence
+  stay in the M8 release gate rather than reopening completed milestones
+  without a concrete defect.
+- `docs/PAINTER_UI_SOLO_FIGMA_90_MILESTONES_2026_KO.md` is the production gate
+  for the narrower user-approved target: replacing at least 90% of common solo
+  Figma Design work while excluding AI, Community, live collaboration, and
+  cloud permissions/branching. Its fixed order is S0 shared corpus, S1
+  deterministic persistence, S2 nested layout/component combinations, S3 text
+  fidelity, S4 vector/appearance fidelity, S5 advanced prototype, S6 visual
+  delivery fidelity, S7 10k-layer scale, S8 autosave/recovery/long Undo, and S9
+  the measured 90% release gate. X1-X5 retain advanced typography, vector
+  effects, large design systems, Dev/accessibility/platform work, and honest
+  Figma exchange as the remaining expansion track.
+- Existing buttons, schema fields, Actions, unit tests, and earlier Complete-v1
+  vertical slices are inputs to this production roadmap, not automatic S-stage
+  completion. S-stage claims require the same fixed real documents to survive
+  Canvas/Layers/Inspector editing, Undo/Redo, process restart, visual delivery,
+  and explicit unsupported-property preflight.
+
+# Painter UI M2.4 sizing policy (Complete v1, 2026-08-03)
+
+- Fixed is available for every selected UI object. Hug is available only to an
+  active Auto Layout container. Fill is available only to an in-flow child of
+  an Auto Layout parent; top-level and Absolute children cannot select it.
+- `PainterUISizingControl` exposes per-option availability without silently
+  rewriting legacy documents.
+- Fill allocation iteratively applies each child's min/max constraints and
+  redistributes the remaining space to unconstrained Fill siblings. This
+  prevents a capped child from leaving space unused while another Fill sibling
+  remains undersized.
+- Existing diagnostics remain canonical for Hug-parent/Fill-child cycles,
+  invalid min/max ranges, fixed overflow, and no-content-space conditions.
+
+# Painter UI M2.6 nested and Ignore-auto-layout policy (Complete v1, 2026-08-03)
+
+- Nested Auto Layout frames retain both roles: they are a sized child of their
+  parent flow and a Horizontal, Vertical, or Grid container for their own children.
+- UI3 terminology is `In flow` and `Ignore auto layout`; the serialized compatibility
+  values remain `auto` and `absolute`.
+- Ignore-auto-layout children do not consume flow cells. Their constraints are
+  re-resolved against the parent's final Auto Layout geometry, including nested
+  absolute/flow combinations.
+- Native nested UMG panels are supported. Ignore-auto-layout children remain an
+  explicit UMG preflight blocker until a provider-neutral overlay-slot contract exists.
+
+# Painter UI M2.7 scroll and overflow policy (Complete v1, 2026-08-03)
+
+- Painter UI document version 29 stores one normalized scroll record per
+  object: `overflow` is `none`, `horizontal`, `vertical`, or `both`; `position`
+  is `scroll`, `fixed`, or `sticky`; and `preserve_position` is boolean.
+- Overflow scrolling is valid only for Frames with Clip content enabled and
+  content extending beyond the selected axis. The Inspector exposes Overflow
+  only for Frames and child positioning only under a scrollable parent.
+- Sticky requires vertical or both-axis parent overflow. Fixed children inside
+  Auto Layout must use Ignore auto layout so their location is not owned by
+  the flow resolver. Invalid combinations are document validation errors;
+  an axis without overflow content is a warning.
+- HTML prototype export preserves the object hierarchy, emits axis-specific
+  overflow, and compensates fixed direct children while their parent scrolls.
+- TigerStudioUMG schema v10 maps horizontal and vertical overflow to native
+  `UScrollBox`, Both to nested ScrollBoxes, and Fixed children to a sibling
+  fixed Canvas inside the Frame Overlay. Sticky remains the explicit
+  `prototype_sticky_requires_umg_runtime_binding` blocker.
+
+# Painter UI M2 completion evidence (Complete v1, 2026-08-03)
+
+- M2.1 through M2.8 are complete for the bounded official-help workflows
+  recorded in `docs/PAINTER_UI_M2_AUTO_LAYOUT_TUTORIAL_EVIDENCE_KO.md`.
+  This is not a whole-Figma parity claim.
+- The changed M2 path passes 81 focused regressions (two unrelated
+  PaintDialog tests excluded), the TigerStudioUMG document/plugin/material/
+  layout path passes 51 tests, and the editor architecture guard passes 4.
+- A real UE 5.8 run generated and loaded a compiled Widget Blueprint with 14
+  widgets, native HorizontalBox and GridPanel classes, a loaded generated
+  class, a visual Editor capture, and zero shader compile errors. The
+  regenerable report is
+  `debugCapture/painter_ui_designer/unreal_umg/qa_report.json`.
+- Native Horizontal/Vertical/Both ScrollBox conversion and Fixed Overlay slots
+  are supported and covered by real UE 5.8 generation evidence. Sticky remains
+  an explicit blocker and must not be represented as completed native support.
+
+# Painter UI M2.3 spacing, alignment, and wrap (Complete v1, 2026-08-03)
+
+- The Inspector exposes a nine-position alignment control and an explicit Auto
+  Gap toggle. Auto Gap reuses canonical `main_alignment=space_between` and
+  therefore does not introduce a parallel serialized layout mode.
+- Wrap is offered only for Horizontal flow. Wrapped rows expose independent
+  main and cross gaps; switching to Vertical clears unsupported Wrap before the
+  property payload is emitted.
+- Canvas Gap dragging follows x for Horizontal and y for Vertical. Shift uses
+  the 10 px big nudge; Alt changes the opposite padding edge; Alt+Shift changes
+  all four padding edges. All paths share
+  `app/painter_ui_auto_layout_overlay.py` and commit one layout mutation.
+- Existing layout schema and TigerStudioUMG meanings are unchanged: native UMG
+  flow panels already consume fixed padding/gap and Space Between is handled by
+  the existing flow alignment preflight.
+
+# Painter UI M2.2 Horizontal/Vertical flow editing (Complete v1, 2026-08-03)
+
+- Official behavior source:
+  `https://help.figma.com/hc/en-us/articles/31289464393751-Use-the-horizontal-and-vertical-flows-in-auto-layout`.
+- `app/painter_ui_auto_layout_flow.py` is the canonical flow-child inspection
+  and reorder service. It identifies the parent axis, orders direct in-flow
+  siblings by stable z/document order, preserves the existing z-index slots,
+  and never writes throwaway x/y values to flow children.
+- Canvas dragging an in-flow child uses sibling centers on the active axis,
+  shows a blue insertion indicator, and commits one reorder on release. It does
+  not enter the generic geometry move/reparent path.
+- Horizontal children reorder with Left/Right; vertical children reorder with
+  Up/Down. Perpendicular keys are consumed without persisting geometry that the
+  Auto Layout resolver would discard.
+- The Inspector exposes immediate Horizontal (`→`) and Vertical (`↓`) flow
+  controls while its hidden combo remains the backward-compatible serialized
+  value source.
+- Absolute-positioned children and contents of a component instance are
+  explicit blockers. A boundary reorder is a no-op and does not increment the
+  document revision or create Undo history.
+- Padding, gap, alignment, and wrap interaction fidelity is intentionally the
+  next M2.3 checkpoint, not part of this completion claim.
+
+# Painter UI M2.1 Auto Layout entry (Complete v1, 2026-08-03)
+
+- The official external entry contract is select one or more layers, then use
+  `Shift+A`, right-sidebar `Add auto layout`, or the canvas context command.
+- A single selected frame receives Auto Layout directly. Other eligible sibling
+  selections are wrapped in a transparent `Frame N`, reparented, and the new
+  frame becomes the selection.
+- `Alt+Shift+A` and `Remove auto layout` disable layout without deleting the
+  frame or its child hierarchy.
+- Shortcut, Inspector, and context-menu surfaces share
+  `app/painter_ui_auto_layout_entry.py` and one Undo step in `app/drawing.py`.
+- Painter flow inference is deterministic (dominant center spread, spatial
+  ordering, minimum non-negative adjacent gap). It is not claimed to reproduce
+  Figma's unpublished heuristic.
+- Cross-artboard, mixed-parent, and ancestor-plus-descendant selections are
+  explicitly blocked rather than silently rewritten.
+- Canonical evidence and next-stage boundaries are in
+  `docs/PAINTER_UI_M2_AUTO_LAYOUT_TUTORIAL_EVIDENCE_KO.md`.
+
+# Painter UI M3 component-set vertical slices (Active, 2026-08-04)
+
+- Component Sets use canonical multidimensional `metadata.variant_properties`.
+  Shared definitions, member combinations, missing/invalid values, and duplicate
+  combination conflicts are inspected without destructive conflict repair.
+- `paint.ui.component.variants.combine` combines only independent main
+  components on one canvas, preserves their authored positions and spacing,
+  follows Figma slash-name conversion (`Variant`, `Property 2`, ...), and uses
+  the top-left component as the default family member. The Canvas renders the
+  resulting virtual Component Set as a no-fill dashed `#9747FF` container; the
+  Inspector Combine button and action use the same Undoable service.
+- Painter UI document schema v30 stores `preferred_values` on Instance Swap
+  definitions. Preferred values are curated suggestions shown first, not an
+  allow-list: other local components remain searchable/selectable. Figma
+  `preferredValues` keys are mapped to stable local component IDs on import and
+  emitted as component keys by the export plugin.
+- Painter UI document schema v31 adds a provider-neutral Slot contract rather
+  than treating Slots as ordinary Frames. A Slot definition references a direct
+  child Frame and stores description, preferred component IDs, and normalized
+  `stretch_child_on_insert`, `display_empty_by_default`, `min_children`,
+  `max_children`, and `allow_preferred_values_only` settings. Instance-local
+  Slot children survive main-component synchronization and JSON reload; Reset
+  restores definition content. Child-count and preferred-only violations are
+  diagnostic and do not reject edits, matching Figma `SlotNode.limitViolations`.
+- Canonical Slot actions are `paint.ui.component.slot.define`, `.inspect`,
+  `.insert`, and `.reset`. The Inspector exposes child count, violations, and
+  Reset. Figma import/export maps native `SLOT`, `slotSettings`, `createSlot()`,
+  and preferred keys. TigerStudioUMG maps authored Slot hierarchy to a native
+  static panel and marks `runtime_mutable=false`; runtime mutation is not
+  claimed.
+- The Inspector generates one Variant control per property dimension and typed
+  Instance controls for Boolean, Text, Number, enum, and Instance Swap values.
+  All changes use canonical component services and the existing Undo path.
+- Main-component Instance Swap definitions expose a dedicated preferred-values
+  editor. It supports checkbox add/remove, drag or button reordering, and local
+  component search. Preferred values only control the initial suggestion order;
+  non-preferred local components remain selectable.
+- Canvas and Layers hierarchy drops resolve Slot frames through the canonical
+  Slot contract. Canvas drops preserve geometry, insert by the horizontal or
+  vertical Auto Layout axis when present, and commit insertion plus geometry as
+  one Undo step. Layers inside/before/after drops use the same insertion service.
+- UI Design Copy/Paste uses the whole-object clipboard schema
+  `tigerstudio.painter.ui.object_clipboard.v1`. It copies complete selected
+  subtrees and sourced interactions, generates new stable object/interaction
+  IDs, remaps internal parents/references, preserves same-document component
+  links and local overrides, and commits paste as one Undo step. A linked
+  Instance is rejected explicitly when its source component does not exist in
+  the target document instead of being silently detached.
+- `Change to` is restricted to variants from the same Component Set. Prototype
+  preview resolves inherited definition interactions on Instances, preserves
+  local overrides, remembers the selected state, shares state across matching
+  family Instances, and gives same-trigger direct Instance interactions priority.
+- Consecutive interactive-component events resolve the currently active Variant
+  definition as the inherited source. The self-contained HTML preview mirrors
+  this lookup and applies target Variant geometry, fill, stroke, radius, opacity,
+  and text to the existing Instance subtree. Navigation interactions expose the
+  official `Reset component state` option; both Python and HTML runtimes clear
+  remembered/shared component state when it is enabled.
+- Figma import/export maps interactive variants through `CHANGE_TO`.
+  TigerStudioUMG does not yet execute that semantic and therefore reports
+  `interactive_component_change_to_runtime_unsupported` as an explicit Blocked
+  preflight result instead of silently omitting it.
+- Component-backed Frame/Shape selections route to the component-aware property
+  Inspector rather than the ordinary compact geometry shell. Variant,
+  definition, typed instance-property, and override rows are members of the
+  visible component group. The generic property host is vertically scrollable
+  and ignores over-wide child size hints so a 360 logical-pixel dock does not
+  overlap or clip its typed controls.
+- `tools/qa_painter_ui_m3_dpi_capture.py` launches real Inspector, Preferred
+  instances, and Canvas widgets at normal 360x900, compact 300x650, and
+  `QT_SCALE_FACTOR=1.5`, captures DPR-accurate PNGs,
+  and emits `tigerstudio.painter.ui.m3_dpi_capture.v1`. The gate verifies loaded
+  fallback glyphs, 540x1350 and 780x930 backing pixels, all typed component
+  controls visible and horizontally contained, and the preferred-value count.
+  The same product-widget gate sends real Qt pointer events through the Canvas,
+  records `mouse_enter`, `hover`, `press`, and `focus`, asserts the runtime
+  Instance component IDs transition Default -> Hover -> Pressed, and stores a
+  PNG for every visual state.
+- The whole-object clipboard corpus is saved through the native `.tspaint` v3
+  archive writer and reloaded through the production reader. Component IDs,
+  pasted root/child hierarchy, local overrides, new interaction IDs, and their
+  remapped source object IDs remain stable after reload.
+- Canvas Slot direct manipulation now has a real product-pointer capture gate.
+  `tools/qa_painter_ui_m3_slot_capture.py` records before, drag-preview, after,
+  and Undo PNGs plus
+  `tigerstudio.painter.ui.m3_slot_pointer_capture.v1`. The gate requires a real
+  `move` gesture, the canonical Slot preview/parent/child IDs, visual containment
+  inside the Slot, and exactly one Undo step. Reparenting recaptures constraints
+  against the new parent so a correct hierarchy cannot still jump visually.
+- Small selected ellipses scale their arc and resize hit targets with their
+  displayed extent. Ordinary interior presses remain available for movement,
+  while the exact arc/resize handles remain interactive.
+- `tools/qa_painter_ui_m3_nested_change_to_capture.py` sends real Canvas click
+  events to a Toggle Instance nested in an outer Card Instance and captures
+  Off -> On -> Off. Prototype state changes rebuild the effective Variant
+  subtree, theme, constraints, and render indexes, so a changed component ID
+  cannot leave stale pixels. The gate also preserves the outer Instance,
+  nested parent, and local opacity override.
+- This is not M3 completion. Live Figma plugin round-trip proof remains gated
+  in `docs/PAINTER_UI_M3_COMPONENT_TUTORIAL_EVIDENCE_KO.md`.
+- The combined focused M3 regression passes `178` tests on 2026-08-04,
+  including preferred Instance editing, nested Instance Swap persistence,
+  Canvas/Layer Slot drops, nested Change-to, whole-object Copy/Paste, 150% DPI
+  product-widget capture, Figma exchange, UMG mapping, and architecture guards.
+- The Slot pointer/constraint and nested Change-to visual paths add three
+  durable tests and pass `136` unique impacted regressions plus the architecture
+  guard on 2026-08-04.
+
+# Painter Painting evidence correction R3 (Active, 2026-08-04)
+
+- Painter recovery must use an atomic temporary-file replacement, validate the
+  ZIP central directory and every entry CRC before offering a snapshot, and
+  expose asynchronous writer failures through
+  `painter_action_state().recovery.last_error`. A failed writer remains
+  retryable; a later successful write clears the recorded error.
+- Actual child-process kill and next-process restore now preserve full RGBA
+  output parity. Killing a replacement writer while its real temporary file is
+  present leaves the prior recovery archive byte-identical and CRC-valid.
+- Runtime stability measurement uses native Windows process APIs for working
+  set, private usage, process handles, GDI objects, and USER objects, plus
+  operation latency percentiles. The workload is cyclic and bounded.
+- Three 15-second native runs form only a calibration distribution at
+  `debugCapture/painter/soak/calibration-baseline-20260804.json`. The aggregate
+  records observed min/max/median/MAD and is explicitly
+  `release_claim_passed=false`; short warm-up slopes are not extrapolated into
+  a long-session claim.
+- R3 remains incomplete until actual disk-full behavior and repeated long
+  native measurements establish an evidence-derived comparison envelope. A
+  single two-hour survival run is tracked separately and no fixed threshold may
+  be chosen from intuition.
+- The first native 7,200-second run survived 62,114 operations and 517 bounded
+  cycles with zero workload errors, but working set increased by 309,198,848
+  bytes and private usage by 363,929,600 bytes. This is survival evidence, not a
+  leak-free result. Three-run acceptance now rejects any run with positive
+  late-half slope and strictly increasing last-three-quarter medians; a stable
+  run cannot outvote an unresolved retained-growth run, and no byte threshold
+  is invented. Source inspection identifies per-signature Qt offscreen context
+  and FBO creation as a hypothesis only; a dedicated churn diagnostic must
+  measure it before a session-local context/FBO reuse correction is accepted.
+- The second native 7,200-second run survived 132,058 operations and 1,100
+  cycles with zero workload errors and a raw-summary-consistent scoped
+  acceptance. Working set ended 21,184,512 bytes lower, while private usage
+  ended 256,118,784 bytes higher after an intervening release made its overall
+  slope negative. This does not reproduce the first run's monotonic retention
+  and does not establish stability. A third unchanged-source run started at
+  12:55:05; no core Painter runtime correction is applied before it finishes.
+
+# Painter Painting raster mask and perspective correction R4 (Implemented, 2026-08-04)
+
+- The canonical new layer-mask primitive is a document-sized 8-bit alpha
+  raster (`QImage.Format_Alpha8`), not a polygon boundary. It must preserve
+  values from 0 through 255 for feathering, gradients, and brush edits.
+- The shared layer compositor accepts layer-id keyed raster masks and gives
+  them priority over the legacy polygon field. Legacy polygons remain only as
+  a v2 compatibility source until document migration is complete.
+- Polygon-to-raster creation, continuous gradients, hide/reveal brush writes,
+  and per-pixel RGBA application are covered by pixel assertions.
+- `.tspaint` schema v3 persists one Alpha8 PNG asset per raster-masked layer;
+  v1/v2 documents remain readable and legacy polygon masks rasterize on open.
+- Selection/path/channel/layer-alpha creation, 0–255 brush and gradient edits,
+  enable, link/unlink, apply/delete, Undo, clipboard, recovery, image/canvas
+  resize, crop, flip, and free transform now share that same mask asset.
+- The perspective ruler now stores 1/2/3-point mode, off-canvas vanishing
+  points, and a separate snap toggle. Mouse and tablet samples share one path:
+  the first meaningful motion chooses the closest ruler axis and all remaining
+  samples stay projected to that axis until pen-up.
+- The R4 implementation gate passes 202 Painting tests and 5 architecture/
+  debug-boundary tests. This remains automated functional evidence, not manual
+  release approval.
+
+## Painter UI M3 live Figma round-trip contract (2026-08-04)
+
+- `tools/qa_painter_ui_m3_figma_live_roundtrip.py` prepares a real Figma Desktop
+  development-plugin package and consumes the Page snapshot copied by that plugin.
+- Figma export stores `stable_id`, `component_id`, and
+  `component_source_object_id` as Tiger Studio shared plugin data. Figma import
+  prefers those values over generated Figma-node IDs so object, component,
+  instance, and Slot references survive the round trip.
+- Nested object coordinates are artboard-space in the Painter document and are
+  converted to parent-local coordinates when assigned to a Figma child node.
+- After `createInstance()`, cloned instance sublayers are paired with authored rows
+  by `component_source_object_id`. Slot-local authored children are then created
+  under the actual cloned `SlotNode`; they must never be silently omitted.
+- Figma import traverses Instance children so cloned Slot rows and authored
+  Slot-local hierarchy are restored. Stable-ID equality is part of the live QA
+  pass condition.
+- The generated package passes JavaScript syntax validation and the focused
+  84-test Figma/Component/Slot/architecture regression. M3 remains Active until
+  an interactive Figma Desktop run registers the manifest, executes the plugin,
+  reimports its clipboard snapshot, and records a visible Figma product capture.
+- A real live run must pass the Figma-assigned development plugin ID through
+  `--plugin-id`. The placeholder manifest ID is suitable only for package and
+  syntax QA; it must not make `live_execution_ready` true.
+
+## Painter UI limited Figma plugin compatibility runtime (2026-08-04)
+
+- Figma plugin exchange and third-party plugin execution are separate product
+  surfaces. Exchange does not imply that Painter can run arbitrary Figma plugins.
+- The compatibility roadmap is defined by
+  `docs/PAINTER_UI_FIGMA_PLUGIN_COMPAT_MILESTONES_2026_KO.md`.
+- FP1 may read, validate, install, list, inspect, and remove local plugin packages,
+  but it must never import or execute their JavaScript. FP1 reports
+  `metadata_only_no_code_execution` and `runtime_ready=false`.
+- Manifest paths must remain inside the package root. Duplicate IDs, missing entry
+  files, unsupported editor types, private/proposed APIs, and unsafe paths are
+  explicit preflight failures or blocks rather than silently ignored features.
+- JavaScript execution begins only in FP2 through a separately tested sandbox with
+  time/memory limits, a small allowlisted API surface, and atomic Painter undo.
+- Product compatibility claims are capability- and corpus-based. “All Figma
+  plugins supported” is prohibited without matching public API and real-plugin
+  evidence.
+- FP1 completed on 2026-08-04 with a metadata-only manifest validator, bounded
+  package registry, reviewed install/remove Actions, and a local manager dialog.
+  At the FP1 gate the manager had no Run control. FP2 now enables Run only when
+  the manifest and main-source allowlist preflight both pass.
+- The FP2 headless subset runs in a separate Node 24 permission-mode process with
+  a minimal environment, disabled string/Wasm code generation, static ambient-
+  authority rejection, a VM timeout, and an outer process timeout. It exposes only
+  currentPage/selection, notification/close/font stubs, Rectangle/Ellipse/Frame/
+  Text/Vector creation, resize, and appendChild. A successful result becomes one atomic
+  Painter document commit; exceptions, unsupported APIs, and timeouts do not apply.
+- The pinned Figma official `figma/plugin-samples` revision
+  `03131bef561eb25ee2b704e3b39e40acc70330e0` passes the unmodified three-case
+  compatibility corpus: Sierpinski creates 485 ellipses, create-rects-shapes creates
+  five rectangles, and vector-path creates one Painter path. The corpus manifest and
+  runner are `qa_corpus/painter_ui_figma_plugins/official_samples.json` and
+  `tools/qa_painter_ui_figma_plugin_official_corpus.py`.
+- Solid fill/stroke RGBA, independent paint opacity, stroke width/alignment, and
+  Text family/style/size/weight/alignment/line-height now have public-API fixtures.
+  Existing canonical solid paints also round-trip through a selected Plugin API node.
+- `tools/qa_painter_ui_figma_plugin_product.py` captures legible Korean success and
+  failure manager states and uses the real `PaintDialog` UI Design workspace for
+  after-run and after-Undo product captures. It asserts one atomic Undo snapshot on
+  success and document immutability on failure.
+- The focused exchange/plugin/runtime/corpus/product-manager/menu/architecture
+  regression passes 59 tests. The explicitly limited headless FP2 subset is complete;
+  this does not imply support for Plugin UI, network access, storage, widgets, FigJam,
+  or the complete Figma Plugin API.
+- FP3 Plugin UI work follows the public Figma lifecycle rather than treating an HTML
+  file as a static preview. UI-to-main messages arrive through
+  `parent.postMessage({pluginMessage: value}, '*')`; main-to-UI messages are emitted
+  by `figma.ui.postMessage(value)` and appear at `event.data.pluginMessage`. Because
+  `figma.ui.onmessage` must remain alive, FP3 requires a session worker with explicit
+  close and timeout instead of reusing the terminating FP2 worker. Until that bridge
+  exists, source preflight explicitly routes `showUI`, `figma.ui`, `__html__`, and
+  `__uiFiles__` plugins to FP3 and does not mark them FP2 runtime-ready.
+- The first FP3 slice now keeps a permission-mode Node worker alive across UI messages,
+  implements bounded show/hide/resize/close and bidirectional `pluginMessage` delivery,
+  and hosts HTML in a dedicated off-the-record Qt WebEngine profile. CSP, request
+  interception, WebEngine settings, and download cancellation deny remote connections,
+  external navigation, clipboard/file access, downloads, persistent cookies, and disk
+  cache by default. This profile is not shared with other product WebViews.
+- Manager rows distinguish headless `Run` from limited document-capable `Run UI`; FP3
+  preflight rejects Figma roots outside the current UI/document allowlist.
+  `tools/qa_painter_ui_figma_plugin_ui.py` proves a real dark-theme WebView boot message
+  followed by a button-triggered UI-to-main-to-UI echo, with the final Korean response
+  visible in its capture. A pinned three-case official UI corpus executes the unmodified
+  `post-message` async timer sample, supports `webpack-react` creating three rectangles
+  through UI messages, and runs `icon-drag-and-drop` through the official pluginDrop,
+  figma.on('drop'), DropFile.getTextAsync(), and createNodeFromSvg path. The icon becomes
+  a Painter SVG frame with vector children; all three official UI samples now execute.
+- FP3 UI sessions now expose the same limited Rectangle/Ellipse/Frame/Text/Vector document
+  surface as FP2 and apply events through the shared atomic Painter conversion. A stable
+  plugin-node-to-Painter-object map prevents duplicate creation across sequential UI
+  messages. The real PaintDialog manager/WebView QA creates a blue rectangle and removes
+  it with exactly one `Run Figma UI plugin` Undo snapshot. Callback or worker failures stop
+  polling, disable the WebView, and terminate the session.
+- FP3 network permission validates the official `allowedDomains` scheme, wildcard-host,
+  port, and exact/prefix-path forms. `none` is exclusive; `*` and local addresses require
+  manifest reasoning; `devAllowedDomains` never enters a normal product run. Every networked
+  UI run presents a default-No approval prompt, and approval is session-only. Only approved
+  production patterns are opened in both CSP and the WebEngine request interceptor; external
+  navigation, frames, clipboard/file access, downloads, and persistence remain blocked. A
+  real WebView QA proves an approved 127.0.0.1 path succeeds while an unapproved localhost
+  alias to the same server is blocked.
+- Lifecycle product QA proves the visible 360x220 dialog, a 560x300 resize, hide followed by
+  timer-driven show, and close. Timer callbacks emit UI state even without an outbound
+  pluginMessage, preventing a hidden UI from becoming stranded. Recovery QA drives an
+  infinite message handler into the 100 ms VM timeout and verifies worker termination,
+  polling stop, WebView disablement, and the visible error state. The related regression
+  has product evidence.
+- PluginDrop is separate from pluginMessage. The bridge serializes at most 16 drop files
+  and 1 MiB total text, maps only drops over the active Painter artboard, preserves page or
+  immediate parenting, and applies the complete result through one Undo transaction. The
+  bounded createNodeFromSvg subset accepts at most 256 KiB and 512 geometry elements and
+  preserves path/polyline/polygon/line/circle/ellipse/rect plus basic solid fill/stroke as
+  Frame+Vector hierarchy. It does not claim SVG transforms, filters, masks, embedded assets,
+  fonts, or complex paint servers. Real PaintDialog/manager/WebView QA imports the first
+  official Feather icon, proves `SVG > SVG polyline`, and removes both layers with one Undo.
+  `createFrame()` also follows the official 100x100 white-background default in FP2 and FP3.
+  The related regression passes 83 tests.
+- The bounded FP3 slice is Complete. FP4 remains Active for component/instance, styles,
+  variables, auto layout, boolean/vector breadth, font/image loading, exportAsync, and
+  broader dynamic-page semantics; this is not complete Figma Plugin API compatibility.

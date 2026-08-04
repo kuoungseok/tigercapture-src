@@ -1,5 +1,13 @@
 # Agent Start Here
 
+Painter UI의 M1 선택 동작은
+`docs/PAINTER_UI_M1_TUTORIAL_EVIDENCE_KO.md`, Complete-v1 M2 Auto Layout은
+`docs/PAINTER_UI_M2_AUTO_LAYOUT_TUTORIAL_EVIDENCE_KO.md`의 공식 증거를 따른다.
+현재 실행 지점은
+`docs/PAINTER_UI_FIGMA_REPLACEMENT_MILESTONES_2026_KO.md`의 M3
+Component/Instance/Variant이며, 기능별 공식 단계는
+`docs/PAINTER_UI_M3_COMPONENT_TUTORIAL_EVIDENCE_KO.md`를 따른다.
+
 This is the first durable handoff index for Codex/AI agents continuing work in
 TigerCapture. Use it when the user says a previous session did work, when the
 current task sounds like review automation or UI renewal, or when VTuber /
@@ -43,6 +51,27 @@ Focused entry points:
   evidence instead of treating all M13-M20 work as either complete or absent.
   This is not an After Effects parity claim. Prompt/reference-driven editable
   generation planning is in `docs/MOTION_AI_GENERATION_PRODUCT_PLAN_KO.md`.
+  Before changing Graph Editor interpolation, typography selectors, motion
+  blur, behaviors, repeaters, or Puppet semantics, read
+  `docs/MOTION_DESIGNER_REFERENCE_AUDIT_KO.md` and execute the RA0-RA9 order in
+  `docs/MOTION_DESIGNER_REFERENCE_ALIGNMENT_MILESTONES_KO.md`. Existing
+  implementation status and remaining evidence boundaries are recorded in
+  `docs/MOTION_DESIGNER_REFERENCE_IMPLEMENTATION_STATUS_2026-08-04.md`. Existing
+  Preview/Export parity is not external reference parity; do not retain broad
+  Adobe/Apple terminology when only Tiger subset semantics are implemented.
+  Remaining production-quality gaps are tracked without reusing milestone
+  numbers in `docs/MOTION_DESIGNER_PRODUCTION_GAPS_KO.md`. PG1 layered-image
+  readiness, PG2 temporal matte validation, PG3 restoration/contact
+  compositing, PG4 choreography direction, and PG5 GPU/cache/release gating are
+  Complete v1. Do not invent more production-gap milestones without a concrete
+  defect or user requirement. PG3 evidence is regenerable under
+  `debugCapture/motion_designer/contact_composite_qa/report.json`.
+  PG4 evidence is under
+  `debugCapture/motion_designer/choreography_director_qa/report.json`.
+  PG5 evidence is under
+  `debugCapture/motion_designer/pg5_release_gate/report.json`; its Product
+  Callout export cases truthfully use `gpu_effect_missing` CPU fallback, while
+  the linked 30-minute report is the separate real OpenGL Preview proof.
   Current implementation includes M0-M12 plus recorded portions of M13-M20;
   runtime plugin contribution hosting remains pending.
   Use `debugCapture/motion_designer/release_acceptance/report.json` as the
@@ -62,12 +91,40 @@ Focused entry points:
   a full ACES product-certification claim.
   Do not reopen completed milestone work without a failing test, reproducible
   defect, or explicit user request.
-- Painter UI Designer: read `docs/PAINTER_UI_FIGMA_WORKLIST_KO.md` first,
+- Shared color palettes across Painter painting, Painter UI Design, and Motion
+  Designer: `docs/SPEC_TIGER_SHARED_COLOR_PALETTE_KO.md`. It defines one shared
+  Color Core with program-specific presentation, Link versus Copy semantics,
+  Palette Packs, Brush Kits, color-space boundaries, and the no-I/O stroke
+  performance contract. Treat the document as planning until its product
+  acceptance criteria have real implementation and capture evidence.
+- Painter Painting mode: read `docs/PAINTER_PAINTING_MILESTONES_KO.md` before
+  planning brush, raster-layer, selection/transform, layer-compositing,
+  filter/color, interchange, or large-canvas work, then read
+  `docs/PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md`. The original
+  M0-M8 work is an automated implementation baseline, not product acceptance.
+  The evidence audit's R0-R8 correction order is active and explicitly
+  excludes Painter UI Design. Never promote offscreen, simulated DPI,
+  constructed stylus data, in-process recovery, or microbenchmarks to native,
+  physical-hardware, external-interoperability, or long-session evidence.
+- Painter UI Designer: read
+  `docs/PAINTER_UI_FIGMA_REPLACEMENT_MILESTONES_2026_KO.md` first for the
+  canonical M0-M8 dependency order and current M3 execution point, then
+  `docs/PAINTER_UI_FIGMA_WORKLIST_KO.md`,
   followed by `docs/PLAN_PAINTER_UI_DESIGNER.md` and
   `docs/PAINTER_UI_DESIGNER_MILESTONES_KO.md`. The P0-P10 worklist owns
-  priority and product boundaries; the milestone document records implemented
-  evidence. Painter owns static UI structure/layout/components/tokens, Motion
+  detailed product boundaries and its milestone document records implemented
+  evidence; the replacement roadmap owns cross-feature priority. Painter owns
+  static UI structure/layout/components/tokens, Motion
   Designer owns animation, and Unreal output must use shared `TigerStudioUMG`.
+  Product-complete UI claims and the mandatory task/evidence gates are owned by
+  `docs/PAINTER_UI_PRODUCT_MILESTONES_KO.md`; backend or Action presence alone
+  does not satisfy those gates. M0-M2 are the current Complete-v1 baseline and
+  M3 is the active execution point. Older
+  P0-P10/UI3 documents remain detailed evidence and gap catalogs, not competing
+  execution orders.
+  Shape creation, frame parenting, selection-content Inspector pages, and the
+  Figma Motion boundary are specified in
+  `docs/PAINTER_UI_SHAPE_VERTICAL_SLICE_KO.md`.
   Painter/Motion integration ownership and execution order were agreed with
   Painter authoring session `019f1c1c-039f-71a3-a776-b8334175150f` and are
   canonical in `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`. Start with its P0

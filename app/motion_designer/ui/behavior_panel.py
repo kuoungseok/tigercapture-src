@@ -16,6 +16,14 @@ BEHAVIOR_PARAMS = {
         ("scale_overshoot", 0, 2, .01), ("rotation_kick", -180, 180, .5),
         ("shake", 0, 1000, .5), ("frequency", 0, 30, .1), ("damping", 0, 30, .1),
     ),
+    "spin": (("rate", -1440, 1440, 5),),
+    "drift": (("velocity_x", -4000, 4000, 5), ("velocity_y", -4000, 4000, 5)),
+    "grow_shrink": (("amount", 0, 2, .01), ("cycles", 0, 100, .1), ("phase", -360, 360, 5)),
+    "oscillate": (("amplitude", -1000, 1000, 1), ("cycles", 0, 100, .1), ("phase", -360, 360, 5)),
+    "random_motion": (
+        ("position_amount", 0, 2000, 1), ("rotation_amount", 0, 360, .5),
+        ("frequency", .001, 120, .1), ("seed", -100000, 100000, 1),
+    ),
 }
 
 
@@ -94,6 +102,10 @@ class BehaviorPanel(QWidget):
                 value = (behavior.params.get("distance") or [100.0, 0.0])[0]
             elif key == "distance_y":
                 value = (behavior.params.get("distance") or [100.0, 0.0])[1]
+            elif key == "velocity_x":
+                value = (behavior.params.get("velocity") or [40.0, 0.0])[0]
+            elif key == "velocity_y":
+                value = (behavior.params.get("velocity") or [40.0, 0.0])[1]
             spin.setValue(float(value))
             spin.valueChanged.connect(lambda value, bid=item_id, name=key: self._emit(bid, name, value))
             self.params.addRow(key.replace("_", " ").title(), spin)

@@ -8,6 +8,48 @@ from app.motion_designer.commands import find_layer
 
 
 class MotionTrackingAdapterMixin:
+    def motion_restoration_preflight(
+        self,
+        *,
+        restoration_mask_path: str,
+        confidence: float,
+        max_camera_travel_ratio: float,
+        camera_dx_ratio: float = 0.0,
+        camera_dy_ratio: float = 0.0,
+        grid_size: int = 8,
+    ) -> dict[str, Any]:
+        from app.motion_designer.restoration_preflight import (
+            assess_restoration_preflight,
+        )
+
+        return assess_restoration_preflight(
+            restoration_mask_path=restoration_mask_path,
+            confidence=confidence,
+            max_camera_travel_ratio=max_camera_travel_ratio,
+            camera_dx_ratio=camera_dx_ratio,
+            camera_dy_ratio=camera_dy_ratio,
+            grid_size=grid_size,
+        )
+
+    def motion_matte_temporal_validate(
+        self,
+        *,
+        mask_paths: Sequence[str],
+        times_ms: Sequence[int] = (),
+        confidences: Sequence[float] = (),
+        thin_structure: bool = False,
+    ) -> dict[str, Any]:
+        from app.motion_designer.temporal_matte_quality import (
+            analyze_temporal_matte_sequence,
+        )
+
+        return analyze_temporal_matte_sequence(
+            mask_paths,
+            times_ms=times_ms,
+            confidences=confidences,
+            thin_structure=thin_structure,
+        )
+
     def _motion_tracking_composition(self, composition_id: str):
         composition = self._motion_store().get(str(composition_id))
         if composition is None:

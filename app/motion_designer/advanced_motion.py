@@ -156,6 +156,37 @@ def project_layer_matrix(
     return projected
 
 
+def _path_position(points: Any, progress: float) -> tuple[float, float]:
+    if not isinstance(points, (list, tuple)) or len(points) < 2:
+        return 0.0, 0.0
+    clean = [_vector(point, 2, [0.0, 0.0]) for point in points]
+    lengths = [math.hypot(clean[index + 1][0] - clean[index][0], clean[index + 1][1] - clean[index][1])
+               for index in range(len(clean) - 1)]
+    total = sum(lengths)
+    if total <= 1e-9:
+        return float(clean[0][0]), float(clean[0][1])
+    target = max(0.0, min(1.0, progress)) * total
+    walked = 0.0
+    for index, length in enumerate(lengths):
+        if target <= walked + length or index == len(lengths) - 1:
+            local = 0.0 if length <= 1e-9 else (target - walked) / length
+            return (
+                float(clean[index][0] + (clean[index + 1][0] - clean[index][0]) * local),
+                float(clean[index][1] + (clean[index + 1][1] - clean[index][1]) * local),
+            )
+        walked += length
+    return float(clean[-1][0]), float(clean[-1][1])
+
+
+def _ordered_copy_indices(count: int, order: str, seed: float) -> list[int]:
+    indices = list(range(count))
+    if order == "reverse":
+        indices.reverse()
+    elif order == "random":
+        indices.sort(key=lambda index: math.sin((index + 1) * 91.733 + seed * 17.171))
+    return indices
+
+
 def evaluate_replicator(config: Any, time_ms: float) -> list[dict[str, float]]:
     """Evaluate a renderer-neutral replicator for any renderable layer type."""
     if not isinstance(config, Mapping) or not bool(config.get("enabled", True)):
@@ -170,9 +201,14 @@ def evaluate_replicator(config: Any, time_ms: float) -> list[dict[str, float]]:
     opacity_end = max(0.0, min(1.0, float(_evaluate(config.get("opacity_end"), time_ms, opacity_start))))
     seed = float(config.get("seed", 0.0) or 0.0)
     jitter = _vector(config.get("jitter"), 2, [0.0, 0.0])
+    order = str(config.get("order") or "normal").lower()
+    ordered_indices = _ordered_copy_indices(count, order, seed)
+    sequence_offset_ms = max(0.0, float(config.get("sequence_offset_ms", 0.0) or 0.0))
+    sequence_fade_ms = max(0.0, float(config.get("sequence_fade_ms", 0.0) or 0.0))
+    sequence_start_ms = float(config.get("sequence_start_ms", 0.0) or 0.0)
     phase = float(time_ms) / 1000.0
     rows = []
-    for index in range(count):
+    for sequence_index, index in enumerate(ordered_indices):
         mix = index / max(1, count - 1)
         noise_x = math.sin((index * 12.9898 + seed * 17.31) * 1.731 + phase * 0.7)
         noise_y = math.sin((index * 78.233 + seed * 9.17) * 1.137 - phase * 0.53)
@@ -186,17 +222,38 @@ def evaluate_replicator(config: Any, time_ms: float) -> list[dict[str, float]]:
             base_x = abs(offset[0]) * math.cos(radians)
             base_y = abs(offset[0]) * math.sin(radians)
             base_rotation = angle if bool(config.get("face_outward", False)) else rotation * index
+        elif arrangement == "spiral":
+            turns = float(config.get("turns", 2.0) or 2.0)
+            angle = rotation + 360.0 * turns * mix
+            radius = abs(offset[0]) * mix
+            radians = math.radians(angle)
+            base_x = radius * math.cos(radians)
+            base_y = radius * math.sin(radians)
+            base_rotation = angle if bool(config.get("face_outward", False)) else rotation * index
+        elif arrangement == "path":
+            base_x, base_y = _path_position(config.get("path_points"), mix)
+            base_rotation = rotation * index
         else:
             base_x = offset[0] * index
             base_y = offset[1] * index
             base_rotation = rotation * index
+        reveal_time = sequence_start_ms + sequence_index * sequence_offset_ms
+        if sequence_fade_ms > 0.0:
+            sequence_opacity = max(0.0, min(1.0, (float(time_ms) - reveal_time) / sequence_fade_ms))
+        elif sequence_offset_ms > 0.0:
+            sequence_opacity = 1.0 if float(time_ms) >= reveal_time else 0.0
+        else:
+            sequence_opacity = 1.0
         rows.append({
             "x": base_x + noise_x * jitter[0],
             "y": base_y + noise_y * jitter[1],
             "rotation": base_rotation,
             "scale_x": scale[0] ** index,
             "scale_y": scale[1] ** index,
-            "opacity": opacity_start + (opacity_end - opacity_start) * mix,
+            "opacity": (opacity_start + (opacity_end - opacity_start) * mix) * sequence_opacity,
+            "copy_index": float(index),
+            "sequence_index": float(sequence_index),
+            "source_time_ms": float(time_ms) - sequence_index * sequence_offset_ms,
         })
     return rows
 

@@ -78,3 +78,17 @@ def test_release_actions_keep_render_and_product_claims_separate() -> None:
     assert result.ok
     assert result.result["render_ready"] is True
     assert result.result["product_release_ready"] is False
+
+
+def test_performance_gate_is_available_to_automation() -> None:
+    composition = _composition()
+    registry = ActionRegistry(_Owner(composition))
+    result = registry.execute("motion.performance.gate", {
+        "composition_id": composition.id,
+        "sample_times_ms": [0],
+        "iterations": 1,
+        "width": 64,
+        "height": 36,
+    })
+    assert result.ok
+    assert result.result["checks"]["deterministic_frames"] is True

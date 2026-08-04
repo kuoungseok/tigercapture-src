@@ -25,6 +25,7 @@ class MotionTimeline(QWidget):
     rig_keyframe_changed = Signal(str, str, str, str, int, object)
     puppet_keyframe_changed = Signal(str, str, str, str, int, object)
     keyframe_tangent_requested = Signal(str, str, str, str)
+    keyframe_spatial_tangent_requested = Signal(str, str, str, str)
     keyframe_roving_requested = Signal(str, str, str)
     keyframe_tangent_value_requested = Signal(
         str, str, str, str, object,
@@ -132,13 +133,37 @@ class MotionTimeline(QWidget):
         self.graph_mode.addItems(["Value", "Speed"])
         graph_controls.addWidget(self.graph_mode)
         for label, mode in (
-            ("Auto", "auto"),
+            ("Auto", "standard_auto"),
+            ("Continuous", "continuous"),
+            ("Broken", "broken"),
+            ("Tiger Smooth", "tiger_smooth"),
             ("Linear", "linear"),
             ("Hold", "hold"),
         ):
             button = QPushButton(label, self)
+            if mode == "tiger_smooth":
+                button.setToolTip(
+                    "Legacy Tiger temporal Bezier preset retained for old projects."
+                )
+            elif mode == "standard_auto":
+                button.setToolTip(
+                    "Neighbor-derived monotone temporal tangent using adjacent key times and values."
+                )
             button.clicked.connect(
                 lambda _checked=False, value=mode: self._request_tangent(value),
+            )
+            graph_controls.addWidget(button)
+        for label, mode in (
+            ("Path Auto", "auto"),
+            ("Path Continuous", "continuous"),
+            ("Path Broken", "broken"),
+        ):
+            button = QPushButton(label, self)
+            button.setToolTip(
+                "Edit Position's spatial Bezier path independently of temporal easing."
+            )
+            button.clicked.connect(
+                lambda _checked=False, value=mode: self._request_spatial_tangent(value),
             )
             graph_controls.addWidget(button)
         rove = QPushButton("Rove", self)
@@ -348,6 +373,25 @@ class MotionTimeline(QWidget):
                 self._selected_layer_id,
                 property_name,
                 self._selected_graph_keyframe_id,
+            )
+
+    def _request_spatial_tangent(self, mode: str) -> None:
+        item = self.graph_properties.currentItem()
+        property_name = (
+            str(item.data(Qt.UserRole) or "position")
+            if item is not None
+            else "position"
+        )
+        if (
+            self._selected_layer_id
+            and self._selected_graph_keyframe_id
+            and property_name == "position"
+        ):
+            self.keyframe_spatial_tangent_requested.emit(
+                self._selected_layer_id,
+                property_name,
+                self._selected_graph_keyframe_id,
+                str(mode),
             )
 
     def _emit_tangent_change(

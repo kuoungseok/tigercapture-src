@@ -1,12 +1,15 @@
 """Main editor workflow for Motion Designer compositions and clips."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.motion_designer.recovery import (
     default_motion_recovery_root, motion_recovery_path, write_motion_recovery,
 )
 from app.motion_designer.clip import MotionClip
 from app.motion_designer.schema import MotionComposition
 from app.motion_designer.timeline_bridge import duplicate_motion_clip
+from app.motion_designer.project_io import load_motion_project
 from app.video_editor_motion_lane_row import MotionLaneRow
 
 
@@ -134,6 +137,48 @@ def _place_motion_clip(self, composition_id: str, start_ms: int | None = None, d
     self._insert_motion_lane(clip)
     self._refresh_player_tracks()
     return clip
+
+
+def _import_motion_actor_from_path(
+    self,
+    path,
+    *,
+    start_ms: int | None = None,
+) -> dict:
+    source_path = Path(path).expanduser().resolve()
+    composition = load_motion_project(source_path)
+    composition.metadata = dict(composition.metadata or {})
+    composition.metadata["source_project_path"] = str(source_path)
+
+    existing = getattr(self, "_motion_compositions", {}).get(composition.id)
+    if existing is not None:
+        existing_source = str((getattr(existing, "metadata", {}) or {}).get("source_project_path") or "")
+        if existing_source and Path(existing_source) != source_path:
+            from app.motion_designer.schema import new_motion_id
+
+            composition.id = new_motion_id("motion_comp")
+
+    self._motion_compositions[composition.id] = composition
+    clip = self._place_motion_clip(
+        composition.id,
+        start_ms=start_ms,
+        duration_ms=composition.duration_ms,
+    )
+    clip["metadata"] = {
+        **dict(clip.get("metadata") or {}),
+        "actor_kind": "motion_actor",
+        "source_project_path": str(source_path),
+        "composition_revision": int(composition.revision),
+    }
+    self._sync_motion_state_to_player()
+    if hasattr(self, "_register_change"):
+        self._register_change("Import Motion Actor")
+    return {
+        "loaded": True,
+        "path": str(source_path),
+        "composition_id": composition.id,
+        "clip": dict(clip),
+    }
 
 
 def _duplicate_motion_clip(self, clip: dict) -> dict:

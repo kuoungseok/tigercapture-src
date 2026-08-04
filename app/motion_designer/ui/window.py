@@ -683,6 +683,26 @@ class MotionDocumentController:
         candidate.revision += 1
         self._commit(candidate)
 
+    def update_keyframe_spatial_tangent(
+        self,
+        layer_id: str,
+        property_name: str,
+        keyframe_id: str,
+        mode: str,
+    ) -> None:
+        from app.motion_designer.graph_editing import update_keyframe_spatial_tangent
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        update_keyframe_spatial_tangent(
+            layer,
+            property_name,
+            keyframe_id,
+            mode=mode,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
     def set_keyframe_roving(
         self,
         layer_id: str,
@@ -893,7 +913,7 @@ class MotionDesignerWindow(QMainWindow):
         self.inspector_tabs.addTab(self.inspector, "Properties")
         self.inspector_tabs.addTab(self.advanced, "Motion")
         self.inspector_tabs.addTab(self.generator, "Generator")
-        self.inspector_tabs.addTab(self.replicator, "Replicator")
+        self.inspector_tabs.addTab(self.replicator, "Tiger Repeater")
         self.inspector_tabs.addTab(self.image, "Image")
         self.inspector_tabs.addTab(self.vector, "Shape")
         self.inspector_tabs.addTab(self.typography, "Text")
@@ -976,6 +996,8 @@ class MotionDesignerWindow(QMainWindow):
         self.toolbar.open_project_requested.connect(self._open_motion_project)
         self.toolbar.save_project_requested.connect(self._save_motion_project)
         self.toolbar.save_project_as_requested.connect(self._save_motion_project_as)
+        self.toolbar.open_package_requested.connect(self._open_motion_package)
+        self.toolbar.export_package_requested.connect(self._export_motion_package)
         self.toolbar.add_layer_requested.connect(self._add_layer)
         self.toolbar.behavior_requested.connect(self._add_behavior)
         self.toolbar.effect_requested.connect(self._add_effect)
@@ -1126,6 +1148,9 @@ class MotionDesignerWindow(QMainWindow):
         self.timeline.keyframe_tangent_requested.connect(
             self.controller.update_keyframe_tangent,
         )
+        self.timeline.keyframe_spatial_tangent_requested.connect(
+            self.controller.update_keyframe_spatial_tangent,
+        )
         self.timeline.keyframe_roving_requested.connect(
             self.controller.set_keyframe_roving,
         )
@@ -1138,6 +1163,7 @@ class MotionDesignerWindow(QMainWindow):
         self.viewer_header.zoom_changed.connect(self.canvas.set_zoom_mode)
         self.viewer_header.grid_changed.connect(self.canvas.set_grid_visible)
         self.viewer_header.safe_changed.connect(self.canvas.set_safe_guides_visible)
+        self.viewer_header.color_changed.connect(self._set_board_color)
         self.ai.plan_requested.connect(self._plan_ai_request)
         self.ai.style_requested.connect(self._plan_ai_style)
         self.ai.style_apply_requested.connect(self._apply_ai_style)
@@ -1185,8 +1211,9 @@ class MotionDesignerWindow(QMainWindow):
         return code
 
     def _on_model_changed(self, composition: MotionComposition) -> None:
-        self.canvas.set_composition(composition, self._time_ms)
-        self.preview.set_composition(composition, self._time_ms)
+        viewer_time = self._viewer_sample_time(composition, self._time_ms)
+        self.canvas.set_composition(composition, viewer_time)
+        self.preview.set_composition(composition, viewer_time)
         self.layers.set_composition(composition)
         self.timeline.set_composition(composition, self._time_ms)
         self.viewer_header.set_fps(composition.fps)
@@ -1334,6 +1361,80 @@ class MotionDesignerWindow(QMainWindow):
             return False
         self._document_path = Path(path).expanduser().resolve(strict=False)
         return self._save_motion_project()
+
+    def _open_motion_package(self) -> bool:
+        if not self._confirm_discard_document_changes():
+            return False
+        from app.motion_designer.runtime_package import (
+            MOTION_PACKAGE_EXTENSION,
+            load_motion_package,
+        )
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            motion_text("Open Portable Motion Package"),
+            "",
+            f"Tiger Studio Motion Package (*{MOTION_PACKAGE_EXTENSION})",
+        )
+        if not path:
+            return False
+        source = Path(path).expanduser().resolve(strict=False)
+        extract_dir = source.with_suffix(".assets")
+        try:
+            composition = load_motion_package(source, extract_dir)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, motion_text("Open Portable Motion Package"), str(exc),
+            )
+            return False
+        self._managed_document = True
+        self._document_path = None
+        self._selected_layer_id = ""
+        self._time_ms = 0
+        self._composition_navigation.clear()
+        self.toolbar.set_parent_navigation_enabled(False)
+        self.controller.load(composition)
+        self._document_dirty = False
+        self._update_document_title()
+        self.statusBar().showMessage(
+            motion_text("Opened portable package {name}", name=source.name),
+            5000,
+        )
+        return True
+
+    def _export_motion_package(self) -> bool:
+        from app.motion_designer.runtime_package import (
+            MOTION_PACKAGE_EXTENSION,
+            export_motion_package,
+        )
+
+        initial = Path(
+            f"{self.controller.composition.name or 'motion_project'}{MOTION_PACKAGE_EXTENSION}"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            motion_text("Export Portable Motion Package"),
+            str(initial),
+            f"Tiger Studio Motion Package (*{MOTION_PACKAGE_EXTENSION})",
+        )
+        if not path:
+            return False
+        try:
+            result = export_motion_package(self._root_composition_snapshot(), path)
+        except Exception as exc:
+            QMessageBox.critical(
+                self, motion_text("Export Portable Motion Package"), str(exc),
+            )
+            return False
+        self.statusBar().showMessage(
+            motion_text(
+                "Exported {count} resource(s) to {name}",
+                count=result["asset_count"],
+                name=Path(result["path"]).name,
+            ),
+            5000,
+        )
+        return True
 
     def _document_recovery_path(self) -> Path:
         from app.motion_designer.recovery import (
@@ -1795,6 +1896,24 @@ class MotionDesignerWindow(QMainWindow):
         self.vrm.set_layer(layer)
         self.particle.set_layer(layer)
         self.button.set_layer(layer)
+        color_capable = (
+            layer is not None and layer.layer_type in {"shape", "text"}
+        )
+        self.viewer_header.color_picker.setEnabled(color_capable)
+        self.viewer_header.color_palette.setEnabled(color_capable)
+        if color_capable:
+            fill = layer.source.params.get("fill", "#FF3F8FBA")
+            if isinstance(fill, dict):
+                fill = fill.get("default", "#FF3F8FBA")
+            self.viewer_header.color_picker.set_color(fill)
+            self.viewer_header.color_palette.set_current_color(fill)
+            self.viewer_header.color_picker.setToolTip(
+                f"Choose color for selected {layer.layer_type} layer"
+            )
+        else:
+            self.viewer_header.color_picker.setToolTip(
+                "Select a Shape or Text layer to apply color"
+            )
         self.timeline.set_selected_layer(self._selected_layer_id)
         self.canvas.set_selected_layer(self._selected_layer_id)
         if layer is not None:
@@ -2219,6 +2338,16 @@ class MotionDesignerWindow(QMainWindow):
 
     def _set_typography_params(self, changes: object) -> None:
         self._set_source_params(changes, "text")
+
+    def _set_board_color(self, color: str) -> None:
+        """Apply the board-level picker to a selected color-bearing layer."""
+        if not self._selected_layer_id:
+            return
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        if layer.layer_type == "shape":
+            self._set_vector_params({"fill": str(color)})
+        elif layer.layer_type == "text":
+            self._set_typography_params({"fill": str(color)})
 
     def _set_image_params(self, changes: object) -> None:
         if not self._selected_layer_id or not isinstance(changes, dict):
@@ -2777,10 +2906,12 @@ class MotionDesignerWindow(QMainWindow):
                 continue
             if key in {"start_ms", "end_ms"}:
                 item[key] = int(round(value))
-            elif key in {"distance_x", "distance_y"}:
-                distance = list(item.setdefault("params", {}).get("distance") or [100.0, 0.0])
-                distance[0 if key == "distance_x" else 1] = float(value)
-                item["params"]["distance"] = distance
+            elif key in {"distance_x", "distance_y", "velocity_x", "velocity_y"}:
+                vector_key = "distance" if key.startswith("distance_") else "velocity"
+                default = [100.0, 0.0] if vector_key == "distance" else [40.0, 0.0]
+                vector = list(item.setdefault("params", {}).get(vector_key) or default)
+                vector[0 if key.endswith("_x") else 1] = float(value)
+                item["params"][vector_key] = vector
             else:
                 item.setdefault("params", {})[key] = float(value)
         self.controller.update_layer(layer.id, {"behaviors": rows})
@@ -2803,6 +2934,19 @@ class MotionDesignerWindow(QMainWindow):
             )
 
             effect = make_painterly_look_effect()
+            self.controller.update_layer(layer.id, {
+                "effects": [
+                    *[item.to_dict() for item in layer.effects],
+                    effect.to_dict(),
+                ],
+            })
+            return
+        if kind == "paper_crumple":
+            from app.motion_designer.paper_crumple import (
+                make_paper_crumple_effect,
+            )
+
+            effect = make_paper_crumple_effect({"amount": 0.65})
             self.controller.update_layer(layer.id, {
                 "effects": [
                     *[item.to_dict() for item in layer.effects],
@@ -3736,10 +3880,29 @@ class MotionDesignerWindow(QMainWindow):
         sample_count = 0
         for item in masks:
             if item["id"] == mask_id:
-                item.setdefault("metadata", {})["tracking_cache"] = dict(cache)
-                sample_count = len(cache.get("samples", []))
+                from app.motion_designer.schema import MotionMaskRef
+                from app.motion_designer.temporal_matte_quality import (
+                    finalize_tracked_motion_mask,
+                )
+
+                finalized = finalize_tracked_motion_mask(
+                    MotionMaskRef.from_dict(item),
+                    width=int(layer.source.params.get("width", self.controller.composition.width)),
+                    height=int(layer.source.params.get("height", self.controller.composition.height)),
+                    tracking=cache,
+                ).to_dict()
+                item.setdefault("metadata", {})["tracking_cache"] = finalized
+                cache = finalized
+                sample_count = len(finalized.get("samples", []))
         metadata = cache.get("metadata", {})
-        suffix = " - stopped at cut" if isinstance(metadata, dict) and metadata.get("terminated_reason") == "shot_cut" else ""
+        reason = str(metadata.get("terminated_reason") or "") if isinstance(metadata, dict) else ""
+        suffix = (
+            " - stopped at matte risk"
+            if reason == "temporal_matte_quality_gate"
+            else " - stopped at cut"
+            if reason == "shot_cut"
+            else ""
+        )
         self.masks.set_tracking_status(mask_id, f"{sample_count} cached samples{suffix}")
         self.controller.update_layer(layer.id, {"masks": masks})
 
@@ -3929,10 +4092,26 @@ class MotionDesignerWindow(QMainWindow):
             int(round(remap_layer_time(layer, self._time_ms))),
         )
 
+    @staticmethod
+    def _viewer_sample_time(
+        composition: MotionComposition,
+        time_ms: int,
+    ) -> int:
+        duration = max(1, int(composition.duration_ms))
+        requested = max(0, int(time_ms))
+        if requested < duration:
+            return requested
+        frame_ms = max(1, int(round(1000.0 / max(1.0, composition.fps))))
+        return max(0, duration - frame_ms)
+
     def _set_time(self, time_ms: int) -> None:
         self._time_ms = int(time_ms)
-        self.canvas.set_time(self._time_ms)
-        self.preview.set_time(self._time_ms)
+        viewer_time = self._viewer_sample_time(
+            self.controller.composition,
+            self._time_ms,
+        )
+        self.canvas.set_time(viewer_time)
+        self.preview.set_time(viewer_time)
         self.timeline.tracks.set_state(self.controller.composition, self._time_ms)
         if self._selected_layer_id:
             layer = next(

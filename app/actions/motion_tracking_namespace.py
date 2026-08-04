@@ -18,6 +18,52 @@ def register_motion_tracking_actions(registry: Any) -> None:
         "roi": {"type": "array", "minItems": 4, "maxItems": 4},
         "name": {"type": "string"},
     }
+    registry.register_adapter_action(
+        "motion.restoration.preflight",
+        "Estimate restored-pixel exposure and clamp unsafe camera travel.",
+        "motion",
+        "motion_restoration_preflight",
+        params_schema=schema_object({
+            "restoration_mask_path": {"type": "string"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "max_camera_travel_ratio": {"type": "number", "minimum": 0},
+            "camera_dx_ratio": {"type": "number"},
+            "camera_dy_ratio": {"type": "number"},
+            "grid_size": {"type": "integer", "minimum": 2, "maximum": 32},
+        }, required=(
+            "restoration_mask_path",
+            "confidence",
+            "max_camera_travel_ratio",
+        )),
+        required=(
+            "restoration_mask_path",
+            "confidence",
+            "max_camera_travel_ratio",
+        ),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.matte.temporal.validate",
+        "Detect propagated matte pop, boundary flicker, centroid drift, confidence loss, and the first unsafe frame.",
+        "motion",
+        "motion_matte_temporal_validate",
+        params_schema=schema_object({
+            "mask_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 2,
+            },
+            "times_ms": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+            "confidences": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1}},
+            "thin_structure": {"type": "boolean"},
+        }, required=("mask_paths",)),
+        required=("mask_paths",),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
     for action_id, method, title in (
         ("motion.track.point", "motion_track_point", "Analyze Point Track"),
         ("motion.track.multi_point", "motion_track_multi_point", "Analyze Multi-point Track"),

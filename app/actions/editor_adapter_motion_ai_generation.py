@@ -371,6 +371,92 @@ class MotionAIGenerationAdapterMixin:
             audio_hits_ms=audio_hits_ms or (),
         ).to_dict()
 
+    def motion_ai_choreography_candidates(
+        self,
+        *,
+        decomposition: Mapping[str, Any],
+        duration_ms: int,
+        prompt: str = "",
+        motion_style: str = "",
+        audio_hits_ms: list[int] | None = None,
+        max_simultaneous_motion: int = 3,
+    ) -> dict[str, Any]:
+        from app.motion_designer.choreography_director import (
+            plan_choreography_candidates,
+        )
+        from app.motion_designer.image_decomposition import ImageDecompositionResult
+
+        result = ImageDecompositionResult.from_dict(decomposition)
+        inpaint = result.diagnostics.get("inpaint")
+        inpaint = dict(inpaint) if isinstance(inpaint, Mapping) else {}
+        report = plan_choreography_candidates(
+            result.elements,
+            duration_ms=duration_ms,
+            max_camera_travel_ratio=float(
+                inpaint.get("max_camera_travel_ratio", 0.0) or 0.0
+            ),
+            prompt=prompt,
+            motion_style=motion_style,
+            audio_hits_ms=audio_hits_ms or (),
+            max_simultaneous_motion=max_simultaneous_motion,
+        )
+        report["source_hash"] = result.source_hash
+        report["duration_ms"] = int(duration_ms)
+        return report
+
+    def motion_ai_choreography_candidate_apply(
+        self,
+        *,
+        composition_id: str,
+        decomposition: Mapping[str, Any],
+        director_plan: Mapping[str, Any],
+        candidate_id: str,
+        approved: bool,
+        in_ms: int,
+        out_ms: int,
+        reference_id: str = "layered_image",
+        name: str = "Layered Image",
+        center: list[float] | None = None,
+        size: list[int] | None = None,
+        base_revision: int | None = None,
+        allow_quality_override: bool = False,
+    ) -> dict[str, Any]:
+        from app.motion_designer.choreography_director import (
+            select_choreography_candidate,
+        )
+        from app.motion_designer.image_decomposition import ImageDecompositionResult
+
+        result = ImageDecompositionResult.from_dict(decomposition)
+        expected_hash = str(director_plan.get("source_hash") or "")
+        if expected_hash and expected_hash != result.source_hash:
+            raise ValueError("choreography plan targets a different decomposition")
+        candidate = select_choreography_candidate(
+            director_plan,
+            candidate_id,
+            approved=approved,
+        )
+        applied = self.motion_ai_choreography_apply(
+            composition_id=composition_id,
+            decomposition=decomposition,
+            in_ms=in_ms,
+            out_ms=out_ms,
+            reference_id=reference_id,
+            name=name,
+            center=center,
+            size=size,
+            variant=str(candidate.get("variant") or "clean"),
+            prompt=str(director_plan.get("shot_grammar") or ""),
+            base_revision=base_revision,
+            allow_quality_override=allow_quality_override,
+        )
+        applied["director_selection"] = {
+            "candidate_id": str(candidate["id"]),
+            "variant": str(candidate["variant"]),
+            "shot_grammar": str(candidate.get("shot_grammar") or "layered_reveal"),
+            "metrics": dict(candidate.get("metrics") or {}),
+        }
+        return applied
+
     def motion_ai_integrity_validate(
         self,
         *,
@@ -396,6 +482,59 @@ class MotionAIGenerationAdapterMixin:
 
         result = ImageDecompositionResult.from_dict(decomposition)
         return evaluate_decomposition_cutout_quality(result)
+
+    def motion_ai_layer_readiness_inspect(
+        self,
+        *,
+        decomposition: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from app.motion_designer.image_decomposition import ImageDecompositionResult
+        from app.motion_designer.layer_readiness import assess_layer_motion_readiness
+
+        result = ImageDecompositionResult.from_dict(decomposition)
+        return assess_layer_motion_readiness(result)
+
+    def motion_ai_restoration_preflight(
+        self,
+        *,
+        decomposition: Mapping[str, Any],
+        camera_dx_ratio: float = 0.0,
+        camera_dy_ratio: float = 0.0,
+        grid_size: int = 8,
+    ) -> dict[str, Any]:
+        from app.motion_designer.image_decomposition import ImageDecompositionResult
+        from app.motion_designer.restoration_preflight import (
+            assess_decomposition_restoration_preflight,
+        )
+
+        result = ImageDecompositionResult.from_dict(decomposition)
+        return assess_decomposition_restoration_preflight(
+            result,
+            camera_dx_ratio=camera_dx_ratio,
+            camera_dy_ratio=camera_dy_ratio,
+            grid_size=grid_size,
+        )
+
+    def motion_ai_contact_composite_prepare(
+        self,
+        *,
+        foreground_path: str,
+        background_path: str,
+        output_dir: str,
+        edge_strength: float = 0.8,
+        light_match_strength: float = 0.25,
+        shadow_opacity: float = 0.34,
+    ) -> dict[str, Any]:
+        from app.motion_designer.contact_composite import prepare_contact_composite
+
+        return prepare_contact_composite(
+            foreground_path=foreground_path,
+            background_path=background_path,
+            output_dir=output_dir,
+            edge_strength=edge_strength,
+            light_match_strength=light_match_strength,
+            shadow_opacity=shadow_opacity,
+        )
 
     def motion_ai_choreography_apply(
         self,

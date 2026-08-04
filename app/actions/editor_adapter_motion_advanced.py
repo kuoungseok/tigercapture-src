@@ -236,6 +236,16 @@ class MotionAdvancedAdapterMixin:
         ]
         cache.corrections.append(correction)
         cache.corrections.sort(key=lambda row: row.time_ms)
+        from app.motion_designer.temporal_matte_quality import (
+            finalize_tracked_motion_mask,
+        )
+
+        cache = finalize_tracked_motion_mask(
+            mask,
+            width=int(layer.source.params.get("width", composition.width)),
+            height=int(layer.source.params.get("height", composition.height)),
+            tracking=cache,
+        )
         mask.metadata[TRACKING_METADATA_KEY] = cache.to_dict()
         return self._motion_advanced_changed(
             composition,
@@ -244,6 +254,9 @@ class MotionAdvancedAdapterMixin:
             mask_id=mask.id,
             correction=correction.to_dict(),
             correction_count=len(cache.corrections),
+            temporal_matte_quality=dict(
+                cache.metadata.get("temporal_matte_quality") or {}
+            ),
         )
 
     def motion_matte_freeze(
@@ -304,6 +317,8 @@ class MotionAdvancedAdapterMixin:
             confidence = [
                 float(sample.confidence) for sample in cache.samples
             ]
+            temporal = cache.metadata.get("temporal_matte_quality")
+            temporal = dict(temporal) if isinstance(temporal, Mapping) else {}
             rows.append({
                 "mask_id": mask.id,
                 "kind": mask.kind,
@@ -316,6 +331,9 @@ class MotionAdvancedAdapterMixin:
                 ),
                 "minimum_confidence": min(confidence) if confidence else 0.0,
                 "source_revision": cache.source_revision,
+                "temporal_status": str(temporal.get("status") or "not_analyzed"),
+                "auto_stop_at_ms": temporal.get("auto_stop_at_ms"),
+                "correction_times_ms": list(temporal.get("correction_times_ms") or []),
             })
         return {
             "changed": False,
@@ -391,13 +409,29 @@ class MotionAdvancedAdapterMixin:
         enabled: bool = True,
         samples: int = 8,
         shutter: float = 0.65,
+        mode: str = "fast_translation_vector_blur_v1",
+        shutter_angle: float = 180.0,
+        shutter_phase: float = -90.0,
     ) -> dict[str, Any]:
         composition = self._motion_advanced_composition(composition_id)
         layer = find_layer(composition, layer_id)
+        contract = str(mode or "fast_translation_vector_blur_v1")
+        if contract not in {
+            "fast_translation_vector_blur_v1", "temporal_shutter_samples_v1",
+        }:
+            raise ValueError(f"unsupported motion blur mode: {mode}")
         layer.metadata["motion_blur"] = {
             "enabled": bool(enabled),
             "samples": max(2, min(32, int(samples))),
             "shutter": max(0.0, min(2.0, float(shutter))),
+            "contract": contract,
+            "shutter_angle": max(0.0, min(720.0, float(shutter_angle))),
+            "shutter_phase": max(-720.0, min(720.0, float(shutter_phase))),
+            "parameter_semantics": {
+                "shutter": "blur_length_multiplier",
+                "shutter_angle": "degrees_of_frame_exposure",
+                "shutter_phase": "degrees_relative_to_frame_time",
+            },
         }
         return self._motion_advanced_changed(
             composition, "Set Motion Blur", layer_id=layer.id,
@@ -420,13 +454,24 @@ class MotionAdvancedAdapterMixin:
         opacity_end: float = 1.0,
         jitter: list[float] | None = None,
         seed: int = 0,
+        order: str = "normal",
+        sequence_offset_ms: float = 0.0,
+        sequence_fade_ms: float = 0.0,
+        turns: float = 2.0,
+        path_points: list[list[float]] | None = None,
     ) -> dict[str, Any]:
         composition = self._motion_advanced_composition(composition_id)
         layer = find_layer(composition, layer_id)
         arrangement = str(arrangement or "line").lower()
-        if arrangement not in {"line", "grid", "radial"}:
-            raise ValueError("replicator arrangement must be line, grid, or radial")
+        if arrangement not in {"line", "grid", "radial", "spiral", "path"}:
+            raise ValueError("replicator arrangement must be line, grid, radial, spiral, or path")
+        order = str(order or "normal").lower()
+        if order not in {"normal", "reverse", "random"}:
+            raise ValueError("replicator order must be normal, reverse, or random")
+        if arrangement == "path" and (not path_points or len(path_points) < 2):
+            raise ValueError("path replicator requires at least two path_points")
         data = {
+            "contract": "tiger_repeater_v2",
             "enabled": bool(enabled),
             "arrangement": arrangement,
             "count": max(1, min(256, int(count))),
@@ -438,11 +483,39 @@ class MotionAdvancedAdapterMixin:
             "opacity_end": max(0.0, min(1.0, float(opacity_end))),
             "jitter": list(jitter or [0.0, 0.0])[:2],
             "seed": int(seed),
+            "order": order,
+            "sequence_offset_ms": max(0.0, float(sequence_offset_ms)),
+            "sequence_fade_ms": max(0.0, float(sequence_fade_ms)),
+            "turns": float(turns),
+            "path_points": [list(point)[:2] for point in (path_points or [])],
         }
         layer.metadata["replicator"] = data
         return self._motion_advanced_changed(
-            composition, "Set Motion Replicator", layer_id=layer.id, replicator=data,
+            composition, "Set Tiger Repeater", layer_id=layer.id, replicator=data,
         )
+
+    def motion_reference_gate_compare(
+        self,
+        *,
+        composition_id: str,
+        reference_path: str,
+        time_ms: int = 0,
+        reference_source: str = "",
+        thresholds: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.motion_designer.export_renderer import MotionExportRenderer
+        from app.motion_designer.reference_gate import compare_reference_frame
+
+        composition = self._motion_advanced_composition(composition_id)
+        actual = MotionExportRenderer().render_rgba_array(composition, int(time_ms))
+        report = compare_reference_frame(
+            actual,
+            reference_path,
+            reference_source=reference_source or reference_path,
+            thresholds=thresholds,
+        )
+        report.update({"composition_id": composition.id, "time_ms": int(time_ms)})
+        return report
 
     def motion_generator_create(
         self,
@@ -609,6 +682,52 @@ class MotionAdvancedAdapterMixin:
             "Remove Text Animator",
             layer_id=layer.id,
             text_animators=filtered,
+        )
+
+    def motion_text_animator_selector_convert(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        animator_id: str = "",
+    ) -> dict[str, Any]:
+        """Explicitly migrate one legacy selector without changing other animators."""
+        from app.motion_designer.text_selectors import (
+            convert_legacy_selector,
+            is_standard_selector,
+        )
+
+        composition = self._motion_advanced_composition(composition_id)
+        layer = find_layer(composition, layer_id)
+        if layer.layer_type != "text":
+            raise ValueError("text selector conversion requires a text layer")
+        target_id = str(animator_id or "")
+        if target_id:
+            stack = list(layer.source.params.get("text_animators") or [])
+            for index, animator in enumerate(stack):
+                if isinstance(animator, Mapping) and str(animator.get("id") or "") == target_id:
+                    if is_standard_selector(animator):
+                        raise ValueError("text animator already uses Standard Range Selector v1")
+                    converted, warnings = convert_legacy_selector(animator)
+                    stack[index] = converted
+                    layer.source.params["text_animators"] = stack
+                    break
+            else:
+                raise ValueError(f"unknown text animator: {target_id}")
+        else:
+            current = layer.source.params.get("text_animation")
+            current = current if isinstance(current, Mapping) else {}
+            if is_standard_selector(current):
+                raise ValueError("text animator already uses Standard Range Selector v1")
+            converted, warnings = convert_legacy_selector(current)
+            layer.source.params["text_animation"] = converted
+        return self._motion_advanced_changed(
+            composition,
+            "Convert Text Selector to Standard Range",
+            layer_id=layer.id,
+            animator_id=target_id or None,
+            selector=converted,
+            warnings=warnings,
         )
 
     def motion_typography_character_3d_prepare(

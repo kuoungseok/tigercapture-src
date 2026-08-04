@@ -144,9 +144,15 @@ def run_trend_product_gate(
     recovery_roundtrip = _same_document(recovered, composition)
 
     alpha_composition = MotionComposition.from_dict(composition.to_dict())
+    opaque_template_roles = {
+        "background",
+        "background_media",
+        "demo_photo_overlay",
+        "media_slot",
+    }
     alpha_composition.layers = [
         layer for layer in alpha_composition.layers
-        if layer.metadata.get("template_role") != "background"
+        if layer.metadata.get("template_role") not in opaque_template_roles
     ]
     alpha_path = root / "alpha.png"
     MotionProfileExporter().export(

@@ -864,7 +864,9 @@ provider-neutral post-render 효과를 사용하는 실제 편집 가능 템플�
 ## 14. 제외 및 주장 경계
 
 - Apple Liquid Glass의 픽셀 동일 복제 또는 공식 호환을 주장하지 않는다.
-- After Effects plugin, `.aep`, Adobe effect 호환을 목표로 하지 않는다.
+- After Effects plugin, `.aep` 시각 재생/쓰기, Adobe effect 호환을 목표로 하지 않는다.
+  단, 안전한 구조 검사와 향후 네이티브 변환 프리플라이트는
+  `SPEC_MOTION_AEP_IMPORT.md` 범위로 진행한다.
 - 외부 생성형 비디오 모델의 결과를 편집 가능한 motion layer라고 주장하지
   않는다.
 - Painter의 브러시 엔진과 프레임 드로잉 UI를 Motion Designer에 복제하지

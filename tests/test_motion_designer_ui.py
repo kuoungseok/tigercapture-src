@@ -62,7 +62,7 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.inspector_tabs.indexOf(window.rig) >= 0
     assert window.inspector_tabs.tabText(1) == "Motion"
     assert window.inspector_tabs.tabText(2) == "Generator"
-    assert window.inspector_tabs.tabText(3) == "Replicator"
+    assert window.inspector_tabs.tabText(3) == "Tiger Repeater"
     assert window.inspector_tabs.tabText(4) == "Image"
     assert window.inspector_tabs.tabText(13) == "VRM"
     assert window.inspector_tabs.tabText(14) == "Particles"
@@ -629,6 +629,10 @@ def test_motion_template_gallery_renders_cards_and_normalizes_variant() -> None:
     dialog = MotionTemplateGalleryDialog(variant="16:9")
     assert dialog.items.count() >= 14
     assert not dialog.items.item(0).icon().isNull()
+    dialog.category.setCurrentText("Top 10")
+    assert dialog.items.count() == 10
+    assert dialog.items.item(0).text().startswith("TOP 1  Clean Logo Reveal")
+    dialog.category.setCurrentText("All")
     tutorial = next(
         dialog.items.item(index)
         for index in range(dialog.items.count())
@@ -801,6 +805,9 @@ def test_motion_mask_inspector_tracks_video_without_blocking_ui(tmp_path) -> Non
     assert mask.id not in window._tracking_jobs
     stored = window.controller.composition.layers[0].masks[0].metadata["tracking_cache"]
     assert stored["metadata"]["provider"] == "opencv_lk_ransac_v1"
+    assert stored["metadata"]["temporal_matte_quality"]["schema"] == (
+        "tigerstudio.motion.temporal_matte_quality.v1"
+    )
     assert len(stored["samples"]) >= 5
     window.close()
     app.processEvents()
@@ -1251,6 +1258,28 @@ def test_template_change_restarts_active_playback_from_zero() -> None:
     assert window._playback_fractional_ms == 0.0
     assert window.timeline.play_button.isChecked()
     window._set_playback_direction(0)
+    window.close()
+    app.processEvents()
+
+
+def test_motion_viewer_holds_last_valid_frame_at_composition_end() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    composition = MotionComposition(
+        width=960,
+        height=540,
+        fps=30.0,
+        duration_ms=4000,
+    )
+    window = MotionDesignerWindow(composition)
+
+    window._set_time(composition.duration_ms)
+
+    assert window._time_ms == composition.duration_ms
+    assert window.canvas._time_ms == composition.duration_ms - 33
+    assert window.preview._time_ms == composition.duration_ms - 33
     window.close()
     app.processEvents()
 

@@ -4,6 +4,15 @@
 상태: 계획 승인, 구현 전  
 기준: 기존 M0-M11 완료 범위와 M12 잔여 작업 이후의 제품 확장
 
+> 2026-08-04 레퍼런스 정합성 주의: 이 문서의 `Complete`는 당시 내부
+> Preview/Export parity와 기록된 제품 증거를 뜻하며 Adobe After Effects 또는
+> Apple Motion과의 의미·수치 parity를 뜻하지 않는다. Graph Editor의 spatial
+> interpolation/Auto/Continuous tangent, Text Range Selector, shutter motion blur,
+> Behavior, Replicator, Puppet 명칭과 의미의 교정은
+> `MOTION_DESIGNER_REFERENCE_AUDIT_KO.md`와
+> `MOTION_DESIGNER_REFERENCE_ALIGNMENT_MILESTONES_KO.md`의 RA0-RA9가 소유한다.
+> 해당 RA gate 전에는 이 문서의 넓은 표현을 외부 호환 주장으로 사용하지 않는다.
+
 ## 1. 목표와 경계
 
 이 계획은 After Effects를 기능 수로 복제하는 계획이 아니다. Tiger Studio가
@@ -31,7 +40,7 @@ Lab, Music Lab을 활용하면서 다음 결과를 만들 수 있게 하는 계�
 - Advanced 3D renderer:
   https://helpx.adobe.com/after-effects/desktop/work-with-3d-composition/advanced-3d-renderer/advanced-3d-renderer.html
 
-After Effects 완전 호환, `.aep` 읽기/쓰기, AE 플러그인 호환, 임의 Adobe
+After Effects 완전 호환, `.aep` 시각 재생/쓰기, AE 플러그인 호환, 임의 Adobe
 효과의 재현은 이 계획의 주장이 아니다.
 
 ## 2. 공통 완료 규칙

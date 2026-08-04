@@ -58,6 +58,9 @@ class RenderNode:
     motion_blur_vector: tuple[float, float] = (0.0, 0.0)
     motion_blur_samples: int = 1
     motion_blur_shutter: float = 0.0
+    motion_blur_contract: str = "fast_translation_vector_blur_v1"
+    motion_blur_shutter_angle: float = 0.0
+    motion_blur_shutter_phase: float = 0.0
     depth_z: float = 0.0
     cast_shadows: bool = False
     receive_shadows: bool = False
@@ -343,14 +346,30 @@ def build_render_graph(
             motion_blur = composition.metadata.get("motion_blur")
         motion_blur = motion_blur if isinstance(motion_blur, dict) else {}
         blur_enabled = bool(motion_blur.get("enabled", False))
+        blur_contract = str(
+            motion_blur.get("contract") or "fast_translation_vector_blur_v1"
+        )
         samples = max(1, min(32, int(motion_blur.get("samples", 8) or 8))) if blur_enabled else 1
         shutter = max(0.0, min(2.0, float(motion_blur.get("shutter", 0.65) or 0.0))) if blur_enabled else 0.0
+        shutter_angle = max(
+            0.0,
+            min(720.0, float(motion_blur.get("shutter_angle", 180.0) or 0.0)),
+        ) if blur_enabled else 0.0
+        shutter_phase = max(
+            -720.0,
+            min(720.0, float(motion_blur.get("shutter_phase", -90.0) or 0.0)),
+        ) if blur_enabled else 0.0
         previous = previous_states.get(layer.id)
         vector = (
             float(state.matrix[4] - previous.matrix[4]) * shutter,
             float(state.matrix[5] - previous.matrix[5]) * shutter,
         ) if previous is not None and blur_enabled else (0.0, 0.0)
-        if samples > 1 and (abs(vector[0]) > 0.05 or abs(vector[1]) > 0.05):
+        temporal_blur = blur_contract == "temporal_shutter_samples_v1"
+        if samples > 1 and (
+            temporal_blur
+            or abs(vector[0]) > 0.05
+            or abs(vector[1]) > 0.05
+        ):
             motion_blur_node_count += 1
         three_d = layer.metadata.get("three_d")
         three_d = three_d if isinstance(three_d, dict) else {}
@@ -384,6 +403,9 @@ def build_render_graph(
             motion_blur_vector=vector,
             motion_blur_samples=samples,
             motion_blur_shutter=shutter,
+            motion_blur_contract=blur_contract,
+            motion_blur_shutter_angle=shutter_angle,
+            motion_blur_shutter_phase=shutter_phase,
             depth_z=max(
                 -8.0,
                 min(8.0, float(layer.metadata.get("depth_z", 0.0) or 0.0)),
@@ -569,6 +591,20 @@ def _node_surface(
     )
     scale_x = width / max(1.0, float(region.width()))
     scale_y = height / max(1.0, float(region.height()))
+    if (
+        node.motion_blur_contract == "temporal_shutter_samples_v1"
+        and node.motion_blur_samples > 1
+        and node.source_layer is not None
+        and node.source_composition is not None
+    ):
+        return _temporal_node_surface(
+            node,
+            width=width,
+            height=height,
+            region=region,
+            scale_x=scale_x,
+            scale_y=scale_y,
+        )
     surface = transparent_image(width, height)
     image = _node_image(node)
     if image is None:
@@ -597,6 +633,102 @@ def _node_surface(
         node,
         pixel_scale=(scale_x, scale_y),
     )
+
+
+def shutter_sample_times(
+    time_ms: float,
+    fps: float,
+    samples: int,
+    shutter_angle: float,
+    shutter_phase: float,
+) -> list[float]:
+    count = max(1, min(32, int(samples)))
+    frame_ms = 1000.0 / max(1e-6, float(fps))
+    opening = float(time_ms) + frame_ms * float(shutter_phase) / 360.0
+    duration = frame_ms * max(0.0, float(shutter_angle)) / 360.0
+    if count == 1 or duration <= 1e-9:
+        return [float(time_ms)]
+    return [opening + duration * index / (count - 1) for index in range(count)]
+
+
+def _temporal_node_surface(
+    node: RenderNode,
+    *,
+    width: int,
+    height: int,
+    region: QRectF,
+    scale_x: float,
+    scale_y: float,
+) -> QImage:
+    import numpy as np
+
+    composition = node.source_composition
+    layer = node.source_layer
+    assert composition is not None and layer is not None
+    times = shutter_sample_times(
+        node.composition_time_ms,
+        composition.fps,
+        node.motion_blur_samples,
+        node.motion_blur_shutter_angle,
+        node.motion_blur_shutter_phase,
+    )
+    accumulated = np.zeros((height, width, 4), dtype=np.float32)
+    rendered = 0
+    for sample_time in times:
+        bounded_time = max(0.0, min(float(composition.duration_ms), sample_time))
+        states = {state.id: state for state in evaluate_composition(composition, bounded_time)}
+        state = states.get(node.layer_id)
+        if state is None or not state.active:
+            continue
+        image = render_source(
+            layer,
+            state.local_time_ms,
+            composition=composition,
+            composition_time_ms=bounded_time,
+            quality=node.render_quality,
+            viewport_size=node.source_viewport_size,
+        )
+        if image is None:
+            continue
+        sample = transparent_image(width, height)
+        painter = QPainter(sample)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.scale(scale_x, scale_y)
+        painter.translate(-region.x(), -region.y())
+        instances = evaluate_replicator(layer.metadata.get("replicator"), state.local_time_ms)
+        sample_node = RenderNode(
+            node.layer_id,
+            image,
+            state.matrix,
+            state.opacity,
+            state.blend_mode,
+            (float(state.anchor[0]), float(state.anchor[1])),
+            replicator_instances=instances,
+        )
+        for instance in instances or [{"opacity": 1.0}]:
+            painter.save()
+            painter.setOpacity(state.opacity * float(instance.get("opacity", 1.0)))
+            painter.setTransform(_instance_transform(sample_node, instance), combine=True)
+            painter.drawImage(
+                -image.width() * state.anchor[0],
+                -image.height() * state.anchor[1],
+                image,
+            )
+            painter.restore()
+        painter.end()
+        straight = sample.convertToFormat(QImage.Format_RGBA8888)
+        raw = np.frombuffer(straight.constBits(), dtype=np.uint8).reshape(
+            straight.height(), straight.bytesPerLine(),
+        )[:, : width * 4].reshape(height, width, 4)
+        accumulated += raw.astype(np.float32)
+        rendered += 1
+    if rendered == 0:
+        return transparent_image(width, height)
+    output = np.ascontiguousarray(np.clip(accumulated / rendered, 0, 255).astype(np.uint8))
+    return QImage(
+        output.data, width, height, output.strides[0], QImage.Format_RGBA8888,
+    ).copy().convertToFormat(QImage.Format_RGBA8888_Premultiplied)
 
 
 def _paint_node(painter: QPainter, node: RenderNode) -> None:

@@ -59,6 +59,37 @@ def test_preview_and_export_motion_composite_match() -> None:
     app.processEvents()
 
 
+def test_motion_actor_transform_moves_preview_and_export_together() -> None:
+    app = _app()
+    composition, clip = _motion_state()
+    clip.start_ms = 0
+    clip.position_x = 20.0
+    clip.position_y = -10.0
+    clip.scale_x = 0.75
+    clip.scale_y = 0.75
+    base = np.zeros((80, 100, 3), dtype=np.uint8)
+    preview_owner = SimpleNamespace(
+        _motion_clips=[clip],
+        _motion_compositions={composition.id: composition},
+        _motion_renderer=None,
+    )
+    export_owner = SimpleNamespace(
+        _motion_clips=[clip],
+        _motion_compositions={composition.id: composition},
+        _motion_renderer=None,
+    )
+
+    preview = _apply_motion_clips(preview_owner, base, 100)
+    exported = VideoExportThread._apply_motion_export_cpu(export_owner, base, 100)
+    red_pixels = np.argwhere(preview[:, :, 0] > 180)
+
+    assert np.array_equal(preview, exported)
+    assert red_pixels.size > 0
+    assert float(red_pixels[:, 1].mean()) > 65.0
+    assert float(red_pixels[:, 0].mean()) < 35.0
+    app.processEvents()
+
+
 def test_inactive_motion_clip_does_not_allocate_a_renderer() -> None:
     composition, clip = _motion_state()
     owner = SimpleNamespace(_motion_clips=[clip], _motion_compositions={composition.id: composition},
@@ -88,12 +119,36 @@ def test_motion_clip_actions_create_place_and_split() -> None:
     assert owner._motion_clips[0]["end_ms"] == owner._motion_clips[1]["start_ms"]
 
 
+def test_motion_actor_import_action_loads_and_places_project(tmp_path: Path) -> None:
+    from app.motion_designer.project_io import save_motion_project
+
+    composition, _clip = _motion_state()
+    source = save_motion_project(composition, tmp_path / "lower-third.tgmotion")
+    owner = ActionOwner()
+    registry = ActionRegistry(owner)
+
+    imported = registry.execute(
+        "motion.actor.import",
+        {"path": str(source), "start_ms": 2750},
+    )
+
+    assert imported.ok
+    assert imported.result["composition_id"] == composition.id
+    assert owner._motion_clips[0]["start_ms"] == 2750
+    assert owner._motion_clips[0]["metadata"]["actor_kind"] == "motion_actor"
+    assert owner._motion_clips[0]["metadata"]["source_project_path"] == str(source)
+
+
 def test_project_io_preserves_motion_reference(tmp_path: Path) -> None:
     from tools.qa_motion_baseline import _EditorStub
     from app.project_io import load_project, save_project
 
     app = QCoreApplication.instance() or QCoreApplication([])
     composition, clip = _motion_state()
+    clip.position_x = 144.0
+    clip.position_y = -32.0
+    clip.scale_x = 1.25
+    clip.rotation_degrees = 8.0
     source = _EditorStub()
     source._motion_compositions = {composition.id: composition}
     source._motion_clips = [clip.to_dict()]
@@ -106,6 +161,10 @@ def test_project_io_preserves_motion_reference(tmp_path: Path) -> None:
     assert list(restored._motion_compositions) == [composition.id]
     assert restored._motion_clips[0]["composition_id"] == composition.id
     assert restored._motion_clips[0]["start_ms"] == 500
+    assert restored._motion_clips[0]["position_x"] == 144.0
+    assert restored._motion_clips[0]["position_y"] == -32.0
+    assert restored._motion_clips[0]["scale_x"] == 1.25
+    assert restored._motion_clips[0]["rotation_degrees"] == 8.0
     del app
 
 

@@ -71,6 +71,35 @@ def test_replicator_line_grid_and_radial_layouts() -> None:
     assert radial[2]["x"] == pytest.approx(-40)
 
 
+def test_replicator_v2_path_spiral_and_sequence_are_deterministic() -> None:
+    path = evaluate_replicator({
+        "enabled": True,
+        "arrangement": "path",
+        "count": 3,
+        "path_points": [[0, 0], [100, 0], [100, 100]],
+        "order": "normal",
+    }, 0)
+    assert [(row["x"], row["y"]) for row in path] == [(0, 0), (100, 0), (100, 100)]
+
+    spiral = evaluate_replicator({
+        "enabled": True, "arrangement": "spiral", "count": 3,
+        "offset": [100, 0], "turns": 1,
+    }, 0)
+    assert spiral[0]["x"] == pytest.approx(0)
+    assert spiral[-1]["x"] == pytest.approx(100)
+
+    config = {
+        "enabled": True, "arrangement": "line", "count": 3,
+        "offset": [10, 0], "order": "random", "seed": 7,
+        "sequence_offset_ms": 100, "sequence_fade_ms": 100,
+    }
+    first = evaluate_replicator(config, 150)
+    second = evaluate_replicator(config, 150)
+    assert first == second
+    assert sorted(row["sequence_index"] for row in first) == [0, 1, 2]
+    assert sum(row["opacity"] > 0 for row in first) == 2
+
+
 def test_radial_replicator_keeps_instance_offsets_in_composition_space() -> None:
     _app()
     layer = MotionLayer(
@@ -178,4 +207,29 @@ def test_generator_and_replicator_have_independent_inspectors() -> None:
     assert window.inspector_tabs.currentWidget() is window.replicator
     assert layer.id == window._selected_layer_id
     assert window.controller.composition.layers[0].metadata["replicator"]["enabled"]
+    window.close()
+
+
+def test_replicator_inspector_preserves_v2_path_and_sequence_fields() -> None:
+    _app()
+    composition = MotionComposition(width=640, height=360, duration_ms=2000)
+    layer = MotionLayer(name="Path copies", layer_type="shape", out_ms=2000)
+    layer.metadata["replicator"] = {
+        "contract": "tiger_repeater_v2",
+        "enabled": True,
+        "arrangement": "path",
+        "count": 4,
+        "path_points": [[0.0, 0.0], [40.0, 20.0], [100.0, 0.0]],
+        "sequence_offset_ms": 120.0,
+        "sequence_fade_ms": 80.0,
+    }
+    composition.layers.append(layer)
+    window = MotionDesignerWindow(composition)
+    window._select_layer(layer.id)
+    window.replicator.set_layer(layer)
+    window.replicator.count.setValue(5)
+    updated = window.controller.composition.layers[0].metadata["replicator"]
+    assert updated["contract"] == "tiger_repeater_v2"
+    assert updated["path_points"] == [[0.0, 0.0], [40.0, 20.0], [100.0, 0.0]]
+    assert updated["sequence_offset_ms"] == 120.0
     window.close()

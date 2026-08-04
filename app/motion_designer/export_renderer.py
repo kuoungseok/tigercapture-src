@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable
 
 from PySide6.QtCore import QCoreApplication, QRectF
@@ -16,7 +17,8 @@ from .source_frame import transparent_image
 
 
 class MotionExportRenderer:
-    def __init__(self, *, cache_capacity: int = 120) -> None:
+    def __init__(self, *, cache_capacity: int = 120,
+                 cache_max_bytes: int = 256 * 1024 * 1024) -> None:
         self._owned_application = None
         application = QCoreApplication.instance()
         if application is None:
@@ -28,7 +30,7 @@ class MotionExportRenderer:
             from app.font_fallback import load_application_ui_fonts
 
             load_application_ui_fonts()
-        self.cache = MotionFrameCache(cache_capacity)
+        self.cache = MotionFrameCache(cache_capacity, max_bytes=cache_max_bytes)
         self.last_tiled_report: dict[str, object] = {}
         self._gpu = MotionGpuExportRenderer()
         self.last_render_report: dict[str, object] = {
@@ -37,6 +39,7 @@ class MotionExportRenderer:
 
     def render_frame(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,
                      height: int | None = None, use_cache: bool = True) -> QImage:
+        started_at = perf_counter()
         output_width = max(1, int(width or composition.width))
         output_height = max(1, int(height or composition.height))
         tiled_settings = composition.metadata.get("tiled_export")
@@ -54,6 +57,14 @@ class MotionExportRenderer:
         )
         cached = self.cache.get(key) if use_cache else None
         if isinstance(cached, QImage):
+            self.last_render_report = {
+                "backend": "frame_cache",
+                "cache_hit": True,
+                "frame_render_ms": round((perf_counter() - started_at) * 1000.0, 3),
+                "cache": self.cache.diagnostics(),
+                "output_width": output_width,
+                "output_height": output_height,
+            }
             return cached.copy()
         if tiled_enabled:
             if (
@@ -70,13 +81,23 @@ class MotionExportRenderer:
             )
             if use_cache:
                 self.cache.put(key, image.copy())
+            self.last_render_report = {
+                "backend": "tiled_export",
+                "cache_hit": False,
+                "frame_render_ms": round((perf_counter() - started_at) * 1000.0, 3),
+                "cache": self.cache.diagnostics(),
+                **self.last_tiled_report,
+            }
             return image
+        graph_started_at = perf_counter()
         graph = build_render_graph(
             composition,
             time_ms,
             render_quality="export",
             output_size=(output_width, output_height),
         )
+        graph_ms = (perf_counter() - graph_started_at) * 1000.0
+        gpu_started_at = perf_counter()
         try:
             gpu_image = self._gpu.render(
                 graph,
@@ -92,12 +113,21 @@ class MotionExportRenderer:
                     f"{type(exc).__name__}:{exc}"
                 ),
             }
+        gpu_ms = (perf_counter() - gpu_started_at) * 1000.0
         if gpu_image is not None:
             image = gpu_image
-            self.last_render_report = dict(self._gpu.last_diagnostics)
             if use_cache:
                 self.cache.put(key, image.copy())
+            self.last_render_report = {
+                **self._gpu.last_diagnostics,
+                "cache_hit": False,
+                "graph_build_ms": round(graph_ms, 3),
+                "gpu_attempt_ms": round(gpu_ms, 3),
+                "frame_render_ms": round((perf_counter() - started_at) * 1000.0, 3),
+                "cache": self.cache.diagnostics(),
+            }
             return image
+        paint_started_at = perf_counter()
         image = transparent_image(output_width, output_height)
         painter = QPainter(image)
         paint_render_graph(
@@ -106,13 +136,20 @@ class MotionExportRenderer:
             QRectF(0, 0, output_width, output_height),
         )
         painter.end()
+        paint_ms = (perf_counter() - paint_started_at) * 1000.0
+        if use_cache:
+            self.cache.put(key, image.copy())
         self.last_render_report = {
             **self._gpu.last_diagnostics,
             "backend": "qt_painter_export",
             "gpu_fallback": True,
+            "cache_hit": False,
+            "graph_build_ms": round(graph_ms, 3),
+            "gpu_attempt_ms": round(gpu_ms, 3),
+            "cpu_paint_ms": round(paint_ms, 3),
+            "frame_render_ms": round((perf_counter() - started_at) * 1000.0, 3),
+            "cache": self.cache.diagnostics(),
         }
-        if use_cache:
-            self.cache.put(key, image.copy())
         return image
 
     def render_frame_tiled(

@@ -69,6 +69,14 @@ EFFECT_PARAMS = {
         ("strength", 0.0, 1.0, 0.01), ("angle", -180.0, 180.0, 1.0),
         ("width", 2.0, 500.0, 1.0),
     ),
+    "paper_crumple": (
+        ("amount", 0.0, 1.0, 0.01),
+        ("crease_density", 1.0, 12.0, 1.0),
+        ("sharpness", 1.0, 24.0, 0.25),
+        ("depth", 0.0, 100.0, 0.5),
+        ("residual_wrinkle", 0.0, 1.0, 0.01),
+        ("seed", 0.0, 100000.0, 1.0),
+    ),
     "scan_cleanup": (
         ("white_balance", 0.0, 1.0, 0.01),
         ("paper_remove", 0.0, 1.0, 0.01),

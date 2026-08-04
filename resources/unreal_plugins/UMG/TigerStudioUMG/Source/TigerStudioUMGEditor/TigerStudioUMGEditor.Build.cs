@@ -26,6 +26,7 @@ public class TigerStudioUMGEditor : ModuleRules
                 "JsonUtilities",
                 "Kismet",
                 "KismetCompiler",
+                "MaterialEditor",
                 "MovieScene",
                 "MovieSceneTracks",
                 "Projects",

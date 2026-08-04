@@ -39,6 +39,14 @@ def test_selector_units_support_grapheme_word_and_line_ranges() -> None:
     assert [(row.start, row.end) for row in selector_units("첫줄\n둘째", "line")] == [(0, 2), (3, 5)]
 
 
+def test_selector_character_units_follow_unicode_grapheme_boundaries() -> None:
+    text = "A🇰🇷👍🏽👨‍👩‍👧‍👦B"
+    units = selector_units(text, "character")
+    assert [text[row.start:row.end] for row in units] == [
+        "A", "🇰🇷", "👍🏽", "👨‍👩‍👧‍👦", "B",
+    ]
+
+
 def test_selector_range_and_stagger_leave_unselected_glyphs_unchanged() -> None:
     config = {
         "in": "fade-in", "in_duration_ms": 1000, "out_duration_ms": 0,

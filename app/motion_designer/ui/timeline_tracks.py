@@ -57,6 +57,31 @@ class LayerTimelineView(QWidget):
     def _layers(self) -> list[MotionLayer]:
         return list(reversed(self.composition.layers)) if self.composition else []
 
+    def _quality_markers(self) -> list[tuple[int, str]]:
+        markers: list[tuple[int, str]] = []
+        if self.composition is None:
+            return markers
+        for layer in self.composition.layers:
+            for mask in layer.masks:
+                tracking = mask.metadata.get("tracking_cache")
+                if not isinstance(tracking, dict):
+                    continue
+                metadata = tracking.get("metadata")
+                if not isinstance(metadata, dict):
+                    continue
+                report = metadata.get("temporal_matte_quality")
+                if not isinstance(report, dict):
+                    continue
+                stop_at = report.get("auto_stop_at_ms")
+                if stop_at is not None:
+                    markers.append((int(stop_at), "error"))
+                markers.extend(
+                    (int(value), "warning")
+                    for value in report.get("correction_times_ms", [])
+                    if stop_at is None or int(value) != int(stop_at)
+                )
+        return sorted(set(markers))
+
     def _row_layer(self, y: float) -> MotionLayer | None:
         row = int((y - self.HEADER_HEIGHT) // self.ROW_HEIGHT)
         layers = self._layers()
@@ -80,6 +105,16 @@ class LayerTimelineView(QWidget):
             painter.setPen(QColor("#8f969f"))
             painter.drawText(x + 4, 16, f"{time_ms / 1000:g}")
             painter.setPen(QPen(QColor("#323740"), 1))
+        for time_ms, severity in self._quality_markers():
+            x = self._x(time_ms)
+            color = QColor("#ff4f64" if severity == "error" else "#f2b34d")
+            painter.setBrush(color)
+            painter.setPen(QPen(color.darker(135), 1))
+            painter.drawPolygon(QPolygonF((
+                QPointF(x - 5, 1),
+                QPointF(x + 5, 1),
+                QPointF(x, 10),
+            )))
         for row, layer in enumerate(self._layers()):
             top = self.HEADER_HEIGHT + row * self.ROW_HEIGHT
             if layer.id == self.selected_layer_id:
