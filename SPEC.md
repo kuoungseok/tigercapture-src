@@ -9151,6 +9151,25 @@ AI Script Edit MVP integration:
   repeaters, motion blur, Puppet deformation, expressions, and behaviors must
   never disappear silently during Unreal generation.
 
+### Linked TSX motion sources
+
+- Motion Designer can link trusted `.tsx` and `.jsx` React motion sources as
+  `remotion_tsx` layers without rewriting the original source. The canonical
+  contract is `docs/MOTION_REMOTION_TSX_LINKED_SOURCE_KO.md`.
+- Static inspection never executes source. Preview preparation requires an
+  explicit trust decision, bundles the original path through Tiger's local
+  React/esbuild compatibility runtime, and generates an alpha-capable frame
+  cache for the normal Motion render graph.
+- The linked source path and SHA-256 remain authoritative. A missing or changed
+  source invalidates the cache instead of showing stale frames.
+- Action/MCP parity is provided by `motion.remotion_tsx.runtime.status`,
+  `motion.remotion_tsx.runtime.install`, `motion.remotion_tsx.inspect`,
+  `motion.remotion_tsx.import`, and `motion.remotion_tsx.refresh`.
+- The compatibility surface currently covers React plus `useCurrentFrame`,
+  `useVideoConfig`, `interpolate`, `spring`, `random`, relative imports, and a
+  basic `next/image` shim. This is not a claim of full Remotion, arbitrary npm,
+  browser API, or After Effects compatibility.
+
 ## Motion Designer AEP Inspection (2026-08-03)
 
 - Tiger Studio now owns a dependency-free, bounded AEP structural parser under

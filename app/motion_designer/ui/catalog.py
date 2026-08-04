@@ -19,6 +19,7 @@ OBJECT_ITEMS = (
     ("MMD Actor", "mmd_actor"),
     ("VRM Avatar", "vrm_actor"),
     ("Particle Emitter", "particle"),
+    ("Remotion TSX", "remotion_tsx"),
     ("Camera", "camera"),
     ("Light", "light"),
 )
@@ -161,6 +162,7 @@ ITEM_DESCRIPTIONS = {
     "mmd_actor": "MMD model and motion actor",
     "vrm_actor": "VRM avatar actor",
     "particle": "GPU particle emitter",
+    "remotion_tsx": "Linked React motion source; original TSX stays unchanged",
     "camera": "Animate composition framing",
     "light": "Light supported 3D layers",
     "fade": "Fade the selected layer in or out",

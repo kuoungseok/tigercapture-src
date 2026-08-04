@@ -1830,6 +1830,23 @@ class MotionDesignerWindow(QMainWindow):
             self.left_tabs.setCurrentWidget(self.inspector_tabs)
             self.inspector_tabs.setCurrentWidget(self.particle)
             return
+        if requested_type == "remotion_tsx":
+            from app.motion_designer.ui.remotion_tsx_workflow import (
+                choose_and_prepare_remotion_tsx,
+            )
+
+            layer = choose_and_prepare_remotion_tsx(
+                self,
+                width=composition.width,
+                height=composition.height,
+                fps=composition.fps,
+                duration_ms=composition.duration_ms,
+            )
+            if layer is None:
+                return
+            self.controller.add_layer(layer)
+            self._select_layer(layer.id)
+            return
         layer_type = "shape" if requested_type in {
             "shape", "rectangle", "ellipse", "polygon", "star", "path",
         } else requested_type

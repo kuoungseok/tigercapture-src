@@ -9,6 +9,11 @@ from app.actions.schema import ActionSpec, schema_object
 
 
 def register_motion_actions(registry: Any) -> None:
+    from app.actions.motion_remotion_tsx_namespace import (
+        register_motion_remotion_tsx_actions,
+    )
+
+    register_motion_remotion_tsx_actions(registry)
     cid = {"composition_id": {"type": "string"}}
     lid = {**cid, "layer_id": {"type": "string"}}
     registry.register_adapter_action(

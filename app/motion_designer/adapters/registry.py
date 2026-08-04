@@ -71,6 +71,14 @@ def render_source(
             composition_time_ms=composition_time_ms,
             quality=quality, viewport_size=viewport_size,
         )
+    elif layer.layer_type == "remotion_tsx" or layer.source.kind == "remotion_tsx":
+        from .remotion_tsx import render_remotion_tsx
+
+        image = render_remotion_tsx(
+            layer, time_ms, composition=composition,
+            composition_time_ms=composition_time_ms,
+            quality=quality, viewport_size=viewport_size,
+        )
     else:
         image = render_shape(layer, time_ms)
     return apply_effects(apply_masks(image, layer, time_ms), layer.effects, time_ms)

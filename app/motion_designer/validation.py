@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from math import isfinite
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from .schema import AnimatedProperty, MotionComposition
@@ -1201,6 +1202,44 @@ def _validate_frame_blending(
         ))
 
 
+def _validate_remotion_tsx_layer(layer, path: str, issues: list[ValidationIssue]) -> None:
+    if layer.layer_type != "remotion_tsx" and layer.source.kind != "remotion_tsx":
+        return
+    source = Path(layer.source.uri).expanduser().resolve(strict=False)
+    if not source.is_file():
+        issues.append(ValidationIssue(
+            "missing_remotion_tsx_source",
+            "Linked Remotion TSX source does not exist.",
+            f"{path}.source.uri",
+        ))
+        return
+    try:
+        from .remotion_tsx import inspect_remotion_tsx
+
+        inspection = inspect_remotion_tsx(source)
+    except (OSError, ValueError, UnicodeError) as error:
+        issues.append(ValidationIssue(
+            "invalid_remotion_tsx_source",
+            f"Remotion TSX source could not be inspected: {error}",
+            f"{path}.source.uri",
+        ))
+        return
+    if not inspection.ok:
+        issues.append(ValidationIssue(
+            "unsupported_remotion_tsx_source",
+            "; ".join(inspection.warnings) or "Unsupported Remotion TSX source.",
+            f"{path}.source.uri",
+        ))
+    prepared = str(layer.source.params.get("prepared_source_sha256") or "")
+    if prepared and prepared != inspection.source_sha256:
+        issues.append(ValidationIssue(
+            "stale_remotion_tsx_preview",
+            "The linked TSX changed after its preview cache was prepared.",
+            f"{path}.source.revision",
+            severity="warning",
+        ))
+
+
 def validate_composition(composition: MotionComposition) -> ValidationReport:
     issues: list[ValidationIssue] = []
     if composition.width <= 0 or composition.height <= 0:
@@ -1513,6 +1552,7 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
         _validate_particle_layer(layer, path, issues)
         _validate_button_component(layer, path, issues)
         _validate_generator_layer(layer, path, issues)
+        _validate_remotion_tsx_layer(layer, path, issues)
     from .expressions import expression_issues
 
     layer_index = {layer.id: index for index, layer in enumerate(composition.layers)}
