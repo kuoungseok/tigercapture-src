@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.ar_pbr.animation import normalize_animation_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.ambient_occlusion import (
     DEFAULT_AMBIENT_OCCLUSION_MODE,
     DEFAULT_AO_AMBIENT,
@@ -355,6 +356,18 @@ DEFAULT_RENDER = {
         "hdri_path": "",
         "ibl_exposure": 1.1,
         "ibl_rotation": 0.0,
+        "render_mode": "ibl_realtime",
+        "show_environment_background": True,
+        "environment_visibility": {
+            "camera_visible": True,
+            "reflection_visible": True,
+            "diffuse_visible": True,
+            "refraction_visible": True,
+            "background_output": "environment",
+            "diffuse_strength": 1.0,
+            "reflection_strength": 1.0,
+            "refraction_strength": 1.0,
+        },
         "light_azimuth": 45.0,
         "light_elevation": 45.0,
         "light_color": [1.0, 1.0, 1.0],
@@ -889,6 +902,12 @@ def normalize_lighting_settings(value: Any) -> dict[str, Any]:
     out.update(flatten_render_pass_settings(data))
     out.update(flatten_motion_blur_settings(data))
     out.update(flatten_triplanar_settings(data))
+    environment = normalize_environment_visibility(data)
+    render_mode = resolve_render_mode(data)
+    out["show_environment_background"] = bool(environment["camera_visible"])
+    out["environment_visibility"] = environment
+    out["render_mode"] = str(render_mode["requested"])
+    out["render_mode_policy"] = render_mode
     return out
 
 

@@ -49,6 +49,7 @@ from app.ar_pbr.post_effects import normalize_post_effects_settings
 from app.ar_pbr.preview_diagnostics import overlay_diagnostics_payload
 from app.ar_pbr.shadow import normalize_shadow_settings
 from app.ar_pbr.hybrid_rendering import normalize_hybrid_render_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.material_layering import normalize_material_layering_settings
 from app.ar_pbr.subsurface import normalize_subsurface_settings
 from app.ar_pbr.surface import normalize_surface_settings
@@ -1119,6 +1120,8 @@ uniform float u_extra_light1_spot_outer_cos;
 uniform vec3 u_shadow_center;
 uniform float u_direct_strength;
 uniform float u_ibl_exposure;
+uniform float u_diffuse_environment_strength;
+uniform float u_reflection_environment_strength;
 uniform float u_ibl_rotation;
 uniform float u_object_depth;
 uniform float u_occlusion_tolerance;
@@ -1246,9 +1249,9 @@ vec3 sample_env(vec3 dir) {
 
 vec3 sample_irradiance(vec3 dir) {
     if (u_has_ibl_probe == 1) {
-        return pow(max(texture2D(u_irradiance_tex, dir_to_equirect(dir)).rgb, vec3(0.0)), vec3(2.2)) * u_ibl_exposure;
+        return pow(max(texture2D(u_irradiance_tex, dir_to_equirect(dir)).rgb, vec3(0.0)), vec3(2.2)) * u_ibl_exposure * u_diffuse_environment_strength;
     }
-    return sample_env(dir);
+    return sample_env(dir) * u_diffuse_environment_strength;
 }
 
 vec3 sample_prefiltered_env(vec3 dir, float roughness) {
@@ -1261,11 +1264,11 @@ vec3 sample_prefiltered_env(vec3 dir, float roughness) {
         vec2 uv = dir_to_equirect(dir);
         vec3 low = pow(max(texture2D(u_prefilter_tex, vec2(uv.x, (uv.y + lo) / levels)).rgb, vec3(0.0)), vec3(2.2));
         vec3 high = pow(max(texture2D(u_prefilter_tex, vec2(uv.x, (uv.y + hi) / levels)).rgb, vec3(0.0)), vec3(2.2));
-        return mix(low, high, mix_value) * u_ibl_exposure;
+        return mix(low, high, mix_value) * u_ibl_exposure * u_reflection_environment_strength;
     }
     vec3 env = sample_env(dir);
     vec3 blur = sample_env(vec3(0.0, 1.0, 0.0));
-    return mix(env, blur, clamp(roughness * 0.58, 0.0, 0.72));
+    return mix(env, blur, clamp(roughness * 0.58, 0.0, 0.72)) * u_reflection_environment_strength;
 }
 
 vec2 sample_brdf_lut(float ndotv, float roughness) {
@@ -4527,6 +4530,8 @@ class _ARPBRDirectGLPainter:
         glint_sparkle_rendering = normalize_glint_sparkle_settings(lighting)
         depth_of_field_rendering = normalize_depth_of_field_settings(lighting)
         post_effects_rendering = normalize_post_effects_settings(lighting)
+        environment_visibility = normalize_environment_visibility(lighting)
+        render_mode_policy = resolve_render_mode(lighting)
         triplanar_rendering = normalize_triplanar_settings(lighting)
         additional_lights = []
         for raw in list(lighting.get("additional_lights") or [])[:2]:
@@ -4576,6 +4581,18 @@ class _ARPBRDirectGLPainter:
             "light_color": light_color,
             "direct": direct,
             "ibl": ibl,
+            "diffuse_environment_strength": (
+                float(environment_visibility["diffuse_strength"])
+                if environment_visibility["diffuse_visible"] and render_mode_policy["active"] != "studio_lights_only"
+                else 0.0
+            ),
+            "reflection_environment_strength": (
+                float(environment_visibility["reflection_strength"])
+                if environment_visibility["reflection_visible"] and render_mode_policy["active"] != "studio_lights_only"
+                else 0.0
+            ),
+            "environment_visibility": environment_visibility,
+            "render_mode_policy": render_mode_policy,
             "rotation": rotation,
             "hdri_path": str(lighting.get("hdri_path") or ""),
             "color_management": color_management,
@@ -4827,6 +4844,14 @@ class _ARPBRDirectGLPainter:
             self._set_pbr_uniform("u_light_color", lighting["light_color"])
             self._set_pbr_uniform("u_direct_strength", float(lighting["direct"]))
             self._set_pbr_uniform("u_ibl_exposure", float(lighting["ibl"]))
+            self._set_pbr_uniform(
+                "u_diffuse_environment_strength",
+                float(lighting["diffuse_environment_strength"]),
+            )
+            self._set_pbr_uniform(
+                "u_reflection_environment_strength",
+                float(lighting["reflection_environment_strength"]),
+            )
             self._set_pbr_uniform("u_ibl_rotation", float(lighting["rotation"]))
             additional_lights = list(lighting.get("additional_lights") or [])[:2]
             for extra_index in range(2):

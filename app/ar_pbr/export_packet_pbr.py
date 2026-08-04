@@ -37,6 +37,7 @@ from app.ar_pbr.bevel import apply_bevel_normal, bevel_edge_mask, normalize_beve
 from app.ar_pbr.displacement import apply_displacement_proxy, normalize_displacement_settings
 from app.ar_pbr.hybrid_rendering import apply_hybrid_gi, denoise_float_rgb, normalize_hybrid_render_settings
 from app.ar_pbr.ray_gi_detail import normalize_ray_gi_detail_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.hair import apply_hair_groom_shading, normalize_hair_groom_settings
 from app.ar_pbr.material_layering import apply_material_layer, normalize_material_layering_settings
 from app.ar_pbr.microsurface import (
@@ -178,6 +179,8 @@ def _draw_pbr_triangles(
     color_management = normalize_color_management_settings(lighting)
     hybrid_rendering = normalize_hybrid_render_settings(lighting)
     ray_gi_detail = normalize_ray_gi_detail_settings(lighting)
+    environment_visibility = normalize_environment_visibility(lighting)
+    render_mode_policy = resolve_render_mode(lighting)
     ambient_occlusion_rendering = normalize_ambient_occlusion_settings(lighting)
     depth_edge_glow = normalize_depth_edge_glow_settings(lighting)
     transmission_rendering = normalize_transmission_settings(lighting)
@@ -202,6 +205,8 @@ def _draw_pbr_triangles(
     diagnostics["pbr_color_management"] = color_management
     diagnostics["pbr_hybrid_rendering"] = hybrid_rendering
     diagnostics["pbr_ray_gi_detail"] = ray_gi_detail
+    diagnostics["pbr_environment_visibility"] = environment_visibility
+    diagnostics["pbr_render_mode_policy"] = render_mode_policy
     diagnostics["pbr_ambient_occlusion_rendering"] = ambient_occlusion_rendering
     diagnostics["pbr_depth_edge_glow"] = normalize_depth_edge_glow_settings(lighting)
     diagnostics["pbr_transmission_rendering"] = transmission_rendering
@@ -940,6 +945,20 @@ def _draw_pbr_triangles(
                 spec_env_rgb = np.asarray(spec_env_rgb, dtype=np.float32) * ibl_exposure
                 if ibl_probe is None:
                     spec_env_rgb = spec_env_rgb * (1.0 - roughness[:, :, None] * 0.52) + env_rgb[None, None, :] * (roughness[:, :, None] * 0.52)
+
+            environment_enabled = str(render_mode_policy.get("active")) != "studio_lights_only"
+            diffuse_scale = (
+                float(environment_visibility["diffuse_strength"])
+                if environment_enabled and bool(environment_visibility["diffuse_visible"])
+                else 0.0
+            )
+            reflection_scale = (
+                float(environment_visibility["reflection_strength"])
+                if environment_enabled and bool(environment_visibility["reflection_visible"])
+                else 0.0
+            )
+            diffuse_env = np.asarray(diffuse_env, dtype=np.float32) * diffuse_scale
+            spec_env_rgb = np.asarray(spec_env_rgb, dtype=np.float32) * reflection_scale
 
             if brdf_terms is not None:
                 brdf_terms = np.asarray(brdf_terms, dtype=np.float32)

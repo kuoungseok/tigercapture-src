@@ -41,6 +41,8 @@ _MODE_CODES: dict[str, int] = {
     "delight_shading": 17,
     "intrinsic_channels": 18,
     "delight_compare": 19,
+    "iid_shading": 21,
+    "iid_residual": 22,
 }
 
 _TEXTURE_NAMES: tuple[str, ...] = (
@@ -58,6 +60,8 @@ _TEXTURE_NAMES: tuple[str, ...] = (
     "f90_mask",
     "irradiance",
     "delight_shading",
+    "iid_shading",
+    "iid_residual",
 )
 
 _VERTEX_SHADER = """
@@ -86,6 +90,8 @@ uniform sampler2D u_f0;
 uniform sampler2D u_f90;
 uniform sampler2D u_irradiance;
 uniform sampler2D u_delight_shading;
+uniform sampler2D u_iid_shading;
+uniform sampler2D u_iid_residual;
 uniform int u_normal_directx;
 uniform int u_mode;
 uniform int u_shape;
@@ -295,6 +301,8 @@ void main() {
     }
     if (u_mode == 16) { gl_FragColor = vec4(texture2D(u_irradiance, material_uv).rgb, 1.0); return; }
     if (u_mode == 17) { gl_FragColor = vec4(texture2D(u_delight_shading, material_uv).rgb, 1.0); return; }
+    if (u_mode == 21) { gl_FragColor = vec4(texture2D(u_iid_shading, material_uv).rgb, 1.0); return; }
+    if (u_mode == 22) { gl_FragColor = vec4(texture2D(u_iid_residual, material_uv).rgb, 1.0); return; }
 
     vec3 surface_n = sphere_n;
     vec3 tangent = vec3(1.0, 0.0, 0.0);
@@ -508,6 +516,8 @@ def render_texture_lab_gpu_preview_from_generated(
             "f90_mask": "u_f90",
             "irradiance": "u_irradiance",
             "delight_shading": "u_delight_shading",
+            "iid_shading": "u_iid_shading",
+            "iid_residual": "u_iid_residual",
         }
         for unit, name in enumerate(_TEXTURE_NAMES):
             tex_id = _upload_texture(GL, arrays[name], unit)

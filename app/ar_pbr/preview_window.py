@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDockWidget,
     QFrame,
     QHBoxLayout,
@@ -91,6 +92,7 @@ from app.ar_pbr.render_profile import (
     marmoset_pbr_available,
     vrm_mtoon_available,
 )
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.shadow import DEFAULT_SHADOW_STRENGTH
 from app.ar_pbr.surface import (
     DEFAULT_SURFACE_METALLIC,
@@ -610,7 +612,13 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._hdri_presets: list[HdriPreset] = hdri_presets()
         initial_hdri_key = str(self._initial_lighting.get("hdri_id") or self._initial_lighting.get("hdri_path") or "")
         self._selected_hdri = resolve_hdri_preset(initial_hdri_key)
-        self._background_visible = bool(self._initial_lighting.get("show_environment_background", True))
+        initial_environment = normalize_environment_visibility(self._initial_lighting)
+        initial_render_mode = resolve_render_mode(self._initial_lighting)
+        self._background_visible = bool(initial_environment["camera_visible"])
+        self._reflection_environment_visible = bool(initial_environment["reflection_visible"])
+        self._diffuse_environment_visible = bool(initial_environment["diffuse_visible"])
+        self._refraction_environment_visible = bool(initial_environment["refraction_visible"])
+        self._render_mode = str(initial_render_mode["requested"])
         self._preview_max_triangles = max(1_000, int(max_triangles))
         self._preview_texture_max_size = max(64, int(texture_max_size))
         self._suppress_emit = False
@@ -742,6 +750,37 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._hdri_combo.setToolTip("HDR cubemap preset")
         combo_row.addWidget(self._hdri_combo, stretch=1)
         controls_layout.addLayout(combo_row)
+
+        self._render_mode_combo = QComboBox(controls)
+        self._render_mode_combo.setObjectName("ArPbrHdriCombo")
+        for label, value in (
+            ("IBL Realtime", "ibl_realtime"),
+            ("Hybrid RT", "hybrid_rt"),
+            ("Path Traced", "path_traced"),
+            ("Studio Lights Only", "studio_lights_only"),
+        ):
+            self._render_mode_combo.addItem(label, value)
+        mode_index = self._render_mode_combo.findData(self._render_mode)
+        self._render_mode_combo.setCurrentIndex(max(0, mode_index))
+        self._render_mode_combo.setToolTip(
+            "Hardware modes fall back honestly to IBL Realtime until a native DXR/Vulkan RT helper is available."
+        )
+        self._render_mode_combo.currentIndexChanged.connect(self._on_render_mode_changed)
+        controls_layout.addWidget(self._render_mode_combo)
+
+        environment_visibility_row = QHBoxLayout()
+        self._diffuse_env_check = QCheckBox("Diffuse HDRI", controls)
+        self._reflection_env_check = QCheckBox("Reflection HDRI", controls)
+        self._refraction_env_check = QCheckBox("Refraction HDRI", controls)
+        for check, checked in (
+            (self._diffuse_env_check, self._diffuse_environment_visible),
+            (self._reflection_env_check, self._reflection_environment_visible),
+            (self._refraction_env_check, self._refraction_environment_visible),
+        ):
+            check.setChecked(bool(checked))
+            check.toggled.connect(self._on_environment_visibility_changed)
+            environment_visibility_row.addWidget(check)
+        controls_layout.addLayout(environment_visibility_row)
 
         self._ibl_exposure = _SliderRow("Environment Intensity", 0.0, 4.0, 1.1, parent=controls, kind="accent")
         self._ibl_rotation = _SliderRow("Environment Rotation", -180.0, 180.0, 0.0, suffix="deg", parent=controls, kind="accent")
@@ -1460,6 +1499,14 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             "hdri_id": str(self._selected_hdri.id if self._selected_hdri is not None else ""),
             "hdri_path": str(self._selected_hdri.path if self._selected_hdri is not None else ""),
             "show_environment_background": bool(self._background_visible),
+            "render_mode": str(self._render_mode),
+            "environment_visibility": {
+                "camera_visible": bool(self._background_visible),
+                "reflection_visible": bool(self._reflection_environment_visible),
+                "diffuse_visible": bool(self._diffuse_environment_visible),
+                "refraction_visible": bool(self._refraction_environment_visible),
+                "background_output": "environment" if self._background_visible else "transparent",
+            },
             "ibl_exposure": float(self._state.ibl_exposure),
             "ibl_rotation": float(self._state.ibl_rotation),
             "light_azimuth": float(self._state.light_azimuth),
@@ -1554,6 +1601,16 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                     self._sync_render_profile_combo()
             if "show_environment_background" in settings:
                 self._set_environment_background_visible(bool(settings["show_environment_background"]), emit=False)
+            environment = normalize_environment_visibility(settings)
+            if "environment_visibility" in settings:
+                self._set_environment_background_visible(bool(environment["camera_visible"]), emit=False)
+                self._reflection_environment_visible = bool(environment["reflection_visible"])
+                self._diffuse_environment_visible = bool(environment["diffuse_visible"])
+                self._refraction_environment_visible = bool(environment["refraction_visible"])
+                self._sync_environment_visibility_controls()
+            if "render_mode" in settings:
+                self._render_mode = str(resolve_render_mode(settings)["requested"])
+                self._sync_render_mode_combo()
             if "ibl_exposure" in settings:
                 self._state.ibl_exposure = max(0.0, min(8.0, float(settings["ibl_exposure"])))
             if "ibl_rotation" in settings:
@@ -1731,6 +1788,58 @@ class ArPbrAssetPreviewWindow(QMainWindow):
 
     def _on_background_toggled(self, checked: bool) -> None:
         self._set_environment_background_visible(bool(checked))
+
+    def _sync_render_mode_combo(self) -> None:
+        combo = getattr(self, "_render_mode_combo", None)
+        if combo is None:
+            return
+        index = combo.findData(str(self._render_mode))
+        combo.blockSignals(True)
+        try:
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            policy = resolve_render_mode({"render_mode": self._render_mode})
+            combo.setToolTip(
+                f"Active: {policy['active']}"
+                + (" | native RT unavailable, using IBL fallback" if policy["fallback"] else "")
+            )
+        finally:
+            combo.blockSignals(False)
+
+    def _sync_environment_visibility_controls(self) -> None:
+        for name, value in (
+            ("_diffuse_env_check", self._diffuse_environment_visible),
+            ("_reflection_env_check", self._reflection_environment_visible),
+            ("_refraction_env_check", self._refraction_environment_visible),
+        ):
+            check = getattr(self, name, None)
+            if check is not None:
+                check.blockSignals(True)
+                check.setChecked(bool(value))
+                check.blockSignals(False)
+        self._sync_background_button()
+
+    def _on_render_mode_changed(self, _index: int) -> None:
+        combo = getattr(self, "_render_mode_combo", None)
+        if combo is None:
+            return
+        self._render_mode = str(combo.currentData() or "ibl_realtime")
+        policy = resolve_render_mode({"render_mode": self._render_mode})
+        if policy["active"] == "studio_lights_only":
+            self._diffuse_environment_visible = False
+            self._reflection_environment_visible = False
+            self._refraction_environment_visible = False
+            self._sync_environment_visibility_controls()
+        self._sync_render_mode_combo()
+        self._update()
+        self._emit_lighting_changed()
+
+    def _on_environment_visibility_changed(self, _checked: bool) -> None:
+        self._diffuse_environment_visible = bool(self._diffuse_env_check.isChecked())
+        self._reflection_environment_visible = bool(self._reflection_env_check.isChecked())
+        self._refraction_environment_visible = bool(self._refraction_env_check.isChecked())
+        self._update()
+        self._emit_lighting_changed()
 
     def _apply_render_profile_to_mesh(self) -> None:
         if not self._descriptor or self._gl_widget is None:

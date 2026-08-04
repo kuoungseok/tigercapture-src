@@ -707,7 +707,8 @@ The lab must provide:
   metallic value, optional heuristic Base Color de-light estimate, optional
   Substrate reflectance/F90 mask strength, Substrate Slab mode, preview
   light/environment, and animated-light preview.
-- `Generate De-lit Estimate` is an optional heuristic photographic-lighting
+- `Generate De-lit / IID Estimate` offers two deliberately separate methods.
+  `Fast Heuristic` is an optional photographic-lighting
   cleanup for sources such as grass, asphalt, fabric, or walls. It estimates a
   low-frequency lighting field from input luminance and exposes separate
   `base_color_source`, `base_color_estimate`, and `delight_shading` diagnostics.
@@ -737,6 +738,21 @@ Research audit and implementation boundary:
   61966-2-1 sRGB registry, `prs-eth/Marigold` IID v1.1, and the SIGGRAPH 2024
   IntrinsicDiffusion project. These references classify and constrain the
   feature; they do not validate its output as measured reflectance.
+- `AI High Quality · Marigold IID` uses the official Diffusers
+  `MarigoldIntrinsicsPipeline` with
+  `prs-eth/marigold-iid-lighting-v1-1`. It predicts Albedo `A`, diffuse
+  Shading `S`, and non-diffuse Residual `R` under `I=A*S+R`; output conversion
+  must use `visualize_intrinsics(prediction, target_properties)` rather than
+  guessing channel order or color space. Defaults are 4 steps, ensemble 1,
+  processing resolution 768, seed 0. The output remains a learned prediction,
+  not measured reflectance, and cannot silently replace Base Color or feed
+  Height/Normal/AO/Roughness/Metallic inference.
+- Diffusers and the OpenRAIL++ checkpoint are lazy optional dependencies.
+  Normal startup performs no network access. `Install AI IID` is the explicit
+  dependency/checkpoint action; it stores only fp16 safetensors (about 2.6 GB,
+  excluding duplicate fp32 and pickle weights) under
+  `external/models/marigold-iid-lighting-v1-1`. Actions expose the same offline
+  readiness/install contract through `ar_pbr.texture_lab.iid_status`.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
 - Height export includes both the compatibility 8-bit PNG and a 16-bit
@@ -765,6 +781,8 @@ Automation surface:
 
 - `ar_pbr.texture_lab.open`: opens the image texture lab window for an image.
 - `ar_pbr.texture_lab.preview`: writes a plane preview or map preview PNG.
+- `ar_pbr.texture_lab.iid_status`: reports Marigold IID dependency, CUDA,
+  checkpoint, license, durable path, and explicit install commands.
 - `ar_pbr.texture_lab.export`: writes separate and packed texture maps plus a
   JSON manifest.
 - `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
@@ -924,6 +942,80 @@ AR/PBR Texture Lab window, Painter PBR panel, and Python Actions.
 - If PyTorch CUDA is not installed, installed without CUDA, or fails at runtime,
   Texture Lab must keep working on CPU and surface an explicit fallback reason
   plus install/verify commands in the UI and action payloads.
+
+## Environment Visibility and Hardware RT Milestones
+
+The AR/PBR renderer has one renderer-neutral environment contract in
+`app.ar_pbr.render_environment`. An HDRI is not required to be visible to the
+camera in order to remain available to lighting rays. The normalized settings
+are serialized under `render.lighting.environment_visibility`:
+
+- `camera_visible` controls only the viewer/export background.
+- `reflection_visible`, `diffuse_visible`, and `refraction_visible` control
+  independent environment contributions.
+- `diffuse_strength`, `reflection_strength`, and `refraction_strength` are
+  independent 0..8 energy multipliers. The current UI exposes visibility; the
+  Action/schema contract also preserves the strengths.
+- `background_output` is `environment`, `transparent`, or `solid`.
+- `camera_visible=false` with `reflection_visible=true` is the supported
+  invisible-HDRI/reflection-studio setup. It must not clear the IBL probe.
+- Realtime OpenGL and packet export both apply diffuse and reflection
+  visibility independently. `studio_lights_only` disables both environment
+  contributions without deleting the selected HDRI.
+
+Render mode requests are `ibl_realtime`, `hybrid_rt`, `path_traced`, and
+`studio_lights_only`. `hybrid_rt` and `path_traced` are capability-gated:
+
+- CUDA availability is never evidence of DXR or Vulkan ray-tracing support.
+- Native RT is active only when the explicitly configured, separate-process
+  helper responds to `--capabilities-json` with
+  `hardware_ray_tracing=true` and `api=dxr|vulkan_rt`.
+- Helper capability is cached by executable path and modification time. Scene
+  normalization and Painter rendering must never launch a subprocess per
+  object, dab, or frame.
+- Without that native helper, requested hardware modes remain persisted but
+  the active mode is honestly reported as `ibl_realtime` with
+  `fallback_reason=native_rt_backend_unavailable`.
+- `ar_pbr.preview.rt_status` reports the requested/active mode, native device,
+  API, helper state, and fallback. It is ownerless and does not open a window.
+- The helper boundary must not import Painter or drawing modules. This keeps
+  acceleration-structure creation, shader compilation, denoising, and future
+  path-trace accumulation outside the brush-input latency path.
+
+Milestone state for this revision:
+
+1. **M0 · Shared contract — complete.** Preview, track schema, Actions, GPU
+   packets, and export share environment visibility and render-mode policy.
+2. **M1 · Invisible reflection HDRI — complete.** Camera background can be
+   hidden while diffuse/specular environment lighting remains active.
+3. **M2 · Native RT capability boundary — complete.** An isolated helper ABI,
+   cached probe, explicit API/device report, and honest fallback are in place.
+4. **M3 · Hybrid RT reflections — backend pending.** The request/policy is
+   stable, but no DXR/Vulkan RT helper binary ships in this revision. Therefore
+   the product must not label current OpenGL reflection as hardware RT.
+5. **M4 · RT shadows/AO/refraction — backend pending.** Existing raster/screen
+   approximations remain available but are not renamed as ray traced.
+6. **M5 · Path-traced export — backend pending.** The mode and environment
+   policy are serialized; sample accumulation, denoising, and native export are
+   not claimed until the helper produces verified frames.
+7. **M6 · Painter isolation — complete for the contract layer.** Capability
+   probes are cached and process-isolated, and tests guard against Painter or
+   drawing imports. Native RT remains opt-in and cannot enter the stroke path.
+
+This split follows the renderer semantics rather than tying visibility to a
+skybox mesh. DXR invokes a miss shader when no intersection is accepted, which
+is the appropriate place to sample a reflection environment. Unreal likewise
+separates Sky Light contribution, ray-tracing reflection contribution, and
+camera/path-tracer visibility:
+
+- Microsoft DXR miss shader:
+  https://learn.microsoft.com/en-us/windows/win32/direct3d12/miss-shader
+- Unreal Engine 5.8 hardware ray tracing:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/hardware-ray-tracing-in-unreal-engine
+- Unreal Engine 5.8 ray/path-tracer light properties:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/ray-tracing-and-path-tracer-features-properties-in-unreal-engine
+- Unreal Engine 5.8 Path Tracer skylighting and visible lights:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/path-tracer-in-unreal-engine
 
 ## First QA Targets
 

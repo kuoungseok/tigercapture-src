@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.actions.editor_adapter_ar_pbr_base import ArPbrBaseAdapterMixin
+from app.ar_pbr.render_environment import hardware_rt_capability, resolve_render_mode
 
 
 class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
@@ -25,6 +26,10 @@ class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
             "window": "ar_pbr_preview",
             "settings": dict(window.lighting_settings() or {}),
         }
+
+    def ar_pbr_preview_rt_status(self, *, render_mode: str = "hybrid_rt") -> dict[str, Any]:
+        capability = hardware_rt_capability(refresh=True)
+        return resolve_render_mode({"render_mode": render_mode}, capability=capability)
 
     def ar_pbr_preview_settings_set(self, **params: Any) -> dict[str, Any]:
         window = self._ar_pbr_settings_window()
@@ -59,6 +64,8 @@ class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
             "hdri_path": str(settings.get("hdri_path") or ""),
             "ibl_exposure": float(settings.get("ibl_exposure", 1.1) or 0.0),
             "ibl_rotation": float(settings.get("ibl_rotation", 0.0) or 0.0),
+            "render_mode": str(settings.get("render_mode") or "ibl_realtime"),
+            "environment_visibility": dict(settings.get("environment_visibility") or {}),
             "surface_override_strength": float(settings.get("surface_override_strength", 0.0) or 0.0),
             "surface_roughness": float(settings.get("surface_roughness", 0.45) or 0.45),
             "surface_metallic": float(settings.get("surface_metallic", 0.0) or 0.0),
@@ -84,6 +91,7 @@ class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
         hdri_path: str | None = None,
         ibl_exposure: float | None = None,
         ibl_rotation: float | None = None,
+        render_mode: str | None = None,
         surface_override_strength: float | None = None,
         surface_roughness: float | None = None,
         surface_metallic: float | None = None,
@@ -104,6 +112,7 @@ class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
                 "hdri_path": hdri_path,
                 "ibl_exposure": ibl_exposure,
                 "ibl_rotation": ibl_rotation,
+                "render_mode": render_mode,
                 "surface_override_strength": surface_override_strength,
                 "surface_roughness": surface_roughness,
                 "surface_metallic": surface_metallic,

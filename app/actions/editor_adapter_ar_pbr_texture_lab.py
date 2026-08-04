@@ -12,6 +12,7 @@ from app.ar_pbr.texture_map_lab import (
     substrate_export_plan,
     texture_lab_cpu_fallback_allowed,
 )
+from app.ar_pbr.marigold_iid import marigold_iid_status
 
 
 class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
@@ -89,6 +90,9 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
     ) -> dict[str, Any]:
         cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
         return select_texture_map_backend(backend, allow_cpu=cpu_allowed)
+
+    def ar_pbr_texture_lab_iid_status(self) -> dict[str, Any]:
+        return marigold_iid_status()
 
     def ar_pbr_texture_lab_export(
         self,

@@ -27,7 +27,7 @@ from app.ar_pbr.pbr_math import (
 )
 
 
-SCHEMA_ID = "tigerstudio.ar_pbr.texture_map_lab.v3"
+SCHEMA_ID = "tigerstudio.ar_pbr.texture_map_lab.v4"
 DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
     "base_color",
     "normal",
@@ -43,6 +43,8 @@ ANALYSIS_MAPS: tuple[str, ...] = (
     "base_color_estimate",
     "irradiance",
     "delight_shading",
+    "iid_shading",
+    "iid_residual",
 )
 OPTIONAL_SUBSTRATE_MAPS: tuple[str, ...] = (
     "f0",
@@ -63,6 +65,8 @@ PREVIEW_MODES: tuple[str, ...] = (
     "metallic",
     "irradiance",
     "delight_shading",
+    "iid_shading",
+    "iid_residual",
     "height",
     "cavity",
     "curvature",
@@ -76,6 +80,7 @@ PREVIEW_SHAPES: tuple[str, ...] = ("plane", "sphere")
 PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "orm", "arm", "rma", "gltf_mr")
 NORMAL_FORMATS: tuple[str, ...] = ("unreal_directx", "directx", "opengl")
 AO_ALGORITHMS: tuple[str, ...] = ("heightfield_horizon", "legacy_blur")
+DELIGHT_METHODS: tuple[str, ...] = ("heuristic", "marigold_iid_lighting")
 TEXTURE_MAP_BACKENDS: tuple[str, ...] = ("auto", "cpu", "torch_cuda", "cupy", "opencv_cuda")
 TORCH_CUDA_WHEEL_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 PREVIEW_ONLY_SETTING_KEYS = frozenset(
@@ -125,6 +130,16 @@ UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
         "compression": "Grayscale",
         "usage": "Diagnostic estimated illumination removed from BaseColor",
     },
+    "iid_shading": {
+        "sRGB": True,
+        "compression": "Default",
+        "usage": "Marigold IID Lighting diffuse Shading visualization",
+    },
+    "iid_residual": {
+        "sRGB": True,
+        "compression": "Default",
+        "usage": "Marigold IID Lighting non-diffuse Residual visualization",
+    },
     "unreal_orm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
     "orm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
     "arm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
@@ -162,10 +177,17 @@ class TextureMapLabSettings:
     metallic_threshold: float = 1.1
     metallic_softness: float = 0.08
     delight_enabled: bool = False
+    delight_method: str = "heuristic"
     delight_apply_to_base_color: bool = False
     delight_strength: float = 0.65
     delight_radius_px: float = 42.0
     delight_contrast_preservation: float = 0.25
+    iid_checkpoint: str = "prs-eth/marigold-iid-lighting-v1-1"
+    iid_denoise_steps: int = 4
+    iid_ensemble_size: int = 1
+    iid_processing_resolution: int = 768
+    iid_seed: int = 0
+    iid_allow_download: bool = False
     substrate_enabled: bool = False
     substrate_mode: str = "off"
     substrate_reflectance: float = 0.5
@@ -464,6 +486,9 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
     normal_filter = str(raw.get("normal_filter", defaults.normal_filter) or defaults.normal_filter).strip().lower()
     if normal_filter not in {"sobel", "central_difference"}:
         normal_filter = defaults.normal_filter
+    delight_method = str(raw.get("delight_method", defaults.delight_method) or defaults.delight_method).strip().lower()
+    if delight_method not in DELIGHT_METHODS:
+        delight_method = defaults.delight_method
     substrate_mode = str(raw.get("substrate_mode", defaults.substrate_mode) or defaults.substrate_mode).strip().lower()
     if substrate_mode in {"substrate", "substrate_slab", "bsdf_slab"}:
         substrate_mode = "slab"
@@ -510,6 +535,7 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
         "metallic_threshold": clamp_float(raw.get("metallic_threshold"), 0.0, 1.5, defaults.metallic_threshold),
         "metallic_softness": clamp_float(raw.get("metallic_softness"), 0.001, 0.5, defaults.metallic_softness),
         "delight_enabled": bool_setting(raw.get("delight_enabled"), defaults.delight_enabled),
+        "delight_method": delight_method,
         "delight_apply_to_base_color": bool_setting(
             raw.get("delight_apply_to_base_color"),
             defaults.delight_apply_to_base_color,
@@ -522,6 +548,25 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
             1.0,
             defaults.delight_contrast_preservation,
         ),
+        "iid_checkpoint": str(raw.get("iid_checkpoint") or defaults.iid_checkpoint),
+        "iid_denoise_steps": int(
+            round(clamp_float(raw.get("iid_denoise_steps"), 1.0, 20.0, float(defaults.iid_denoise_steps)))
+        ),
+        "iid_ensemble_size": int(
+            round(clamp_float(raw.get("iid_ensemble_size"), 1.0, 10.0, float(defaults.iid_ensemble_size)))
+        ),
+        "iid_processing_resolution": int(
+            round(
+                clamp_float(
+                    raw.get("iid_processing_resolution"),
+                    0.0,
+                    2048.0,
+                    float(defaults.iid_processing_resolution),
+                )
+            )
+        ),
+        "iid_seed": int(round(clamp_float(raw.get("iid_seed"), 0.0, 2147483647.0, float(defaults.iid_seed)))),
+        "iid_allow_download": bool_setting(raw.get("iid_allow_download"), defaults.iid_allow_download),
         "substrate_enabled": substrate_enabled,
         "substrate_mode": substrate_mode,
         "substrate_reflectance": clamp_float(
@@ -1548,6 +1593,14 @@ def generate_texture_maps_from_image(
 ) -> dict[str, Any]:
     """Generate base, scalar, normal, and packed-ready PBR maps from an in-memory image."""
     normalized = normalize_texture_map_settings(settings)
+    delight_method = str(normalized.get("delight_method", "heuristic"))
+    ai_iid_enabled = bool(normalized.get("delight_enabled", False)) and delight_method == "marigold_iid_lighting"
+    # Marigold owns the estimate in AI mode. Disable the fast heuristic for the
+    # base map pass so it cannot be mistaken for or blended into model output.
+    generation_settings = dict(normalized)
+    if ai_iid_enabled:
+        generation_settings["delight_enabled"] = False
+        generation_settings["delight_apply_to_base_color"] = False
     selected_backend = select_texture_map_backend(backend, allow_cpu=allow_cpu)
     if selected_backend["active"] == "unavailable":
         raise TextureMapGpuRequiredError(
@@ -1556,7 +1609,7 @@ def generate_texture_maps_from_image(
     resized = _resize_for_max_size(image.convert("RGB"), max_size)
     if selected_backend["active"] == "torch_cuda":
         try:
-            result = _generate_texture_maps_torch_cuda(resized, normalized, source_path=source_path)
+            result = _generate_texture_maps_torch_cuda(resized, generation_settings, source_path=source_path)
         except Exception as exc:
             if not allow_cpu:
                 selected_backend = dict(selected_backend)
@@ -1569,23 +1622,57 @@ def generate_texture_maps_from_image(
             fallback_backend["requested"] = selected_backend.get("requested", "torch_cuda")
             fallback_backend["fallback"] = True
             fallback_backend["reason"] = f"torch_cuda_failed:{type(exc).__name__}"
-            result = _generate_texture_maps_cpu(resized, normalized, source_path=source_path)
+            result = _generate_texture_maps_cpu(resized, generation_settings, source_path=source_path)
             selected_backend = fallback_backend
     else:
-        result = _generate_texture_maps_cpu(resized, normalized, source_path=source_path)
+        result = _generate_texture_maps_cpu(resized, generation_settings, source_path=source_path)
+    if ai_iid_enabled:
+        from app.ar_pbr.marigold_iid import run_marigold_iid_lighting
+
+        iid = run_marigold_iid_lighting(resized, normalized)
+        maps = result["maps"]
+        albedo = np.asarray(iid["albedo"], dtype=np.float32)
+        shading = np.asarray(iid["shading"], dtype=np.float32)
+        residual = np.asarray(iid["residual"], dtype=np.float32)
+        maps["base_color_estimate"] = albedo
+        maps["iid_shading"] = shading
+        maps["iid_residual"] = residual
+        shading_luma = np.clip(
+            shading[..., 0] * 0.2126 + shading[..., 1] * 0.7152 + shading[..., 2] * 0.0722,
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        maps["irradiance"] = shading_luma
+        maps["delight_shading"] = shading_luma
+        if bool(normalized.get("delight_apply_to_base_color", False)):
+            maps["base_color"] = albedo
+            maps["f0"] = _f0_from_material_maps(albedo, maps["metallic"], normalized)
+        result["iid"] = dict(iid["metadata"])
+        result["diagnostics"] = _map_diagnostics(maps)
+    result["settings"] = dict(normalized)
+    result["algorithms"] = _algorithm_metadata(normalized)
+    if ai_iid_enabled:
+        result["algorithms"]["delight"].update(dict(result.get("iid") or {}))
     result["backend"] = selected_backend
     result["source_fingerprint"] = texture_source_fingerprint(resized)
     result["settings_fingerprint"] = texture_map_settings_fingerprint(normalized)
     estimate_applied = bool(normalized.get("delight_enabled", False)) and bool(
         normalized.get("delight_apply_to_base_color", False)
     )
+    estimate_classification = (
+        "learned_iid_prediction_not_measured_albedo"
+        if ai_iid_enabled
+        else "heuristic_estimate_not_measured_albedo"
+    )
+    estimate_source = "marigold_iid_lighting_albedo" if ai_iid_enabled else "heuristic_de_lit_estimate"
     result["base_color_provenance"] = {
-        "export_source": "heuristic_de_lit_estimate" if estimate_applied else "adjusted_input_rgb",
+        "export_source": estimate_source if estimate_applied else "adjusted_input_rgb",
         "estimate_generated": bool(normalized.get("delight_enabled", False)),
         "estimate_applied": estimate_applied,
         "estimate_map": "base_color_estimate",
         "surface_inference_source": "adjusted_input_rgb",
-        "classification": "heuristic_estimate_not_measured_albedo",
+        "method": delight_method,
+        "classification": estimate_classification,
         "confidence": None,
     }
     return result
@@ -1616,6 +1703,8 @@ def generate_texture_maps(
 
 
 def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
+    delight_method = str(settings.get("delight_method", "heuristic"))
+    learned_iid = delight_method == "marigold_iid_lighting"
     return {
         "height": "luma_contrast_edge_aware_heightfield",
         "normal": {
@@ -1651,14 +1740,26 @@ def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
         },
         "delight": {
             "enabled": bool(settings.get("delight_enabled", False)),
-            "implementation_version": "heuristic_linear_srgb_v2",
-            "classification": "heuristic_estimate_not_measured_albedo",
-            "method": "two_scale_luminance_illumination_division",
-            "source": "linear_srgb_luminance_edge_aware_illumination_field",
-            "working_color_space": "linear_srgb_iec_61966_2_1",
+            "implementation_version": "marigold_iid_lighting_v1_1" if learned_iid else "heuristic_linear_srgb_v2",
+            "classification": (
+                "learned_iid_prediction_not_measured_albedo"
+                if learned_iid
+                else "heuristic_estimate_not_measured_albedo"
+            ),
+            "method": delight_method,
+            "source": (
+                "prs-eth/marigold-iid-lighting-v1-1"
+                if learned_iid
+                else "linear_srgb_luminance_edge_aware_illumination_field"
+            ),
+            "working_color_space": "checkpoint_target_properties" if learned_iid else "linear_srgb_iec_61966_2_1",
             "retinex_reference_implementation": False,
-            "intrinsic_decomposition_model": None,
-            "validation": "not_photometrically_validated",
+            "intrinsic_decomposition_model": (
+                str(settings.get("iid_checkpoint") or "prs-eth/marigold-iid-lighting-v1-1")
+                if learned_iid
+                else None
+            ),
+            "validation": "model_prediction" if learned_iid else "not_photometrically_validated",
             "confidence": None,
             "applied_to_base_color": bool(settings.get("delight_apply_to_base_color", False))
             and bool(settings.get("delight_enabled", False)),
@@ -2279,6 +2380,11 @@ def export_texture_maps(
         if bool(generated["settings"].get("substrate_enabled", False))
         else DEFAULT_SEPARATE_MAPS
     )
+    if (
+        bool(generated["settings"].get("delight_enabled", False))
+        and str(generated["settings"].get("delight_method", "heuristic")) == "marigold_iid_lighting"
+    ):
+        default_maps = tuple(dict.fromkeys((*default_maps, "base_color_estimate", "iid_shading", "iid_residual")))
     map_names = _normalize_name_list(maps, default_maps)
     layout_names = _normalize_name_list(packed_layouts, DEFAULT_PACKED_LAYOUTS)
     files: dict[str, str] = {}

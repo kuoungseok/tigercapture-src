@@ -36,6 +36,7 @@ from app.ar_pbr.shadow import normalize_shadow_settings
 from app.ar_pbr.tone_mapping import normalize_color_management_settings
 from app.ar_pbr.hair import normalize_hair_groom_settings
 from app.ar_pbr.hybrid_rendering import normalize_hybrid_render_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.ray_gi_detail import normalize_ray_gi_detail_settings
 from app.ar_pbr.material_layering import normalize_material_layering_settings
 from app.ar_pbr.microsurface import normalize_microsurface_settings
@@ -337,6 +338,8 @@ def build_gpu_preview_items(
         catcher_settings = normalize_catcher_settings(lighting)
         color_management = normalize_color_management_settings(lighting)
         hybrid_rendering = normalize_hybrid_render_settings(lighting)
+        environment_visibility = normalize_environment_visibility(lighting)
+        render_mode_policy = resolve_render_mode(lighting)
         ray_gi_detail = normalize_ray_gi_detail_settings(lighting)
         ambient_occlusion_rendering = normalize_ambient_occlusion_settings(lighting)
         depth_edge_glow = normalize_depth_edge_glow_settings(lighting)
@@ -694,6 +697,9 @@ def build_gpu_preview_items(
                         lighting.get("additional_lights") or []
                     )[:2],
                     "ibl_exposure": float(ibl_exposure),
+                    "environment_visibility": environment_visibility,
+                    "render_mode": str(render_mode_policy["requested"]),
+                    "render_mode_policy": render_mode_policy,
                     "ibl_rotation": float(ibl_rotation),
                     "hdri_path": str(hdri_path),
                     "hdri_enabled": bool(hdri_path),

@@ -38,6 +38,7 @@ from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.style import editor_scrollbar_qss, studio_chrome_qss
 from app.ar_pbr.texture_map_lab import (
+    DELIGHT_METHODS,
     DEFAULT_SEPARATE_MAPS,
     PACKED_LAYOUTS,
     PREVIEW_MODES,
@@ -56,6 +57,11 @@ from app.ar_pbr.texture_map_lab import (
     texture_map_settings_fingerprint,
     texture_map_to_image,
 )
+from app.ar_pbr.marigold_iid import (
+    MarigoldIidUnavailableError,
+    marigold_iid_install_plan,
+    marigold_iid_status,
+)
 
 
 _WM_ENTERSIZEMOVE = 0x0231
@@ -73,6 +79,8 @@ _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
     ("Metal", "metallic"),
     ("Irrad", "irradiance"),
     ("Shade", "delight_shading"),
+    ("AI Shade", "iid_shading"),
+    ("AI Resid", "iid_residual"),
     ("Cavity", "cavity"),
     ("Curv", "curvature"),
     ("F0", "f0"),
@@ -523,6 +531,79 @@ class _TextureLabGpuInstallDialog(QDialog):
             pass
 
 
+class _TextureLabMarigoldInstallDialog(_TextureLabGpuInstallDialog):
+    """Explicit dependency + checkpoint installer for optional AI IID mode."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Texture Lab AI IID Setup")
+        self.setObjectName("TextureLabMarigoldInstallDialog")
+        self._plan = marigold_iid_install_plan()
+        self._state.setText(
+            "Ready. This installs Diffusers dependencies, then downloads the official Marigold IID Lighting checkpoint."
+        )
+        self._start_button.setText("Install AI IID")
+        self._cancel_button.setText("Cancel")
+        self._close_button.setText("Close")
+        self._console.clear()
+        self._log("Dependencies:")
+        self._log(str(self._plan["dependency_command"]))
+        self._log("\nOfficial checkpoint (OpenRAIL++):")
+        self._log(str(self._plan["download_command"]))
+        self._log("\nVerify:")
+        self._log(str(self._plan["verify_command"]))
+
+    def start_install(self) -> None:
+        if self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning:
+            return
+        self._cancel_requested = False
+        self._start_button.setEnabled(False)
+        self._close_button.setEnabled(False)
+        self._cancel_button.setEnabled(True)
+        self._set_state("Installing AI IID Python dependencies...", value=10, busy=True)
+        self._start_process(
+            "dependencies",
+            str(self._plan["dependency_program"]),
+            [str(arg) for arg in self._plan["dependency_args"]],
+        )
+
+    def _process_finished(self, proc: QProcess, exit_code: int) -> None:
+        self._read_output(proc)
+        if self._process is proc:
+            self._process = None
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self._finish(False, "AI IID setup cancelled.", allow_retry=True)
+            return
+        if int(exit_code) != 0:
+            self._finish(False, f"AI IID setup failed during {self._phase} (exit {exit_code}).", allow_retry=True)
+            return
+        if self._phase == "dependencies":
+            importlib.invalidate_caches()
+            self._set_state("Downloading the official Marigold IID Lighting checkpoint...", value=45, busy=True)
+            self._start_process(
+                "checkpoint",
+                str(self._plan["download_program"]),
+                [str(arg) for arg in self._plan["download_args"]],
+            )
+            return
+        if self._phase == "checkpoint":
+            importlib.invalidate_caches()
+            self._set_state("Verifying pipeline API, checkpoint, and CUDA...", value=85, busy=True)
+            self._start_process(
+                "verify",
+                str(self._plan["verify_program"]),
+                [str(arg) for arg in self._plan["verify_args"]],
+            )
+            return
+        payload = marigold_iid_status()
+        if not payload.get("available"):
+            self._finish(False, f"AI IID verification failed: {payload.get('reason')}", allow_retry=True)
+            return
+        self._finish(True, "AI IID High Quality mode is ready.", allow_retry=False)
+        self.installed.emit(payload)
+
+
 class ArPbrTextureMapLabWindow(QMainWindow):
     """Image-to-material plane preview and export controls."""
 
@@ -565,6 +646,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
         self._delight_check: QCheckBox | None = None
+        self._delight_method_combo: QComboBox | None = None
         self._delight_apply_check: QCheckBox | None = None
         self._height_invert_check: QCheckBox | None = None
         self._parallax_check: QCheckBox | None = None
@@ -589,6 +671,11 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             else bool(self._settings.get("delight_enabled", False))
         )
         values["delight_enabled"] = delight_checked
+        values["delight_method"] = str(
+            self._delight_method_combo.currentData()
+            if self._delight_method_combo is not None
+            else self._settings.get("delight_method", "heuristic")
+        )
         values["delight_apply_to_base_color"] = bool(
             self._delight_apply_check.isChecked()
             if self._delight_apply_check is not None
@@ -783,10 +870,11 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             self.queue_preview()
 
     def _preview_mode_label(self, mode: str) -> str:
+        method = str(self._delight_method_combo.currentData() or "heuristic") if self._delight_method_combo else "heuristic"
         labels = {
             "material": "Material",
             "intrinsic_channels": "Analysis Channels",
-            "albedo": "De-lit Estimate (Heuristic)",
+            "albedo": "Albedo · Marigold IID" if method == "marigold_iid_lighting" else "De-lit Estimate (Heuristic)",
             "delight_compare": "Input / Estimate Compare",
             "base_color_source": "Input BaseColor",
             "base_color": "Export BaseColor",
@@ -796,6 +884,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             "metallic": "Metallic",
             "irradiance": "Estimated Illumination",
             "delight_shading": "Estimated Lighting Field",
+            "iid_shading": "AI Diffuse Shading",
+            "iid_residual": "AI Non-diffuse Residual",
             "height": "Height",
             "cavity": "Cavity",
             "curvature": "Curvature",
@@ -840,6 +930,26 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         dialog.installed.connect(self._on_gpu_backend_installed)
         self._gpu_install_dialog = dialog
         dialog.show()
+
+    def _show_ai_setup_help(self) -> None:
+        dialog = getattr(self, "_ai_install_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = _TextureLabMarigoldInstallDialog(self)
+        dialog.setStyleSheet(studio_chrome_qss(_TEXTURE_LAB_QSS))
+        dialog.installed.connect(self._on_ai_backend_installed)
+        self._ai_install_dialog = dialog
+        dialog.show()
+
+    def _on_ai_backend_installed(self, _payload: object) -> None:
+        self._generated_maps_cache = None
+        if self._delight_method_combo is not None:
+            index = self._delight_method_combo.findData("marigold_iid_lighting")
+            if index >= 0:
+                self._delight_method_combo.setCurrentIndex(index)
+        self.queue_preview()
 
     def _on_gpu_backend_installed(self, payload: object) -> None:
         self._backend_selection = dict(payload or {})
@@ -919,6 +1029,12 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         gpu_setup.setToolTip("Install and verify the Texture Lab PyTorch CUDA backend")
         gpu_setup.clicked.connect(self._show_gpu_setup_help)
         self._gpu_setup_button = gpu_setup
+        ai_setup = QPushButton("Install AI IID", central)
+        ai_setup.setIcon(app_icon("settings", size=16))
+        ai_setup.setIconSize(icon_size(16))
+        ai_setup.setToolTip("Install Diffusers and the official Marigold IID Lighting checkpoint")
+        ai_setup.clicked.connect(self._show_ai_setup_help)
+        self._ai_setup_button = ai_setup
         export_maps = QPushButton("Export Maps", central)
         export_maps.setIcon(app_icon("export", size=16))
         export_maps.setIconSize(icon_size(16))
@@ -957,6 +1073,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         toolbar_layout.addWidget(export_packed, 1, 4, 1, 2)
         toolbar_layout.addWidget(export_size_label, 2, 0)
         toolbar_layout.addWidget(self._export_size_combo, 2, 1, 1, 2)
+        toolbar_layout.addWidget(ai_setup, 2, 3)
         top.addWidget(toolbar, 0, Qt.AlignmentFlag.AlignLeft)
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
         copy_shortcut.activated.connect(self._copy_preview_to_clipboard_from_ui)
@@ -998,12 +1115,26 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._normal_format_combo.addItem("OpenGL Normal", "opengl")
         self._normal_format_combo.currentIndexChanged.connect(self.queue_preview)
         controls_layout.addWidget(_section_label("Base Color / De-lit Estimate", controls))
-        self._delight_check = QCheckBox("Generate De-lit Estimate", controls)
+        self._delight_method_combo = QComboBox(controls)
+        self._delight_method_combo.setObjectName("TextureLabCombo")
+        self._delight_method_combo.addItem("Fast Heuristic", "heuristic")
+        self._delight_method_combo.addItem("AI High Quality · Marigold IID", "marigold_iid_lighting")
+        method_index = self._delight_method_combo.findData(
+            str(self._settings.get("delight_method", "heuristic"))
+        )
+        self._delight_method_combo.setCurrentIndex(max(0, method_index))
+        self._delight_method_combo.setToolTip(
+            "Fast uses the local linear-light heuristic. AI High Quality uses the official "
+            "Marigold IID Lighting checkpoint to predict Albedo, Shading, and Residual."
+        )
+        self._delight_method_combo.currentIndexChanged.connect(self._on_delight_method_changed)
+        controls_layout.addWidget(self._delight_method_combo)
+        self._delight_check = QCheckBox("Generate De-lit / IID Estimate", controls)
         self._delight_check.setObjectName("TextureLabCheck")
         self._delight_check.setChecked(bool(self._settings.get("delight_enabled", False)))
         self._delight_check.setToolTip(
-            "Estimate broad photographic lighting with a heuristic cleanup. "
-            "It is not a measured or physically guaranteed albedo."
+            "Generate with the selected method. AI High Quality is a learned IID prediction, "
+            "not a physical reflectance measurement."
         )
         self._delight_check.toggled.connect(self._on_delight_toggled)
         controls_layout.addWidget(self._delight_check)
@@ -1013,7 +1144,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             bool(self._settings.get("delight_apply_to_base_color", False))
         )
         self._delight_apply_check.setToolTip(
-            "Explicitly replace exported Base Color with the heuristic estimate. "
+            "Explicitly replace exported Base Color with the selected estimate. "
             "Height, Normal, AO, Roughness, and Metallic still use the input image."
         )
         self._delight_apply_check.toggled.connect(self.queue_preview)
@@ -1024,6 +1155,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             "Export Estimate Separately",
             "base_color_estimate",
         )
+        self._add_advanced_map_check(controls_layout, controls, "Export AI Shading", "iid_shading")
+        self._add_advanced_map_check(controls_layout, controls, "Export AI Residual", "iid_residual")
         self._add_slider(controls_layout, "De-light Strength", "delight_strength", 0.0, 1.0, 0.01)
         self._add_slider(controls_layout, "Shading Radius", "delight_radius_px", 1.0, 256.0, 1.0)
         self._add_slider(controls_layout, "Detail Preserve", "delight_contrast_preservation", 0.0, 1.0, 0.01)
@@ -1134,6 +1267,17 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                     return
         self.queue_preview()
 
+    def _on_delight_method_changed(self, _index: int) -> None:
+        self._generated_maps_cache = None
+        method = str(self._delight_method_combo.currentData() or "heuristic") if self._delight_method_combo else "heuristic"
+        if method == "marigold_iid_lighting":
+            for name in ("base_color_estimate", "iid_shading", "iid_residual"):
+                check = self._advanced_map_checks.get(name)
+                if check is not None:
+                    check.setChecked(True)
+        self._sync_delight_controls()
+        self.queue_preview()
+
     def _on_animate_light_toggled(self, checked: bool) -> None:
         if checked:
             slider = self._sliders.get("preview_light_azimuth")
@@ -1175,6 +1319,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _sync_delight_controls(self) -> None:
         enabled = bool(self._delight_check.isChecked()) if self._delight_check else False
+        method = str(self._delight_method_combo.currentData() or "heuristic") if self._delight_method_combo else "heuristic"
+        heuristic = method == "heuristic"
         if self._delight_apply_check is not None:
             if not enabled and self._delight_apply_check.isChecked():
                 self._delight_apply_check.blockSignals(True)
@@ -1184,12 +1330,27 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for key in ("delight_strength", "delight_radius_px", "delight_contrast_preservation"):
             slider = self._sliders.get(key)
             if slider is not None:
-                slider.setEnabled(enabled)
+                slider.setEnabled(enabled and heuristic)
                 slider.setToolTip(
                     "Controls a heuristic lighting-cleanup estimate; it is not measured albedo."
-                    if enabled
-                    else "Enable Generate De-lit Estimate to edit this value."
+                    if enabled and heuristic
+                    else (
+                        "Marigold IID owns this estimate in AI High Quality mode."
+                        if enabled
+                        else "Enable Generate De-lit / IID Estimate to edit this value."
+                    )
                 )
+        if self._delight_method_combo is not None:
+            status = marigold_iid_status() if not heuristic else None
+            self._delight_method_combo.setToolTip(
+                "AI High Quality is ready."
+                if status and status.get("available")
+                else (
+                    f"AI High Quality needs setup: {status.get('reason')}. Use Install AI IID."
+                    if status
+                    else "Fast local linear-light heuristic."
+                )
+            )
 
     def _sync_parallax_controls(self) -> None:
         enabled = bool(self._parallax_check.isChecked()) if self._parallax_check else True
@@ -1292,15 +1453,22 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             shape = str(payload.get("preview_shape", effective_shape))
             cadence = " | live light" if animating_light else ""
             provenance = dict(payload.get("base_color_provenance") or {})
-            base_source = (
-                "heuristic estimate explicitly applied"
-                if provenance.get("estimate_applied")
-                else "input Base Color preserved"
-            )
+            if provenance.get("estimate_applied"):
+                base_source = (
+                    "Marigold IID albedo explicitly applied"
+                    if provenance.get("method") == "marigold_iid_lighting"
+                    else "heuristic estimate explicitly applied"
+                )
+            else:
+                base_source = "input Base Color preserved"
             self._status.setText(
                 f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | "
                 f"{backend} | {cache} | {base_source}{cadence}"
             )
+        except MarigoldIidUnavailableError as exc:
+            self._last_preview_path = None
+            self._show_source_fallback_preview("AI IID setup required. Showing the source image.")
+            self._status.setText(f"AI IID unavailable: {exc}")
         except TextureMapGpuRequiredError as exc:
             if hasattr(self, "_backend_status"):
                 self._backend_status.setText(self._backend_status_text())
@@ -1444,6 +1612,13 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             for substrate_map in ("f0", "f90_mask"):
                 if substrate_map not in names:
                     names.append(substrate_map)
+        if (
+            bool(self.settings().get("delight_enabled", False))
+            and str(self.settings().get("delight_method", "heuristic")) == "marigold_iid_lighting"
+        ):
+            for iid_map in ("base_color_estimate", "iid_shading", "iid_residual"):
+                if iid_map not in names:
+                    names.append(iid_map)
         for name, check in self._advanced_map_checks.items():
             if check.isChecked() and name not in names:
                 names.append(name)

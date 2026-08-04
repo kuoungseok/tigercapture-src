@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.actions.schema import schema_object
+from app.ar_pbr.render_environment import BACKGROUND_OUTPUTS, RENDER_MODES
 
 
 def ar_pbr_surface_properties_schema() -> dict[str, dict[str, Any]]:
@@ -13,6 +14,7 @@ def ar_pbr_surface_properties_schema() -> dict[str, dict[str, Any]]:
         "hdri_path": {"type": "string"},
         "ibl_exposure": {"type": "number"},
         "ibl_rotation": {"type": "number"},
+        "render_mode": {"type": "string", "enum": list(RENDER_MODES)},
         "surface_override_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "surface_roughness": {"type": "number", "minimum": 0.04, "maximum": 1.0},
         "surface_metallic": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -153,6 +155,19 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
         params_schema=schema_object({
             **surface_properties,
             "show_environment_background": {"type": "boolean"},
+            "environment_visibility": {
+                "type": "object",
+                "properties": {
+                    "camera_visible": {"type": "boolean"},
+                    "reflection_visible": {"type": "boolean"},
+                    "diffuse_visible": {"type": "boolean"},
+                    "refraction_visible": {"type": "boolean"},
+                    "background_output": {"type": "string", "enum": list(BACKGROUND_OUTPUTS)},
+                    "diffuse_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+                    "reflection_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+                    "refraction_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+                },
+            },
             "light_azimuth": {"type": "number"},
             "light_elevation": {"type": "number"},
             "direct_strength": {"type": "number"},
@@ -218,4 +233,17 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
         changed=False,
         async_kind="ui",
         dry_summary="AR/PBR preview scene settings would be applied",
+    )
+    registry.register_adapter_action(
+        "ar_pbr.preview.rt_status",
+        "Report native hardware-ray-tracing capability and the honest render-mode fallback policy.",
+        "ar_pbr",
+        "ar_pbr_preview_rt_status",
+        params_schema=schema_object({
+            "render_mode": {"type": "string", "enum": list(RENDER_MODES)},
+        }),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+        dry_summary="AR/PBR hardware RT capability would be reported",
     )

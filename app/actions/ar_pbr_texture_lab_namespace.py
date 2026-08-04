@@ -6,6 +6,7 @@ from typing import Any
 from app.actions.schema import schema_object
 from app.ar_pbr.texture_map_lab import (
     AO_ALGORITHMS,
+    DELIGHT_METHODS,
     NORMAL_FORMATS,
     PACKED_LAYOUTS,
     PREVIEW_MODES,
@@ -45,10 +46,20 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "metallic_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.5},
             "metallic_softness": {"type": "number", "minimum": 0.001, "maximum": 0.5},
             "delight_enabled": {"type": "boolean"},
+            "delight_method": {"type": "string", "enum": list(DELIGHT_METHODS)},
             "delight_apply_to_base_color": {"type": "boolean"},
             "delight_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "delight_radius_px": {"type": "number", "minimum": 1.0, "maximum": 256.0},
             "delight_contrast_preservation": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "iid_checkpoint": {"type": "string"},
+            "iid_denoise_steps": {"type": "integer", "minimum": 1, "maximum": 20},
+            "iid_ensemble_size": {"type": "integer", "minimum": 1, "maximum": 10},
+            "iid_processing_resolution": {"type": "integer", "minimum": 0, "maximum": 2048},
+            "iid_seed": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+            "iid_allow_download": {
+                "type": "boolean",
+                "description": "Explicit opt-in to Hugging Face network download; false by default.",
+            },
             "substrate_enabled": {"type": "boolean"},
             "substrate_mode": {"type": "string", "enum": ["off", "slab"]},
             "substrate_reflectance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -125,6 +136,17 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
         changed=False,
         requires_owner=False,
         dry_summary="Texture Lab backend status would be reported",
+    )
+    registry.register_adapter_action(
+        "ar_pbr.texture_lab.iid_status",
+        "Report optional Marigold IID dependencies, CUDA, checkpoint, and explicit install plan.",
+        "ar_pbr",
+        "ar_pbr_texture_lab_iid_status",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+        dry_summary="Marigold IID backend status would be reported",
     )
     registry.register_adapter_action(
         "ar_pbr.texture_lab.export",

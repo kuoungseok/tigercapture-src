@@ -104,7 +104,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
 
     payload = generate_texture_maps(image_path, {"normal_strength": 3.0})
 
-    assert payload["schema_id"] == "tigerstudio.ar_pbr.texture_map_lab.v3"
+    assert payload["schema_id"] == "tigerstudio.ar_pbr.texture_map_lab.v4"
     assert payload["size"] == [32, 24]
     maps = payload["maps"]
     assert {
@@ -455,6 +455,138 @@ def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> No
     assert intrinsic_image.height >= 64
 
 
+def test_texture_map_lab_marigold_iid_is_separate_and_explicit(tmp_path, monkeypatch) -> None:
+    from app.ar_pbr.texture_map_lab import generate_texture_maps
+    import app.ar_pbr.marigold_iid as iid_module
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+
+    def fake_iid(image, settings):
+        width, height = image.size
+        return {
+            "albedo": np.full((height, width, 3), (0.25, 0.5, 0.75), dtype=np.float32),
+            "shading": np.full((height, width, 3), 0.6, dtype=np.float32),
+            "residual": np.full((height, width, 3), 0.1, dtype=np.float32),
+            "metadata": {
+                "backend": "marigold_iid_lighting",
+                "checkpoint": settings["iid_checkpoint"],
+                "equation": "I = A * S + R",
+                "conversion": "official_diffusers_visualize_intrinsics",
+            },
+        }
+
+    monkeypatch.setattr(iid_module, "run_marigold_iid_lighting", fake_iid)
+    baseline = generate_texture_maps(image_path, {"delight_enabled": False}, backend="cpu", allow_cpu=True)
+    generated = generate_texture_maps(
+        image_path,
+        {"delight_enabled": True, "delight_method": "marigold_iid_lighting"},
+        backend="cpu",
+        allow_cpu=True,
+    )
+
+    assert np.allclose(generated["maps"]["base_color"], generated["maps"]["base_color_source"])
+    assert np.allclose(generated["maps"]["base_color_estimate"], (0.25, 0.5, 0.75))
+    assert np.allclose(generated["maps"]["iid_shading"], 0.6)
+    assert np.allclose(generated["maps"]["iid_residual"], 0.1)
+    assert np.allclose(generated["maps"]["height"], baseline["maps"]["height"])
+    assert generated["base_color_provenance"]["method"] == "marigold_iid_lighting"
+    assert generated["base_color_provenance"]["estimate_applied"] is False
+    assert generated["algorithms"]["delight"]["equation"] == "I = A * S + R"
+
+    applied = generate_texture_maps(
+        image_path,
+        {
+            "delight_enabled": True,
+            "delight_method": "marigold_iid_lighting",
+            "delight_apply_to_base_color": True,
+        },
+        backend="cpu",
+        allow_cpu=True,
+    )
+    assert np.allclose(applied["maps"]["base_color"], applied["maps"]["base_color_estimate"])
+    assert np.allclose(applied["maps"]["height"], baseline["maps"]["height"])
+    assert applied["base_color_provenance"]["export_source"] == "marigold_iid_lighting_albedo"
+
+
+def test_marigold_iid_uses_official_target_properties_visualizer(monkeypatch) -> None:
+    from contextlib import nullcontext
+    import app.ar_pbr.marigold_iid as iid_module
+
+    calls = {}
+
+    class FakeGenerator:
+        def __init__(self, device):
+            calls["generator_device"] = device
+
+        def manual_seed(self, seed):
+            calls["seed"] = seed
+            return self
+
+    class FakeTorch:
+        Generator = FakeGenerator
+
+        @staticmethod
+        def inference_mode():
+            return nullcontext()
+
+    class FakeProcessor:
+        def visualize_intrinsics(self, prediction, target_properties):
+            calls["prediction"] = prediction
+            calls["target_properties"] = target_properties
+            return [{
+                "albedo": Image.new("RGB", (8, 6), (64, 128, 192)),
+                "shading": Image.new("RGB", (8, 6), (128, 128, 128)),
+                "residual": Image.new("RGB", (8, 6), (16, 32, 48)),
+            }]
+
+    class FakeOutput:
+        prediction = np.zeros((3, 6, 8, 3), dtype=np.float32)
+
+    class FakePipe:
+        target_properties = {"target_names": ["albedo", "shading", "residual"]}
+        image_processor = FakeProcessor()
+
+        def __call__(self, image, **kwargs):
+            calls["kwargs"] = kwargs
+            return FakeOutput()
+
+    monkeypatch.setattr(iid_module, "_pipeline", lambda checkpoint, allow_download: (FakePipe(), FakeTorch(), checkpoint))
+    result = iid_module.run_marigold_iid_lighting(
+        Image.new("RGB", (8, 6), "white"),
+        {
+            "iid_checkpoint": iid_module.MARIGOLD_IID_CHECKPOINT,
+            "iid_denoise_steps": 4,
+            "iid_ensemble_size": 1,
+            "iid_processing_resolution": 768,
+            "iid_seed": 17,
+        },
+    )
+
+    assert calls["target_properties"] is FakePipe.target_properties
+    assert calls["kwargs"]["num_inference_steps"] == 4
+    assert calls["kwargs"]["processing_resolution"] == 768
+    assert calls["kwargs"]["match_input_resolution"] is True
+    assert calls["seed"] == 17
+    assert result["albedo"].shape == (6, 8, 3)
+    assert result["metadata"]["conversion"] == "official_diffusers_visualize_intrinsics"
+
+
+def test_marigold_iid_status_and_install_plan_are_offline_and_durable() -> None:
+    from app.ar_pbr.marigold_iid import marigold_iid_install_plan, marigold_iid_status
+
+    status = marigold_iid_status()
+    plan = marigold_iid_install_plan("C:/Tiger/Python/python.exe")
+
+    assert status["checkpoint_id"] == "prs-eth/marigold-iid-lighting-v1-1"
+    assert "external\\models\\marigold-iid-lighting-v1-1" in status["checkpoint_dir"]
+    assert "debugCapture" not in status["checkpoint_dir"]
+    assert plan["dependency_program"] == "C:/Tiger/Python/python.exe"
+    assert any(arg.startswith("diffusers") for arg in plan["dependency_args"])
+    assert "snapshot_download" in " ".join(plan["download_args"])
+    assert plan["license"].startswith("OpenRAIL++")
+
+
 def test_texture_map_lab_exports_separate_and_packed_maps(tmp_path) -> None:
     from app.ar_pbr.texture_map_lab import export_texture_maps
 
@@ -634,6 +766,7 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
         {"image_path": str(image_path), "output_dir": str(out_dir), "packed_layouts": ["arm"], "allow_cpu": True},
     ).to_dict()
     backend = registry.execute("ar_pbr.texture_lab.backend_status", {"allow_cpu": True}).to_dict()
+    iid_status = registry.execute("ar_pbr.texture_lab.iid_status").to_dict()
     plan = registry.execute("ar_pbr.texture_lab.substrate_plan").to_dict()
 
     assert preview["ok"] is True
@@ -644,11 +777,14 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
     assert (out_dir / "source_arm.png").exists()
     assert backend["ok"] is True
     assert backend["result"]["status"]["install_guidance"]["recommended_backend"] == "torch_cuda"
+    assert iid_status["ok"] is True
+    assert iid_status["result"]["checkpoint_id"] == "prs-eth/marigold-iid-lighting-v1-1"
     assert plan["ok"] is True
     assert plan["result"]["target"] == "Unreal Engine Substrate Slab BSDF"
     settings_props = texture_lab_settings_schema()["properties"]
     assert "delight_enabled" in settings_props
     assert "delight_apply_to_base_color" in settings_props
+    assert settings_props["delight_method"]["enum"] == ["heuristic", "marigold_iid_lighting"]
     assert "preview_animate_light" in settings_props
     assert "substrate_mode" in settings_props
 
@@ -708,6 +844,7 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window.settings()["preview_light_azimuth"] == pytest.approx(-45.0)
     assert window.settings()["preview_light_elevation"] == pytest.approx(45.0)
     assert window._gpu_setup_button.text() == "Install GPU"
+    assert window._ai_setup_button.text() == "Install AI IID"
     assert window._export_max_size() == 4096
     assert window.sizeHint().width() <= 1200
     assert window._preview.thumbnail_count() >= 10
@@ -719,6 +856,7 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     window._preview_shape_combo.setCurrentIndex(window._preview_shape_combo.findData("plane"))
     assert window._advanced_map_checks["f0"].isChecked() is False
     assert window._delight_check is not None
+    assert window._delight_method_combo.currentData() == "heuristic"
     assert window._delight_apply_check is not None
     assert window._delight_apply_check.isEnabled() is False
     assert window._sliders["delight_strength"].isEnabled() is False
@@ -726,6 +864,12 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window._sliders["delight_strength"].isEnabled() is True
     assert window._delight_apply_check.isEnabled() is True
     assert window._delight_apply_check.isChecked() is False
+    window._delight_method_combo.setCurrentIndex(
+        window._delight_method_combo.findData("marigold_iid_lighting")
+    )
+    assert window.settings()["delight_method"] == "marigold_iid_lighting"
+    assert window._sliders["delight_strength"].isEnabled() is False
+    window._delight_method_combo.setCurrentIndex(window._delight_method_combo.findData("heuristic"))
     assert window._preview_mode_combo.currentData() == "albedo"
     window._show_delight_compare_preview()
     assert window._preview_mode_combo.currentData() == "delight_compare"
