@@ -17,9 +17,11 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDockWidget,
     QFrame,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -362,6 +364,56 @@ class _AnimationFrameBuildWorker(QThread):
             })
 
 
+class _NativeRtRenderWorker(QThread):
+    rendered = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: dict[str, Any],
+        *,
+        output_path: str,
+        track: dict[str, Any] | None,
+        mode: str,
+        camera_visible: bool,
+        reflection_visible: bool,
+        hdri_path: str | Path | None,
+        ibl_rotation: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._output_path = output_path
+        self._track = dict(track or {})
+        self._mode = mode
+        self._camera_visible = bool(camera_visible)
+        self._reflection_visible = bool(reflection_visible)
+        self._hdri_path = hdri_path
+        self._ibl_rotation = float(ibl_rotation)
+
+    def run(self) -> None:
+        try:
+            from app.ar_pbr.native_rt import render_descriptor_native_rt
+
+            payload = render_descriptor_native_rt(
+                self._descriptor,
+                output_path=self._output_path,
+                track=self._track,
+                mode=self._mode,
+                samples=16 if self._mode == "path_traced" else 1,
+                bounces=3,
+                camera_visible=self._camera_visible,
+                reflection_visible=self._reflection_visible,
+                hdri_path=self._hdri_path,
+                ibl_rotation=self._ibl_rotation,
+            )
+            if not payload.get("ok"):
+                raise RuntimeError(str(payload.get("native") or payload.get("stderr") or "native RT render failed"))
+            self.rendered.emit(payload)
+        except Exception as exc:
+            self.failed.emit({"error": type(exc).__name__, "message": str(exc)})
+
+
 class _SliderRow(QWidget):
     value_changed = Signal(float)
 
@@ -595,6 +647,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._animation_duration_ms = 0.0
         self._animation_generation = 0
         self._animation_frame_worker: _AnimationFrameBuildWorker | None = None
+        self._native_rt_worker: _NativeRtRenderWorker | None = None
         self._animation_pending_frame: tuple[dict[str, Any], int, int] | None = None
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
@@ -767,6 +820,10 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         )
         self._render_mode_combo.currentIndexChanged.connect(self._on_render_mode_changed)
         controls_layout.addWidget(self._render_mode_combo)
+        self._native_rt_button = QPushButton("Render RT Frame...", controls)
+        self._native_rt_button.setToolTip("Render this asset with the isolated native DXR helper")
+        self._native_rt_button.clicked.connect(self._render_native_rt_frame)
+        controls_layout.addWidget(self._native_rt_button)
 
         environment_visibility_row = QHBoxLayout()
         self._diffuse_env_check = QCheckBox("Diffuse HDRI", controls)
@@ -1803,8 +1860,71 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 f"Active: {policy['active']}"
                 + (" | native RT unavailable, using IBL fallback" if policy["fallback"] else "")
             )
+            button = getattr(self, "_native_rt_button", None)
+            if button is not None and self._native_rt_worker is None:
+                button.setEnabled(
+                    bool(policy.get("hardware_rt_active"))
+                    and self._render_mode in {"hybrid_rt", "path_traced"}
+                    and bool(self._descriptor)
+                )
         finally:
             combo.blockSignals(False)
+
+    def _render_native_rt_frame(self) -> None:
+        if self._native_rt_worker is not None or not self._descriptor:
+            return
+        mode = self._render_mode if self._render_mode in {"hybrid_rt", "path_traced"} else "hybrid_rt"
+        suggested = str(self.asset_path.with_name(f"{self.asset_path.stem}_{mode}.png"))
+        output_path, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Render Hardware RT Frame",
+            suggested,
+            "PNG Image (*.png)",
+        )
+        if not output_path:
+            return
+        worker = _NativeRtRenderWorker(
+            dict(self._descriptor),
+            output_path=output_path,
+            track=self._animation_track,
+            mode=mode,
+            camera_visible=self._background_visible,
+            reflection_visible=self._reflection_environment_visible,
+            hdri_path=self._selected_hdri.path if self._selected_hdri is not None else None,
+            ibl_rotation=float(self._state.ibl_rotation) * 360.0 if self._state is not None else 0.0,
+            parent=self,
+        )
+        self._native_rt_worker = worker
+        self._native_rt_button.setEnabled(False)
+        self._native_rt_button.setText("Rendering RT...")
+        worker.rendered.connect(self._on_native_rt_rendered)
+        worker.failed.connect(self._on_native_rt_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _finish_native_rt_worker(self) -> None:
+        self._native_rt_worker = None
+        self._native_rt_button.setText("Render RT Frame...")
+        self._sync_render_mode_combo()
+
+    def _on_native_rt_rendered(self, payload: object) -> None:
+        result = dict(payload or {})
+        self._finish_native_rt_worker()
+        QMessageBox.information(
+            self,
+            "Hardware RT Render Complete",
+            f"DXR frame saved:\n{result.get('output_path')}\n\n"
+            f"{result.get('triangle_count', 0):,} triangles | {result.get('mode')}",
+        )
+
+    def _on_native_rt_failed(self, payload: object) -> None:
+        result = dict(payload or {})
+        self._finish_native_rt_worker()
+        QMessageBox.warning(
+            self,
+            "Hardware RT Render Failed",
+            f"{result.get('error')}: {result.get('message')}",
+        )
 
     def _sync_environment_visibility_controls(self) -> None:
         for name, value in (

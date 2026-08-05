@@ -71,6 +71,9 @@ external/tools/tts/kokoro/
 external/tools/tts/gpt-sovits/
 external/tools/motion_references/
 external/tools/remotion_tsx_runtime/
+external/tools/ar_pbr_dxr/
+native/ar_pbr_dxr_helper/bin/
+native/ar_pbr_dxr_helper/obj/
 external/assets/motion_reference_corpus/
 external/assets/paint_clipboard/
 external/assets/vtuber/

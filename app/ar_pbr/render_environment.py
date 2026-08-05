@@ -107,6 +107,15 @@ def hardware_rt_capability(
     process per object or per frame.
     """
     configured = str(helper_path or os.environ.get("TIGERSTUDIO_HARDWARE_RT_HELPER") or "").strip()
+    if not configured:
+        try:
+            from app.ar_pbr.native_rt import default_native_rt_helper_path
+
+            default_helper = default_native_rt_helper_path()
+            if default_helper.is_file():
+                configured = str(default_helper)
+        except Exception:
+            configured = ""
     path = Path(configured).expanduser() if configured else None
     try:
         stamp = int(path.stat().st_mtime_ns) if path is not None and path.is_file() else 0
@@ -145,6 +154,9 @@ def hardware_rt_capability(
         "available": available,
         "api": api or None,
         "device": str(payload.get("device") or ""),
+        "raytracing_tier": str(payload.get("raytracing_tier") or ""),
+        "renderer": str(payload.get("renderer") or ""),
+        "shader_model_6_5": bool(payload.get("shader_model_6_5")),
         "helper_path": str(path) if path is not None else "",
         "helper_configured": path is not None,
         "helper_exists": bool(path is not None and path.is_file()),

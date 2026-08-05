@@ -186,6 +186,8 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "ar_pbr.preview.depth_view.set",
         "ar_pbr.preview.surface.get",
         "ar_pbr.preview.surface.set",
+        "ar_pbr.preview.rt_status",
+        "ar_pbr.preview.rt_render",
         "ar_pbr.gizmo.state",
         "ar_pbr.gizmo.show",
         "ar_pbr.gizmo.hide",
@@ -195,6 +197,9 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "ar_pbr.texture_lab.export",
         "ar_pbr.texture_lab.substrate_plan",
     } <= action_ids
+    rt_render_schema = action_specs["ar_pbr.preview.rt_render"]["params_schema"]
+    assert rt_render_schema["required"] == ["output_path"]
+    assert rt_render_schema["properties"]["render_mode"]["enum"] == ["hybrid_rt", "path_traced"]
     settings_schema = action_specs["ar_pbr.preview.settings.set"]["params_schema"]["properties"]
     view_schema = action_specs["ar_pbr.preview.view.set"]["params_schema"]["properties"]
     depth_schema = action_specs["ar_pbr.preview.depth_view.set"]["params_schema"]["properties"]

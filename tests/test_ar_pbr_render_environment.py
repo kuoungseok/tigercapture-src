@@ -68,7 +68,7 @@ def test_background_output_is_authoritative_for_environment_camera_visibility() 
 def test_rt_mode_never_claims_cuda_as_hardware_rt(monkeypatch) -> None:
     from app.ar_pbr.render_environment import hardware_rt_capability, resolve_render_mode
 
-    monkeypatch.delenv("TIGERSTUDIO_HARDWARE_RT_HELPER", raising=False)
+    monkeypatch.setenv("TIGERSTUDIO_HARDWARE_RT_HELPER", "__missing_native_rt_helper__")
     capability = hardware_rt_capability()
     hybrid = resolve_render_mode({"render_mode": "hybrid_rt"}, capability=capability)
     path = resolve_render_mode({"render_mode": "path_traced"}, capability=capability)
@@ -131,9 +131,10 @@ def test_native_helper_capability_is_cached_off_the_render_hot_path(tmp_path, mo
     assert len(calls) == 1
 
 
-def test_lighting_schema_persists_environment_and_rt_request() -> None:
+def test_lighting_schema_persists_environment_and_rt_request(monkeypatch) -> None:
     from app.ar_pbr.schema import normalize_lighting_settings
 
+    monkeypatch.setenv("TIGERSTUDIO_HARDWARE_RT_HELPER", "__missing_native_rt_helper__")
     lighting = normalize_lighting_settings({
         "render_mode": "hybrid_rt",
         "show_environment_background": False,
@@ -161,9 +162,10 @@ def test_live_shader_has_separate_diffuse_and_reflection_environment_energy() ->
     assert "u_ibl_exposure * u_reflection_environment_strength" in shader
 
 
-def test_rt_status_action_exposes_honest_fallback() -> None:
+def test_rt_status_action_exposes_honest_fallback(monkeypatch) -> None:
     from app.actions import build_default_action_registry
 
+    monkeypatch.setenv("TIGERSTUDIO_HARDWARE_RT_HELPER", "__missing_native_rt_helper__")
     registry = build_default_action_registry(None)
     payload = registry.execute(
         "ar_pbr.preview.rt_status",

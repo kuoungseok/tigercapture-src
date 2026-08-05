@@ -5,6 +5,7 @@ from typing import Any
 
 from app.actions.editor_adapter_ar_pbr_base import ArPbrBaseAdapterMixin
 from app.ar_pbr.render_environment import hardware_rt_capability, resolve_render_mode
+from app.ar_pbr.native_rt import render_descriptor_native_rt
 
 
 class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
@@ -30,6 +31,50 @@ class ArPbrSettingsAdapterMixin(ArPbrBaseAdapterMixin):
     def ar_pbr_preview_rt_status(self, *, render_mode: str = "hybrid_rt") -> dict[str, Any]:
         capability = hardware_rt_capability(refresh=True)
         return resolve_render_mode({"render_mode": render_mode}, capability=capability)
+
+    def ar_pbr_preview_rt_render(
+        self,
+        *,
+        output_path: str,
+        render_mode: str = "hybrid_rt",
+        width: int = 960,
+        height: int = 720,
+        samples: int = 16,
+        bounces: int = 3,
+        camera_visible: bool | None = None,
+        reflection_visible: bool | None = None,
+        time_ms: int = 0,
+    ) -> dict[str, Any]:
+        window = self._ar_pbr_settings_window()
+        descriptor = getattr(window, "_descriptor", None)
+        if not isinstance(descriptor, dict) or not descriptor:
+            raise ValueError("AR/PBR preview asset is not loaded yet")
+        lighting = dict(window.lighting_settings() or {})
+        environment = dict(lighting.get("environment_visibility") or {})
+        track = getattr(window, "_animation_track", None)
+        return render_descriptor_native_rt(
+            descriptor,
+            output_path=output_path,
+            track=track if isinstance(track, dict) else None,
+            time_ms=time_ms,
+            mode=render_mode,
+            width=width,
+            height=height,
+            samples=samples,
+            bounces=bounces,
+            camera_visible=(
+                bool(environment.get("camera_visible", True))
+                if camera_visible is None
+                else bool(camera_visible)
+            ),
+            reflection_visible=(
+                bool(environment.get("reflection_visible", True))
+                if reflection_visible is None
+                else bool(reflection_visible)
+            ),
+            hdri_path=str(lighting.get("hdri_path") or "") or None,
+            ibl_rotation=float(lighting.get("ibl_rotation", 0.0) or 0.0) * 360.0,
+        )
 
     def ar_pbr_preview_settings_set(self, **params: Any) -> dict[str, Any]:
         window = self._ar_pbr_settings_window()

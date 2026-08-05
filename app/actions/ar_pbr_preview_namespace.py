@@ -247,3 +247,24 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
         requires_owner=False,
         dry_summary="AR/PBR hardware RT capability would be reported",
     )
+    registry.register_adapter_action(
+        "ar_pbr.preview.rt_render",
+        "Render the latest AR/PBR preview asset through the isolated native DXR helper.",
+        "ar_pbr",
+        "ar_pbr_preview_rt_render",
+        params_schema=schema_object({
+            "output_path": {"type": "string", "minLength": 1},
+            "render_mode": {"type": "string", "enum": ["hybrid_rt", "path_traced"]},
+            "width": {"type": "integer", "minimum": 16, "maximum": 4096},
+            "height": {"type": "integer", "minimum": 16, "maximum": 4096},
+            "samples": {"type": "integer", "minimum": 1, "maximum": 256},
+            "bounces": {"type": "integer", "minimum": 1, "maximum": 8},
+            "camera_visible": {"type": "boolean"},
+            "reflection_visible": {"type": "boolean"},
+            "time_ms": {"type": "integer", "minimum": 0},
+        }, required=("output_path",)),
+        mutating=True,
+        changed=True,
+        requires_owner=True,
+        dry_summary="Latest AR/PBR asset would be rendered by the native DXR helper",
+    )

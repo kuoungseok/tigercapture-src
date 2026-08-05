@@ -967,8 +967,8 @@ Render mode requests are `ibl_realtime`, `hybrid_rt`, `path_traced`, and
 `studio_lights_only`. `hybrid_rt` and `path_traced` are capability-gated:
 
 - CUDA availability is never evidence of DXR or Vulkan ray-tracing support.
-- Native RT is active only when the explicitly configured, separate-process
-  helper responds to `--capabilities-json` with
+- Native RT is active only when the bundled/built or explicitly configured,
+  separate-process helper responds to `--capabilities-json` with
   `hardware_ray_tracing=true` and `api=dxr|vulkan_rt`.
 - Helper capability is cached by executable path and modification time. Scene
   normalization and Painter rendering must never launch a subprocess per
@@ -988,19 +988,42 @@ Milestone state for this revision:
    packets, and export share environment visibility and render-mode policy.
 2. **M1 · Invisible reflection HDRI — complete.** Camera background can be
    hidden while diffuse/specular environment lighting remains active.
-3. **M2 · Native RT capability boundary — complete.** An isolated helper ABI,
-   cached probe, explicit API/device report, and honest fallback are in place.
-4. **M3 · Hybrid RT reflections — backend pending.** The request/policy is
-   stable, but no DXR/Vulkan RT helper binary ships in this revision. Therefore
-   the product must not label current OpenGL reflection as hardware RT.
-5. **M4 · RT shadows/AO/refraction — backend pending.** Existing raster/screen
-   approximations remain available but are not renamed as ray traced.
-6. **M5 · Path-traced export — backend pending.** The mode and environment
-   policy are serialized; sample accumulation, denoising, and native export are
-   not claimed until the helper produces verified frames.
-7. **M6 · Painter isolation — complete for the contract layer.** Capability
-   probes are cached and process-isolated, and tests guard against Painter or
-   drawing imports. Native RT remains opt-in and cannot enter the stroke path.
+3. **M2 · Native DXR backend — complete on supported Windows hardware.**
+   `TigerStudioDxrHelper` builds BLAS/TLAS with Direct3D 12, requires DXR Tier
+   1.1 plus Shader Model 6.5, compiles an inline-RayQuery compute shader, and
+   reports the selected adapter/API. The helper and shader can be rebuilt with
+   `tools/build_ar_pbr_dxr_helper.py`; unsupported/missing builds retain the
+   honest IBL fallback.
+4. **M3 · Hybrid RT v1 — complete.** Static normalized Tiger geometry is sent
+   through a compact per-vertex base-color/metallic/roughness ABI. Primary
+   visibility, ray-traced hard shadows, one reflected ray, triangle hits, and
+   HDRI/procedural environment misses are evaluated by DXR. The selected HDRI
+   rotation is honored, and `camera_visible=false` produces transparent output
+   without removing that HDRI from reflections.
+5. **M4 · Extended RT materials — partial.** Hard shadows and reflection hits
+   are real ray queries. AO, refraction/transmission, normal/height texture
+   evaluation, soft-shadow sampling, and a production denoiser remain future
+   work and must not be claimed as complete.
+6. **M5 · Path-traced frame export v1 — complete.** The helper performs
+   multi-sample, multi-bounce diffuse/specular ray integration and saves PNG
+   frames. This is an explicit frame render, not the realtime editor viewport.
+   Temporal accumulation, animation-camera parity, texture-complete materials,
+   and denoising remain follow-up quality milestones.
+7. **M6 · Painter isolation — complete.** Capability probes are cached; mesh
+   conversion and DXR rendering run outside the Painter/drawing modules and the
+   UI render request runs on a worker thread. No BLAS/TLAS build, subprocess,
+   or path-trace accumulation enters the brush-input hot path.
+
+The editor exposes `Render RT Frame...` when Hybrid RT or Path Traced is
+selected and the native probe succeeds. Automation uses
+`ar_pbr.preview.rt_render`; both paths use the latest preview descriptor,
+animation time, environment visibility, HDRI, and environment rotation.
+
+Verified development hardware for this revision: NVIDIA GeForce RTX 4080
+SUPER, DXR Tier 1.1, Shader Model 6.5. The proof suite rendered hybrid,
+transparent-background/invisible-HDRI, path-traced, HDRI-backed, and external
+Tiger descriptor frames. This is evidence for the backend path, not a minimum
+product GPU requirement.
 
 This split follows the renderer semantics rather than tying visibility to a
 skybox mesh. DXR invokes a miss shader when no intersection is accepted, which
