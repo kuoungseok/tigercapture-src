@@ -517,7 +517,9 @@ def test_live_smudge_uses_committed_layer_source_and_matches_pen_up_pixels() -> 
     dialog.canvas.stroke_added.connect(committed.append)
     dialog.canvas._begin_current_stroke(QPointF(20, 32), sample)
     dialog.canvas._append_current_stroke_sample(QPointF(180, 32), sample, force=True)
-    live_overlay = dialog.canvas._live_stroke_cache_image.copy()
+    # The live overlay is the appended image plus the cap dabs that still
+    # move with the pointer, so it has to be read back through the canvas.
+    live_overlay = dialog.canvas.live_stroke_overlay_image().copy()
     live_composite = base.copy()
     painter = QPainter(live_composite)
     painter.drawImage(0, 0, live_overlay)
@@ -766,7 +768,9 @@ def test_dynamic_live_prefix_matches_committed_render_and_preserves_long_input()
     painter = QPainter(final)
     DrawingCanvas._paint_stroke(painter, committed, 160, 96)
     painter.end()
-    assert bytes(canvas._live_stroke_cache_image.constBits()) == bytes(final.constBits())
+    assert bytes(
+        canvas.live_stroke_overlay_image().constBits()
+    ) == bytes(final.constBits())
 
     long_stroke = Stroke(
         points=[(index / 4999.0, 0.5) for index in range(5000)],

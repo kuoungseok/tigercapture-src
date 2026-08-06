@@ -38,7 +38,17 @@ def draw(dynamics: dict, *, incremental: bool, snapshots: list[int]):
 
     canvas = DrawingCanvas(get_time_ms=lambda: 0)
     canvas.resize(WIDTH, HEIGHT)
-    canvas.set_strokes_snapshot([])
+    from app.drawing import Stroke
+
+    canvas.set_strokes_snapshot([
+        Stroke(
+            points=[(0.05 + 0.04 * i, 0.2), (0.05 + 0.04 * i, 0.9)],
+            point_pressure=[1.0, 1.0],
+            width_px=18.0,
+            color=(30 + 9 * i, 200 - 6 * i, 80 + 7 * i),
+        )
+        for i in range(20)
+    ])
     canvas.set_tool("pen")
     canvas.set_pen_width(26.0)
     canvas._brush_dynamics = dict(dynamics)
@@ -115,14 +125,23 @@ CASES = {
         "tilt_angle": 50,
         "rotation_angle": 40,
     },
-    "smudge (must fall back)": {"enabled": True, "mode": "smudge"},
-    "paint + noise (must fall back)": {
+    "smudge, dulling": {"enabled": True, "mode": "smudge"},
+    "smudge, smear": {
+        "enabled": True,
+        "mode": "smudge",
+        "smudge_type": "smear",
+        "smudge_length": 70,
+        "color_rate": 30,
+    },
+    "mixer": {"enabled": True, "mode": "mixer", "mix": 65},
+    "pickup": {"enabled": True, "mode": "pickup", "pickup": 70},
+    "paint + noise (falls back)": {
         "enabled": True,
         "mode": "paint",
         "noise_enabled": True,
         "noise_scale": 60,
     },
-    "paint + wet edges (must fall back)": {
+    "paint + wet edges (falls back)": {
         "enabled": True,
         "mode": "paint",
         "wet_edges_enabled": True,
@@ -147,12 +166,21 @@ def main() -> int:
             worst_all = max(worst_all, worst)
             if worst:
                 detail.append(f"sample {index}: {differing}px worst {worst}")
-        status = "identical" if worst_all == 0 else "DIFF"
-        if worst_all:
+        # The live overlay composites the moving cap dabs in one more stage
+        # than the committed render.  BRUSH_DYNAMICS_MODEL_CONTRACT budgets two
+        # 8-bit code values for exactly that, so the gate is the contract.
+        if worst_all == 0:
+            status = "identical"
+        elif worst_all <= 2:
+            status = f"within contract (<={worst_all} lsb)"
+        else:
+            status = f"OVER CONTRACT ({worst_all} lsb)"
             failures += 1
-        print(f"{label:<36} {status}")
-        for row in detail:
-            print(f"    {row}")
+        share = max(
+            (int(row.split()[2].rstrip("px")) for row in detail),
+            default=0,
+        ) / (WIDTH * HEIGHT) * 100.0
+        print(f"{label:<36} {status:<28} worst {share:.3f}% of pixels")
     del app
     return 1 if failures else 0
 

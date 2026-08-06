@@ -3386,6 +3386,10 @@ class DrawingCanvas(QWidget):
         self._live_dynamic_cap_dabs: list[dict[str, object]] = []
         self._live_dynamic_cap_cfg: dict[str, object] = {}
         self._live_dynamic_cap_color: QColor = QColor(255, 50, 50)
+        self._live_dynamic_cap_state: dict[str, object] = {}
+        self._live_dynamic_cap_first_dab = 0
+        self._live_dynamic_cap_sampling: QImage | None = None
+        self._live_dynamic_paint_state: dict[str, object] = {}
         self._live_stroke_cache_size: tuple[int, int] = (0, 0)
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._brush_hud_press_global: QPointF | None = None
@@ -4369,15 +4373,48 @@ class DrawingCanvas(QWidget):
     def _invalidate_stroke_raster_cache(self) -> None:
         self._cpu_stroke_cache_key = None
         self._cpu_stroke_cache_image = None
+        self._layer_stroke_images = {}
+        self._layer_stroke_image_rows = []
         self._painter_canvas_gpu_failure_state_key = None
 
-    def _stroke_render_state_key(self, w: int, h: int, t_ms: int) -> tuple:
+    def _stroke_source_signature(
+        self,
+        strokes: list[Stroke],
+    ) -> tuple | None:
+        """Cheap change signal for a strokes list this widget does not own.
+
+        Canvases that own their strokes bump ``_stroke_revision`` on every
+        mutation.  The video and GIF preview overlays are handed a callback
+        instead, which is why the committed-stroke raster cache used to be
+        switched off for them - and every frame re-rendered every stroke.
+        """
+        if hasattr(self, "_embedded_strokes"):
+            return None
+        return tuple(
+            (
+                id(stroke),
+                stroke.start_ms,
+                stroke.end_ms,
+                len(stroke.points),
+            )
+            for stroke in strokes
+        )
+
+    def _stroke_render_state_key(
+        self,
+        w: int,
+        h: int,
+        t_ms: int,
+        *,
+        source_signature: tuple | None = None,
+    ) -> tuple:
         return (
             int(self._stroke_revision),
             int(self._layer_view_revision),
             int(w),
             int(h),
             int(t_ms),
+            source_signature,
         )
 
     def _paint_committed_strokes_qpainter(
@@ -4443,6 +4480,10 @@ class DrawingCanvas(QWidget):
                         mask_enabled=len(self._layer_masks.get(layer_id, [])) >= 3,
                     )
                 )
+        # Kept so a later stroke can be painted into its own layer and the
+        # layers recomposited, instead of re-rendering every committed stroke.
+        self._layer_stroke_images = layer_images
+        self._layer_stroke_image_rows = rows
         painter.drawImage(
             0,
             0,
@@ -4463,10 +4504,12 @@ class DrawingCanvas(QWidget):
         h: int,
         t_ms: int,
     ) -> None:
-        if not hasattr(self, "_embedded_strokes"):
-            self._paint_committed_strokes_qpainter(painter, strokes, w, h, t_ms)
-            return
-        key = self._stroke_render_state_key(w, h, t_ms)
+        key = self._stroke_render_state_key(
+            w,
+            h,
+            t_ms,
+            source_signature=self._stroke_source_signature(strokes),
+        )
         image = self._cpu_stroke_cache_image
         if (
             key != self._cpu_stroke_cache_key
@@ -4490,6 +4533,80 @@ class DrawingCanvas(QWidget):
             self._cpu_stroke_cache_key = key
             self._cpu_stroke_cache_image = image
         painter.drawImage(0, 0, image)
+
+    def _append_stroke_to_layer_cache(
+        self,
+        stroke: Stroke,
+        *,
+        previous_revision: int,
+    ) -> bool:
+        """Extend the per-layer images and recomposite, for layered documents.
+
+        Blend modes, groups, clipping and nested layers all need the compositor,
+        which used to mean throwing the whole raster cache away on every stroke
+        and re-rendering the document.  The compositor already works from one
+        image per layer, so the new stroke only has to reach its own layer.
+        """
+        image = self._cpu_stroke_cache_image
+        layer_images = getattr(self, "_layer_stroke_images", None)
+        rows = getattr(self, "_layer_stroke_image_rows", None)
+        if image is None or image.isNull() or not layer_images or not rows:
+            return False
+        w = image.width()
+        h = image.height()
+        t_ms = int(self._get_time_ms())
+        if self._cpu_stroke_cache_key != (
+            int(previous_revision),
+            int(self._layer_view_revision),
+            int(w),
+            int(h),
+            t_ms,
+            None,
+        ):
+            return False
+        layer_id = self._stroke_layer_id(stroke)
+        if (
+            not stroke.is_active(t_ms)
+            or not self._layer_visibility.get(layer_id, True)
+            or self._wet_canvas_layer_enabled(layer_id)
+        ):
+            return False
+        layer_image = layer_images.get(layer_id)
+        if layer_image is None:
+            if not any(row.layer_id == layer_id for row in rows):
+                return False
+            layer_image = QImage(
+                w,
+                h,
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            layer_image.fill(0)
+            layer_images[layer_id] = layer_image
+        layer_painter = QPainter(layer_image)
+        layer_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            self._paint_stroke(layer_painter, stroke, w, h)
+        finally:
+            layer_painter.end()
+        from app.painter_layer_compositor import composite_layer_images
+
+        composed = composite_layer_images(
+            rows,
+            layer_images,
+            w,
+            h,
+            layer_masks=self._layer_mask_rasters,
+        )
+        cache_painter = QPainter(image)
+        try:
+            cache_painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_Source
+            )
+            cache_painter.drawImage(0, 0, composed)
+        finally:
+            cache_painter.end()
+        self._cpu_stroke_cache_key = self._stroke_render_state_key(w, h, t_ms)
+        return True
 
     def _append_stroke_to_cpu_cache(
         self,
@@ -4524,7 +4641,10 @@ class DrawingCanvas(QWidget):
                 "remote_safe": True,
                 "size": [int(w), int(h)],
             }
-            return False
+            return self._append_stroke_to_layer_cache(
+                stroke,
+                previous_revision=previous_revision,
+            )
         t_ms = int(self._get_time_ms())
         if key != (
             int(previous_revision),
@@ -4532,6 +4652,7 @@ class DrawingCanvas(QWidget):
             int(w),
             int(h),
             t_ms,
+            None,
         ):
             return False
         layer_id = self._stroke_layer_id(stroke)
@@ -4625,18 +4746,7 @@ class DrawingCanvas(QWidget):
                 self._clip_to_layer_mask(painter, mask, w, h)
             try:
                 painter.drawImage(0, 0, self._live_stroke_cache_image)
-                cap_dabs = getattr(self, "_live_dynamic_cap_dabs", None)
-                if cap_dabs:
-                    from app.painter_brush_dynamics import paint_dynamic_dabs
-
-                    # These sit at the stroke's last authored point and move
-                    # with the pointer, so the live image never owns them.
-                    paint_dynamic_dabs(
-                        painter,
-                        cap_dabs,
-                        self._live_dynamic_cap_cfg,
-                        self._live_dynamic_cap_color,
-                    )
+                self._draw_live_dynamic_cap(painter)
             finally:
                 if len(mask) >= 3:
                     painter.restore()
@@ -5746,6 +5856,33 @@ class DrawingCanvas(QWidget):
     ) -> bool:
         if self._layer_rasters:
             return False
+        # A missing GL context is a property of the process, not of the drawing,
+        # yet the retry ran once per commit and hashed every committed stroke
+        # first - tens of milliseconds per pen-up on a busy canvas.
+        unavailable = getattr(
+            self,
+            "_painter_canvas_gpu_context_unavailable",
+            "",
+        )
+        if unavailable:
+            try:
+                from app.painter_opengl import (
+                    PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+                )
+            except Exception:
+                PAINTER_CANVAS_FALLBACK_RENDERER_ID = (
+                    "painter_canvas_qpainter_strokes_v1"
+                )
+            self._painter_canvas_renderer_status = {
+                "renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+                "active": "qpainter",
+                "fallback": True,
+                "fallback_from": "opengl",
+                "reason": str(unavailable),
+                "remote_safe": True,
+                "size": [int(w), int(h)],
+            }
+            return False
         failure_state_key = self._stroke_render_state_key(w, h, t_ms)
         if (
             hasattr(self, "_embedded_strokes")
@@ -5848,6 +5985,10 @@ class DrawingCanvas(QWidget):
                 "size": [int(w), int(h)],
             }
             self._painter_canvas_gpu_failure_key = signature
+            if type(exc).__name__ == "PainterOpenGLUnavailable":
+                self._painter_canvas_gpu_context_unavailable = (
+                    f"{type(exc).__name__}: {exc}"
+                )
             if hasattr(self, "_embedded_strokes"):
                 self._painter_canvas_gpu_failure_state_key = failure_state_key
             return False
@@ -6234,6 +6375,9 @@ class DrawingCanvas(QWidget):
         self._live_stroke_cache_image = None
         self._live_stroke_cache_size = (0, 0)
         self._live_dynamic_cap_dabs = []
+        self._live_dynamic_cap_state = {}
+        self._live_dynamic_cap_sampling = None
+        self._live_dynamic_paint_state = {}
         stream = getattr(self, "_live_dynamic_stream", None)
         if stream is not None:
             stream.reset()
@@ -6357,7 +6501,28 @@ class DrawingCanvas(QWidget):
         The live overlay itself must stay transparent so it can be drawn once
         over the committed canvas.  Supplying this separate source keeps
         Smudge/Mixer/Pickup colors identical before and after pen-up.
+
+        It only depends on committed content, so it is cached: rebuilding it per
+        input sample re-rendered every committed stroke of the layer and was the
+        bulk of a Smudge/Mixer stroke's latency.
         """
+
+        strokes = list(self._get_strokes())
+        cache_key = (
+            int(self._stroke_revision),
+            int(self._layer_view_revision),
+            int(w),
+            int(h),
+            int(self._get_time_ms()),
+            bool(overlay),
+            str(self._active_layer_id),
+            int(self._view_background_pixmap.cacheKey()),
+            self._stroke_source_signature(strokes),
+        )
+        if cache_key == getattr(self, "_dynamic_sampling_cache_key", None):
+            cached = getattr(self, "_dynamic_sampling_cache_image", None)
+            if isinstance(cached, QImage) and not cached.isNull():
+                return cached
 
         image = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
@@ -6368,13 +6533,15 @@ class DrawingCanvas(QWidget):
                     painter.drawPixmap(QRect(0, 0, w, h), self._view_background_pixmap)
                 self._paint_committed_strokes_qpainter(
                     painter,
-                    list(self._get_strokes()),
+                    strokes,
                     w,
                     h,
                     int(self._get_time_ms()),
                 )
             finally:
                 painter.end()
+            self._dynamic_sampling_cache_key = cache_key
+            self._dynamic_sampling_cache_image = image
             return image
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -6383,7 +6550,7 @@ class DrawingCanvas(QWidget):
             if isinstance(raster, QImage) and not raster.isNull():
                 painter.drawImage(QRect(0, 0, w, h), raster)
             t_ms = int(self._get_time_ms())
-            for stroke in list(self._get_strokes()):
+            for stroke in strokes:
                 if (
                     self._stroke_layer_id(stroke) == self._active_layer_id
                     and stroke.is_active(t_ms)
@@ -6401,6 +6568,50 @@ class DrawingCanvas(QWidget):
                 masked.drawImage(QRect(0, 0, w, h), mask)
             finally:
                 masked.end()
+        self._dynamic_sampling_cache_key = cache_key
+        self._dynamic_sampling_cache_image = image
+        return image
+
+    def _draw_live_dynamic_cap(self, painter: QPainter) -> None:
+        """Draw the dabs that sit at the stroke's last authored point.
+
+        They move with the pointer, so the appended live image never owns them.
+        """
+        cap_dabs = getattr(self, "_live_dynamic_cap_dabs", None)
+        if not cap_dabs:
+            return
+        from app.painter_brush_dynamics import paint_dynamic_dabs
+
+        paint_dynamic_dabs(
+            painter,
+            cap_dabs,
+            self._live_dynamic_cap_cfg,
+            self._live_dynamic_cap_color,
+            sampling_image=self._live_dynamic_cap_sampling,
+            state=dict(self._live_dynamic_cap_state),
+            first_dab_index=self._live_dynamic_cap_first_dab,
+            copy_sampling_image=False,
+        )
+
+    def live_stroke_overlay_image(self) -> QImage | None:
+        """The complete in-progress stroke overlay, caps included.
+
+        ``_live_stroke_cache_image`` only holds the dabs that are settled, so
+        anything comparing the live stroke against its committed render has to
+        go through here.
+        """
+        base = self._live_stroke_cache_image
+        if base is None or base.isNull():
+            return base
+        if not getattr(self, "_live_dynamic_cap_dabs", None):
+            return base
+        image = base.copy()
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            self._draw_live_dynamic_cap(painter)
+        finally:
+            painter.end()
         return image
 
     def _paint_live_dynamic_increment(self, w: int, h: int) -> bool:
@@ -6423,8 +6634,11 @@ class DrawingCanvas(QWidget):
         increment = stream.update(preview_stroke, w, h)
         if increment is None:
             self._live_dynamic_cap_dabs = []
+            self._live_dynamic_paint_state = {}
             stream.reset()
             return False
+        from app.painter_brush_dynamics import paint_dynamic_dabs
+
         stable, cap = increment
         opacity_scale = self._layer_opacity.get(self._active_layer_id, 100) / 100.0
         color = QColor(*preview_stroke.color)
@@ -6434,20 +6648,43 @@ class DrawingCanvas(QWidget):
         cfg = normalize_brush_dynamics(
             getattr(preview_stroke, "brush_dynamics", {}) or {}
         )
+        sampling_image = (
+            self._active_layer_dynamic_sampling_image(
+                w,
+                h,
+                overlay=bool(cfg.get("overlay", False)),
+            )
+            if str(cfg.get("mode") or "paint") in {"smudge", "mixer", "pickup"}
+            else None
+        )
+        first_dab = stream.stable_dab_count - len(stable)
+        state = getattr(self, "_live_dynamic_paint_state", None) or {}
         if stable:
-            from app.painter_brush_dynamics import paint_dynamic_dabs
-
             live_painter = QPainter(self._live_stroke_cache_image)
             live_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             try:
-                paint_dynamic_dabs(live_painter, stable, cfg, color)
+                state = paint_dynamic_dabs(
+                    live_painter,
+                    stable,
+                    cfg,
+                    color,
+                    sampling_image=sampling_image,
+                    state=state,
+                    first_dab_index=first_dab,
+                    copy_sampling_image=False,
+                )
             finally:
                 live_painter.end()
+        self._live_dynamic_paint_state = state
         # The cap dabs sit at the last authored point and move with the pointer,
-        # so they are drawn over the live image every frame instead of into it.
+        # so they are drawn over the live image every frame instead of into it,
+        # continuing from - but never advancing - the carried smudge state.
         self._live_dynamic_cap_dabs = list(cap)
         self._live_dynamic_cap_cfg = cfg
         self._live_dynamic_cap_color = color
+        self._live_dynamic_cap_state = dict(state)
+        self._live_dynamic_cap_first_dab = stream.stable_dab_count
+        self._live_dynamic_cap_sampling = sampling_image
         return True
 
     def _paint_latest_live_stroke_segment(self) -> None:

@@ -34,10 +34,15 @@ def committed_strokes(count: int):
     strokes = []
     for index in range(count):
         base = index / max(1, count)
+        # Localised scribbles rather than canvas-wide zig-zags: rasterisation
+        # cost follows painted area, and a corpus of full-canvas strokes says
+        # more about Qt than about the brush path under test.
+        origin_x = 0.05 + 0.9 * ((index * 37) % 100) / 100.0
+        origin_y = 0.05 + 0.9 * ((index * 61) % 100) / 100.0
         points = [
             (
-                0.1 + 0.8 * ((index * 7 + step * 13) % 100) / 100.0,
-                0.1 + 0.8 * ((index * 11 + step * 17) % 100) / 100.0,
+                min(1.0, max(0.0, origin_x + 0.05 * math.cos(step * 0.9))),
+                min(1.0, max(0.0, origin_y + 0.05 * math.sin(step * 1.3))),
             )
             for step in range(12)
         ]

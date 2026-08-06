@@ -627,6 +627,7 @@ class DynamicDabStream:
         self._segment = 0
         self._carry = 0.0
         self._stable_samples = 0
+        self._points_seen = 0
         self._context: dict[str, Any] | None = None
 
     def reset(self) -> None:
@@ -634,6 +635,7 @@ class DynamicDabStream:
         self._segment = 0
         self._carry = 0.0
         self._stable_samples = 0
+        self._points_seen = 0
         self._context = None
 
     @property
@@ -654,10 +656,6 @@ class DynamicDabStream:
         if not bool(plan.get("enabled", False)):
             return None
         cfg = dict(plan["cfg"])
-        if str(cfg["mode"]) != "paint":
-            # Smudge, mixer and pickup carry colour between dabs and sample the
-            # canvas underneath, so a dab cannot be replayed out of context.
-            return None
         if not advanced_dab_alphas_prefix_stable(cfg):
             return None
         if bool(dict(plan["workload"])["degraded"]):
@@ -672,8 +670,10 @@ class DynamicDabStream:
                 # ``_curve`` resampled a per-point channel, so every value
                 # shifts when the point count changes.
                 return None
+        # Deliberately not keyed on the stroke object: the live preview hands in
+        # a fresh snapshot every input sample.  What must not change is the
+        # brush, and the point list must only ever grow.
         signature = (
-            id(stroke),
             int(width),
             int(height),
             tuple(sorted((str(key), repr(value)) for key, value in cfg.items())),
@@ -686,10 +686,11 @@ class DynamicDabStream:
             tuple(int(v) for v in getattr(stroke, "color", (255, 50, 50))),
             float(getattr(stroke, "brush_angle", 0.0)),
         )
-        if signature != self._signature:
+        if signature != self._signature or len(points) < self._points_seen:
             self.reset()
             self._signature = signature
             self._context = _dab_build_context(stroke, plan)
+        self._points_seen = len(points)
         context = self._context
         if context is None:
             return None
@@ -841,13 +842,14 @@ def paint_dynamic_stroke(
     dabs = dynamic_dabs(stroke, width, height)
     if not dabs:
         return False
-    return paint_dynamic_dabs(
+    paint_dynamic_dabs(
         painter,
         dabs,
         cfg,
         color,
         sampling_image=sampling_image,
     )
+    return True
 
 
 def paint_dynamic_dabs(
@@ -857,29 +859,37 @@ def paint_dynamic_dabs(
     color: QColor,
     *,
     sampling_image: QImage | None = None,
-) -> bool:
-    """Paint an already-generated dab sequence.
+    state: dict[str, Any] | None = None,
+    first_dab_index: int = 0,
+    copy_sampling_image: bool = True,
+) -> dict[str, Any]:
+    """Paint an already-generated dab sequence and return the carry state.
 
     Split out of ``paint_dynamic_stroke`` so a live stroke can paint only the
-    dabs it has not painted yet through exactly the same code.
+    dabs it has not painted yet through exactly the same code.  Smudge and mixer
+    carry a colour and a previous position from dab to dab; handing that state
+    back in makes resuming identical to painting the sequence in one go.
     """
     if not dabs:
-        return False
+        return dict(state or {})
     mode = str(cfg["mode"])
     base_opacity = color.alphaF()
     if sampling_image is None:
         device = painter.device()
         sampling_image = QImage(device) if isinstance(device, QImage) else None
-    elif not sampling_image.isNull():
+    elif not sampling_image.isNull() and copy_sampling_image:
         sampling_image = sampling_image.copy()
-    carried_color: QColor | None = None
-    previous_position: tuple[float, float] | None = None
+    carried_color: QColor | None = (state or {}).get("carried_color")
+    previous_position: tuple[float, float] | None = (state or {}).get(
+        "previous_position"
+    )
     captured_dab = _captured_dab_image(cfg)
     frozen_samples = list(cfg.get("sampled_rgba") or [])
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     try:
-        for dab_index, dab in enumerate(dabs):
+        for offset, dab in enumerate(dabs):
+            dab_index = first_dab_index + offset
             rgb = dab["rgb"]
             dab_color = QColor(int(rgb[0]), int(rgb[1]), int(rgb[2]))
             if mode in {"smudge", "pickup", "mixer"}:
@@ -950,7 +960,10 @@ def paint_dynamic_dabs(
             painter.restore()
     finally:
         painter.restore()
-    return True
+    return {
+        "carried_color": carried_color,
+        "previous_position": previous_position,
+    }
 
 
 def capture_dynamic_sample_colors(
