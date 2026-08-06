@@ -1052,6 +1052,13 @@ class WorkbenchPanel(QWidget):
                 self._open_painter_program,
             ),
             (
+                "3D PBR\nTexture",
+                "Create Normal, Height, AO, Roughness, and material maps from an image",
+                "pbr-texture",
+                ("#E2763A", "#8F4FD6"),
+                self._open_pbr_texture_program,
+            ),
+            (
                 "PPT\nMaker",
                 "Open the presentation and catalog deck maker",
                 "project",
@@ -1221,6 +1228,28 @@ class WorkbenchPanel(QWidget):
 
         painter.finished.connect(_forget_window)
         self._show_program_window(painter)
+
+    def _open_pbr_texture_program(self, image_path: str | Path | None = None) -> None:
+        selected = str(image_path or "").strip()
+        if not selected:
+            selected, _filter = QFileDialog.getOpenFileName(
+                self,
+                "Open image for 3D PBR Texture",
+                "",
+                "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;All files (*.*)",
+            )
+        if not selected:
+            return
+        path = Path(selected).expanduser()
+        if not path.is_file():
+            QMessageBox.warning(self, "3D PBR Texture", f"Image file was not found:\n{path}")
+            return
+        try:
+            from app.ar_pbr.texture_lab_entry import open_texture_lab_window
+
+            open_texture_lab_window(self.window(), path)
+        except Exception as exc:
+            QMessageBox.warning(self, "3D PBR Texture", f"Could not open 3D PBR Texture:\n{exc}")
 
     def _open_editor_program(self, method_name: str, title: str) -> None:
         owner = self.window()

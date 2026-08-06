@@ -37,6 +37,7 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
         "Voice Lab",
         "VTuber Studio",
         "Painter",
+        "3D PBR Texture",
         "PPT Maker",
         "Motion Designer",
         "Character Hub",
@@ -48,6 +49,11 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
         if button.accessibleName() == "Motion Designer"
     )
     assert getattr(motion_button, "_program_launcher_icon_name") == "motion-designer"
+    pbr_button = next(
+        button for button in panel._program_launcher_buttons
+        if button.accessibleName() == "3D PBR Texture"
+    )
+    assert getattr(pbr_button, "_program_launcher_icon_name") == "pbr-texture"
     assert all(not button.icon().isNull() for button in buttons)
     tile_sizes = {(button.width(), button.height()) for button in buttons}
     assert tile_sizes == {(72, 86)}
@@ -66,4 +72,31 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
     assert 72 < large_tile[0] <= 84
     assert large_tile[1] > large_tile[0]
 
+    panel.close()
+
+
+def test_3d_pbr_texture_launcher_prompts_for_image_and_opens_lab(tmp_path, monkeypatch) -> None:
+    app = _app()
+    from PySide6.QtWidgets import QFileDialog
+
+    import app.ar_pbr.texture_lab_entry as entry
+    from app.workbench_panel import WorkbenchPanel
+
+    image_path = tmp_path / "material-source.png"
+    image_path.write_bytes(b"source")
+    opened = []
+    monkeypatch.setattr(
+        QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *args, **kwargs: (str(image_path), "Images")),
+    )
+    monkeypatch.setattr(entry, "open_texture_lab_window", lambda owner, path: opened.append((owner, path)))
+
+    panel = WorkbenchPanel()
+    panel._open_pbr_texture_program()
+    app.processEvents()
+
+    assert len(opened) == 1
+    assert opened[0][0] is panel.window()
+    assert opened[0][1] == image_path
     panel.close()

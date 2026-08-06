@@ -696,6 +696,7 @@ Implementation ownership:
 
 - Core generation/export: `app.ar_pbr.texture_map_lab`
 - Qt plane-preview/sliders: `app.ar_pbr.texture_map_lab_window`
+- Shared file-to-window entry: `app.ar_pbr.texture_lab_entry`
 - Python Actions: `ar_pbr.texture_lab.*`
 - Regression tests: `tests/test_ar_pbr_texture_map_lab.py`
 
@@ -788,12 +789,19 @@ Automation surface:
 - `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
   Substrate material-wiring guidance for generated maps.
 
-Product UI note: Painter's right inspector is reserved for the color palette
-and the standalone `Layers / Channels / Paths` tab set. PBR texture generation
-remains available through the Painter automation workflow:
-`paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`. The
-lower-level `ar_pbr.texture_lab.*` actions remain useful for file-based
-automation and review tooling.
+Product UI entry points:
+
+- Tiger Studio `Programs` exposes a `3D PBR Texture` icon. It asks for a source
+  image and opens the shared Texture Lab directly; it does not require creating
+  a Painter document first.
+- Painter retains `Image > PBR Texture Lab...` and
+  `Window > PBR Texture Lab...`; these render the current visible Painter
+  document into the source image before opening the same lab.
+- Painter's right inspector remains reserved for the color palette and the
+  standalone `Layers / Channels / Paths` tab set. Automation continues through
+  `paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`. The
+  lower-level `ar_pbr.texture_lab.*` actions remain useful for file-based
+  automation and review tooling.
 
 Unreal/Substrate research outcome:
 

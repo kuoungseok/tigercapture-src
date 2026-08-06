@@ -654,6 +654,29 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         for x, y in ((.28, .38), (.50, .62), (.72, .46)):
             painter.drawLine(QPointF(s * x, s * .22), QPointF(s * x, s * .82))
             painter.drawEllipse(QPointF(s * x, s * y), s * .075, s * .075)
+    elif n in {"pbr-texture", "pbr_texture", "material-cube", "material_cube"}:
+        # Isometric material cube with a highlighted surface sample. This is
+        # intentionally distinct from the generic 3D-object and image icons.
+        top = QPolygonF([
+            QPointF(s * .20, s * .34), QPointF(s * .50, s * .17),
+            QPointF(s * .80, s * .34), QPointF(s * .50, s * .51),
+        ])
+        left_face = QPolygonF([
+            QPointF(s * .20, s * .34), QPointF(s * .50, s * .51),
+            QPointF(s * .50, s * .84), QPointF(s * .20, s * .67),
+        ])
+        right_face = QPolygonF([
+            QPointF(s * .50, s * .51), QPointF(s * .80, s * .34),
+            QPointF(s * .80, s * .67), QPointF(s * .50, s * .84),
+        ])
+        painter.drawPolygon(top)
+        painter.drawPolygon(left_face)
+        painter.drawPolygon(right_face)
+        painter.drawEllipse(QRectF(s * .41, s * .25, s * .18, s * .12))
+        painter.drawLine(QPointF(s * .28, s * .46), QPointF(s * .42, s * .54))
+        painter.drawLine(QPointF(s * .28, s * .56), QPointF(s * .42, s * .64))
+        painter.drawLine(QPointF(s * .58, s * .55), QPointF(s * .72, s * .47))
+        painter.drawLine(QPointF(s * .58, s * .65), QPointF(s * .72, s * .57))
     elif n in {"image", "picture", "photo", "sticker"}:
         painter.drawRoundedRect(QRectF(s * .16, s * .22, s * .68, s * .56), 3, 3)
         painter.drawEllipse(QPointF(s * .34, s * .38), s * .065, s * .065)
