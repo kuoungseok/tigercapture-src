@@ -262,10 +262,15 @@ class PainterUIProductionPanel(QWidget):
         )
         root.addWidget(self.open_artifact_button)
 
-    def set_document(self, value: Mapping[str, Any] | None) -> None:
-        self._document = normalize_ui_document(value)
-        self.figma_panel.set_document(self._document)
-        review = inspect_ui_review(self._document)
+    def set_document(
+        self,
+        value: Mapping[str, Any] | None,
+        *,
+        normalize: bool = True,
+    ) -> None:
+        self._document = normalize_ui_document(value) if normalize else value
+        self.figma_panel.set_document(self._document, normalize=normalize)
+        review = inspect_ui_review(self._document, normalize=False)
         self.review_list.clear()
         for row in review["comments"]:
             prefix = "Resolved" if row.get("resolved") else "Open"

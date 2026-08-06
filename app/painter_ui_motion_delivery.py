@@ -167,9 +167,15 @@ def motion_delivery_report(
     document_value: Mapping[str, Any],
     object_id: str,
     compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
     """Return a non-mutating, feature-level Web/App/UMG delivery report."""
-    document = normalize_ui_document(document_value)
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = (
+        normalize_ui_document(document_value) if normalize else document_value
+    )
     selected_id = str(object_id or "")
     obj = _find_object(document, selected_id)
     composition_id = (

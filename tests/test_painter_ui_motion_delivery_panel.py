@@ -81,10 +81,12 @@ def test_motion_delivery_panel_has_friendly_empty_states() -> None:
     assert "No Motion delivery report" in panel.empty_label.text()
     assert not panel.open_motion_button.isEnabled()
     assert not panel.preview_hover_button.isEnabled()
+    assert not panel.bake_flipbook_button.isEnabled()
 
     panel.set_report({"selection": {"name": "Checkout Card"}})
     assert "Checkout Card has no Motion binding" in panel.empty_label.text()
     assert not panel.open_motion_button.isEnabled()
+    assert not panel.bake_flipbook_button.isEnabled()
     panel.deleteLater()
 
 
@@ -101,6 +103,7 @@ def test_motion_delivery_panel_summarizes_binding_targets_and_blockers() -> None
     assert panel.transition_label.text() == "normal -> hover"
     assert panel.open_motion_button.isEnabled()
     assert panel.preview_hover_button.isEnabled()
+    assert panel.bake_flipbook_button.isEnabled()
 
     assert panel.target_count_labels["web"]["native"].text() == "Native 2"
     assert panel.target_count_labels["web"]["vector"].text() == "Vector 1"
@@ -122,15 +125,19 @@ def test_motion_delivery_panel_emits_binding_requests() -> None:
     panel.set_report(_report())
     opened: list[str] = []
     previewed: list[str] = []
+    baked: list[str] = []
     panel.open_motion_requested.connect(opened.append)
     panel.preview_hover_requested.connect(previewed.append)
+    panel.bake_flipbook_requested.connect(baked.append)
 
     panel.open_motion_button.click()
     panel.preview_hover_button.click()
+    panel.bake_flipbook_button.click()
     app.processEvents()
 
     assert opened == ["ui-motion-binding-1"]
     assert previewed == ["ui-motion-binding-1"]
+    assert baked == ["ui-motion-binding-1"]
     panel.deleteLater()
 
 

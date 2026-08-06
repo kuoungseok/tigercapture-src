@@ -1073,9 +1073,17 @@ class PainterUMGMaterialEditorPanel(QWidget):
         graph_state = state.get("graph")
         if isinstance(graph_state, Mapping):
             self._explicit_graph_view_state = True
+            # Mark the graph as restored immediately.  Dock replacement can
+            # deliver show/layout timers before the deferred state callback;
+            # without this first application an automatic fit can win that
+            # race and overwrite the user's zoom.  Reapply once after layout
+            # so the requested scene center is also correct for the final
+            # viewport size.
+            saved_graph_state = copy.deepcopy(dict(graph_state))
+            self.graph_view.set_view_state(saved_graph_state)
             QTimer.singleShot(
                 0,
-                lambda: self.graph_view.set_view_state(graph_state),
+                lambda: self.graph_view.set_view_state(saved_graph_state),
             )
 
     def _fit_initial_graph(self) -> None:

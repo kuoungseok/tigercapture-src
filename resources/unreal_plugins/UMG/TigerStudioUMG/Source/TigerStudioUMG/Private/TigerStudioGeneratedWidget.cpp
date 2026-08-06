@@ -9,6 +9,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sound/SoundBase.h"
 #include "TigerStudioButton.h"
+#include "TigerStudioComponentWidget.h"
+#include "TigerStudioRoundedCardHost.h"
 
 void UTigerStudioGeneratedWidget::EmitTigerInteraction(
     const FName ComponentId,
@@ -17,9 +19,90 @@ void UTigerStudioGeneratedWidget::EmitTigerInteraction(
     OnTigerInteraction.Broadcast(ComponentId, EventName);
 }
 
+void UTigerStudioGeneratedWidget::ApplyTigerComponentInstances()
+{
+    if (!WidgetTree)
+    {
+        return;
+    }
+    for (const FTigerStudioUMGComponentInstanceRecord& Instance
+         : TigerComponentInstances)
+    {
+        UTigerStudioComponentWidget* Component =
+            Cast<UTigerStudioComponentWidget>(
+                WidgetTree->FindWidget(FName(*Instance.LayerId)));
+        if (!Component)
+        {
+            continue;
+        }
+        const UTigerStudioComponentWidget* Defaults =
+            Component->GetClass()
+                ->GetDefaultObject<UTigerStudioComponentWidget>();
+        if (Defaults && Defaults != Component)
+        {
+            // A foreign UUserWidget embedded in another generated WidgetTree
+            // can reach the live tree with native definition arrays cleared,
+            // even though its generated-class CDO retains them. These arrays
+            // are class definition metadata, never per-instance values, so
+            // always restore them from the authoritative component CDO.
+            Component->TigerComponentProperties =
+                Defaults->TigerComponentProperties;
+            Component->TigerComponentInstances =
+                Defaults->TigerComponentInstances;
+            if (Component->TigerComponentId.IsEmpty())
+            {
+                Component->TigerComponentId = Defaults->TigerComponentId;
+            }
+            if (Component->TigerBaseComponentId.IsEmpty())
+            {
+                Component->TigerBaseComponentId =
+                    Defaults->TigerBaseComponentId;
+            }
+            if (Component->TigerVariantValuesJson.IsEmpty())
+            {
+                Component->TigerVariantValuesJson =
+                    Defaults->TigerVariantValuesJson;
+            }
+            if (Component->TigerSourceProvider.IsEmpty())
+            {
+                Component->TigerSourceProvider =
+                    Defaults->TigerSourceProvider;
+            }
+            if (Component->TigerSourceDocumentId.IsEmpty())
+            {
+                Component->TigerSourceDocumentId =
+                    Defaults->TigerSourceDocumentId;
+            }
+            if (Component->TigerSourceRevision <= 0)
+            {
+                Component->TigerSourceRevision =
+                    Defaults->TigerSourceRevision;
+            }
+        }
+        Component->TigerInstancePropertyValuesJson =
+            Instance.PropertyValuesJson.IsEmpty()
+                ? TEXT("{}")
+                : Instance.PropertyValuesJson;
+        Component->TigerResolvedOverridesJson =
+            Instance.ResolvedOverridesJson.IsEmpty()
+                ? TEXT("{}")
+                : Instance.ResolvedOverridesJson;
+        Component->ApplyTigerComponentInstances();
+        Component->ApplyTigerComponentProperties();
+    }
+}
+
+void UTigerStudioGeneratedWidget::NativePreConstruct()
+{
+    Super::NativePreConstruct();
+    ApplyTigerComponentInstances();
+    UpdateTigerRoundedCards();
+}
+
 void UTigerStudioGeneratedWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+    ApplyTigerComponentInstances();
     if (!WidgetTree)
     {
         return;
@@ -29,6 +112,28 @@ void UTigerStudioGeneratedWidget::NativeConstruct()
         if (UTigerStudioButton* Button = Cast<UTigerStudioButton>(Widget))
         {
             Button->InitializeTigerButton(this);
+        }
+    });
+    UpdateTigerRoundedCards();
+}
+
+void UTigerStudioGeneratedWidget::UpdateTigerRoundedCards()
+{
+    if (!WidgetTree)
+    {
+        return;
+    }
+    WidgetTree->ForEachWidget([](UWidget* Widget)
+    {
+        if (UTigerStudioRoundedCardHost* RoundedCard =
+                Cast<UTigerStudioRoundedCardHost>(Widget))
+        {
+            RoundedCard->UpdateTigerMaterialSize();
+        }
+        if (UTigerStudioGeneratedWidget* Nested =
+                Cast<UTigerStudioGeneratedWidget>(Widget))
+        {
+            Nested->UpdateTigerRoundedCards();
         }
     });
 }

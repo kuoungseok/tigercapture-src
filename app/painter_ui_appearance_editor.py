@@ -388,6 +388,19 @@ class PainterUIAppearanceDialog(QDialog):
         self.effect_type_combo.addItem("Inner Shadow", "inner_shadow")
         self.effect_type_combo.addItem("Layer Blur", "layer_blur")
         self.effect_type_combo.addItem("Background Blur", "background_blur")
+        for label, effect_type in (
+            ("Figma Noise (preserved)", "noise"),
+            ("Figma Texture (preserved)", "texture"),
+        ):
+            self.effect_type_combo.addItem(label, effect_type)
+            item = self.effect_type_combo.model().item(
+                self.effect_type_combo.count() - 1
+            )
+            if item is not None:
+                # Imported beta effects can be inspected, reordered, removed,
+                # and saved, but are not offered as half-implemented authoring
+                # choices.
+                item.setEnabled(False)
         self.effect_color_edit = QLineEdit()
         self.effect_color_edit.setPlaceholderText("#00000066")
         effect_color_field, self.effect_color_picker = color_edit_with_picker(
@@ -593,10 +606,23 @@ class PainterUIAppearanceDialog(QDialog):
                 "inner_shadow": "Inner Shadow",
                 "layer_blur": "Layer Blur",
                 "background_blur": "Background Blur",
-            }[effect_type]
+                "noise": "Figma Noise · preserved",
+                "texture": "Figma Texture · preserved",
+            }.get(effect_type, effect_type.replace("_", " ").title())
             if effect_type in {"layer_blur", "background_blur"}:
+                if effect.get("blur_type") == "progressive":
+                    label += " · Progressive · preserved"
                 self.effect_list.addItem(
                     f"{label}  {effect['radius']:.1f} px"
+                )
+            elif effect_type == "noise":
+                self.effect_list.addItem(
+                    f"{label}  {effect.get('noise_type', 'monotone')}  "
+                    f"{float(effect.get('noise_size') or 0.0):.1f} px"
+                )
+            elif effect_type == "texture":
+                self.effect_list.addItem(
+                    f"{label}  {float(effect.get('noise_size') or 0.0):.1f} px"
                 )
             else:
                 self.effect_list.addItem(
@@ -635,6 +661,9 @@ class PainterUIAppearanceDialog(QDialog):
             return
         effect = self._effects[self._effect_index]
         is_blur = effect["type"] in {"layer_blur", "background_blur"}
+        preserved_beta = effect["type"] in {"noise", "texture"} or (
+            is_blur and effect.get("blur_type") == "progressive"
+        )
         self._syncing = True
         self.effect_type_combo.setCurrentIndex(
             max(0, self.effect_type_combo.findData(effect["type"]))
@@ -663,6 +692,20 @@ class PainterUIAppearanceDialog(QDialog):
         ):
             widget.setEnabled(not is_blur)
         self.effect_radius_spin.setEnabled(is_blur)
+        if preserved_beta:
+            # The beta Figma contracts are visible in the stack but remain
+            # read-only until Painter has an exact spatial shader editor.
+            for widget in (
+                self.effect_type_combo,
+                self.effect_color_edit,
+                self.effect_x_spin,
+                self.effect_y_spin,
+                self.effect_blur_spin,
+                self.effect_spread_spin,
+                self.effect_radius_spin,
+                self.effect_blend_combo,
+            ):
+                widget.setEnabled(False)
         self._syncing = False
 
     def _commit_effect(self) -> None:

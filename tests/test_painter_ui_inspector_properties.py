@@ -235,6 +235,24 @@ def test_inspector_progressively_discloses_selection_specific_groups() -> None:
     app.processEvents()
 
 
+def test_inspector_visibility_rows_are_registered_form_fields() -> None:
+    app = _app()
+    from app.painter_ui_inspector import PainterUIInspector
+
+    inspector = PainterUIInspector()
+
+    invalid_rows = []
+    for group, widgets in inspector._design_context_rows.items():
+        for widget in widgets:
+            row, _role = inspector._design_form.getWidgetPosition(widget)
+            if row < 0:
+                invalid_rows.append((group, type(widget).__name__))
+
+    assert invalid_rows == []
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_motion_tab_forwards_binding_repair_requests() -> None:
     app = _app()
     from app.painter_ui_inspector import PainterUIInspector

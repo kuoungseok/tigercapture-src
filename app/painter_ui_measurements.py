@@ -64,9 +64,12 @@ def inspect_ui_selection_measurements(
     value: Mapping[str, Any] | None,
     *,
     object_ids: Sequence[str] | None = None,
+    normalize: bool = True,
 ) -> dict[str, Any]:
     """Return nearest directional gaps for a same-artboard UI selection."""
-    document = normalize_ui_document(value)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     objects = document["objects"]
     by_id = {str(row["id"]): row for row in objects}
     requested = [
@@ -104,7 +107,7 @@ def inspect_ui_selection_measurements(
     )
     geometry = resolve_ui_constraints(
         document,
-        resolved_ui_geometry(document),
+        resolved_ui_geometry(document, normalize=False),
     )
     selection_bounds = _bounds(selected, geometry)
     excluded = _descendant_ids(objects, set(report["object_ids"]))

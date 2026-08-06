@@ -23,9 +23,11 @@ _CROSS_ALIGNMENT_LABELS = {
     "center": "C=",
     "end": "C>",
     "stretch": "C#",
+    "baseline": "C_",
 }
 _MAIN_ALIGNMENT_ORDER = ("start", "center", "end", "space_between")
 _CROSS_ALIGNMENT_ORDER = ("start", "center", "end", "stretch")
+_HORIZONTAL_CROSS_ALIGNMENT_ORDER = (*_CROSS_ALIGNMENT_ORDER, "baseline")
 _TOOLTIPS = {
     "mode_horizontal": "Horizontal Auto Layout",
     "mode_vertical": "Vertical Auto Layout",
@@ -253,9 +255,18 @@ def apply_auto_layout_canvas_click(
             (current + 1) % len(_MAIN_ALIGNMENT_ORDER)
         ]
     elif target == "cross_alignment":
-        current = _CROSS_ALIGNMENT_ORDER.index(result["cross_alignment"])
-        result["cross_alignment"] = _CROSS_ALIGNMENT_ORDER[
-            (current + 1) % len(_CROSS_ALIGNMENT_ORDER)
+        order = (
+            _HORIZONTAL_CROSS_ALIGNMENT_ORDER
+            if result["mode"] == "horizontal"
+            else _CROSS_ALIGNMENT_ORDER
+        )
+        current = (
+            order.index(result["cross_alignment"])
+            if result["cross_alignment"] in order
+            else 0
+        )
+        result["cross_alignment"] = order[
+            (current + 1) % len(order)
         ]
     elif target == "positioning":
         result["positioning"] = (
@@ -283,11 +294,14 @@ def apply_auto_layout_canvas_drag(
         dy = round(dy / 10.0) * 10.0
     if target == "gap":
         delta = dx if result["mode"] in {"horizontal", "grid"} else dy
-        result["gap"] = max(0.0, round(float(result["gap"]) + delta))
+        result["gap"] = max(
+            -10000.0,
+            min(10000.0, round(float(result["gap"]) + delta)),
+        )
     elif target == "cross_gap":
         result["cross_gap"] = max(
             0.0,
-            round(float(result["cross_gap"]) + dy),
+            min(10000.0, round(float(result["cross_gap"]) + dy)),
         )
     elif target.startswith("padding_"):
         edge = target.removeprefix("padding_")

@@ -67,8 +67,20 @@ def normalize_ui_dev_handoff(value: object) -> dict[str, Any]:
 
 def _document_with_contract(
     value: Mapping[str, Any] | None,
+    *,
+    normalize: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    document = normalize_ui_document(value)
+    # This writes one key back, so it needs its own dict - but when the
+    # caller already holds a canonical document a shallow copy of the two
+    # touched levels is enough, and rows stay shared.
+    document = (
+        normalize_ui_document(value)
+        if normalize
+        else {
+            **value,
+            "linked_targets": {**(value.get("linked_targets") or {})},
+        }
+    )
     contract = normalize_ui_dev_handoff(
         document["linked_targets"].get("dev_handoff")
     )
@@ -330,8 +342,9 @@ def inspect_ui_dev_handoff(
     value: Mapping[str, Any] | None,
     *,
     object_ids: Sequence[str] | None = None,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document, contract = _document_with_contract(value)
+    document, contract = _document_with_contract(value, normalize=normalize)
     requested = list(
         object_ids
         if object_ids is not None
@@ -339,7 +352,9 @@ def inspect_ui_dev_handoff(
     )
     selected_ids = {str(item) for item in requested}
     selected = [row for row in document["objects"] if row["id"] in selected_ids]
-    geometry = resolved_ui_geometry(document)
+    # _document_with_contract already normalized, so the rest of this
+    # inspection shares that canonical document instead of re-copying it.
+    geometry = resolved_ui_geometry(document, normalize=False)
     token_by_id = {row["id"]: row for row in document["tokens"]}
     collection_by_id = {
         row["id"]: row for row in document["variable_collections"]
@@ -446,10 +461,11 @@ def inspect_ui_dev_handoff(
                 "measurement": inspect_ui_selection_measurements(
                     document,
                     object_ids=[target_id],
+                    normalize=False,
                 ),
             }
         )
-    validation = validate_ui_document(document)
+    validation = validate_ui_document(document, normalize=False)
     return {
         "schema": DEV_INSPECT_SCHEMA,
         "document_id": document["document_id"],
@@ -459,6 +475,7 @@ def inspect_ui_dev_handoff(
         "measurements": inspect_ui_selection_measurements(
             document,
             object_ids=list(selected_ids),
+            normalize=False,
         ),
         "annotations": annotations,
         "measurement_overlays": measurement_overlays,

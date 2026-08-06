@@ -11,8 +11,76 @@ import math
 from typing import Any, Mapping, Sequence
 
 
-TIGER_UMG_SCHEMA_VERSION = 11
+TIGER_UMG_SCHEMA_VERSION = 13
+TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION = 16
+TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION = 17
+TIGER_UMG_PANEL_KINDS = frozenset(
+    {"None", "Canvas", "Horizontal", "Vertical", "Grid", "Overlay"}
+)
+TIGER_UMG_WIDGET_VISIBILITIES = frozenset(
+    {
+        "Visible",
+        "HitTestInvisible",
+    }
+)
 _ANCHOR_EPSILON = 0.000001
+
+
+def validate_umg_panel_record(
+    layer: Mapping[str, Any] | None,
+    *,
+    document_schema_version: int,
+) -> list[str]:
+    """Validate one provider-neutral panel-kind record.
+
+    ``Overlay`` is deliberately gated at schema 17.  Schemas 4-16 keep their
+    existing Canvas/flow meaning, so an older producer cannot accidentally
+    request a panel class its matching Unreal plugin did not generate.
+    """
+
+    source = layer if isinstance(layer, Mapping) else {}
+    panel_kind = str(source.get("PanelKind") or "None")
+    layer_kind = str(source.get("Kind") or "")
+    if panel_kind not in TIGER_UMG_PANEL_KINDS:
+        return [f"umg_panel_kind_unsupported:{panel_kind}"]
+    if panel_kind not in {"None", "Canvas"} and layer_kind != "Group":
+        return ["umg_panel_kind_requires_group"]
+    schema_version = int(document_schema_version)
+    if (
+        panel_kind == "Overlay"
+        and schema_version < TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION
+    ):
+        return ["umg_overlay_panel_requires_schema_17"]
+    spacing_strategy = str(source.get("SpacingStrategy") or "Padding")
+    spacer_size_rule = str(source.get("SpacerSizeRule") or "Auto")
+    spacer_fill_coefficient = source.get("SpacerFillCoefficient", 1.0)
+    reasons: list[str] = []
+    if schema_version >= TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION:
+        if layer_kind == "Group" and "SpacingStrategy" not in source:
+            reasons.append("umg_spacing_strategy_record_invalid")
+        if layer_kind == "Group" and "SpacerSizeRule" not in source:
+            reasons.append("umg_spacer_size_rule_record_invalid")
+        if layer_kind == "Group" and "SpacerFillCoefficient" not in source:
+            reasons.append("umg_spacer_fill_coefficient_invalid")
+    elif spacing_strategy != "Padding":
+        reasons.append("umg_spacing_strategy_requires_schema_17")
+    if spacing_strategy not in {"Padding", "Spacer"}:
+        reasons.append("umg_spacing_strategy_unsupported")
+    if spacer_size_rule not in {"Auto", "Fill"}:
+        reasons.append("umg_spacer_size_rule_unsupported")
+    if not (
+        isinstance(spacer_fill_coefficient, (int, float))
+        and not isinstance(spacer_fill_coefficient, bool)
+        and math.isfinite(float(spacer_fill_coefficient))
+        and float(spacer_fill_coefficient) > 0.0
+    ):
+        reasons.append("umg_spacer_fill_coefficient_invalid")
+    if spacing_strategy == "Spacer" and panel_kind not in {
+        "Horizontal",
+        "Vertical",
+    }:
+        reasons.append("umg_spacer_strategy_requires_linear_panel")
+    return sorted(set(reasons))
 
 
 def _number(value: object, default: float = 0.0) -> float:
@@ -251,9 +319,52 @@ def painter_layer_layout(
     )
 
 
+def validate_umg_widget_visibility(
+    value: object,
+    *,
+    document_schema_version: int | None = None,
+) -> list[str]:
+    """Validate the optional schema-16 ``ESlateVisibility`` layer value."""
+
+    if value is None:
+        if document_schema_version is not None:
+            try:
+                schema_version = int(document_schema_version)
+            except (TypeError, ValueError):
+                schema_version = 0
+            if (
+                schema_version
+                >= TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
+            ):
+                return ["umg_visibility_record_invalid"]
+        return []
+    if not isinstance(value, str):
+        return ["umg_visibility_record_invalid"]
+    if value not in TIGER_UMG_WIDGET_VISIBILITIES:
+        return ["umg_visibility_unsupported"]
+    if document_schema_version is not None:
+        try:
+            schema_version = int(document_schema_version)
+        except (TypeError, ValueError):
+            schema_version = 0
+        if (
+            value != "Visible"
+            and schema_version
+            < TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
+        ):
+            return ["umg_visibility_requires_schema_16"]
+    return []
+
+
 __all__ = [
+    "TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION",
+    "TIGER_UMG_PANEL_KINDS",
     "TIGER_UMG_SCHEMA_VERSION",
+    "TIGER_UMG_WIDGET_VISIBILITIES",
+    "TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION",
     "canvas_slot_record",
     "motion_layer_layout",
     "painter_layer_layout",
+    "validate_umg_panel_record",
+    "validate_umg_widget_visibility",
 ]

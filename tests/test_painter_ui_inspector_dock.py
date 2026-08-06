@@ -146,6 +146,145 @@ def test_selected_frame_exposes_compact_editing_inspector() -> None:
     app.processEvents()
 
 
+def test_selected_frame_exposes_auto_and_manual_umg_panel_kind() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, frame = add_ui_object(
+        create_ui_document(640, 360),
+        kind="frame",
+        name="HUD Stack",
+        x=24,
+        y=24,
+        width=480,
+        height=260,
+    )
+    document, _child = add_ui_object(
+        document,
+        kind="button",
+        name="Continue",
+        parent_id=frame["id"],
+        x=48,
+        y=180,
+        width=180,
+        height=48,
+    )
+    document["selection"] = {
+        "object_id": frame["id"],
+        "object_ids": [frame["id"]],
+    }
+    inspector = PainterUIInspector()
+    changes: list[tuple[str, dict]] = []
+    inspector.properties_changed.connect(
+        lambda object_id, payload: changes.append(
+            (str(object_id), dict(payload))
+        )
+    )
+    inspector.set_document(document)
+
+    selector = inspector.frame_selection_panel.umg_panel_selector
+    state = inspector.frame_selection_panel.umg_panel_state()
+    assert state["requested"] == "auto"
+    assert state["effective"] == "Overlay"
+    assert state["policy"] == "auto"
+    assert state["enabled"] is True
+    assert "UOverlaySlot" in state["reason_text"]
+
+    selector.mode_combo.setCurrentIndex(
+        selector.mode_combo.findData("canvas")
+    )
+    assert changes[-1][0] == frame["id"]
+    assert changes[-1][1]["layout"]["umg_panel_mode"] == "canvas"
+
+    from app.painter_ui_document import update_ui_object
+
+    flow_document, _report = update_ui_object(
+        document,
+        frame["id"],
+        {"layout": {"mode": "horizontal", "umg_panel_mode": "canvas"}},
+    )
+    inspector.set_document(flow_document)
+    flow_state = inspector.frame_selection_panel.umg_panel_state()
+    assert flow_state["effective"] == "Horizontal"
+    assert flow_state["policy"] == "layout"
+    assert flow_state["enabled"] is False
+
+    leaf_document, leaf = add_ui_object(
+        create_ui_document(640, 360),
+        kind="frame",
+        name="Metric Card",
+        x=32,
+        y=32,
+        width=240,
+        height=120,
+        style={"fill": "#FFFFFFFF", "radius": 12.0},
+    )
+    inspector.set_document(leaf_document)
+    leaf_state = inspector.frame_selection_panel.umg_panel_state()
+    assert leaf_state["effective"] == "None"
+    assert leaf_state["policy"] == "not_applicable"
+    assert leaf_state["enabled"] is False
+    assert "직계 자식이 없어" in leaf_state["reason_text"]
+    assert inspector._selected_id() == leaf["id"]
+
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_selected_group_uses_the_same_umg_panel_selector_contract() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, group = add_ui_object(
+        create_ui_document(640, 360),
+        kind="group",
+        name="Overlay Group",
+        x=20,
+        y=20,
+        width=400,
+        height=240,
+    )
+    document, _child = add_ui_object(
+        document,
+        kind="text",
+        name="Title",
+        parent_id=group["id"],
+        x=40,
+        y=40,
+        width=180,
+        height=32,
+        content={"text": "Title"},
+    )
+    document["selection"] = {
+        "object_id": group["id"],
+        "object_ids": [group["id"]],
+    }
+    inspector = PainterUIInspector()
+    changes: list[tuple[str, dict]] = []
+    inspector.properties_changed.connect(
+        lambda object_id, payload: changes.append(
+            (str(object_id), dict(payload))
+        )
+    )
+    inspector.set_document(document)
+
+    selector = inspector.auto_layout_umg_panel_control
+    state = selector.state()
+    assert state["effective"] == "Overlay"
+    assert state["enabled"] is True
+    assert state["status"] == "Auto → Overlay"
+    selector.mode_combo.setCurrentIndex(
+        selector.mode_combo.findData("canvas")
+    )
+    assert changes[-1][0] == group["id"]
+    assert changes[-1][1]["layout"]["umg_panel_mode"] == "canvas"
+
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_selected_shape_swaps_shell_to_shape_inspector() -> None:
     app = _app()
     from app.painter_ui_document import add_ui_object, create_ui_document

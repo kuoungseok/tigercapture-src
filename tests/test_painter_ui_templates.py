@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+import math
 import os
 
 
@@ -54,6 +56,257 @@ def test_every_builtin_template_is_a_valid_complete_editable_document() -> None:
         assert provenance["template_id"] == row["id"]
         assert provenance["template_version"] == row["version"]
         assert provenance["license"]["id"] == row["license"]["id"]
+
+
+def test_builtin_media_placeholders_do_not_claim_missing_image_sources() -> None:
+    from app.painter_ui_templates import (
+        inspect_ui_template_catalog,
+        instantiate_ui_template,
+    )
+
+    observed = 0
+    for template in inspect_ui_template_catalog()["templates"]:
+        document, _report = instantiate_ui_template(template["id"])
+        for row in document["objects"]:
+            if row.get("name") != "Hero Media":
+                continue
+            observed += 1
+            assert row["kind"] == "rectangle"
+            assert not (row.get("content") or {}).get("source_path")
+    assert observed > 0
+
+
+def test_mobile_onboarding_body_uses_readable_non_clipping_type_size() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+
+    document, _report = instantiate_ui_template("mobile_onboarding")
+    body_rows = [
+        row for row in document["objects"] if row.get("name") == "Supporting Copy"
+    ]
+    assert len(body_rows) == 3
+    assert {row["style"]["font_size"] for row in body_rows} == {18.0}
+
+
+def _rectangles_overlap(left: dict, right: dict) -> bool:
+    left_x = float(left["x"])
+    left_y = float(left["y"])
+    left_right = left_x + float(left["width"])
+    left_bottom = left_y + float(left["height"])
+    right_x = float(right["x"])
+    right_y = float(right["y"])
+    right_right = right_x + float(right["width"])
+    right_bottom = right_y + float(right["height"])
+    return (
+        left_x < right_right
+        and right_x < left_right
+        and left_y < right_bottom
+        and right_y < left_bottom
+    )
+
+
+def test_builtin_template_objects_stay_inside_their_artboards() -> None:
+    from app.painter_ui_templates import (
+        inspect_ui_template_catalog,
+        instantiate_ui_template,
+    )
+
+    for template in inspect_ui_template_catalog()["templates"]:
+        document, _report = instantiate_ui_template(template["id"])
+        artboards = {row["id"]: row for row in document["artboards"]}
+        for row in document["objects"]:
+            artboard = artboards[row["artboard_id"]]
+            assert float(row["x"]) >= 0, (template["id"], row["name"])
+            assert float(row["y"]) >= 0, (template["id"], row["name"])
+            assert float(row["x"]) + float(row["width"]) <= float(
+                artboard["width"]
+            ), (template["id"], artboard["name"], row["name"])
+            assert float(row["y"]) + float(row["height"]) <= float(
+                artboard["height"]
+            ), (template["id"], artboard["name"], row["name"])
+
+
+def test_hud_broadcast_and_pitch_constraints_preserve_reference_geometry() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_templates import instantiate_ui_template
+
+    expected_modes = {
+        "Top Status": ("stretch", "top"),
+        "Information Rail": ("right", "stretch"),
+        "Lower Third": ("left", "bottom"),
+        "Action Prompt": ("center", "bottom"),
+    }
+    for template_id in ("game_hud", "broadcast_overlay"):
+        document, _report = instantiate_ui_template(template_id)
+        resolved = resolve_ui_constraints(document)
+        rows_by_name = {row["name"]: row for row in document["objects"]}
+        for name, (horizontal, vertical) in expected_modes.items():
+            row = rows_by_name[name]
+            assert row["constraints"]["horizontal"] == horizontal
+            assert row["constraints"]["vertical"] == vertical
+            for key in ("x", "y", "width", "height"):
+                assert abs(float(resolved[row["id"]][key]) - float(row[key])) <= 1e-6
+
+    pitch, _report = instantiate_ui_template("pitch_deck_cover")
+    resolved = resolve_ui_constraints(pitch)
+    accent_rows = [
+        row for row in pitch["objects"] if row["name"] == "Accent Field"
+    ]
+    assert len(accent_rows) == 3
+    for row in accent_rows:
+        assert row["constraints"]["horizontal"] == "right"
+        assert row["constraints"]["vertical"] == "stretch"
+        for key in ("x", "y", "width", "height"):
+            assert abs(float(resolved[row["id"]][key]) - float(row[key])) <= 1e-6
+
+
+def test_hud_broadcast_and_pitch_constraints_export_expected_umg_anchors() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    expected_anchors = {
+        "Top Status": ((0.0, 0.0), (1.0, 0.0)),
+        "Information Rail": ((1.0, 0.0), (1.0, 1.0)),
+        "Lower Third": ((0.0, 1.0), (0.0, 1.0)),
+        "Action Prompt": ((0.5, 1.0), (0.5, 1.0)),
+    }
+
+    def vector(value: dict) -> tuple[float, float]:
+        return float(value["X"]), float(value["Y"])
+
+    for template_id in ("game_hud", "broadcast_overlay"):
+        document, _report = instantiate_ui_template(template_id)
+        exported = painter_ui_to_umg_document(document)
+        layers_by_name = {row["Name"]: row for row in exported["Layers"]}
+        for name, (minimum, maximum) in expected_anchors.items():
+            slot = layers_by_name[name]["CanvasSlot"]
+            assert vector(slot["AnchorMinimum"]) == minimum
+            assert vector(slot["AnchorMaximum"]) == maximum
+
+    pitch, _report = instantiate_ui_template("pitch_deck_cover")
+    for artboard in pitch["artboards"]:
+        exported = painter_ui_to_umg_document(
+            pitch,
+            artboard_id=artboard["id"],
+        )
+        accent = next(
+            row for row in exported["Layers"] if row["Name"] == "Accent Field"
+        )
+        slot = accent["CanvasSlot"]
+        assert vector(slot["AnchorMinimum"]) == (1.0, 0.0)
+        assert vector(slot["AnchorMaximum"]) == (1.0, 1.0)
+
+
+def test_mobile_dashboard_metrics_chart_and_cta_do_not_overlap() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+
+    observed_artboards = 0
+    for template_id in ("mobile_finance", "saas_dashboard"):
+        document, _report = instantiate_ui_template(template_id)
+        mobile_ids = {
+            row["id"]
+            for row in document["artboards"]
+            if float(row["width"]) <= 700
+        }
+        for artboard_id in mobile_ids:
+            observed_artboards += 1
+            regions = [
+                row
+                for row in document["objects"]
+                if row["artboard_id"] == artboard_id
+                and (
+                    str(row["name"]).startswith("Metric Card")
+                    or row["name"] in {"Chart Region", "Primary CTA"}
+                )
+            ]
+            assert len(regions) == 5
+            for left, right in itertools.combinations(regions, 2):
+                assert not _rectangles_overlap(left, right), (
+                    template_id,
+                    left["name"],
+                    right["name"],
+                )
+    assert observed_artboards == 3
+
+
+def test_mobile_generic_hero_copy_cta_and_cards_have_separate_regions() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+
+    key_names = {
+        "Hero Headline",
+        "Hero Media",
+        "Supporting Copy",
+        "Primary CTA",
+        "Feature Card A",
+        "Feature Card B",
+    }
+    observed_artboards = 0
+    for template_id in (
+        "mobile_onboarding",
+        "commerce_product",
+        "wireframe_user_flow",
+    ):
+        document, _report = instantiate_ui_template(template_id)
+        mobile_ids = {
+            row["id"]
+            for row in document["artboards"]
+            if float(row["width"]) <= 700
+        }
+        for artboard_id in mobile_ids:
+            observed_artboards += 1
+            regions = [
+                row
+                for row in document["objects"]
+                if row["artboard_id"] == artboard_id
+                and row["name"] in key_names
+            ]
+            assert {row["name"] for row in regions} == key_names
+            for left, right in itertools.combinations(regions, 2):
+                assert not _rectangles_overlap(left, right), (
+                    template_id,
+                    left["name"],
+                    right["name"],
+                )
+    assert observed_artboards == 5
+
+
+def test_desktop_generic_supporting_copy_has_enough_line_height() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+
+    observed = 0
+    for template_id in (
+        "commerce_product",
+        "portfolio_case_study",
+        "wireframe_user_flow",
+        "accessible_checkout",
+    ):
+        document, _report = instantiate_ui_template(template_id)
+        desktop_ids = {
+            row["id"]
+            for row in document["artboards"]
+            if float(row["width"]) > 700
+        }
+        for row in document["objects"]:
+            if (
+                row["artboard_id"] not in desktop_ids
+                or row["name"] != "Supporting Copy"
+            ):
+                continue
+            observed += 1
+            font_size = float(row["style"]["font_size"])
+            text = str((row.get("content") or {}).get("text") or "")
+            estimated_chars_per_line = max(
+                1,
+                int(float(row["width"]) / (font_size * 0.55)),
+            )
+            estimated_lines = math.ceil(len(text) / estimated_chars_per_line)
+            estimated_text_height = estimated_lines * font_size * 1.35
+            assert font_size == 18.0
+            assert estimated_text_height <= float(row["height"]), (
+                template_id,
+                estimated_lines,
+                row["height"],
+            )
+    assert observed == 4
 
 
 def test_template_gallery_filters_renders_and_emits_stable_id() -> None:

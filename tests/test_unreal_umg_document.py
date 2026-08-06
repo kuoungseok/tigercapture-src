@@ -56,7 +56,11 @@ def test_motion_umg_document_keeps_resources_animation_and_click_actions(
     )
 
     document = motion_composition_to_umg_document(composition)
-    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 11
+    assert TIGER_UMG_SCHEMA_VERSION == 13
+    assert document["SchemaVersion"] == 16
+    assert all(
+        row["Visibility"] == "Visible" for row in document["Layers"]
+    )
     assert document["Layers"][0]["Kind"] == "Button"
     assert document["Animations"][0]["Property"] == "position"
     assert [row["Type"] for row in document["Interactions"][0]["Actions"]] == [

@@ -144,10 +144,16 @@ def _style_row(
     return row
 
 
-def inspect_ui_style_library(value: Mapping[str, Any]) -> dict[str, Any]:
+def inspect_ui_style_library(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
-    document = normalize_ui_document(value)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     usage = {row["id"]: [] for row in document["styles"]}
     for obj in document["objects"]:
         for kind, style_id in obj["style_ids"].items():

@@ -880,6 +880,65 @@ def test_m1b8_workspace_caches_boolean_geometry_until_render_state_changes(
     assert calls == 3
 
 
+def test_imported_boolean_host_falls_back_to_canonical_figma_geometry(
+    monkeypatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage, QPainter, QPainterPath
+    from PySide6.QtWidgets import QApplication
+
+    import app.painter_ui_workspace as workspace
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    app = QApplication.instance() or QApplication([])
+    document, first, second = _two_shapes()
+    document, group = compose_ui_boolean(
+        document,
+        "union",
+        [first["id"], second["id"]],
+    )
+    content = dict(group["content"])
+    content["vector_fill_geometry"] = [
+        {
+            "path": "M 0 0 H 100 V 100 H 0 Z",
+            "winding_rule": "nonzero",
+        }
+    ]
+    document, group = update_ui_object(
+        document,
+        group["id"],
+        {"content": content},
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(480, 320)
+    overlay.set_document(document)
+    row = overlay._effective_objects_by_id[group["id"]]
+    monkeypatch.setattr(overlay, "_boolean_path", lambda _row: QPainterPath())
+    calls = 0
+    original = workspace.draw_ui_vector_paths
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(workspace, "draw_ui_vector_paths", counted)
+    image = QImage(480, 320, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    overlay._paint_object(painter, row)
+    painter.end()
+
+    assert calls == 1
+    assert any(
+        image.pixelColor(x, y).alpha() > 0
+        for y in range(0, image.height(), 8)
+        for x in range(0, image.width(), 8)
+    )
+    app.processEvents()
+
+
 def test_m1b8_boolean_context_bar_has_keyboard_and_accessibility_contract() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import Qt

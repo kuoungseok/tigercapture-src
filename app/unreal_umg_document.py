@@ -1,6 +1,7 @@
 """Provider-neutral Tiger Studio UMG document and resource packaging."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import shutil
@@ -11,20 +12,117 @@ from app.motion_designer.interactive_button import button_component
 from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionLayer
 from app.unreal_umg_layout import (
     TIGER_UMG_SCHEMA_VERSION,
+    TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION,
     motion_layer_layout,
+    validate_umg_panel_record,
+    validate_umg_widget_visibility,
+)
+from app.unreal_umg_button import (
+    TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION,
+    motion_button_style_record,
+    validate_umg_button_style_record,
 )
 from app.unreal_umg_image_fill import (
     UMGImageFillConversion,
     motion_image_fill_conversion,
     validate_umg_image_fill_record,
 )
+from app.unreal_umg_baked import (
+    SUPPORTED_TIGER_UMG_SCHEMA_VERSION,
+    validate_umg_materialized_baked_layer,
+    validate_umg_resource_identity_contract,
+)
 from app.unreal_umg_material import (
     motion_shape_gradient_material,
     validate_umg_material_record,
 )
+from app.unreal_umg_component import (
+    inspect_umg_component_records,
+    validate_umg_component_contract,
+)
 
 
 SUPPORTED_NATIVE_LAYERS = {"group", "shape", "text", "image"}
+TIGER_UMG_DISPOSITIONS = frozenset(
+    {"Native", "Material", "Baked", "Blocked"}
+)
+
+
+def inspect_umg_document_records(
+    document: object,
+    *,
+    resources_required: bool = False,
+) -> dict[str, Any]:
+    """Return only typed rows and explicit container/row diagnostics.
+
+    ``Resources`` was optional in schema 4-era provider documents, so the
+    generic reader preserves an absent container as an empty legacy list.
+    Provider adapters that always serialize it can opt into the stricter
+    ``resources_required`` contract.  A present malformed container or row is
+    never silently filtered in either mode.
+    """
+
+    if not isinstance(document, Mapping):
+        reasons = ["umg_document_record_invalid", "umg_layers_record_invalid"]
+        if resources_required:
+            reasons.append("umg_resources_record_invalid")
+        return {
+            "layers": [],
+            "resources": [],
+            "components": [],
+            "component_instances": [],
+            "component_layers": [],
+            "reasons": sorted(reasons),
+        }
+
+    reasons: list[str] = []
+    raw_layers = document.get("Layers")
+    layers: list[Mapping[str, Any]] = []
+    if not isinstance(raw_layers, list):
+        reasons.append("umg_layers_record_invalid")
+    else:
+        for row in raw_layers:
+            if isinstance(row, Mapping):
+                layers.append(row)
+            else:
+                reasons.append("umg_layer_record_invalid")
+
+    resources: list[Mapping[str, Any]] = []
+    if "Resources" not in document:
+        if resources_required:
+            reasons.append("umg_resources_record_invalid")
+    else:
+        raw_resources = document.get("Resources")
+        if not isinstance(raw_resources, list):
+            reasons.append("umg_resources_record_invalid")
+        else:
+            for row in raw_resources:
+                if isinstance(row, Mapping):
+                    resources.append(row)
+                else:
+                    reasons.append("umg_resource_record_invalid")
+    component_records = inspect_umg_component_records(document)
+    return {
+        "layers": layers,
+        "resources": resources,
+        "components": component_records["components"],
+        "component_instances": component_records["component_instances"],
+        "component_layers": component_records["component_layers"],
+        "reasons": sorted(
+            set([*reasons, *component_records["reasons"]])
+        ),
+    }
+
+
+def validated_umg_disposition(row: Mapping[str, Any]) -> str | None:
+    """Return one exact four-way classification, never a coerced value."""
+
+    value = row.get("Disposition")
+    return (
+        value
+        if isinstance(value, str) and value in TIGER_UMG_DISPOSITIONS
+        else None
+    )
 
 
 def _value2(value: Any, default: tuple[float, float]) -> list[float]:
@@ -123,13 +221,14 @@ def _umg_block_reasons(
     if layer.layer_type not in SUPPORTED_NATIVE_LAYERS:
         return [f"unsupported_layer_type:{layer.layer_type}"]
     params = layer.source.params
+    is_button = button_component(layer) is not None
     reasons: list[str] = list(
         image_fill.block_reasons if image_fill is not None else []
     )
     if layer.layer_type == "shape":
         gradient_material = (
             None
-            if image_fill is not None
+            if image_fill is not None or is_button
             else motion_shape_gradient_material(
                 params,
                 layer_type=layer.layer_type,
@@ -143,7 +242,11 @@ def _umg_block_reasons(
         if primitive != "rectangle":
             reasons.append(f"shape_primitive_requires_bake:{primitive}")
         radius = params.get("radius", 0.0)
-        if _static_number(radius) > 0.0 and image_fill is None:
+        if (
+            _static_number(radius) > 0.0
+            and image_fill is None
+            and not is_button
+        ):
             reasons.append("rounded_shape_requires_bake")
         for key in (
             "path", "boolean", "trim", "offset_path", "repeater",
@@ -161,7 +264,10 @@ def _umg_block_reasons(
                 if image_fill is not None
                 else "shape_operator_requires_bake:gradient"
             )
-        if _static_number(params.get("stroke_width", 0.0)) > 0.0:
+        if (
+            _static_number(params.get("stroke_width", 0.0)) > 0.0
+            and not is_button
+        ):
             reasons.append("shape_stroke_requires_bake")
         if gradient_material is not None:
             reasons.extend(
@@ -287,7 +393,7 @@ def motion_composition_to_umg_document(
         image_fill_conversion = motion_image_fill_conversion(layer)
         material_record = (
             None
-            if image_fill_conversion is not None
+            if image_fill_conversion is not None or component is not None
             else motion_shape_gradient_material(
                 layer.source.params,
                 layer_type=layer.layer_type,
@@ -317,6 +423,15 @@ def motion_composition_to_umg_document(
             image_fill_record = image_fill_conversion.bind_asset(asset_id)
         font_file = str(layer.source.params.get("font_file") or "")
         font_asset_id = register_resource(font_file, "font") if font_file else ""
+        button_style_record = (
+            motion_button_style_record(
+                layer.source.params,
+                layer_type=layer.layer_type,
+                has_image_fill=image_fill_conversion is not None,
+            )
+            if component is not None
+            else {}
+        )
 
         position = _vector2(layer.transform.position.default, (0.0, 0.0))
         scale = _vector2(layer.transform.scale.default, (1.0, 1.0))
@@ -331,6 +446,7 @@ def motion_composition_to_umg_document(
         payload = _layer_payload(layer)
         payload["font_asset_id"] = font_asset_id
         payload["image_fill"] = dict(image_fill_record)
+        payload["umg_button_style"] = copy.deepcopy(button_style_record)
         payload["umg_mapping"] = (
             "blocked_preflight"
             if block_reasons
@@ -354,6 +470,7 @@ def motion_composition_to_umg_document(
                 "Opacity": float(layer.transform.opacity.default or 0.0),
                 "AssetId": asset_id,
                 "ImageFill": image_fill_record,
+                "ButtonStyle": button_style_record,
                 "Material": (
                     material_record if disposition == "Material" else {}
                 ),
@@ -472,8 +589,28 @@ def motion_composition_to_umg_document(
         ):
             existing["Actions"].append(action_row)
 
+    schema_version = (
+        TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION
+        if any(bool(row.get("ButtonStyle")) for row in layers)
+        else TIGER_UMG_SCHEMA_VERSION
+    )
+    for layer in layers:
+        # Current Motion documents are converted in strict mode after legacy
+        # defaults for these older schema additions have stopped applying.
+        # Keep every current FTigerStudioUMGLayerRecord outer field explicit
+        # even when Motion does not author that feature.
+        layer.setdefault("PanelKind", "None")
+        layer.setdefault("FlowSlot", {})
+        layer.setdefault("ScrollOverflow", "None")
+        layer.setdefault("ScrollPosition", "Scroll")
+        layer.setdefault("Flipbook", {})
+        if (
+            schema_version
+            >= TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
+        ):
+            layer.setdefault("Visibility", "Visible")
     return {
-        "SchemaVersion": TIGER_UMG_SCHEMA_VERSION,
+        "SchemaVersion": schema_version,
         "Provider": provider,
         "DocumentId": composition.id,
         "Revision": int(composition.revision),
@@ -488,22 +625,100 @@ def motion_composition_to_umg_document(
     }
 
 
-def preflight_umg_document(document: Mapping[str, Any]) -> dict[str, Any]:
-    schema_version = int(document.get("SchemaVersion", 0) or 0)
+def preflight_umg_document(
+    document: Mapping[str, Any],
+    *,
+    document_path: str | Path | None = None,
+    base_path: str | Path | None = None,
+) -> dict[str, Any]:
+    source = document if isinstance(document, Mapping) else {}
+    record_contract = inspect_umg_document_records(document)
+    layers = [
+        *record_contract["layers"],
+        *record_contract["component_layers"],
+    ]
+    resources = record_contract["resources"]
+    raw_schema_version = source.get("SchemaVersion")
+    schema_version = (
+        raw_schema_version
+        if isinstance(raw_schema_version, int)
+        and not isinstance(raw_schema_version, bool)
+        else 0
+    )
+    resource_base_path = (
+        Path(document_path).expanduser().resolve().parent
+        if document_path is not None
+        else Path(base_path).expanduser().resolve()
+        if base_path is not None
+        else None
+    )
     counts = {"Native": 0, "Material": 0, "Baked": 0, "Blocked": 0}
     blockers: list[dict[str, Any]] = []
-    for row in document.get("Layers", []):
-        if not isinstance(row, Mapping):
+    document_reasons = [
+        *record_contract["reasons"],
+        *validate_umg_component_contract(document),
+    ]
+    if not 4 <= schema_version <= SUPPORTED_TIGER_UMG_SCHEMA_VERSION:
+        document_reasons.append("umg_schema_version_unsupported")
+    document_reasons.extend(validate_umg_resource_identity_contract(resources))
+    if document_reasons:
+        blockers.append(
+            {
+                "layer_id": "",
+                "name": "Tiger UMG document",
+                "reasons": sorted(set(document_reasons)),
+            }
+        )
+    for row in layers:
+        disposition = validated_umg_disposition(row)
+        if disposition is None:
+            blockers.append(
+                {
+                    "layer_id": str(row.get("Id") or ""),
+                    "name": str(row.get("Name") or ""),
+                    "reasons": ["umg_layer_disposition_invalid"],
+                }
+            )
             continue
-        disposition = str(row.get("Disposition") or "Blocked")
-        counts[disposition] = counts.get(disposition, 0) + 1
+        counts[disposition] += 1
+        panel_reasons = validate_umg_panel_record(
+            row,
+            document_schema_version=schema_version,
+        )
         image_reasons = validate_umg_image_fill_record(
             row.get("ImageFill"),
             layer_asset_id=str(row.get("AssetId") or ""),
         )
+        visibility_reasons = validate_umg_widget_visibility(
+            row.get("Visibility"),
+            document_schema_version=schema_version,
+        )
+        button_style = row.get("ButtonStyle")
+        has_button_style = isinstance(button_style, Mapping) and bool(
+            button_style
+        )
+        button_style_reasons = validate_umg_button_style_record(
+            button_style,
+            layer_kind=str(row.get("Kind") or "") if has_button_style else "",
+            document_schema_version=schema_version,
+            required=(
+                schema_version
+                >= TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION
+                and disposition == "Native"
+                and str(row.get("Kind") or "") == "Button"
+            ),
+        )
+        if has_button_style and disposition != "Native":
+            button_style_reasons.append(
+                "button_style_requires_native_disposition"
+            )
+        button_style_reasons = sorted(set(button_style_reasons))
         if disposition == "Material":
             reasons = [
+                *panel_reasons,
                 *image_reasons,
+                *button_style_reasons,
+                *visibility_reasons,
                 *validate_umg_material_record(
                     row.get("Material"),
                     layer_kind=str(row.get("Kind") or ""),
@@ -513,15 +728,40 @@ def preflight_umg_document(document: Mapping[str, Any]) -> dict[str, Any]:
             if not reasons:
                 continue
         elif disposition == "Baked":
-            reasons = ["baked_generation_unavailable"]
+            reasons = sorted(
+                set(
+                    [
+                        *panel_reasons,
+                        *validate_umg_materialized_baked_layer(
+                            row,
+                            document_schema_version=schema_version,
+                            resources=resources,
+                            resource_base_path=resource_base_path,
+                        ),
+                        *button_style_reasons,
+                        *visibility_reasons,
+                    ]
+                )
+            )
+            if not reasons:
+                continue
         elif disposition == "Blocked":
             reasons = [
                 str(reason)
                 for reason in row.get("BlockReasons", [])
                 if str(reason)
             ] or ["unsupported_layer"]
-        else:
-            reasons = image_reasons
+        else:  # Native is the only remaining validated disposition.
+            reasons = sorted(
+                set(
+                    [
+                        *panel_reasons,
+                        *image_reasons,
+                        *button_style_reasons,
+                        *visibility_reasons,
+                    ]
+                )
+            )
             if not reasons:
                 continue
         blockers.append({
@@ -571,7 +811,7 @@ def package_umg_document(
         json.dumps(packaged, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    preflight = preflight_umg_document(packaged)
+    preflight = preflight_umg_document(packaged, base_path=root)
     return {
         "ok": not missing and preflight["ok"],
         "document_path": str(document_path),
@@ -596,9 +836,12 @@ def package_motion_composition_for_umg(
 
 
 __all__ = [
+    "TIGER_UMG_DISPOSITIONS",
     "TIGER_UMG_SCHEMA_VERSION",
+    "inspect_umg_document_records",
     "motion_composition_to_umg_document",
     "package_motion_composition_for_umg",
     "package_umg_document",
     "preflight_umg_document",
+    "validated_umg_disposition",
 ]

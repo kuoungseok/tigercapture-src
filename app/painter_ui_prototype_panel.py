@@ -363,12 +363,18 @@ class PainterUIPrototypePanel(QWidget):
         )
         self.background_changed.emit(f"#{value}")
 
-    def set_document(self, value: Mapping[str, Any]) -> None:
-        self._document = normalize_ui_document(value)
+    def set_document(
+        self,
+        value: Mapping[str, Any],
+        *,
+        normalize: bool = True,
+    ) -> None:
+        self._document = normalize_ui_document(value) if normalize else value
         self._object_id = str(self._document["selection"]["object_id"] or "")
         report = inspect_ui_prototype_authoring(
             self._document,
             object_id=self._object_id,
+            normalize=False,
         )
         self.flow_combo.blockSignals(True)
         self.flow_combo.clear()

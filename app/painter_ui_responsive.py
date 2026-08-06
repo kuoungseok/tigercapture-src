@@ -5,6 +5,8 @@ import copy
 from collections.abc import Mapping
 from typing import Any
 
+from app.painter_ui_json_copy import json_deepcopy
+
 
 _ORIENTATIONS = {"any", "portrait", "landscape"}
 _SCALAR_KEYS = {"x", "y", "width", "height", "rotation", "opacity"}
@@ -53,7 +55,7 @@ def normalize_ui_responsive_changes(
             result[key] = bool(source[key])
     for key in _MAPPING_KEYS:
         if isinstance(source.get(key), Mapping):
-            result[key] = copy.deepcopy(dict(source[key]))
+            result[key] = json_deepcopy(dict(source[key]))
     return result
 
 
@@ -138,7 +140,7 @@ def resolve_ui_responsive_object(
     breakpoint: str,
     orientation: str,
 ) -> dict[str, Any]:
-    result = copy.deepcopy(dict(row))
+    result = json_deepcopy(dict(row))
     overrides = _responsive_overrides_for_context(
         row,
         breakpoint=breakpoint,
@@ -153,10 +155,10 @@ def resolve_ui_responsive_object(
             if key in _MAPPING_KEYS:
                 result[key] = {
                     **dict(result.get(key) or {}),
-                    **copy.deepcopy(dict(value)),
+                    **json_deepcopy(dict(value)),
                 }
             else:
-                result[key] = copy.deepcopy(value)
+                result[key] = json_deepcopy(value)
     result["responsive_override_id"] = str(overrides[-1]["id"])
     return result
 
@@ -164,7 +166,7 @@ def resolve_ui_responsive_object(
 def resolve_ui_responsive_document(
     document: Mapping[str, Any],
 ) -> dict[str, Any]:
-    result = copy.deepcopy(dict(document))
+    result = json_deepcopy(dict(document))
     artboards = {
         str(row["id"]): row
         for row in result.get("artboards", [])

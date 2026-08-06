@@ -18,6 +18,11 @@ UI_EFFECT_TYPES = {
     "inner_shadow",
     "layer_blur",
     "background_blur",
+    # Figma REST beta effects.  Painter preserves these losslessly, but the
+    # current raster canvas deliberately does not approximate them as a
+    # shadow or uniform blur.
+    "noise",
+    "texture",
 }
 UI_EFFECT_BLEND_MODES = {
     "normal",
@@ -32,6 +37,8 @@ UI_EFFECT_BLEND_MODES = {
     "hard_light",
     "difference",
     "exclusion",
+    "linear_burn",
+    "linear_dodge",
     "hue",
     "saturation",
     "color",
@@ -53,6 +60,18 @@ def _point(value: object, fallback: tuple[float, float]) -> dict[str, float]:
         "x": _number(value.get("x"), fallback[0]),
         "y": _number(value.get("y"), fallback[1]),
     }
+
+
+def _effect_color(value: object, default: str) -> str:
+    if not isinstance(value, Mapping):
+        return str(value or default)
+    channels = [
+        max(0, min(255, round(_number(value.get(key)) * 255.0)))
+        for key in ("r", "g", "b", "a")
+    ]
+    if "a" not in value:
+        channels[3] = 255
+    return "#" + "".join(f"{channel:02X}" for channel in channels)
 
 
 def normalize_ui_gradient(value: object) -> dict[str, Any]:
@@ -94,25 +113,253 @@ def normalize_ui_effect(value: object) -> dict[str, Any]:
     if effect_type not in UI_EFFECT_TYPES:
         effect_type = "drop_shadow"
     if effect_type in {"layer_blur", "background_blur"}:
-        return {
+        result: dict[str, Any] = {
             "type": effect_type,
             "radius": max(
                 0.0,
                 min(256.0, _number(value.get("radius"), 8.0)),
             ),
         }
+        raw_blur_type = value.get("blur_type", value.get("blurType"))
+        progressive_fields_present = any(
+            key in value
+            for key in (
+                "start_radius",
+                "startRadius",
+                "start_offset",
+                "startOffset",
+                "end_offset",
+                "endOffset",
+            )
+        )
+        if raw_blur_type is not None or progressive_fields_present:
+            blur_type = str(raw_blur_type or "progressive").strip().casefold()
+            if blur_type not in {"normal", "progressive"}:
+                blur_type = "normal"
+            result["blur_type"] = blur_type
+            if blur_type == "progressive":
+                result["start_radius"] = max(
+                    0.0,
+                    min(
+                        256.0,
+                        _number(
+                            value.get("start_radius", value.get("startRadius")),
+                            0.0,
+                        ),
+                    ),
+                )
+                result["start_offset"] = _point(
+                    value.get("start_offset", value.get("startOffset")),
+                    (0.0, 0.0),
+                )
+                result["end_offset"] = _point(
+                    value.get("end_offset", value.get("endOffset")),
+                    (0.0, 1.0),
+                )
+        if value.get("visible") is False:
+            result["visible"] = False
+        return result
+    if effect_type == "noise":
+        noise_type = str(
+            value.get("noise_type", value.get("noiseType")) or "monotone"
+        ).strip().casefold()
+        if noise_type not in {"monotone", "duotone", "multitone"}:
+            noise_type = "monotone"
+        blend_mode = str(
+            value.get("blend_mode", value.get("blendMode")) or "normal"
+        ).strip().casefold()
+        if blend_mode not in UI_EFFECT_BLEND_MODES:
+            blend_mode = "normal"
+        result = {
+            "type": effect_type,
+            "color": _effect_color(value.get("color"), "#000000FF"),
+            "blend_mode": blend_mode,
+            "noise_size": max(
+                0.0,
+                _number(value.get("noise_size", value.get("noiseSize"))),
+            ),
+            "noise_type": noise_type,
+            "density": max(0.0, _number(value.get("density"))),
+        }
+        noise_size_vector = value.get(
+            "noise_size_vector",
+            value.get("noiseSizeVector"),
+        )
+        if isinstance(noise_size_vector, Mapping):
+            result["noise_size_vector"] = _point(
+                noise_size_vector,
+                (result["noise_size"], result["noise_size"]),
+            )
+        secondary_color = value.get(
+            "secondary_color",
+            value.get("secondaryColor"),
+        )
+        if secondary_color is not None:
+            result["secondary_color"] = _effect_color(
+                secondary_color,
+                "#FFFFFFFF",
+            )
+        if "opacity" in value:
+            result["opacity"] = max(
+                0.0,
+                min(1.0, _number(value.get("opacity"), 1.0)),
+            )
+        if value.get("visible") is False:
+            result["visible"] = False
+        return result
+    if effect_type == "texture":
+        result = {
+            "type": effect_type,
+            "radius": max(0.0, _number(value.get("radius"))),
+            "noise_size": max(
+                0.0,
+                _number(value.get("noise_size", value.get("noiseSize"))),
+            ),
+            "clip_to_shape": bool(
+                value.get("clip_to_shape", value.get("clipToShape", False))
+            ),
+        }
+        noise_size_vector = value.get(
+            "noise_size_vector",
+            value.get("noiseSizeVector"),
+        )
+        if isinstance(noise_size_vector, Mapping):
+            result["noise_size_vector"] = _point(
+                noise_size_vector,
+                (result["noise_size"], result["noise_size"]),
+            )
+        if value.get("visible") is False:
+            result["visible"] = False
+        return result
     blend_mode = str(value.get("blend_mode") or "normal").strip().casefold()
     if blend_mode not in UI_EFFECT_BLEND_MODES:
         blend_mode = "normal"
-    return {
+    result = {
         "type": effect_type,
-        "color": str(value.get("color") or "#00000066"),
+        "color": _effect_color(value.get("color"), "#00000066"),
         "x": _number(value.get("x")),
         "y": _number(value.get("y"), 4.0),
         "blur": max(0.0, _number(value.get("blur"), 8.0)),
         "spread": _number(value.get("spread")),
         "blend_mode": blend_mode,
     }
+    show_behind = value.get(
+        "show_shadow_behind_node",
+        value.get("showShadowBehindNode"),
+    )
+    if show_behind is not None and effect_type == "drop_shadow":
+        result["show_shadow_behind_node"] = bool(show_behind)
+    if value.get("visible") is False:
+        result["visible"] = False
+    return result
+
+
+def ui_effect_render_block_reason(value: object) -> str:
+    """Return an explicit reason when Painter must not fake an effect.
+
+    Figma's beta noise, texture, and progressive blur effects need a spatial
+    shader or a deterministic raster bake.  Treating a progressive blur as a
+    uniform blur at its end radius is visually plausible but semantically
+    wrong, so renderers and delivery adapters share this decision.
+    """
+
+    value = value if isinstance(value, Mapping) else {}
+    if value.get("visible") is False:
+        return ""
+    effect_type = str(value.get("type") or "").strip().casefold()
+    if effect_type == "noise":
+        return "figma_noise_effect_requires_ui_material_or_deterministic_bake"
+    if effect_type == "texture":
+        return "figma_texture_effect_requires_ui_material_or_deterministic_bake"
+    blur_type = str(
+        value.get("blur_type", value.get("blurType")) or "normal"
+    ).strip().casefold()
+    if effect_type in {"layer_blur", "background_blur"} and blur_type == (
+        "progressive"
+    ):
+        return (
+            f"figma_progressive_{effect_type}_requires_"
+            "ui_material_or_deterministic_bake"
+        )
+    return ""
+
+
+def _ui_effect_bounds(value: object) -> dict[str, float] | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        result = {
+            key: float(value.get(key))
+            for key in ("x", "y", "width", "height")
+        }
+    except (TypeError, ValueError):
+        return None
+    if (
+        not all(math.isfinite(number) for number in result.values())
+        or result["width"] < 0.0
+        or result["height"] < 0.0
+    ):
+        return None
+    return result
+
+
+def ui_effect_render_block_reasons(
+    value: object,
+    *,
+    exact_render: object = None,
+) -> list[str]:
+    """Return the stable blocker plus exact-render safety diagnostics.
+
+    The first entry is always :func:`ui_effect_render_block_reason`, preserving
+    the public compatibility reason. Additional entries explain why a Figma
+    Render API PNG is not, by itself, a safe leaf replacement for progressive
+    blur: layer blur can expand outside the authored box, while background
+    blur depends on pixels behind the node at runtime.
+    """
+
+    value = value if isinstance(value, Mapping) else {}
+    reason = ui_effect_render_block_reason(value)
+    if not reason:
+        return []
+    reasons = [reason]
+    effect_type = str(value.get("type") or "").strip().casefold()
+    blur_type = str(
+        value.get("blur_type", value.get("blurType")) or "normal"
+    ).strip().casefold()
+    if blur_type != "progressive":
+        return reasons
+    if effect_type == "background_blur":
+        reasons.append(
+            "figma_progressive_background_blur_backdrop_dependency_"
+            "requires_runtime_composition"
+        )
+        return reasons
+    if effect_type != "layer_blur" or not isinstance(exact_render, Mapping):
+        return reasons
+    source_bounds = _ui_effect_bounds(exact_render.get("source_bounds"))
+    render_bounds = _ui_effect_bounds(exact_render.get("render_bounds"))
+    if source_bounds is None or render_bounds is None:
+        reasons.append(
+            "figma_progressive_layer_blur_exact_render_bounds_"
+            "require_layout_aware_bake"
+        )
+        return reasons
+    epsilon = 0.0001
+    source_right = source_bounds["x"] + source_bounds["width"]
+    source_bottom = source_bounds["y"] + source_bounds["height"]
+    render_right = render_bounds["x"] + render_bounds["width"]
+    render_bottom = render_bounds["y"] + render_bounds["height"]
+    if (
+        render_bounds["x"] < source_bounds["x"] - epsilon
+        or render_bounds["y"] < source_bounds["y"] - epsilon
+        or render_right > source_right + epsilon
+        or render_bottom > source_bottom + epsilon
+    ):
+        reasons.append(
+            "figma_progressive_layer_blur_render_bounds_expansion_"
+            "requires_layout_aware_bake"
+        )
+    return reasons
 
 
 def normalize_ui_effects(value: object) -> list[dict[str, Any]]:
@@ -411,4 +658,6 @@ __all__ = [
     "set_ui_fill_gradient",
     "update_ui_effect",
     "update_ui_blur",
+    "ui_effect_render_block_reason",
+    "ui_effect_render_block_reasons",
 ]

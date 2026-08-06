@@ -441,10 +441,13 @@ def inspect_ui_prototype_authoring(
     value: Mapping[str, Any],
     *,
     object_id: str = "",
+    normalize: bool = True,
 ) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
-    document = normalize_ui_document(value)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     prototype = normalize_ui_prototype_contract(
         document["linked_targets"].get("prototype")
     )

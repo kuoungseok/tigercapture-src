@@ -243,3 +243,43 @@ def test_custom_anchor_normalization_clamps_orders_and_collapses_noise() -> None
     assert constraints["anchor_min_x"] == 0.0
     assert constraints["anchor_max_x"] == 1.0
     assert constraints["anchor_min_y"] == constraints["anchor_max_y"] == 0.4
+
+
+def test_document_constraint_resolution_uses_parent_indexes(monkeypatch) -> None:
+    """Bulk resolution must not fall back to one full scan per object."""
+    import app.painter_ui_constraints as constraint_module
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600)
+    document, parent = add_ui_object(
+        document,
+        kind="frame",
+        x=40,
+        y=50,
+        width=500,
+        height=300,
+    )
+    child_ids: list[str] = []
+    for index in range(64):
+        document, child = add_ui_object(
+            document,
+            parent_id=parent["id"],
+            x=60 + index,
+            y=80,
+            width=40,
+            height=20,
+        )
+        child_ids.append(child["id"])
+
+    def reject_linear_parent_scan(*_args, **_kwargs):
+        raise AssertionError("bulk constraint resolution used the linear helper")
+
+    monkeypatch.setattr(
+        constraint_module,
+        "constraint_parent_geometry",
+        reject_linear_parent_scan,
+    )
+    geometry = constraint_module.resolve_ui_constraints(document)
+
+    assert len(geometry) == 65
+    assert geometry[child_ids[-1]]["x"] == 123.0

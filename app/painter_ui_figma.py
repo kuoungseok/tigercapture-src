@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import math
 import mimetypes
 import os
 import re
@@ -11,8 +12,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
+from app.painter_ui_appearance import ui_effect_render_block_reasons
 from app.painter_ui_document import normalize_ui_document, validate_ui_document
 
 
@@ -180,6 +182,43 @@ def _figma_component_property_bindings(value: object) -> dict[str, str]:
     }
 
 
+def _figma_unmapped_component_property_bindings(
+    value: object,
+) -> dict[str, Any]:
+    """Preserve reference entries that cannot enter Painter's active map."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    supported_fields = {"characters", "visible", "mainComponent"}
+    return {
+        f"figma_field:{field}": copy.deepcopy(property_name)
+        for field, property_name in value.items()
+        if field not in supported_fields or not str(property_name or "").strip()
+    }
+
+
+def _detach_figma_component_property_bindings(
+    row: dict[str, Any],
+    warnings: list[str],
+    *,
+    reason: str = "remote_component_property_bindings_detached",
+) -> None:
+    """Preserve bindings that cannot remain active after remote fallback."""
+
+    bindings = dict(row.get("component_property_bindings") or {})
+    if not bindings:
+        return
+    content = row.get("content")
+    content = dict(content) if isinstance(content, Mapping) else {}
+    recovery = content.get("figma_component_property_bindings")
+    recovery = dict(recovery) if isinstance(recovery, Mapping) else {}
+    recovery.update(copy.deepcopy(bindings))
+    content["figma_component_property_bindings"] = recovery
+    row["content"] = content
+    row["component_property_bindings"] = {}
+    warnings.append(f"converted:{row['id']}:{reason}")
+
+
 def _figma_variant_key(node: Mapping[str, Any]) -> str:
     properties = node.get("variantProperties")
     if isinstance(properties, Mapping) and properties:
@@ -299,6 +338,87 @@ def _gradient_paint(paints: object) -> Mapping[str, Any] | None:
             in {"GRADIENT_LINEAR", "GRADIENT_RADIAL"}
         ),
         None,
+    )
+
+
+def _figma_paint_is_opaque_alpha_cover(paint: Mapping[str, Any]) -> bool:
+    """Return whether one visible Figma fill is opaque over the whole shape."""
+
+    if not bool(paint.get("visible", True)):
+        return False
+    paint_opacity = max(
+        0.0,
+        min(1.0, _number(paint.get("opacity"), 1.0)),
+    )
+    paint_type = str(paint.get("type") or "").upper()
+    if paint_type == "SOLID":
+        color = paint.get("color")
+        color = color if isinstance(color, Mapping) else {}
+        return paint_opacity * _number(color.get("a"), 1.0) >= 0.999
+    if paint_type.startswith("GRADIENT_"):
+        stops = paint.get("gradientStops")
+        if not isinstance(stops, list) or not stops:
+            return False
+        return all(
+            isinstance(stop, Mapping)
+            and paint_opacity
+            * _number(
+                (
+                    stop.get("color")
+                    if isinstance(stop.get("color"), Mapping)
+                    else {}
+                ).get("a"),
+                1.0,
+            )
+            >= 0.999
+            for stop in stops
+        )
+    # Image alpha and plugin paint extensions require raster evaluation even
+    # when their current thumbnail happens to look opaque.
+    return False
+
+
+def _figma_mask_requires_raster_alpha(node: Mapping[str, Any]) -> bool:
+    """Detect masks that cannot be represented by a hard geometry clip.
+
+    Painter's current live canvas can safely inherit a vector/shape clip down
+    a target subtree.  It cannot yet composite per-pixel alpha or luminance for
+    the complete sibling group, so preserve that distinction instead of
+    claiming a gradient alpha mask was converted exactly.
+    """
+
+    mask_type = str(node.get("maskType") or "ALPHA").upper()
+    if mask_type == "VECTOR":
+        return False
+    if mask_type == "LUMINANCE":
+        return True
+    if _number(node.get("opacity"), 1.0) < 0.999:
+        return True
+    effects = node.get("effects")
+    if isinstance(effects, list) and any(
+        isinstance(effect, Mapping) and bool(effect.get("visible", True))
+        for effect in effects
+    ):
+        return True
+    strokes = node.get("strokes")
+    if (
+        isinstance(strokes, list)
+        and _number(node.get("strokeWeight"), 1.0) > 0.0
+        and any(
+            isinstance(stroke, Mapping) and bool(stroke.get("visible", True))
+            for stroke in strokes
+        )
+    ):
+        return True
+    fills = node.get("fills")
+    visible_fills = [
+        paint
+        for paint in fills
+        if isinstance(paint, Mapping) and bool(paint.get("visible", True))
+    ] if isinstance(fills, list) else []
+    return not any(
+        _figma_paint_is_opaque_alpha_cover(paint)
+        for paint in visible_fills
     )
 
 
@@ -465,6 +585,7 @@ def _map_paints(
                         "temperature",
                         "tint",
                         "highlights",
+                        "shadows",
                     )
                 },
             }
@@ -554,6 +675,92 @@ def _box(node: Mapping[str, Any]) -> dict[str, float]:
     }
 
 
+def _figma_missing_auto_layout_cross_box(
+    node: Mapping[str, Any],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    """Conservatively infer one missing Auto Layout cross-axis bound.
+
+    Some component/node snapshots omit a container ``absoluteBoundingBox``
+    while retaining resolved bounds for one or more direct flow children.
+    For center-aligned children with a common center (or start/end aligned
+    children with a common edge), the smallest content box plus authored
+    padding is a deterministic inverse of Figma's layout result.  The main
+    axis remains untouched because fill/space distribution is ambiguous.
+    """
+
+    fallback = _box(node)
+    if isinstance(node.get("absoluteBoundingBox"), Mapping):
+        return fallback, {}
+    mode = str(node.get("layoutMode") or "").upper()
+    if mode not in {"HORIZONTAL", "VERTICAL"}:
+        return fallback, {}
+    cross_position = "y" if mode == "HORIZONTAL" else "x"
+    cross_size = "height" if mode == "HORIZONTAL" else "width"
+    leading_key = "paddingTop" if mode == "HORIZONTAL" else "paddingLeft"
+    trailing_key = (
+        "paddingBottom" if mode == "HORIZONTAL" else "paddingRight"
+    )
+    children = [
+        child
+        for child in node.get("children", [])
+        if isinstance(child, Mapping)
+        and bool(child.get("visible", True))
+        and str(child.get("layoutPositioning") or "").upper() != "ABSOLUTE"
+        and isinstance(child.get("absoluteBoundingBox"), Mapping)
+    ]
+    if not children:
+        return fallback, {}
+    child_boxes = [_box(child) for child in children]
+    starts = [box[cross_position] for box in child_boxes]
+    sizes = [box[cross_size] for box in child_boxes]
+    ends = [start + size for start, size in zip(starts, sizes)]
+    leading = max(0.0, _number(node.get(leading_key)))
+    trailing = max(0.0, _number(node.get(trailing_key)))
+    alignment = str(node.get("counterAxisAlignItems") or "MIN").upper()
+    tolerance = 0.5
+    inferred_start: float | None = None
+    if alignment == "CENTER":
+        centers = [start + size * 0.5 for start, size in zip(starts, sizes)]
+        if max(centers) - min(centers) > tolerance:
+            return fallback, {}
+        content_size = max(sizes)
+        inferred_start = (
+            sum(centers) / len(centers) - content_size * 0.5 - leading
+        )
+    elif alignment == "MAX":
+        if max(ends) - min(ends) > tolerance:
+            return fallback, {}
+        content_size = max(sizes)
+        inferred_start = max(ends) + trailing - (
+            leading + content_size + trailing
+        )
+    elif alignment == "MIN":
+        if max(starts) - min(starts) > tolerance:
+            return fallback, {}
+        content_size = max(sizes)
+        inferred_start = min(starts) - leading
+    else:
+        # BASELINE needs font ascent data (or the sibling recovery stored by
+        # the baseline importer) and is intentionally not guessed here.
+        return fallback, {}
+    inferred_size = leading + content_size + trailing
+    if inferred_size <= 0.0 or inferred_start is None:
+        return fallback, {}
+    fallback[cross_position] = float(inferred_start)
+    fallback[cross_size] = float(inferred_size)
+    return fallback, {
+        "status": "cross_axis_inferred",
+        "reason": "missing_absolute_bounding_box",
+        "axis": cross_size,
+        "alignment": alignment.casefold(),
+        "evidence_child_ids": [
+            str(child.get("id") or "") for child in children
+        ],
+        "inferred_position": float(inferred_start),
+        "inferred_size": float(inferred_size),
+    }
+
+
 def _map_kind(node: Mapping[str, Any]) -> str:
     node_type = str(node.get("type") or "").upper()
     if node_type in {"FRAME", "SECTION", "COMPONENT", "COMPONENT_SET", "SLOT"}:
@@ -571,6 +778,7 @@ def _map_kind(node: Mapping[str, Any]) -> str:
         "BOOLEAN_OPERATION",
         "STAR",
         "POLYGON",
+        "REGULAR_POLYGON",
     }:
         return "path"
     if _image_paint(node.get("fills")) is not None:
@@ -632,6 +840,50 @@ def _figma_axis_sizing(
     return "fixed"
 
 
+def _figma_layout_stroke_edges(
+    node: Mapping[str, Any],
+) -> dict[str, float]:
+    """Return visible per-edge stroke widths used by Figma Auto Layout."""
+
+    paints = node.get("strokes")
+    if not isinstance(paints, list) or not any(
+        isinstance(paint, Mapping)
+        and bool(paint.get("visible", True))
+        and _number(paint.get("opacity"), 1.0) > 0.0
+        for paint in paints
+    ):
+        return {edge: 0.0 for edge in ("left", "top", "right", "bottom")}
+    width = max(0.0, _number(node.get("strokeWeight")))
+    individual = node.get("individualStrokeWeights")
+    individual = individual if isinstance(individual, Mapping) else {}
+    return {
+        edge: max(0.0, _number(individual.get(edge), width))
+        for edge in ("left", "top", "right", "bottom")
+    }
+
+
+def _figma_layout_stroke_insets(
+    node: Mapping[str, Any],
+) -> dict[str, float]:
+    align = str(node.get("strokeAlign") or "CENTER").upper()
+    factor = {"INSIDE": 1.0, "CENTER": 0.5}.get(align, 0.0)
+    return {
+        edge: width * factor
+        for edge, width in _figma_layout_stroke_edges(node).items()
+    }
+
+
+def _figma_layout_stroke_outsets(
+    node: Mapping[str, Any],
+) -> dict[str, float]:
+    align = str(node.get("strokeAlign") or "CENTER").upper()
+    factor = {"OUTSIDE": 1.0, "CENTER": 0.5}.get(align, 0.0)
+    return {
+        edge: width * factor
+        for edge, width in _figma_layout_stroke_edges(node).items()
+    }
+
+
 def _map_layout(
     node: Mapping[str, Any],
     *,
@@ -649,9 +901,9 @@ def _map_layout(
         "min": "start",
         "center": "center",
         "max": "end",
-        "baseline": "start",
+        "baseline": "baseline",
     }.get(str(node.get("counterAxisAlignItems") or "MIN").casefold(), "start")
-    return {
+    layout = {
         "mode": mode,
         "padding": {
             "left": _number(node.get("paddingLeft")),
@@ -659,7 +911,9 @@ def _map_layout(
             "right": _number(node.get("paddingRight")),
             "bottom": _number(node.get("paddingBottom")),
         },
-        "gap": max(0.0, _number(node.get("itemSpacing"))),
+        # Figma explicitly permits negative itemSpacing for overlapping
+        # Auto Layout children. Do not clamp it to a conventional CSS gap.
+        "gap": _number(node.get("itemSpacing")),
         "cross_gap": max(
             0.0,
             _number(
@@ -688,6 +942,559 @@ def _map_layout(
             else "auto"
         ),
     }
+    if bool(node.get("itemReverseZIndex", False)):
+        # Figma defines this as paint stacking only; flow order remains the
+        # REST children order and is intentionally handled independently.
+        layout["reverse_z_index"] = True
+    if bool(node.get("strokesIncludedInLayout", False)):
+        # Keep this authored semantic explicit.  Figma counts the container's
+        # inward stroke and each child's outward stroke footprint when it
+        # measures and places Auto Layout content.
+        layout["include_strokes"] = True
+        stroke_insets = _figma_layout_stroke_insets(node)
+        if any(stroke_insets.values()):
+            layout["stroke_insets"] = stroke_insets
+    stroke_outsets = _figma_layout_stroke_outsets(node)
+    if any(stroke_outsets.values()):
+        layout["stroke_outsets"] = stroke_outsets
+    return layout
+
+
+def _figma_resolved_child_baseline_offsets(
+    node: Mapping[str, Any],
+) -> dict[str, float]:
+    """Recover direct-child baseline metrics from resolved Figma geometry.
+
+    Figma REST/archive nodes expose ``counterAxisAlignItems=BASELINE`` and the
+    final child bounds, but not each font's ascent.  All participating boxes
+    nevertheless share one baseline.  Choosing any line in the intersection
+    of their cross-axis bounds yields the exact relative offsets; the nearest
+    common trailing edge keeps every stored offset inside its child box.
+    """
+
+    if (
+        str(node.get("layoutMode") or "").upper() != "HORIZONTAL"
+        or str(node.get("counterAxisAlignItems") or "").upper()
+        != "BASELINE"
+    ):
+        return {}
+    children = [
+        child
+        for child in node.get("children", [])
+        if isinstance(child, Mapping)
+        and bool(child.get("visible", True))
+        and str(child.get("layoutPositioning") or "").upper() != "ABSOLUTE"
+        and isinstance(child.get("absoluteBoundingBox"), Mapping)
+    ]
+    if not children:
+        return {}
+    starts = [_box(child)["y"] for child in children]
+    ends = [_box(child)["y"] + _box(child)["height"] for child in children]
+    common_start = max(starts)
+    common_end = min(ends)
+    baseline = common_end if common_end >= common_start else common_start
+    return {
+        str(child.get("id") or ""): max(0.0, baseline - _box(child)["y"])
+        for child in children
+        if str(child.get("id") or "")
+    }
+
+
+_FIGMA_LAYOUT_GEOMETRY_EPSILON = 0.5
+_FIGMA_AFFINE_EPSILON = 0.0001
+_FIGMA_AUTO_LAYOUT_RECOVERY_FIELDS = (
+    "layoutMode",
+    "layoutWrap",
+    "layoutSizingHorizontal",
+    "layoutSizingVertical",
+    "primaryAxisSizingMode",
+    "counterAxisSizingMode",
+    "primaryAxisAlignItems",
+    "counterAxisAlignItems",
+    "itemSpacing",
+    "counterAxisSpacing",
+    "paddingLeft",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "layoutPositioning",
+    "layoutGrow",
+    "layoutAlign",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+)
+
+
+def _figma_size_aabb_diverges(node: Mapping[str, Any]) -> bool:
+    """Return whether local layout size and transformed canvas AABB disagree."""
+
+    size = node.get("size")
+    bounds = node.get("absoluteBoundingBox")
+    if not isinstance(size, Mapping) or not isinstance(bounds, Mapping):
+        return False
+    local_width = _number(size.get("x"))
+    local_height = _number(size.get("y"))
+    bounds_width = _number(bounds.get("width"))
+    bounds_height = _number(bounds.get("height"))
+    if min(local_width, local_height, bounds_width, bounds_height) < 0.0:
+        return False
+    return max(
+        abs(local_width - bounds_width),
+        abs(local_height - bounds_height),
+    ) > _FIGMA_LAYOUT_GEOMETRY_EPSILON
+
+
+def _figma_has_non_translation_transform(node: Mapping[str, Any]) -> bool:
+    """Detect rotation, scale, reflection, or shear in a Figma affine matrix."""
+
+    transform = node.get("relativeTransform")
+    if (
+        isinstance(transform, list)
+        and len(transform) >= 2
+        and isinstance(transform[0], list)
+        and isinstance(transform[1], list)
+        and len(transform[0]) >= 2
+        and len(transform[1]) >= 2
+    ):
+        a = _number(transform[0][0], 1.0)
+        c = _number(transform[0][1])
+        b = _number(transform[1][0])
+        d = _number(transform[1][1], 1.0)
+        if max(
+            abs(a - 1.0),
+            abs(b),
+            abs(c),
+            abs(d - 1.0),
+        ) > _FIGMA_AFFINE_EPSILON:
+            return True
+    return abs(_number(node.get("rotation"))) > _FIGMA_AFFINE_EPSILON
+
+
+_FIGMA_IDENTITY_LINEAR_TRANSFORM = (1.0, 0.0, 0.0, 1.0)
+
+
+def _figma_legacy_text_rotation_is_radian_quarter_turn(
+    node: Mapping[str, Any],
+) -> bool:
+    """Recognize a narrow legacy REST text-rotation convention.
+
+    A few old ``/nodes`` snapshots serialize an intrinsic auto-width text
+    node's quarter turn in radians while omitting both ``size`` and
+    ``relativeTransform``.  Require the exact quarter-turn marker and the
+    independent line-height/AABB evidence so an ordinary authored 1.57-degree
+    rotation is never guessed to be 90 degrees.
+    """
+
+    if (
+        str(node.get("type") or "").upper() != "TEXT"
+        or isinstance(node.get("relativeTransform"), list)
+    ):
+        return False
+    rotation = _number(node.get("rotation"))
+    if abs(abs(rotation) - math.pi / 2.0) > _FIGMA_AFFINE_EPSILON:
+        return False
+    style = node.get("style")
+    style = style if isinstance(style, Mapping) else {}
+    if str(style.get("textAutoResize") or "").upper() != "WIDTH_AND_HEIGHT":
+        return False
+    line_height = _number(style.get("lineHeightPx"))
+    bounds = node.get("absoluteBoundingBox")
+    bounds = bounds if isinstance(bounds, Mapping) else {}
+    rotated_height = _number(bounds.get("width"))
+    tolerance = max(1.0, line_height * 0.01)
+    return line_height > 0.0 and abs(rotated_height - line_height) <= tolerance
+
+
+def _figma_rotation_degrees(node: Mapping[str, Any]) -> float:
+    rotation = _number(node.get("rotation"))
+    if _figma_legacy_text_rotation_is_radian_quarter_turn(node):
+        return math.degrees(rotation)
+    return rotation
+
+
+def _figma_node_linear_transform(
+    node: Mapping[str, Any],
+) -> tuple[float, float, float, float]:
+    """Return Figma's 2x2 linear transform as ``a, c, b, d``."""
+
+    transform = node.get("relativeTransform")
+    if (
+        isinstance(transform, list)
+        and len(transform) >= 2
+        and isinstance(transform[0], list)
+        and isinstance(transform[1], list)
+        and len(transform[0]) >= 2
+        and len(transform[1]) >= 2
+    ):
+        return (
+            _number(transform[0][0], 1.0),
+            _number(transform[0][1]),
+            _number(transform[1][0]),
+            _number(transform[1][1], 1.0),
+        )
+    # Standard REST snapshots express this fallback rotation in degrees. A
+    # tightly identified legacy intrinsic-text quarter turn is converted by
+    # the helper above.
+    angle = math.radians(_figma_rotation_degrees(node))
+    cosine = math.cos(angle)
+    sine = math.sin(angle)
+    return (cosine, -sine, sine, cosine)
+
+
+def _multiply_figma_linear_transforms(
+    parent: tuple[float, float, float, float],
+    child: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    pa, pc, pb, pd = parent
+    ca, cc, cb, cd = child
+    return (
+        pa * ca + pc * cb,
+        pa * cc + pc * cd,
+        pb * ca + pd * cb,
+        pb * cc + pd * cd,
+    )
+
+
+def _figma_outer_affine_issue(
+    transform: tuple[float, float, float, float],
+) -> str:
+    a, c, b, d = transform
+    if max(abs(a - 1.0), abs(b), abs(c), abs(d - 1.0)) <= _FIGMA_AFFINE_EPSILON:
+        return ""
+    scale_x = math.hypot(a, b)
+    scale_y = math.hypot(c, d)
+    determinant = a * d - b * c
+    orthogonality = (
+        abs(a * c + b * d) / max(_FIGMA_AFFINE_EPSILON, scale_x * scale_y)
+    )
+    if determinant < 0.0:
+        return "outer_affine_snapshot_requires_reflection_support"
+    if orthogonality > _FIGMA_AFFINE_EPSILON:
+        return "outer_affine_snapshot_requires_shear_support"
+    return "outer_affine_snapshot_requires_hierarchical_transform_support"
+
+
+def _figma_linear_transform_is_identity(
+    transform: tuple[float, float, float, float],
+) -> bool:
+    a, c, b, d = transform
+    return max(
+        abs(a - 1.0),
+        abs(b),
+        abs(c),
+        abs(d - 1.0),
+    ) <= _FIGMA_AFFINE_EPSILON
+
+
+def _figma_affine_snapshot_geometry(
+    node: Mapping[str, Any],
+    effective_linear: tuple[float, float, float, float],
+) -> tuple[dict[str, float], float, dict[str, Any]]:
+    """Map a cumulative orthogonal affine transform to Painter geometry.
+
+    Painter stores a center-pivot rectangle plus one rotation, while Figma
+    stores local size and a hierarchical affine matrix. Rotation with positive
+    scales is representable. Reflection, shear, and missing local dimensions
+    remain an explicit blocker with the exact matrix retained for recovery.
+    """
+
+    bounds = _box(node)
+    size = node.get("size")
+    a, c, b, d = effective_linear
+    scale_x = math.hypot(a, b)
+    scale_y = math.hypot(c, d)
+    determinant = a * d - b * c
+    orthogonality = (
+        abs(a * c + b * d) / max(_FIGMA_AFFINE_EPSILON, scale_x * scale_y)
+    )
+    metadata: dict[str, Any] = {
+        "effective_linear_transform": [[a, c], [b, d]],
+        "relative_transform": copy.deepcopy(node.get("relativeTransform")),
+        "source_size": copy.deepcopy(size),
+        "source_absolute_bounding_box": copy.deepcopy(
+            node.get("absoluteBoundingBox")
+        ),
+    }
+    source_bounds = node.get("absoluteBoundingBox")
+    source_bounds = (
+        source_bounds if isinstance(source_bounds, Mapping) else {}
+    )
+    source_x = _number(source_bounds.get("x"), bounds["x"])
+    source_y = _number(source_bounds.get("y"), bounds["y"])
+    source_width = max(
+        0.0,
+        _number(source_bounds.get("width"), bounds["width"]),
+    )
+    source_height = max(
+        0.0,
+        _number(source_bounds.get("height"), bounds["height"]),
+    )
+    center_x = source_x + source_width * 0.5
+    center_y = source_y + source_height * 0.5
+    rotation = math.degrees(math.atan2(b, a))
+    cosine = abs(math.cos(math.radians(rotation)))
+    sine = abs(math.sin(math.radians(rotation)))
+    if not isinstance(size, Mapping):
+        quarter_turn = min(cosine, sine) <= _FIGMA_AFFINE_EPSILON
+        if (
+            quarter_turn
+            and source_width > _FIGMA_AFFINE_EPSILON
+            and source_height > _FIGMA_AFFINE_EPSILON
+            and scale_x > _FIGMA_AFFINE_EPSILON
+            and scale_y > _FIGMA_AFFINE_EPSILON
+            and determinant > _FIGMA_AFFINE_EPSILON
+            and orthogonality <= _FIGMA_AFFINE_EPSILON
+        ):
+            width = source_height if sine > cosine else source_width
+            height = source_width if sine > cosine else source_height
+            metadata.update(
+                {
+                    "status": "rotation_scale_mapped",
+                    "scale_x": scale_x,
+                    "scale_y": scale_y,
+                    "rotation": rotation,
+                    "missing_local_size_recovery": (
+                        "quarter_turn_aabb_inverse"
+                    ),
+                }
+            )
+            if _figma_legacy_text_rotation_is_radian_quarter_turn(node):
+                metadata["source_rotation_unit_recovery"] = (
+                    "legacy_radians_inferred_from_text_line_height"
+                )
+            return (
+                {
+                    "x": center_x - width * 0.5,
+                    "y": center_y - height * 0.5,
+                    "width": width,
+                    "height": height,
+                },
+                rotation,
+                metadata,
+            )
+        metadata.update(
+            {
+                "status": "blocked_missing_local_size",
+                "reason": "figma_affine_snapshot_requires_local_size",
+            }
+        )
+        return bounds, 0.0, metadata
+    local_width = _number(size.get("x"))
+    local_height = _number(size.get("y"))
+    near_zero_negative_axes: dict[str, float] = {}
+    if -_FIGMA_AFFINE_EPSILON <= local_width < 0.0:
+        near_zero_negative_axes["width"] = local_width
+        local_width = 0.0
+    if -_FIGMA_AFFINE_EPSILON <= local_height < 0.0:
+        near_zero_negative_axes["height"] = local_height
+        local_height = 0.0
+    if (
+        local_width < 0.0
+        or local_height < 0.0
+        or scale_x <= _FIGMA_AFFINE_EPSILON
+        or scale_y <= _FIGMA_AFFINE_EPSILON
+        or determinant <= _FIGMA_AFFINE_EPSILON
+        or orthogonality > _FIGMA_AFFINE_EPSILON
+    ):
+        metadata.update(
+            {
+                "status": "blocked_non_orthogonal_affine",
+                "reason": (
+                    "figma_affine_snapshot_requires_shear_or_reflection_support"
+                ),
+                "determinant": determinant,
+                "orthogonality_error": orthogonality,
+            }
+        )
+        return bounds, 0.0, metadata
+    scaled_width = local_width * scale_x
+    scaled_height = local_height * scale_y
+    width = max(1.0, scaled_width)
+    height = max(1.0, scaled_height)
+    # Keep the effective first basis-vector angle in Painter's stored Figma
+    # convention. The workspace owns the Qt paint-transform sign conversion.
+    # Painter's object contract intentionally keeps every editable extent at
+    # least one pixel, while Figma commonly serializes a stroked line with a
+    # zero local width or height.  Promoting that zero axis without adjusting
+    # the orthogonal axis makes a rotated line's AABB larger than the source.
+    # Fit the remaining extent by least squares against both source AABB axes;
+    # this retains the authored transform and the 1 px edit handle without
+    # moving the snapshot or inflating its other dimension.
+    minimum_extent_adjustment: dict[str, Any] = {}
+    if scaled_width <= _FIGMA_AFFINE_EPSILON < scaled_height:
+        width = 1.0
+        height = max(
+            1.0,
+            sine * (source_width - cosine * width)
+            + cosine * (source_height - sine * width),
+        )
+        minimum_extent_adjustment = {
+            "axis": "width",
+            "source_scaled_extent": scaled_width,
+            "mapped_extent": width,
+            "orthogonal_mapped_extent": height,
+            "strategy": "least_squares_source_aabb",
+        }
+    elif scaled_height <= _FIGMA_AFFINE_EPSILON < scaled_width:
+        height = 1.0
+        width = max(
+            1.0,
+            cosine * (source_width - sine * height)
+            + sine * (source_height - cosine * height),
+        )
+        minimum_extent_adjustment = {
+            "axis": "height",
+            "source_scaled_extent": scaled_height,
+            "mapped_extent": height,
+            "orthogonal_mapped_extent": width,
+            "strategy": "least_squares_source_aabb",
+        }
+    metadata.update(
+        {
+            "status": "rotation_scale_mapped",
+            "scale_x": scale_x,
+            "scale_y": scale_y,
+            "rotation": rotation,
+        }
+    )
+    if minimum_extent_adjustment:
+        metadata["minimum_extent_adjustment"] = minimum_extent_adjustment
+    if near_zero_negative_axes:
+        metadata["near_zero_negative_local_size_clamped"] = (
+            near_zero_negative_axes
+        )
+    return (
+        {
+            "x": center_x - width * 0.5,
+            "y": center_y - height * 0.5,
+            "width": width,
+            "height": height,
+        },
+        rotation,
+        metadata,
+    )
+
+
+def _figma_transformed_auto_layout_recovery(
+    node: Mapping[str, Any],
+    mapped_layout: Mapping[str, Any],
+    *,
+    parent_linear: tuple[float, float, float, float] = (
+        _FIGMA_IDENTITY_LINEAR_TRANSFORM
+    ),
+) -> dict[str, Any]:
+    """Preserve transformed Auto Layout as resolved snapshot geometry.
+
+    Figma lays out transformed children using their local ``size`` while its
+    REST ``absoluteBoundingBox`` is an axis-aligned canvas bound. Painter's
+    current object contract has one width/height pair, so reflowing those AABB
+    dimensions can move a resolved snapshot by tens of thousands of pixels.
+    Until the document contract carries hierarchical affine layout geometry,
+    keep the imported AABBs untouched and retain the source layout/transform
+    data for a future editable relink.
+    """
+
+    if str(mapped_layout.get("mode") or "") not in {
+        "horizontal",
+        "vertical",
+    }:
+        return {}
+    reasons: list[str] = []
+    if _figma_outer_affine_issue(parent_linear):
+        # A locally axis-aligned Auto Layout can still be reflected, rotated,
+        # scaled, or sheared by an ancestor. Reflowing its absolute AABBs as
+        # though that outer basis were identity reverses or distorts children.
+        reasons.append("outer_affine_transform")
+    if _figma_has_non_translation_transform(node):
+        reasons.append("container_affine_transform")
+    if _figma_size_aabb_diverges(node):
+        reasons.append("container_local_size_differs_from_aabb")
+    affected_children: list[str] = []
+    for child in node.get("children", []):
+        if not isinstance(child, Mapping):
+            continue
+        if not bool(child.get("visible", True)):
+            continue
+        if str(child.get("layoutPositioning") or "").upper() == "ABSOLUTE":
+            continue
+        child_reasons = (
+            _figma_has_non_translation_transform(child)
+            or _figma_size_aabb_diverges(child)
+        )
+        if not child_reasons:
+            continue
+        affected_children.append(str(child.get("id") or ""))
+    if affected_children:
+        reasons.append("flow_child_local_size_or_transform_differs_from_aabb")
+    if not reasons:
+        return {}
+    return {
+        "status": "snapshot_absolute_geometry",
+        "reason": "transformed_auto_layout_requires_affine_layout",
+        "reason_codes": reasons,
+        "mapped_layout": copy.deepcopy(dict(mapped_layout)),
+        "source_layout": {
+            key: copy.deepcopy(node[key])
+            for key in _FIGMA_AUTO_LAYOUT_RECOVERY_FIELDS
+            if key in node
+        },
+        "relative_transform": copy.deepcopy(node.get("relativeTransform")),
+        "size": copy.deepcopy(node.get("size")),
+        "absolute_bounding_box": copy.deepcopy(
+            node.get("absoluteBoundingBox")
+        ),
+        "affected_child_ids": affected_children,
+    }
+
+
+def _convert_figma_hug_fill_cycles(
+    objects: list[dict[str, Any]],
+    warnings: list[str],
+) -> None:
+    """Resolve impossible Figma sizing pairs without moving any geometry.
+
+    REST snapshots can contain a Hug auto-layout parent with an in-flow Fill
+    child on the same axis. Tiger cannot solve that circular dependency. The
+    snapshot already supplies a resolved absoluteBoundingBox for the parent,
+    so make that parent axis Fixed and retain the child's Fill behavior. This
+    changes only responsive sizing semantics; imported x/y/width/height stay
+    exactly as resolved by Figma.
+    """
+
+    children: dict[str, list[dict[str, Any]]] = {}
+    for row in objects:
+        children.setdefault(str(row.get("parent_id") or ""), []).append(row)
+
+    for parent in objects:
+        layout = parent.get("layout")
+        if not isinstance(layout, dict) or layout.get("mode") not in {
+            "horizontal",
+            "vertical",
+        }:
+            continue
+        parent_id = str(parent.get("id") or "")
+        direct_children = children.get(parent_id, [])
+        for axis in ("width", "height"):
+            sizing_key = f"{axis}_sizing"
+            if layout.get(sizing_key) != "hug":
+                continue
+            conflicting_children = sorted(
+                str(child.get("id") or "")
+                for child in direct_children
+                if isinstance(child.get("layout"), Mapping)
+                and child["layout"].get("positioning") != "absolute"
+                and child["layout"].get(sizing_key) == "fill"
+            )
+            if not conflicting_children:
+                continue
+            layout[sizing_key] = "fixed"
+            warnings.append(
+                f"converted:{parent_id}:layout.{sizing_key}:hug_to_fixed:"
+                "figma_hug_fill_cycle_preserve_absolute_geometry:"
+                + ",".join(conflicting_children)
+            )
 
 
 def _map_constraints(node: Mapping[str, Any]) -> dict[str, Any]:
@@ -720,17 +1527,140 @@ def _map_constraints(node: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _capture_figma_center_constraint_offsets(
+    objects: list[dict[str, Any]],
+    artboards: list[dict[str, Any]],
+) -> None:
+    """Preserve Figma CENTER constraints at their authored position.
+
+    Figma's CENTER constraint keeps the child's offset from the parent center;
+    the REST payload only names the constraint mode. Painter's resolver needs
+    that offset serialized explicitly, otherwise every centered import snaps
+    to the exact parent center on its first constraint pass.
+
+    Imported object coordinates are artboard-local, including nested rows, so
+    parent rows and the synthetic 0,0 artboard rect share one coordinate space.
+    """
+
+    objects_by_id = {str(row["id"]): row for row in objects}
+    artboards_by_id = {str(row["id"]): row for row in artboards}
+    for row in objects:
+        constraints = row.get("constraints")
+        if not isinstance(constraints, dict):
+            continue
+        horizontal_center = constraints.get("horizontal") == "center"
+        vertical_center = constraints.get("vertical") == "center"
+        if not horizontal_center and not vertical_center:
+            continue
+        parent_id = str(row.get("parent_id") or "")
+        if parent_id:
+            parent = objects_by_id.get(parent_id)
+            if parent is None:
+                continue
+            parent_x = _number(parent.get("x"))
+            parent_y = _number(parent.get("y"))
+        else:
+            parent = artboards_by_id.get(str(row.get("artboard_id") or ""))
+            if parent is None:
+                continue
+            parent_x = 0.0
+            parent_y = 0.0
+        parent_width = _number(parent.get("width"))
+        parent_height = _number(parent.get("height"))
+        if horizontal_center:
+            constraints["center_offset_x"] = (
+                _number(row.get("x"))
+                + _number(row.get("width")) * 0.5
+                - parent_x
+                - parent_width * 0.5
+            )
+        if vertical_center:
+            constraints["center_offset_y"] = (
+                _number(row.get("y"))
+                + _number(row.get("height")) * 0.5
+                - parent_y
+                - parent_height * 0.5
+            )
+
+
+_FIGMA_VARIABLE_FIELD_PATHS = {
+    "fills": "style.fill",
+    "strokes": "style.stroke",
+    "opacity": "opacity",
+    "cornerRadius": "style.radius",
+    "strokeWeight": "style.stroke_width",
+    "itemSpacing": "layout.gap",
+    "counterAxisSpacing": "layout.cross_gap",
+    "paddingLeft": "layout.padding.left",
+    "paddingTop": "layout.padding.top",
+    "paddingRight": "layout.padding.right",
+    "paddingBottom": "layout.padding.bottom",
+}
+
+
+def _figma_variable_target_path(
+    node: Mapping[str, Any],
+    field: object,
+) -> str:
+    field_name = str(field or "")
+    if (
+        field_name == "fills"
+        and str(node.get("type") or "").upper() == "TEXT"
+    ):
+        return "style.text_color"
+    return _FIGMA_VARIABLE_FIELD_PATHS.get(field_name, "")
+
+
+def _figma_variable_bindings(node: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return lossless, alias-level recovery records for boundVariables.
+
+    Painter's active ``token_bindings`` contract stores one token per property
+    path. Figma can bind a list of individual paints and also exposes fields
+    that Painter cannot edit yet. Keep every original alias independently so
+    unresolved variables can be relinked later without inventing a value.
+    """
+
+    source = node.get("boundVariables")
+    source = source if isinstance(source, Mapping) else {}
+    result: list[dict[str, Any]] = []
+    for raw_field, raw_value in source.items():
+        field = str(raw_field or "")
+        source_was_list = isinstance(raw_value, list)
+        aliases = raw_value if source_was_list else [raw_value]
+        for alias_index, raw_alias in enumerate(aliases):
+            alias = raw_alias if isinstance(raw_alias, Mapping) else {}
+            variable_id = str(alias.get("id") or "")
+            result.append(
+                {
+                    "field": field,
+                    "alias_index": alias_index,
+                    "source_was_list": source_was_list,
+                    "id": variable_id,
+                    "type": str(alias.get("type") or ""),
+                    "target_path": _figma_variable_target_path(node, field),
+                    "token_id": (
+                        _stable_id("token", variable_id)
+                        if variable_id
+                        else ""
+                    ),
+                    "status": "pending",
+                    "reason": "",
+                    "raw_alias": copy.deepcopy(
+                        dict(raw_alias)
+                        if isinstance(raw_alias, Mapping)
+                        else raw_alias
+                    ),
+                }
+            )
+    return result
+
+
 def _map_token_bindings(node: Mapping[str, Any]) -> dict[str, str]:
     source = node.get("boundVariables")
     source = source if isinstance(source, Mapping) else {}
-    field_paths = {
-        "fills": "style.fill",
-        "strokes": "style.stroke",
-        "opacity": "opacity",
-        "cornerRadius": "style.radius",
-    }
     result: dict[str, str] = {}
-    for field, path in field_paths.items():
+    for field in _FIGMA_VARIABLE_FIELD_PATHS:
+        path = _figma_variable_target_path(node, field)
         raw = source.get(field)
         aliases = raw if isinstance(raw, list) else [raw]
         alias = next(
@@ -746,6 +1676,121 @@ def _map_token_bindings(node: Mapping[str, Any]) -> dict[str, str]:
     return result
 
 
+def _resolve_figma_variable_bindings(
+    row: dict[str, Any],
+    token_ids: set[str],
+    warnings: list[str],
+) -> None:
+    """Activate resolvable aliases and mark every fallback explicitly."""
+
+    requested = dict(row.get("token_bindings") or {})
+    active = {
+        path: str(token_id)
+        for path, token_id in requested.items()
+        if str(token_id) in token_ids
+    }
+    row["token_bindings"] = active
+    content = row.get("content")
+    content = dict(content) if isinstance(content, Mapping) else {}
+    records = content.get("figma_variable_bindings")
+    if not isinstance(records, list):
+        return
+
+    activated_paths: set[str] = set()
+    resolved_records: list[dict[str, Any]] = []
+    for raw_record in records:
+        if not isinstance(raw_record, Mapping):
+            continue
+        record = copy.deepcopy(dict(raw_record))
+        field = str(record.get("field") or "")
+        alias_index = max(0, int(_number(record.get("alias_index"))))
+        variable_id = str(record.get("id") or "")
+        target_path = str(record.get("target_path") or "")
+        token_id = str(record.get("token_id") or "")
+        source_suffix = f"[{alias_index}]" if record.get("source_was_list") else ""
+        source_path = f"boundVariables.{field}{source_suffix}"
+
+        if not variable_id:
+            record["status"] = "blocked"
+            record["reason"] = "missing_variable_alias_id"
+            warnings.append(
+                f"blocked:{row['id']}:{source_path}:"
+                "figma_variable_binding_requires_token_relink:"
+                "missing_variable_alias_id"
+            )
+        elif not target_path:
+            record["status"] = "blocked"
+            record["reason"] = "unsupported_bound_variable_field"
+            warnings.append(
+                f"blocked:{row['id']}:{source_path}:"
+                "figma_variable_binding_requires_token_relink:"
+                f"unsupported_field:{variable_id}"
+            )
+        elif (
+            target_path not in activated_paths
+            and active.get(target_path) == token_id
+        ):
+            record["status"] = "native"
+            record["reason"] = "mapped_to_token_binding"
+            activated_paths.add(target_path)
+        elif token_id not in token_ids:
+            record["status"] = "unresolved"
+            record["reason"] = "missing_variable_definition"
+            warnings.append(
+                f"converted:{row['id']}:{source_path}:"
+                "figma_variable_binding_requires_token_relink:"
+                f"missing_variable_definition:{variable_id}"
+            )
+        else:
+            record["status"] = "recovered"
+            record["reason"] = "multiple_aliases_require_per_paint_binding"
+            warnings.append(
+                f"converted:{row['id']}:{source_path}:"
+                "figma_variable_binding_requires_token_relink:"
+                f"multiple_aliases:{variable_id}"
+            )
+        resolved_records.append(record)
+
+    content["figma_variable_bindings"] = resolved_records
+    row["content"] = content
+
+
+def _resolve_figma_artboard_variable_bindings(
+    records: list[dict[str, Any]],
+    token_ids: set[str],
+    warnings: list[str],
+) -> None:
+    """Resolve recovery records for frames promoted to Painter artboards."""
+
+    for record in records:
+        artboard_id = str(record.get("artboard_id") or "")
+        field = str(record.get("field") or "")
+        alias_index = max(0, int(_number(record.get("alias_index"))))
+        variable_id = str(record.get("id") or "")
+        token_id = str(record.get("token_id") or "")
+        source_suffix = f"[{alias_index}]" if record.get("source_was_list") else ""
+        source_path = f"boundVariables.{field}{source_suffix}"
+        if not variable_id:
+            record["status"] = "blocked"
+            record["reason"] = "missing_variable_alias_id"
+            detail = "missing_variable_alias_id"
+        elif token_id not in token_ids:
+            record["status"] = "unresolved"
+            record["reason"] = "missing_variable_definition"
+            detail = f"missing_variable_definition:{variable_id}"
+        else:
+            # Painter artboards do not expose token_bindings. Preserve the
+            # authored static background/geometry and require an explicit
+            # relink instead of pretending this alias is active.
+            record["status"] = "blocked"
+            record["reason"] = "artboard_variable_binding_unsupported"
+            detail = f"artboard_binding_unsupported:{variable_id}"
+        warnings.append(
+            f"blocked:{artboard_id}:{source_path}:"
+            f"figma_variable_binding_requires_token_relink:{detail}"
+        )
+
+
 def _figma_text_resize_mode(value: object) -> str:
     return {
         "WIDTH_AND_HEIGHT": "auto_width",
@@ -753,6 +1798,56 @@ def _figma_text_resize_mode(value: object) -> str:
         "NONE": "fixed_size",
         "TRUNCATE": "fixed_size",
     }.get(str(value or "").strip().upper(), "")
+
+
+def _figma_progressive_blur_effect(effect: Mapping[str, Any]) -> bool:
+    effect_type = str(effect.get("type") or "").strip().upper()
+    if effect_type not in {"LAYER_BLUR", "BACKGROUND_BLUR"}:
+        return False
+    progressive_fields_present = any(
+        key in effect for key in ("startRadius", "startOffset", "endOffset")
+    )
+    raw_blur_type = effect.get("blurType")
+    if raw_blur_type is None and not progressive_fields_present:
+        return False
+    return str(raw_blur_type or "PROGRESSIVE").strip().upper() == (
+        "PROGRESSIVE"
+    )
+
+
+def _figma_exact_effect_types(node: Mapping[str, Any]) -> list[str]:
+    """Return visible modern effects that require an exact node render."""
+
+    effects = node.get("effects")
+    if not isinstance(effects, list):
+        return []
+    result: list[str] = []
+    for effect in effects:
+        if not isinstance(effect, Mapping) or not bool(
+            effect.get("visible", True)
+        ):
+            continue
+        effect_type = str(effect.get("type") or "").strip().upper()
+        if effect_type in {"NOISE", "TEXTURE"}:
+            label = effect_type.casefold()
+        elif _figma_progressive_blur_effect(effect):
+            label = f"progressive_{effect_type.casefold()}"
+        else:
+            continue
+        if label not in result:
+            result.append(label)
+    return result
+
+
+def _figma_bounds_record(value: object) -> dict[str, float]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        "x": _number(value.get("x")),
+        "y": _number(value.get("y")),
+        "width": max(0.0, _number(value.get("width"))),
+        "height": max(0.0, _number(value.get("height"))),
+    }
 
 
 def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
@@ -764,30 +1859,144 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     )
     appearance_effects: list[dict[str, Any]] = []
     for effect in raw_effects:
-        if not isinstance(effect, Mapping) or not effect.get("visible", True):
+        if not isinstance(effect, Mapping):
             continue
         effect_type = str(effect.get("type") or "").upper()
+        effect_visible = bool(effect.get("visible", True))
+        preserve_hidden = effect_type in {"NOISE", "TEXTURE"} or (
+            _figma_progressive_blur_effect(effect)
+        )
+        if not effect_visible and not preserve_hidden:
+            continue
         if effect_type in {"LAYER_BLUR", "BACKGROUND_BLUR"}:
-            appearance_effects.append(
-                {
-                    "type": (
-                        "background_blur"
-                        if effect_type == "BACKGROUND_BLUR"
-                        else "layer_blur"
+            blur: dict[str, Any] = {
+                "type": (
+                    "background_blur"
+                    if effect_type == "BACKGROUND_BLUR"
+                    else "layer_blur"
+                ),
+                "radius": max(
+                    0.0,
+                    _number(effect.get("radius"), 8.0),
+                ),
+            }
+            raw_blur_type = effect.get("blurType")
+            progressive_fields_present = any(
+                key in effect
+                for key in ("startRadius", "startOffset", "endOffset")
+            )
+            if raw_blur_type is not None or progressive_fields_present:
+                blur_type = str(
+                    raw_blur_type or "PROGRESSIVE"
+                ).strip().casefold()
+                blur["blur_type"] = (
+                    blur_type
+                    if blur_type in {"normal", "progressive"}
+                    else "normal"
+                )
+                if blur["blur_type"] == "progressive":
+                    start_offset = effect.get("startOffset")
+                    start_offset = (
+                        start_offset
+                        if isinstance(start_offset, Mapping)
+                        else {}
+                    )
+                    end_offset = effect.get("endOffset")
+                    end_offset = (
+                        end_offset
+                        if isinstance(end_offset, Mapping)
+                        else {}
+                    )
+                    blur.update(
+                        {
+                            "start_radius": max(
+                                0.0,
+                                _number(effect.get("startRadius")),
+                            ),
+                            "start_offset": {
+                                "x": _number(start_offset.get("x")),
+                                "y": _number(start_offset.get("y")),
+                            },
+                            "end_offset": {
+                                "x": _number(end_offset.get("x")),
+                                "y": _number(end_offset.get("y"), 1.0),
+                            },
+                        }
+                    )
+            if not effect_visible:
+                blur["visible"] = False
+            appearance_effects.append(blur)
+            continue
+        if effect_type == "NOISE":
+            noise_type = str(
+                effect.get("noiseType") or "MONOTONE"
+            ).strip().casefold()
+            if noise_type not in {"monotone", "duotone", "multitone"}:
+                noise_type = "monotone"
+            noise: dict[str, Any] = {
+                "type": "noise",
+                "color": _color(effect.get("color"), "#000000FF"),
+                "blend_mode": str(
+                    effect.get("blendMode") or "NORMAL"
+                ).casefold(),
+                "noise_size": max(0.0, _number(effect.get("noiseSize"))),
+                "noise_type": noise_type,
+                "density": max(0.0, _number(effect.get("density"))),
+            }
+            noise_size_vector = effect.get("noiseSizeVector")
+            if isinstance(noise_size_vector, Mapping):
+                noise["noise_size_vector"] = {
+                    "x": _number(
+                        noise_size_vector.get("x"),
+                        noise["noise_size"],
                     ),
-                    "radius": max(
-                        0.0,
-                        _number(effect.get("radius"), 8.0),
+                    "y": _number(
+                        noise_size_vector.get("y"),
+                        noise["noise_size"],
                     ),
                 }
-            )
+            if effect.get("secondaryColor") is not None:
+                noise["secondary_color"] = _color(
+                    effect.get("secondaryColor"),
+                    "#FFFFFFFF",
+                )
+            if effect.get("opacity") is not None:
+                noise["opacity"] = max(
+                    0.0,
+                    min(1.0, _number(effect.get("opacity"), 1.0)),
+                )
+            if not effect_visible:
+                noise["visible"] = False
+            appearance_effects.append(noise)
+            continue
+        if effect_type == "TEXTURE":
+            texture: dict[str, Any] = {
+                "type": "texture",
+                "radius": max(0.0, _number(effect.get("radius"))),
+                "noise_size": max(0.0, _number(effect.get("noiseSize"))),
+                "clip_to_shape": bool(effect.get("clipToShape", False)),
+            }
+            noise_size_vector = effect.get("noiseSizeVector")
+            if isinstance(noise_size_vector, Mapping):
+                texture["noise_size_vector"] = {
+                    "x": _number(
+                        noise_size_vector.get("x"),
+                        texture["noise_size"],
+                    ),
+                    "y": _number(
+                        noise_size_vector.get("y"),
+                        texture["noise_size"],
+                    ),
+                }
+            if not effect_visible:
+                texture["visible"] = False
+            appearance_effects.append(texture)
             continue
         if effect_type not in {"DROP_SHADOW", "INNER_SHADOW"}:
             continue
         offset = effect.get("offset")
         offset = offset if isinstance(offset, Mapping) else {}
-        appearance_effects.append(
-            {
+        shadow_effect: dict[str, Any] = {
                 "type": (
                     "inner_shadow"
                     if effect_type == "INNER_SHADOW"
@@ -802,7 +2011,14 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                     effect.get("blendMode") or "NORMAL"
                 ).casefold(),
             }
-        )
+        if (
+            effect_type == "DROP_SHADOW"
+            and effect.get("showShadowBehindNode") is not None
+        ):
+            shadow_effect["show_shadow_behind_node"] = bool(
+                effect.get("showShadowBehindNode")
+            )
+        appearance_effects.append(shadow_effect)
     corner_values = node.get("rectangleCornerRadii")
     corner_values = (
         list(corner_values)
@@ -870,6 +2086,12 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
             ) if corner_values else fallback_radius,
         },
     }
+    individual_stroke_weights = node.get("individualStrokeWeights")
+    if isinstance(individual_stroke_weights, Mapping):
+        result["individual_stroke_weights"] = {
+            side: max(0.0, _number(individual_stroke_weights.get(side)))
+            for side in ("top", "right", "bottom", "left")
+        }
     if gradient is not None:
         result["fill_gradient"] = _map_gradient(gradient)
     if appearance_effects:
@@ -915,6 +2137,7 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
             effect
             for effect in appearance_effects
             if effect["type"] == "drop_shadow"
+            and bool(effect.get("visible", True))
         ),
         None,
     )
@@ -927,16 +2150,167 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _svg_number(value: float) -> str:
+    return f"{float(value):.6f}".rstrip("0").rstrip(".") or "0"
+
+
+def _visible_figma_paints(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        row
+        for row in value
+        if isinstance(row, Mapping) and bool(row.get("visible", True))
+    ]
+
+
+def _recover_figma_semantic_vector_geometry(
+    node: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Recover only primitives whose stored semantics determine the path.
+
+    Old REST fixtures were often fetched without ``geometry=paths``.  An
+    arbitrary VECTOR cannot be reconstructed from its bounding box, so this
+    helper intentionally supports only two tightly constrained cases present
+    in the compatibility corpus: an unrotated vector explicitly named as a
+    rectangle, and the 2:1 solid tooltip triangle exported as ``Arrow``.
+    Everything else remains an explicit compatibility blocker.
+    """
+
+    if str(node.get("type") or "").upper() != "VECTOR":
+        return {}
+    bounds = node.get("absoluteBoundingBox")
+    bounds = bounds if isinstance(bounds, Mapping) else {}
+    width = _number(bounds.get("width"))
+    height = _number(bounds.get("height"))
+    if width <= 0.0 or height <= 0.0:
+        return {}
+    fills = _visible_figma_paints(node.get("fills"))
+    strokes = _visible_figma_paints(node.get("strokes"))
+    if (
+        len(fills) != 1
+        or str(fills[0].get("type") or "").upper() != "SOLID"
+        or strokes
+    ):
+        return {}
+
+    name = str(node.get("name") or "").strip()
+    rotation = _number(node.get("rotation"))
+    width_text = _svg_number(width)
+    height_text = _svg_number(height)
+    if (
+        re.fullmatch(r"Rectangle(?:\s+\d+)?", name, re.IGNORECASE)
+        and abs(rotation) <= 0.0001
+    ):
+        path = f"M 0 0 H {width_text} V {height_text} H 0 Z"
+        return {
+            "kind": "rectangle",
+            "geometry": [{"path": path, "winding_rule": "nonzero"}],
+            "consumed_rotation": False,
+        }
+
+    ratio = max(width, height) / min(width, height)
+    if name.casefold() != "arrow" or abs(ratio - 2.0) > 0.01:
+        return {}
+    half_turn = (
+        abs(abs(rotation) - math.pi) <= 0.001
+        or abs(abs(rotation) - 180.0) <= 0.001
+    )
+    if abs(rotation) > 0.0001 and not half_turn:
+        return {}
+    half_width = _svg_number(width / 2.0)
+    half_height = _svg_number(height / 2.0)
+    if width >= height:
+        path = (
+            f"M 0 {height_text} L {width_text} {height_text} "
+            f"L {half_width} 0 Z"
+            if half_turn
+            else f"M 0 0 L {width_text} 0 L {half_width} {height_text} Z"
+        )
+    else:
+        path = (
+            f"M {width_text} 0 L {width_text} {height_text} "
+            f"L 0 {half_height} Z"
+            if half_turn
+            else f"M 0 0 L 0 {height_text} L {width_text} {half_height} Z"
+        )
+    return {
+        "kind": "triangle",
+        "geometry": [{"path": path, "winding_rule": "nonzero"}],
+        "consumed_rotation": half_turn,
+    }
+
+
 def _map_content(
     node: Mapping[str, Any],
     image_urls: Mapping[str, str],
     image_paths: Mapping[str, str],
+    vector_render_paths: Mapping[str, str],
+    effect_render_paths: Mapping[str, str],
+    *,
+    file_key: str = "",
 ) -> dict[str, Any]:
     node_type = str(node.get("type") or "").upper()
+    node_id = str(node.get("id") or "")
     result: dict[str, Any] = {
-        "figma_node_id": str(node.get("id") or ""),
+        "figma_node_id": node_id,
         "figma_type": node_type,
     }
+    exact_effect_types = _figma_exact_effect_types(node)
+    exact_render_path = str(effect_render_paths.get(node_id) or "").strip()
+    exact_render_file = (
+        Path(exact_render_path).expanduser().resolve()
+        if exact_render_path
+        else None
+    )
+    if (
+        exact_effect_types
+        and exact_render_file is not None
+        and exact_render_file.is_file()
+    ):
+        result["figma_exact_render"] = {
+            "png_path": str(exact_render_file),
+            "source_bounds": _figma_bounds_record(
+                node.get("absoluteBoundingBox")
+            ),
+            "render_bounds": _figma_bounds_record(
+                node.get("absoluteRenderBounds")
+            ),
+            "source": "figma_render_api",
+            "node_id": node_id,
+            "format": "png",
+            "scale": 1.0,
+            "effect_types": exact_effect_types,
+            "provenance": {
+                "file_key": str(file_key or ""),
+                "endpoint": "GET /v1/images/:key",
+                "authenticated_import": True,
+            },
+        }
+    variable_bindings = _figma_variable_bindings(node)
+    if variable_bindings:
+        result["figma_variable_bindings"] = variable_bindings
+    unsupported_paints: list[dict[str, Any]] = []
+    for paint_target in ("fills", "strokes"):
+        paints = node.get(paint_target)
+        if not isinstance(paints, list):
+            continue
+        for paint in paints:
+            if not isinstance(paint, Mapping):
+                continue
+            paint_type = str(paint.get("type") or "").upper()
+            if paint_type not in {"GRADIENT_ANGULAR", "GRADIENT_DIAMOND"}:
+                continue
+            unsupported_paints.append(
+                {
+                    "target": paint_target,
+                    "type": paint_type,
+                    "paint": copy.deepcopy(dict(paint)),
+                    "reason": "requires_conic_or_diamond_gradient_material",
+                }
+            )
+    if unsupported_paints:
+        result["figma_unsupported_paints"] = unsupported_paints
     if node_type == "TEXT":
         style = node.get("style")
         style = style if isinstance(style, Mapping) else {}
@@ -993,16 +2367,57 @@ def _map_content(
         }
     image = _image_paint(node.get("fills"))
     if image is not None:
+        mapped_image = _map_paints([image])[0]
         image_ref = str(image.get("imageRef") or "")
         local_path = str(image_paths.get(image_ref) or "")
         scale_mode = str(image.get("scaleMode") or "FILL").upper()
-        image_fit = {
-            "FIT": "fit",
-            "FILL": "fill",
-            "STRETCH": "stretch",
-            "TILE": "tile",
-            "CROP": "crop",
-        }.get(scale_mode, "fill")
+        image_fit = str(mapped_image.get("fit") or "fill")
+        image_transform = copy.deepcopy(
+            image.get("imageTransform")
+            if isinstance(image.get("imageTransform"), list)
+            else []
+        )
+        image_render_blockers: list[str] = []
+        visible_fills = _visible_figma_paints(node.get("fills"))
+        if len(visible_fills) > 1:
+            image_render_blockers.append(
+                "figma_multiple_image_or_mixed_fills_require_composited_render"
+            )
+        adjustments = dict(mapped_image.get("adjustments") or {})
+        if any(abs(_number(value)) > 0.0001 for value in adjustments.values()):
+            image_render_blockers.append(
+                "figma_image_filters_require_verified_color_pipeline"
+            )
+        if str(mapped_image.get("blend_mode") or "normal") != "normal":
+            image_render_blockers.append(
+                "figma_image_paint_blend_mode_requires_composited_render"
+            )
+        if image_transform:
+            valid_shape = (
+                len(image_transform) == 2
+                and all(
+                    isinstance(axis, list) and len(axis) >= 3
+                    for axis in image_transform
+                )
+            )
+            try:
+                a, c, _offset_x = (
+                    float(value) for value in image_transform[0][:3]
+                )
+                b, d, _offset_y = (
+                    float(value) for value in image_transform[1][:3]
+                )
+                transform_valid = valid_shape and all(
+                    math.isfinite(float(value))
+                    for axis in image_transform
+                    for value in axis[:3]
+                ) and abs(a * d - b * c) > 1.0e-9
+            except (IndexError, TypeError, ValueError):
+                transform_valid = False
+            if not transform_valid:
+                image_render_blockers.append(
+                    "figma_image_transform_invalid_or_singular"
+                )
         result.update(
             {
                 "image_ref": image_ref,
@@ -1011,14 +2426,26 @@ def _map_content(
                 "source_path": local_path,
                 "image_mode": scale_mode.casefold(),
                 "image_fit": image_fit,
+                "tile_scale": float(mapped_image.get("tile_scale", 1.0)),
+                "image_rotation": float(mapped_image.get("rotation", 0.0)),
+                "image_opacity": float(mapped_image.get("opacity", 1.0)),
+                "image_adjustments": adjustments,
+                "image_blend_mode": str(
+                    mapped_image.get("blend_mode") or "normal"
+                ),
                 "image_status": "ready" if local_path else "missing",
-                "figma_image_transform": copy.deepcopy(
-                    image.get("imageTransform")
-                    if isinstance(image.get("imageTransform"), list)
-                    else []
+                "figma_image_transform": image_transform,
+                "figma_image_transform_semantics": (
+                    "target_normalized_to_source_normalized"
+                    if image_transform
+                    else "none"
                 ),
             }
         )
+        if image_render_blockers:
+            result["figma_image_render_blockers"] = sorted(
+                set(image_render_blockers)
+            )
     fill_geometry = node.get("fillGeometry")
     if isinstance(fill_geometry, list):
         result["vector_fill_geometry"] = [
@@ -1042,6 +2469,62 @@ def _map_content(
             for row in stroke_geometry
             if isinstance(row, Mapping) and str(row.get("path") or "")
         ]
+        if result["vector_stroke_geometry"]:
+            # REST strokeGeometry is the expanded outline around the shape's
+            # center regardless of strokeAlign. Preserve it together with the
+            # alignment so Painter can clip the centered geometry inside or
+            # outside instead of re-stroking with the stale uniform
+            # strokeWeight fallback used by mixed-edge rectangles.
+            local_size = node.get("size")
+            local_size = local_size if isinstance(local_size, Mapping) else {}
+            source_box = _box(node)
+            result["figma_stroke_geometry"] = {
+                "representation": "expanded_outline",
+                "source": "strokeGeometry",
+                "viewport": {
+                    "width": max(
+                        0.0001,
+                        _number(local_size.get("x"), source_box["width"]),
+                    ),
+                    "height": max(
+                        0.0001,
+                        _number(local_size.get("y"), source_box["height"]),
+                    ),
+                },
+            }
+    has_editable_geometry = bool(
+        result.get("vector_fill_geometry")
+        or result.get("vector_stroke_geometry")
+        or result.get("vector_paths")
+    )
+    if node_type == "VECTOR" and not has_editable_geometry:
+        render_path = str(
+            vector_render_paths.get(str(node.get("id") or "")) or ""
+        ).strip()
+        if render_path and Path(render_path).expanduser().is_file():
+            result["vector_render_path"] = render_path
+            result["figma_vector_geometry_recovery"] = {
+                "kind": "svg_render",
+                "source": "figma_render_api",
+                "editability": "render_only",
+            }
+        else:
+            recovery = _recover_figma_semantic_vector_geometry(node)
+            if recovery:
+                result["vector_fill_geometry"] = copy.deepcopy(
+                    recovery["geometry"]
+                )
+                result["vector_paths"] = [
+                    str(row["path"]) for row in recovery["geometry"]
+                ]
+                result["figma_vector_geometry_recovery"] = {
+                    "kind": str(recovery["kind"]),
+                    "source": "semantic_primitive",
+                    "editability": "editable_path",
+                    "consumed_rotation": bool(
+                        recovery.get("consumed_rotation", False)
+                    ),
+                }
     return result
 
 
@@ -1053,9 +2536,65 @@ def _top_level_frames(page: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         row
         for row in children
         if str(row.get("type") or "").upper()
-        in {"FRAME", "COMPONENT", "COMPONENT_SET", "SECTION"}
+        in {"FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE", "SECTION"}
     ]
     return frames or [page]
+
+
+_FIGMA_ARTBOARD_GAP = 160.0
+_FIGMA_PAGE_GAP = 1600.0
+
+
+def _figma_page_frame_placement(
+    frames: Sequence[Mapping[str, Any]],
+    *,
+    origin_y: float,
+) -> tuple[list[tuple[float, float]], float]:
+    """Return canvas positions for one page's top-level frames.
+
+    Figma keeps every top-level frame's board position in
+    ``absoluteBoundingBox``, and that grid is what makes an imported file
+    recognisable.  Each page owns an independent coordinate space, so a page
+    is shifted to its own local origin and stacked below the previous one
+    instead of being interleaved.  Frames without a bounding box (and pages
+    that report none at all) fall back to the historical left-to-right strip
+    appended after the positioned content.
+    """
+    boxes = [_box(frame) for frame in frames]
+    positioned = [
+        isinstance(frame.get("absoluteBoundingBox"), Mapping)
+        for frame in frames
+    ]
+    if any(positioned):
+        base_x = min(
+            box["x"] for box, ok in zip(boxes, positioned) if ok
+        )
+        base_y = min(
+            box["y"] for box, ok in zip(boxes, positioned) if ok
+        )
+        strip_x = max(
+            box["x"] + box["width"] - base_x
+            for box, ok in zip(boxes, positioned)
+            if ok
+        ) + _FIGMA_ARTBOARD_GAP
+    else:
+        base_x = 0.0
+        base_y = 0.0
+        strip_x = 0.0
+
+    placements: list[tuple[float, float]] = []
+    for box, ok in zip(boxes, positioned):
+        if ok:
+            placements.append((box["x"] - base_x, box["y"] - base_y + origin_y))
+            continue
+        placements.append((strip_x, origin_y))
+        strip_x += box["width"] + _FIGMA_ARTBOARD_GAP
+
+    page_height = max(
+        (y - origin_y) + box["height"]
+        for box, (_x, y) in zip(boxes, placements)
+    )
+    return placements, origin_y + page_height + _FIGMA_PAGE_GAP
 
 
 def _preferred_artboard_id(
@@ -1087,27 +2626,86 @@ def _figma_document_root(payload: Mapping[str, Any]) -> Mapping[str, Any] | None
     root = payload.get("document")
     if isinstance(root, Mapping):
         return root
-    nodes = payload.get("nodes")
-    nodes = nodes if isinstance(nodes, Mapping) else {}
-    children = [
+    # Public compatibility fixtures and JSON_REST_V1 exports often contain a
+    # single REST node rather than the outer /files or /nodes response. Treat
+    # that node exactly like a one-entry /nodes response so the same wrapping,
+    # deduplication, and validation path applies.
+    payload_type = str(payload.get("type") or "").upper()
+    if payload_type:
+        if payload_type == "DOCUMENT":
+            return payload
+        nodes: Mapping[str, Any] = {
+            "fragment": {"document": payload},
+        }
+    else:
+        raw_nodes = payload.get("nodes")
+        nodes = raw_nodes if isinstance(raw_nodes, Mapping) else {}
+    selected = [
         row["document"]
         for row in nodes.values()
         if isinstance(row, Mapping) and isinstance(row.get("document"), Mapping)
     ]
-    if not children:
+    if not selected:
         return None
-    return {
-        "id": "figma:nodes-document",
-        "name": str(payload.get("name") or "Figma Nodes"),
-        "type": "DOCUMENT",
-        "children": [
+
+    # A /files/:key/nodes response may mix frame-like targets and leaf targets.
+    # Feeding every target into one CANVAS makes _top_level_frames select only
+    # the frame-like rows and silently drops sibling leaves. Remove targets
+    # already expanded beneath another selected node, then give each remaining
+    # leaf a synthetic frame so it remains an editable object on its own
+    # artboard. Selected CANVAS nodes remain real document pages.
+    descendant_ids: set[str] = set()
+    for node in selected:
+        root_id = str(node.get("id") or "")
+        for descendant in _walk_figma_nodes(node):
+            descendant_id = str(descendant.get("id") or "")
+            if descendant_id and descendant_id != root_id:
+                descendant_ids.add(descendant_id)
+    selected = [
+        node
+        for node in selected
+        if not str(node.get("id") or "")
+        or str(node.get("id") or "") not in descendant_ids
+    ]
+
+    pages: list[Mapping[str, Any]] = []
+    loose_nodes: list[Mapping[str, Any]] = []
+    for node in selected:
+        if str(node.get("type") or "").upper() == "CANVAS":
+            pages.append(node)
+        else:
+            loose_nodes.append(node)
+    if loose_nodes:
+        frame_types = {"FRAME", "COMPONENT", "COMPONENT_SET", "SECTION"}
+        artboards: list[Mapping[str, Any]] = []
+        for node in loose_nodes:
+            if str(node.get("type") or "").upper() in frame_types:
+                artboards.append(node)
+                continue
+            node_box = _box(node)
+            artboards.append(
+                {
+                    "id": f"figma:nodes-artboard:{node.get('id') or len(artboards)}",
+                    "name": str(node.get("name") or "Imported Node"),
+                    "type": "FRAME",
+                    "absoluteBoundingBox": node_box,
+                    "clipsContent": False,
+                    "children": [node],
+                }
+            )
+        pages.append(
             {
                 "id": "figma:nodes-canvas",
                 "name": "Imported Nodes",
                 "type": "CANVAS",
-                "children": children,
+                "children": artboards,
             }
-        ],
+        )
+    return {
+        "id": "figma:nodes-document",
+        "name": str(payload.get("name") or "Figma Nodes"),
+        "type": "DOCUMENT",
+        "children": pages,
     }
 
 
@@ -1117,6 +2715,8 @@ def import_figma_payload(
     source: str = "",
     image_urls: Mapping[str, str] | None = None,
     image_paths: Mapping[str, str] | None = None,
+    vector_render_paths: Mapping[str, str] | None = None,
+    effect_render_paths: Mapping[str, str] | None = None,
     variables_payload: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     root = _figma_document_root(payload)
@@ -1134,6 +2734,8 @@ def import_figma_payload(
         raise PainterUIFigmaError("Figma document does not contain any pages")
     images = dict(image_urls or {})
     local_images = dict(image_paths or {})
+    local_vector_renders = dict(vector_render_paths or {})
+    local_effect_renders = dict(effect_render_paths or {})
     file_key = ""
     try:
         file_key = figma_file_key(source)
@@ -1146,12 +2748,14 @@ def import_figma_payload(
     components: list[dict[str, Any]] = []
     interactions: list[dict[str, Any]] = []
     sections: list[dict[str, Any]] = []
-    pending_reactions: list[tuple[str, list[Mapping[str, Any]]]] = []
+    artboard_variable_bindings: list[dict[str, Any]] = []
+    pending_reactions: list[dict[str, Any]] = []
     figma_targets: dict[str, tuple[str, str]] = {}
     warnings: list[str] = []
     supported = 0
     skipped = 0
     component_set_index = _figma_component_set_index(root)
+    page_origin_y = 0.0
 
     for page in pages:
         page_id = _figma_node_stable_id(page, "page")
@@ -1161,8 +2765,15 @@ def import_figma_payload(
                 "name": str(page.get("name") or "Page"),
             }
         )
-        artboard_x = 0.0
-        for frame in _top_level_frames(page):
+        page_frames = _top_level_frames(page)
+        frame_placements, page_origin_y = _figma_page_frame_placement(
+            page_frames,
+            origin_y=page_origin_y,
+        )
+        for frame, (artboard_x, artboard_y) in zip(
+            page_frames,
+            frame_placements,
+        ):
             frame_object_start = len(objects)
             frame_box = _box(frame)
             frame_id = _figma_node_stable_id(frame, "artboard")
@@ -1175,7 +2786,7 @@ def import_figma_payload(
                     "width": int(round(frame_box["width"])),
                     "height": int(round(frame_box["height"])),
                     "x": artboard_x,
-                    "y": 0.0,
+                    "y": artboard_y,
                     "background": (
                         _color(background.get("color"), "#FFFFFF")
                         if background
@@ -1189,8 +2800,35 @@ def import_figma_payload(
                     ),
                 }
             )
+            # A top-level COMPONENT is both the artboard source and an
+            # editable Painter object (visit(frame) below). Its alias records
+            # therefore belong to that object only; copying them into the
+            # artboard recovery list would duplicate one Figma source slot.
+            if str(frame.get("type") or "").upper() != "COMPONENT":
+                for binding in _figma_variable_bindings(frame):
+                    binding["artboard_id"] = frame_id
+                    binding["figma_node_id"] = str(frame.get("id") or "")
+                    artboard_variable_bindings.append(binding)
+            frame_layout_mode = str(frame.get("layoutMode") or "").upper()
+            if frame_layout_mode in {"HORIZONTAL", "VERTICAL"}:
+                warnings.append(
+                    f"converted:{frame.get('id')}:"
+                    "artboard_auto_layout_flattened_to_absolute_geometry"
+                )
+            frame_reactions = frame.get("reactions")
+            if not isinstance(frame_reactions, list):
+                frame_reactions = frame.get("interactions")
+            if isinstance(frame_reactions, list) and frame_reactions:
+                pending_reactions.append(
+                    {
+                        "source_kind": "artboard",
+                        "source_id": frame_id,
+                        "source_figma_node_id": str(frame.get("id") or ""),
+                        "artboard_id": frame_id,
+                        "reactions": copy.deepcopy(frame_reactions),
+                    }
+                )
             figma_targets[str(frame.get("id") or "")] = ("artboard", frame_id)
-            artboard_x += frame_box["width"] + 160.0
 
             def visit(
                 node: Mapping[str, Any],
@@ -1200,6 +2838,11 @@ def import_figma_payload(
                 parent_layout_mode: str = "none",
                 definition_component_id: str = "",
                 instance_component_id: str = "",
+                parent_figma_linear: tuple[float, float, float, float] = (
+                    _FIGMA_IDENTITY_LINEAR_TRANSFORM
+                ),
+                parent_affine_snapshot: bool = False,
+                parent_baseline_offsets: Mapping[str, float] | None = None,
             ) -> None:
                 nonlocal supported, skipped
                 node_type = str(node.get("type") or "").upper()
@@ -1208,18 +2851,271 @@ def import_figma_payload(
                     skipped += 1
                     warnings.append(f"blocked:{node.get('id')}:{node_type}")
                     return
+                effective_figma_linear = _multiply_figma_linear_transforms(
+                    parent_figma_linear,
+                    _figma_node_linear_transform(node),
+                )
+                affine_snapshot_active = bool(parent_affine_snapshot)
                 current_parent = parent_id
                 if include_self:
-                    node_box = _box(node)
+                    (
+                        node_box,
+                        missing_bounds_recovery,
+                    ) = _figma_missing_auto_layout_cross_box(node)
                     object_id = _figma_node_stable_id(node)
                     kind = _map_kind(node)
-                    content = _map_content(node, images, local_images)
+                    content = _map_content(
+                        node,
+                        images,
+                        local_images,
+                        local_vector_renders,
+                        local_effect_renders,
+                        file_key=file_key,
+                    )
+                    raw_component_property_references = node.get(
+                        "componentPropertyReferences"
+                    )
+                    raw_component_property_references = (
+                        raw_component_property_references
+                        if isinstance(raw_component_property_references, Mapping)
+                        else {}
+                    )
+                    component_property_bindings = (
+                        _figma_component_property_bindings(
+                            raw_component_property_references
+                        )
+                    )
+                    component_property_binding_recovery = (
+                        _figma_unmapped_component_property_bindings(
+                            raw_component_property_references
+                        )
+                    )
+                    if raw_component_property_references:
+                        content["figma_component_property_references"] = (
+                            copy.deepcopy(
+                                dict(raw_component_property_references)
+                            )
+                        )
+                    if component_property_binding_recovery:
+                        content["figma_component_property_bindings"] = (
+                            component_property_binding_recovery
+                        )
+                    if missing_bounds_recovery:
+                        content["figma_missing_bounds_recovery"] = (
+                            missing_bounds_recovery
+                        )
+                        warnings.append(
+                            f"converted:{node.get('id')}:GEOMETRY:"
+                            "missing_auto_layout_cross_bounds_inferred"
+                        )
+                    mapped_layout = _map_layout(
+                        node,
+                        parent_layout_mode=parent_layout_mode,
+                    )
+                    baseline_offset = (
+                        parent_baseline_offsets.get(str(node.get("id") or ""))
+                        if isinstance(parent_baseline_offsets, Mapping)
+                        else None
+                    )
+                    if baseline_offset is not None:
+                        mapped_layout["baseline_offset"] = max(
+                            0.0,
+                            float(baseline_offset),
+                        )
+                        mapped_layout["baseline_source"] = (
+                            "figma_resolved_geometry"
+                        )
+                    auto_layout_recovery = (
+                        _figma_transformed_auto_layout_recovery(
+                            node,
+                            mapped_layout,
+                            parent_linear=parent_figma_linear,
+                        )
+                    )
+                    if auto_layout_recovery:
+                        if not affine_snapshot_active:
+                            outer_affine_reason = _figma_outer_affine_issue(
+                                parent_figma_linear
+                            )
+                            if outer_affine_reason:
+                                pa, pc, pb, pd = parent_figma_linear
+                                auto_layout_recovery.update(
+                                    {
+                                        "outer_affine_ignored": True,
+                                        "outer_affine_reason": (
+                                            outer_affine_reason
+                                        ),
+                                        "outer_affine_linear_transform": [
+                                            [pa, pc],
+                                            [pb, pd],
+                                        ],
+                                    }
+                                )
+                                warnings.append(
+                                    f"blocked:{node.get('id')}:AFFINE:"
+                                    f"{outer_affine_reason}"
+                                )
+                            # The imported AABB is already in artboard space.
+                            # Start the recoverable affine basis at the
+                            # flattened subtree root so unrelated outer groups
+                            # are not applied to that absolute geometry twice.
+                            effective_figma_linear = (
+                                _figma_node_linear_transform(node)
+                            )
+                        affine_snapshot_active = True
+                        content["figma_auto_layout_recovery"] = (
+                            auto_layout_recovery
+                        )
+                        mapped_layout = copy.deepcopy(mapped_layout)
+                        mapped_layout.update(
+                            {
+                                "mode": "none",
+                                "width_sizing": "fixed",
+                                "height_sizing": "fixed",
+                            }
+                        )
+                        warnings.append(
+                            f"converted:{object_id}:"
+                            "transformed_auto_layout_flattened_to_"
+                            "snapshot_absolute_geometry"
+                        )
+                    affine_rotation: float | None = None
+                    if affine_snapshot_active:
+                        (
+                            node_box,
+                            affine_rotation,
+                            affine_recovery,
+                        ) = _figma_affine_snapshot_geometry(
+                            node,
+                            effective_figma_linear,
+                        )
+                        content["figma_affine_snapshot_geometry"] = (
+                            affine_recovery
+                        )
+                        if auto_layout_recovery.get("outer_affine_ignored"):
+                            affine_recovery["outer_affine_ignored"] = True
+                            affine_recovery["outer_affine_reason"] = (
+                                auto_layout_recovery.get(
+                                    "outer_affine_reason"
+                                )
+                            )
+                            affine_recovery["outer_affine_linear_transform"] = (
+                                copy.deepcopy(
+                                    auto_layout_recovery.get(
+                                        "outer_affine_linear_transform"
+                                    )
+                                )
+                            )
+                        if str(affine_recovery.get("status") or "").startswith(
+                            "blocked_"
+                        ):
+                            warnings.append(
+                                f"blocked:{node.get('id')}:AFFINE:"
+                                f"{affine_recovery.get('reason')}"
+                            )
+                    elif not _figma_linear_transform_is_identity(
+                        effective_figma_linear
+                    ):
+                        # Ordinary transformed nodes do not need their parent
+                        # flow flattened, but they still need the same
+                        # cumulative affine-to-center-pivot conversion. Using
+                        # the already transformed Figma AABB as Painter's local
+                        # width/height and then applying the archive's auxiliary
+                        # rotation field rotates the AABB a second time.
+                        (
+                            candidate_box,
+                            candidate_rotation,
+                            candidate_recovery,
+                        ) = _figma_affine_snapshot_geometry(
+                            node,
+                            effective_figma_linear,
+                        )
+                        if (
+                            candidate_recovery.get("status")
+                            == "rotation_scale_mapped"
+                        ):
+                            node_box = candidate_box
+                            affine_rotation = candidate_rotation
+                            candidate_recovery["scope"] = (
+                                "ordinary_node_cumulative_transform"
+                            )
+                            content["figma_affine_snapshot_geometry"] = (
+                                candidate_recovery
+                            )
+                            warnings.append(
+                                f"converted:{node.get('id')}:AFFINE:"
+                                "orthogonal_transform_mapped"
+                            )
+                    elif (
+                        not _figma_linear_transform_is_identity(
+                            parent_figma_linear
+                        )
+                        or not _figma_linear_transform_is_identity(
+                            _figma_node_linear_transform(node)
+                        )
+                    ):
+                        # A parent and child transform can cancel exactly in
+                        # canvas space (the Grida archive contains paired
+                        # reflections whose cumulative matrix is identity).
+                        # The auxiliary ``rotation`` field has already been
+                        # consumed by that hierarchy. Falling back to it here
+                        # rotates the resolved Figma AABB a second time.
+                        affine_rotation = 0.0
+                        a, c, b, d = effective_figma_linear
+                        content["figma_affine_snapshot_geometry"] = {
+                            "status": "cumulative_identity_consumed",
+                            "scope": "ordinary_node_cumulative_transform",
+                            "effective_linear_transform": [[a, c], [b, d]],
+                            "relative_transform": copy.deepcopy(
+                                node.get("relativeTransform")
+                            ),
+                            "source_size": copy.deepcopy(node.get("size")),
+                            "source_absolute_bounding_box": copy.deepcopy(
+                                node.get("absoluteBoundingBox")
+                            ),
+                            "source_rotation": copy.deepcopy(
+                                node.get("rotation")
+                            ),
+                            "rotation": 0.0,
+                        }
+                        warnings.append(
+                            f"converted:{node.get('id')}:AFFINE:"
+                            "cumulative_identity_transform_consumed"
+                        )
+                    for unsupported_paint in content.get(
+                        "figma_unsupported_paints", []
+                    ):
+                        warnings.append(
+                            f"blocked:{node.get('id')}:PAINT:"
+                            f"{unsupported_paint.get('type')}:"
+                            f"{unsupported_paint.get('reason')}"
+                        )
                     has_vector_geometry = bool(
                         content.get("vector_fill_geometry")
                         or content.get("vector_stroke_geometry")
                         or content.get("vector_paths")
                     )
-                    if kind == "path" and not has_vector_geometry:
+                    vector_recovery = content.get(
+                        "figma_vector_geometry_recovery"
+                    )
+                    vector_recovery = (
+                        vector_recovery
+                        if isinstance(vector_recovery, Mapping)
+                        else {}
+                    )
+                    if kind == "path" and vector_recovery:
+                        if vector_recovery.get("source") == "figma_render_api":
+                            warnings.append(
+                                f"converted:{node.get('id')}:VECTOR:"
+                                "figma_svg_render_fallback_noneditable"
+                            )
+                        else:
+                            warnings.append(
+                                f"converted:{node.get('id')}:VECTOR:"
+                                "semantic_primitive_geometry_recovered:"
+                                f"{vector_recovery.get('kind')}"
+                            )
+                    elif kind == "path" and not has_vector_geometry:
                         warnings.append(
                             f"blocked:{node.get('id')}:VECTOR:"
                             "missing_geometry_paths"
@@ -1233,6 +3129,29 @@ def import_figma_payload(
                             f"blocked:{node.get('id')}:IMAGE:missing_asset:"
                             f"{content.get('image_ref')}"
                         )
+                    for image_reason in content.get(
+                        "figma_image_render_blockers", []
+                    ):
+                        warnings.append(
+                            f"blocked:{node.get('id')}:IMAGE:"
+                            f"{image_reason}"
+                        )
+                    individual_stroke_weights = node.get(
+                        "individualStrokeWeights"
+                    )
+                    if isinstance(individual_stroke_weights, Mapping):
+                        if content.get("vector_stroke_geometry"):
+                            warnings.append(
+                                f"converted:{node.get('id')}:STROKE:"
+                                "individual_stroke_weights_rendered_from_"
+                                "expanded_geometry"
+                            )
+                        else:
+                            warnings.append(
+                                f"blocked:{node.get('id')}:STROKE:"
+                                "individual_stroke_weights_require_"
+                                "expanded_geometry_or_bake"
+                            )
                     role = "none"
                     component_id = ""
                     source_object_id = ""
@@ -1343,7 +3262,19 @@ def import_figma_payload(
                             "y": node_box["y"] - frame_box["y"],
                             "width": node_box["width"],
                             "height": node_box["height"],
-                            "rotation": _number(node.get("rotation")),
+                            "rotation": (
+                                affine_rotation
+                                if affine_rotation is not None
+                                else (
+                                    0.0
+                                    if bool(
+                                        vector_recovery.get(
+                                            "consumed_rotation", False
+                                        )
+                                    )
+                                    else _figma_rotation_degrees(node)
+                                )
+                            ),
                             "opacity": max(
                                 0.0, min(1.0, _number(node.get("opacity"), 1.0))
                             ),
@@ -1356,10 +3287,7 @@ def import_figma_payload(
                             "style": _map_style(node),
                             "content": content,
                             "constraints": _map_constraints(node),
-                            "layout": _map_layout(
-                                node,
-                                parent_layout_mode=parent_layout_mode,
-                            ),
+                            "layout": mapped_layout,
                             "component_id": component_id,
                             "component_role": role,
                             "component_source_object_id": source_object_id,
@@ -1371,9 +3299,7 @@ def import_figma_payload(
                                 node.get("componentProperties")
                             ),
                             "component_property_bindings": (
-                                _figma_component_property_bindings(
-                                    node.get("componentPropertyReferences")
-                                )
+                                component_property_bindings
                             ),
                             "token_bindings": _map_token_bindings(node),
                         }
@@ -1382,15 +3308,31 @@ def import_figma_payload(
                         "object",
                         object_id,
                     )
-                    reactions = [
-                        row
-                        for row in node.get("reactions", [])
-                        if isinstance(row, Mapping)
-                    ]
-                    if reactions:
-                        pending_reactions.append((object_id, reactions))
+                    raw_reactions = node.get("reactions")
+                    if not isinstance(raw_reactions, list):
+                        raw_reactions = node.get("interactions")
+                    if isinstance(raw_reactions, list) and raw_reactions:
+                        pending_reactions.append(
+                            {
+                                "source_kind": "object",
+                                "source_id": object_id,
+                                "source_figma_node_id": str(
+                                    node.get("id") or ""
+                                ),
+                                "artboard_id": frame_id,
+                                "reactions": copy.deepcopy(raw_reactions),
+                            }
+                        )
                     supported += 1
                     current_parent = object_id
+                child_baseline_offsets = (
+                    _figma_resolved_child_baseline_offsets(node)
+                )
+                if child_baseline_offsets:
+                    warnings.append(
+                        f"converted:{node.get('id')}:AUTO_LAYOUT:"
+                        "baseline_alignment_preserved_from_resolved_geometry"
+                    )
                 child_parent_layout_mode = str(
                     node.get("layoutMode") or "NONE"
                 ).casefold()
@@ -1412,6 +3354,9 @@ def import_figma_payload(
                                 if node_type == "INSTANCE"
                                 else instance_component_id
                             ),
+                            parent_figma_linear=effective_figma_linear,
+                            parent_affine_snapshot=affine_snapshot_active,
+                            parent_baseline_offsets=child_baseline_offsets,
                         )
             if str(frame.get("type") or "").upper() == "SECTION":
                 section_objects = objects[frame_object_start:]
@@ -1420,8 +3365,11 @@ def import_figma_payload(
                         "id": _figma_node_stable_id(frame, "section"),
                         "name": str(frame.get("name") or "Section"),
                         "page_name": str(page.get("name") or ""),
-                        "x": float(frame_box["x"]),
-                        "y": float(frame_box["y"]),
+                        # Sections share the canvas with the artboard imported
+                        # from the same frame, so they must use the same
+                        # page-local placement rather than raw Figma coords.
+                        "x": float(artboard_x),
+                        "y": float(artboard_y),
                         "width": float(frame_box["width"]),
                         "height": float(frame_box["height"]),
                         "object_ids": [
@@ -1435,6 +3383,7 @@ def import_figma_payload(
             if str(frame.get("type") or "").upper() == "COMPONENT":
                 visit(frame)
             else:
+                frame_linear = _figma_node_linear_transform(frame)
                 for child in frame.get("children", []):
                     if isinstance(child, Mapping):
                         frame_layout_mode = str(
@@ -1447,7 +3396,25 @@ def import_figma_payload(
                                 if frame_layout_mode in {"horizontal", "vertical"}
                                 else "none"
                             ),
+                            parent_figma_linear=frame_linear,
+                            # The top-level artboard already owns absolute
+                            # snapshot geometry and is not a Painter object.
+                            # Let a nested transformed layout establish its
+                            # own recoverable affine subtree root.
+                            parent_affine_snapshot=False,
                         )
+                if str(frame.get("type") or "").upper() == "INSTANCE":
+                    # A top-level Figma instance is a screen/artboard, so its
+                    # expanded descendants remain editable snapshot objects.
+                    # Their component property references still point into
+                    # the absent instance root and cannot be active Painter
+                    # definition bindings.
+                    for snapshot_row in objects[frame_object_start:]:
+                        if snapshot_row.get("component_property_bindings"):
+                            _detach_figma_component_property_bindings(
+                                snapshot_row,
+                                warnings,
+                            )
 
     component_ids_by_figma_node = {
         str((row.get("metadata") or {}).get("figma_node_id") or ""): str(
@@ -1534,6 +3501,7 @@ def import_figma_payload(
         row["content"]["remote_component"] = remote
         row["component_id"] = ""
         row["component_role"] = "none"
+        _detach_figma_component_property_bindings(row, warnings)
         warnings.append(
             f"converted:{row['id']}:remote_component_instance_to_group"
         )
@@ -1551,6 +3519,31 @@ def import_figma_payload(
             ):
                 row["component_id"] = ""
                 row["component_source_object_id"] = ""
+                _detach_figma_component_property_bindings(row, warnings)
+
+    # REST /nodes responses include the resolved descendants of local
+    # instances. Their componentPropertyReferences describe the source
+    # definition and must not become active bindings on the expanded instance
+    # copy, which lives outside that definition. Preserve the source metadata
+    # for recovery/inspection, but detach it from Tiger's editable binding
+    # contract.
+    for row in objects:
+        if not row.get("component_property_bindings"):
+            continue
+        parent = objects_by_id.get(str(row.get("parent_id") or ""))
+        while parent is not None:
+            parent_content = parent.get("content")
+            parent_content = (
+                parent_content if isinstance(parent_content, Mapping) else {}
+            )
+            if str(parent_content.get("figma_type") or "").upper() == "INSTANCE":
+                _detach_figma_component_property_bindings(
+                    row,
+                    warnings,
+                    reason="expanded_instance_property_bindings_resolved",
+                )
+                break
+            parent = objects_by_id.get(str(parent.get("parent_id") or ""))
 
     figma_node_index = {
         str(node.get("id") or ""): node
@@ -1592,6 +3585,22 @@ def import_figma_payload(
                 "outline": bool(source_node.get("isMaskOutline", False)),
                 "target_ids": targets,
             }
+            mask_type = str(source_node.get("maskType") or "ALPHA").upper()
+            requires_raster_alpha = _figma_mask_requires_raster_alpha(
+                source_node
+            )
+            content = row.get("content")
+            content = dict(content) if isinstance(content, Mapping) else {}
+            content["figma_mask"] = {
+                "type": mask_type.casefold(),
+                "requires_raster_alpha": requires_raster_alpha,
+                "workspace_rendering": {
+                    "ALPHA": "pixel_alpha",
+                    "LUMINANCE": "pixel_luminance",
+                    "VECTOR": "geometry_clip",
+                }.get(mask_type, "geometry_clip"),
+            }
+            row["content"] = content
 
     object_component_ids = {
         str(row["id"]): str(row.get("component_id") or "")
@@ -1599,51 +3608,233 @@ def import_figma_payload(
     }
     trigger_map = {
         "ON_CLICK": "click",
-        "MOUSE_ENTER": "hover",
+        "ON_HOVER": "hover",
+        "MOUSE_ENTER": "mouse_enter",
+        "MOUSE_LEAVE": "mouse_leave",
         "MOUSE_DOWN": "press",
+        "ON_PRESS": "press",
+        "ON_DRAG": "drag",
         "ON_KEY_DOWN": "keyboard",
+        "AFTER_TIMEOUT": "delay",
+        "ON_GAMEPAD": "gamepad",
     }
-    for source_object_id, reactions in pending_reactions:
-        for reaction in reactions:
-            trigger_row = reaction.get("trigger")
-            trigger_row = trigger_row if isinstance(trigger_row, Mapping) else {}
-            trigger = trigger_map.get(
-                str(trigger_row.get("type") or "ON_CLICK").upper(),
-                "click",
+    navigation_map = {
+        "NAVIGATE": "navigate",
+        "OVERLAY": "open_overlay",
+        "SWAP": "swap_overlay",
+        "CHANGE_TO": "change_variant",
+        "SCROLL_TO": "scroll_to",
+    }
+    reaction_recovery: list[dict[str, Any]] = []
+    source_reaction_count = 0
+    source_reaction_action_count = 0
+    native_reaction_count = 0
+    native_reaction_action_count = 0
+
+    def append_unique(values: list[str], reason: str) -> None:
+        if reason and reason not in values:
+            values.append(reason)
+
+    for pending in pending_reactions:
+        source_kind = str(pending.get("source_kind") or "object")
+        source_id = str(pending.get("source_id") or "")
+        source_figma_node_id = str(
+            pending.get("source_figma_node_id") or ""
+        )
+        source_artboard_id = str(pending.get("artboard_id") or "")
+        reactions = pending.get("reactions")
+        reactions = reactions if isinstance(reactions, list) else []
+        for reaction_index, raw_reaction in enumerate(reactions):
+            source_reaction_count += 1
+            reaction = (
+                raw_reaction if isinstance(raw_reaction, Mapping) else {}
             )
-            actions = reaction.get("actions")
-            if not isinstance(actions, list):
-                legacy = reaction.get("action")
-                actions = [legacy] if isinstance(legacy, Mapping) else []
-            for action_index, raw_action in enumerate(actions):
+            recovery_reasons: list[str] = []
+            blocked_actions: list[dict[str, Any]] = []
+            native_action_indices: list[int] = []
+            if source_kind != "object":
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_artboard_source_unsupported",
+                )
+            if not isinstance(raw_reaction, Mapping):
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_record_malformed",
+                )
+
+            raw_trigger = reaction.get("trigger")
+            trigger_row = (
+                raw_trigger if isinstance(raw_trigger, Mapping) else {}
+            )
+            trigger_type = str(trigger_row.get("type") or "").upper()
+            trigger = trigger_map.get(trigger_type, "")
+            if not isinstance(raw_trigger, Mapping):
+                append_unique(
+                    recovery_reasons,
+                    (
+                        "figma_reaction_trigger_missing"
+                        if raw_trigger is None
+                        else "figma_reaction_trigger_malformed"
+                    ),
+                )
+            elif not trigger_type:
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_trigger_missing",
+                )
+            elif not trigger:
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_trigger_unsupported",
+                )
+
+            raw_actions_value = reaction.get("actions")
+            if isinstance(raw_actions_value, list):
+                raw_actions = list(raw_actions_value)
+            elif "action" in reaction:
+                raw_actions = [reaction.get("action")]
+            elif "actions" in reaction:
+                raw_actions = [raw_actions_value]
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_actions_container_malformed",
+                )
+            else:
+                raw_actions = []
+            source_reaction_action_count += len(raw_actions)
+            if not raw_actions:
+                append_unique(
+                    recovery_reasons,
+                    "figma_reaction_has_no_actions",
+                )
+            source_blocking_reasons = list(recovery_reasons)
+
+            for action_index, raw_action in enumerate(raw_actions):
+                action_reasons: list[str] = []
+                mapped_action = ""
+                destination = ""
+                target_kind = ""
+                target_id = ""
+                action_type = ""
+                navigation = ""
                 if not isinstance(raw_action, Mapping):
-                    continue
-                action_type = str(raw_action.get("type") or "").upper()
-                navigation = str(raw_action.get("navigation") or "").upper()
-                destination = str(raw_action.get("destinationId") or "")
-                target_kind, target_id = figma_targets.get(destination, ("", ""))
-                mapped_action = "navigate"
-                if action_type == "BACK":
-                    mapped_action = "back"
-                elif action_type in {"CLOSE", "CLOSE_OVERLAY"}:
-                    mapped_action = "close_overlay"
-                elif navigation in {"OVERLAY", "SWAP"}:
-                    mapped_action = "open_overlay"
-                elif navigation == "CHANGE_TO":
-                    mapped_action = "change_variant"
-                elif action_type != "NODE":
+                    append_unique(
+                        action_reasons,
+                        "figma_reaction_action_malformed",
+                    )
+                else:
+                    action_type = str(raw_action.get("type") or "").upper()
+                    navigation = str(
+                        raw_action.get("navigation") or ""
+                    ).upper()
+                    destination = str(raw_action.get("destinationId") or "")
+                    if action_type == "BACK":
+                        mapped_action = "back"
+                    elif action_type in {"CLOSE", "CLOSE_OVERLAY"}:
+                        mapped_action = "close_overlay"
+                    elif action_type == "URL":
+                        append_unique(
+                            action_reasons,
+                            "figma_prototype_url_action_requires_runtime_policy",
+                        )
+                    elif action_type == "NODE":
+                        if not navigation:
+                            append_unique(
+                                action_reasons,
+                                "figma_reaction_navigation_missing",
+                            )
+                        else:
+                            mapped_action = navigation_map.get(navigation, "")
+                            if not mapped_action:
+                                append_unique(
+                                    action_reasons,
+                                    "figma_reaction_navigation_unsupported",
+                                )
+                        if not destination:
+                            append_unique(
+                                action_reasons,
+                                (
+                                    "figma_scroll_to_missing_destination"
+                                    if navigation == "SCROLL_TO"
+                                    else "figma_reaction_destination_missing"
+                                ),
+                            )
+                        else:
+                            target_kind, target_id = figma_targets.get(
+                                destination,
+                                ("", ""),
+                            )
+                            if not target_kind:
+                                append_unique(
+                                    action_reasons,
+                                    "figma_reaction_destination_unresolved",
+                                )
+                        if (
+                            mapped_action == "scroll_to"
+                            and target_kind
+                            and target_kind != "object"
+                        ):
+                            append_unique(
+                                action_reasons,
+                                "figma_scroll_to_requires_object_destination",
+                            )
+                        if mapped_action == "change_variant" and (
+                            target_kind != "object"
+                            or not object_component_ids.get(target_id, "")
+                        ):
+                            append_unique(
+                                action_reasons,
+                                (
+                                    "figma_change_to_destination_requires_"
+                                    "local_component"
+                                ),
+                            )
+                    elif not action_type:
+                        append_unique(
+                            action_reasons,
+                            "figma_reaction_action_type_missing",
+                        )
+                    else:
+                        append_unique(
+                            action_reasons,
+                            "figma_reaction_action_type_unsupported",
+                        )
+
+                for reason in source_blocking_reasons:
+                    append_unique(action_reasons, reason)
+                if action_reasons:
+                    for reason in action_reasons:
+                        append_unique(recovery_reasons, reason)
+                    blocked_actions.append(
+                        {
+                            "action_index": action_index,
+                            "action_type": action_type,
+                            "navigation": navigation,
+                            "destination_id": destination,
+                            "reasons": action_reasons,
+                            "raw_action": copy.deepcopy(raw_action),
+                        }
+                    )
                     warnings.append(
-                        f"blocked_reaction:{source_object_id}:{action_type}"
+                        "blocked_reaction:"
+                        f"{source_figma_node_id or source_id}:"
+                        f"{reaction_index}:{action_index}:"
+                        f"{action_reasons[0]}"
                     )
                     continue
+
+                native_action_indices.append(action_index)
+                native_reaction_action_count += 1
+                assert isinstance(raw_action, Mapping)
                 interactions.append(
                     {
                         "id": _stable_id(
                             "interaction",
-                            f"{source_object_id}-{len(interactions)}-{action_index}",
+                            f"{source_id}-{reaction_index}-{action_index}",
                         ),
                         "name": f"Figma {trigger} {mapped_action}",
-                        "source_object_id": source_object_id,
+                        "source_object_id": source_id,
                         "trigger": trigger,
                         "action": mapped_action,
                         "target_artboard_id": (
@@ -1651,7 +3842,7 @@ def import_figma_payload(
                         ),
                         "target_object_id": (
                             (
-                                source_object_id
+                                source_id
                                 if mapped_action == "change_variant"
                                 else target_id
                             )
@@ -1670,9 +3861,56 @@ def import_figma_payload(
                             "preserve_scroll_position": bool(
                                 raw_action.get("preserveScrollPosition", False)
                             ),
+                            "figma_reaction": {
+                                "source_kind": source_kind,
+                                "source_object_id": source_id,
+                                "source_figma_node_id": source_figma_node_id,
+                                "artboard_id": source_artboard_id,
+                                "reaction_index": reaction_index,
+                                "action_index": action_index,
+                                "raw_reaction": copy.deepcopy(raw_reaction),
+                                "raw_trigger": copy.deepcopy(raw_trigger),
+                                "raw_action": copy.deepcopy(raw_action),
+                            },
                         },
                     }
                 )
+
+            if recovery_reasons:
+                reaction_recovery.append(
+                    {
+                        "id": _stable_id(
+                            "figma-reaction-recovery",
+                            f"{source_kind}-{source_id}-{reaction_index}",
+                        ),
+                        "status": (
+                            "partial" if native_action_indices else "blocked"
+                        ),
+                        "source_kind": source_kind,
+                        "source_object_id": (
+                            source_id if source_kind == "object" else ""
+                        ),
+                        "source_artboard_id": (
+                            source_id if source_kind == "artboard" else ""
+                        ),
+                        "source_figma_node_id": source_figma_node_id,
+                        "artboard_id": source_artboard_id,
+                        "reaction_index": reaction_index,
+                        "trigger_type": trigger_type,
+                        "reasons": recovery_reasons,
+                        "native_action_indices": native_action_indices,
+                        "blocked_actions": blocked_actions,
+                        "raw_reaction": copy.deepcopy(raw_reaction),
+                    }
+                )
+                if not blocked_actions:
+                    warnings.append(
+                        "blocked_reaction:"
+                        f"{source_figma_node_id or source_id}:"
+                        f"{reaction_index}:{recovery_reasons[0]}"
+                    )
+            else:
+                native_reaction_count += 1
 
     tokens: list[dict[str, Any]] = []
     variable_root = (
@@ -1710,17 +3948,39 @@ def import_figma_payload(
 
     token_ids = {str(row["id"]) for row in tokens}
     for row in objects:
-        bindings = dict(row.get("token_bindings") or {})
-        row["token_bindings"] = {
-            path: token_id
-            for path, token_id in bindings.items()
-            if str(token_id) in token_ids
-        }
-        for path, token_id in bindings.items():
-            if str(token_id) not in token_ids:
-                warnings.append(
-                    f"converted:{row['id']}:{path}:missing_figma_variable"
-                )
+        _resolve_figma_variable_bindings(row, token_ids, warnings)
+    _resolve_figma_artboard_variable_bindings(
+        artboard_variable_bindings,
+        token_ids,
+        warnings,
+    )
+
+    _capture_figma_center_constraint_offsets(objects, artboards)
+    _convert_figma_hug_fill_cycles(objects, warnings)
+
+    source_component_property_binding_count = sum(
+        len(references)
+        for node in _walk_figma_nodes(root)
+        for references in [node.get("componentPropertyReferences")]
+        if isinstance(references, Mapping)
+    )
+    native_component_property_binding_count = sum(
+        len(row.get("component_property_bindings", {}))
+        for row in objects
+    )
+    recovered_component_property_binding_count = sum(
+        len((row.get("content") or {}).get(
+            "figma_component_property_bindings",
+            {},
+        ))
+        for row in objects
+        if isinstance(
+            (row.get("content") or {}).get(
+                "figma_component_property_bindings"
+            ),
+            Mapping,
+        )
+    )
 
     preferred_artboard_id = _preferred_artboard_id(artboards, objects)
     preferred_page_id = next(
@@ -1751,6 +4011,8 @@ def import_figma_payload(
                     "version": str(payload.get("version") or ""),
                     "last_modified": str(payload.get("lastModified") or ""),
                     "mode": "imported",
+                    "artboard_variable_bindings": artboard_variable_bindings,
+                    "reaction_recovery": reaction_recovery,
                 }
             },
         }
@@ -1807,7 +4069,75 @@ def import_figma_payload(
         "object_count": len(document["objects"]),
         "component_count": len(document["components"]),
         "token_count": len(document["tokens"]),
+        "variable_binding_count": sum(
+            len((row.get("content") or {}).get("figma_variable_bindings", []))
+            for row in document["objects"]
+        )
+        + len(artboard_variable_bindings),
+        "unresolved_variable_binding_count": sum(
+            1
+            for row in document["objects"]
+            for binding in (
+                (row.get("content") or {}).get("figma_variable_bindings", [])
+            )
+            if isinstance(binding, Mapping)
+            and str(binding.get("status") or "") == "unresolved"
+        )
+        + sum(
+            1
+            for binding in artboard_variable_bindings
+            if str(binding.get("status") or "") == "unresolved"
+        ),
+        "variable_binding_relink_count": sum(
+            1
+            for row in document["objects"]
+            for binding in (
+                (row.get("content") or {}).get("figma_variable_bindings", [])
+            )
+            if isinstance(binding, Mapping)
+            and str(binding.get("status") or "") != "native"
+        )
+        + sum(
+            1
+            for binding in artboard_variable_bindings
+            if str(binding.get("status") or "") != "native"
+        ),
+        "source_component_property_binding_count": (
+            source_component_property_binding_count
+        ),
+        "native_component_property_binding_count": (
+            native_component_property_binding_count
+        ),
+        "recovered_component_property_binding_count": (
+            recovered_component_property_binding_count
+        ),
+        "component_property_binding_count_conserved": (
+            source_component_property_binding_count
+            == native_component_property_binding_count
+            + recovered_component_property_binding_count
+        ),
         "interaction_count": len(document["interactions"]),
+        "source_reaction_count": source_reaction_count,
+        "source_reaction_action_count": source_reaction_action_count,
+        "native_reaction_count": native_reaction_count,
+        "native_reaction_action_count": native_reaction_action_count,
+        "blocked_recovery_reaction_count": len(reaction_recovery),
+        "blocked_recovery_action_count": sum(
+            len(row.get("blocked_actions", []))
+            for row in reaction_recovery
+        ),
+        "reaction_count_conserved": (
+            source_reaction_count
+            == native_reaction_count + len(reaction_recovery)
+        ),
+        "reaction_action_count_conserved": (
+            source_reaction_action_count
+            == native_reaction_action_count
+            + sum(
+                len(row.get("blocked_actions", []))
+                for row in reaction_recovery
+            )
+        ),
         "section_count": len(document.get("sections", [])),
         "comment_count": len(
             (
@@ -1836,8 +4166,11 @@ def inspect_figma_resources(
     document: Mapping[str, Any],
     *,
     available_font_families: object = None,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    normalized = normalize_ui_document(document)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    normalized = normalize_ui_document(document) if normalize else document
     available = (
         {
             str(name).strip().casefold()
@@ -1968,6 +4301,153 @@ def _download_figma_images(
     return paths, warnings
 
 
+def _figma_missing_vector_node_ids(payload: Mapping[str, Any]) -> list[str]:
+    """Find scene VECTOR nodes for which the REST snapshot omitted paths."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    stack: list[object] = [payload]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, Mapping):
+            node_id = str(value.get("id") or "")
+            if (
+                node_id
+                and node_id not in seen
+                and str(value.get("type") or "").upper() == "VECTOR"
+                and not any(
+                    isinstance(value.get(field), list)
+                    and any(
+                        isinstance(row, Mapping)
+                        and str(row.get("path") or "").strip()
+                        for row in value[field]
+                    )
+                    for field in ("fillGeometry", "strokeGeometry")
+                )
+            ):
+                seen.add(node_id)
+                result.append(node_id)
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return sorted(result)
+
+
+def _figma_exact_effect_node_ids(payload: Mapping[str, Any]) -> list[str]:
+    """Find nodes whose visible modern effects need exact PNG evidence."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    stack: list[object] = [payload]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, Mapping):
+            node_id = str(value.get("id") or "")
+            if (
+                node_id
+                and node_id not in seen
+                and _figma_exact_effect_types(value)
+            ):
+                seen.add(node_id)
+                result.append(node_id)
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return sorted(result)
+
+
+def _figma_vector_render_urls(
+    file_key: str,
+    node_ids: list[str],
+    *,
+    token: str,
+    timeout: float,
+    opener: Callable[..., Any] | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Request exact SVG renders when editable geometry is unavailable."""
+
+    urls: dict[str, str] = {}
+    warnings: list[str] = []
+    encoded_key = urllib.parse.quote(file_key, safe="")
+    for start in range(0, len(node_ids), 100):
+        chunk = node_ids[start : start + 100]
+        query = urllib.parse.urlencode(
+            {
+                "ids": ",".join(chunk),
+                "format": "svg",
+                "svg_include_id": "true",
+            }
+        )
+        try:
+            payload = _request_json(
+                f"{FIGMA_API_ROOT}/images/{encoded_key}?{query}",
+                token=token,
+                timeout=timeout,
+                opener=opener,
+                optional=True,
+            )
+        except PainterUIFigmaError as exc:
+            warnings.append(
+                "vector_render_request_failed:"
+                f"{','.join(chunk)}:{exc}"
+            )
+            continue
+        images = payload.get("images")
+        images = images if isinstance(images, Mapping) else {}
+        for node_id in chunk:
+            address = str(images.get(node_id) or "").strip()
+            if address:
+                urls[node_id] = address
+    return urls, warnings
+
+
+def _figma_effect_render_urls(
+    file_key: str,
+    node_ids: list[str],
+    *,
+    token: str,
+    timeout: float,
+    opener: Callable[..., Any] | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Request exact 1x PNGs for visible modern Figma effects."""
+
+    urls: dict[str, str] = {}
+    warnings: list[str] = []
+    encoded_key = urllib.parse.quote(file_key, safe="")
+    for start in range(0, len(node_ids), 100):
+        chunk = node_ids[start : start + 100]
+        query = urllib.parse.urlencode(
+            {
+                "ids": ",".join(chunk),
+                "format": "png",
+                "scale": 1,
+            }
+        )
+        try:
+            payload = _request_json(
+                f"{FIGMA_API_ROOT}/images/{encoded_key}?{query}",
+                token=token,
+                timeout=timeout,
+                opener=opener,
+                optional=True,
+            )
+        except PainterUIFigmaError as exc:
+            warnings.append(
+                "effect_render_request_failed:"
+                f"{','.join(chunk)}:{exc}"
+            )
+            continue
+        images = payload.get("images")
+        images = images if isinstance(images, Mapping) else {}
+        for node_id in chunk:
+            address = str(images.get(node_id) or "").strip()
+            if address:
+                urls[node_id] = address
+            else:
+                warnings.append(f"effect_render_missing:{node_id}")
+    return urls, warnings
+
+
 def import_figma_file(
     source: str,
     *,
@@ -2003,32 +4483,88 @@ def import_figma_file(
         opener=opener,
         optional=True,
     )
+    resolved_asset_root = (
+        Path(asset_root).expanduser().resolve()
+        if asset_root
+        else default_figma_asset_root(key)
+    )
     image_urls = image_payload.get("meta", {}).get("images")
     if not isinstance(image_urls, Mapping):
         image_urls = image_payload.get("images")
     image_urls = image_urls if isinstance(image_urls, Mapping) else {}
     local_images, image_warnings = _download_figma_images(
         image_urls,
-        root=Path(asset_root).expanduser().resolve()
-        if asset_root
-        else default_figma_asset_root(key),
+        root=resolved_asset_root,
         timeout=timeout,
         opener=opener,
     )
+    missing_vector_ids = _figma_missing_vector_node_ids(payload)
+    vector_render_urls, vector_request_warnings = _figma_vector_render_urls(
+        key,
+        missing_vector_ids,
+        token=access_token,
+        timeout=timeout,
+        opener=opener,
+    )
+    local_vector_renders, vector_download_warnings = _download_figma_images(
+        vector_render_urls,
+        root=resolved_asset_root / "vector-renders",
+        timeout=timeout,
+        opener=opener,
+    )
+    vector_download_warnings = [
+        warning.replace(
+            "image_download_failed:",
+            "vector_render_download_failed:",
+            1,
+        )
+        for warning in vector_download_warnings
+    ]
+    effect_render_ids = _figma_exact_effect_node_ids(payload)
+    effect_render_urls, effect_request_warnings = _figma_effect_render_urls(
+        key,
+        effect_render_ids,
+        token=access_token,
+        timeout=timeout,
+        opener=opener,
+    )
+    local_effect_renders, effect_download_warnings = _download_figma_images(
+        effect_render_urls,
+        root=resolved_asset_root / "effect-renders",
+        timeout=timeout,
+        opener=opener,
+    )
+    effect_download_warnings = [
+        warning.replace(
+            "image_download_failed:",
+            "effect_render_download_failed:",
+            1,
+        )
+        for warning in effect_download_warnings
+    ]
     document, report = import_figma_payload(
         payload,
         source=source,
         image_urls=image_urls,
         image_paths=local_images,
+        vector_render_paths=local_vector_renders,
+        effect_render_paths=local_effect_renders,
         variables_payload=variable_payload,
     )
-    report["asset_root"] = str(
-        Path(asset_root).expanduser().resolve()
-        if asset_root
-        else default_figma_asset_root(key)
-    )
+    report["asset_root"] = str(resolved_asset_root)
     report["downloaded_image_count"] = len(local_images)
-    report["warnings"].extend(image_warnings)
+    report["downloaded_vector_render_count"] = len(local_vector_renders)
+    report["requested_effect_render_count"] = len(effect_render_ids)
+    report["downloaded_effect_render_count"] = len(local_effect_renders)
+    report["warnings"].extend(
+        [
+            *image_warnings,
+            *vector_request_warnings,
+            *vector_download_warnings,
+            *effect_request_warnings,
+            *effect_download_warnings,
+        ]
+    )
     return document, report
 
 
@@ -2155,17 +4691,40 @@ def merge_figma_document(
 
 def inspect_figma_compatibility(
     document: Mapping[str, Any],
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    normalized = normalize_ui_document(document)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    normalized = normalize_ui_document(document) if normalize else document
     rows: list[dict[str, str]] = []
+    render_blockers: list[dict[str, Any]] = []
     component_ids = {str(row["id"]) for row in normalized["components"]}
+    object_ids = {str(row["id"]) for row in normalized["objects"]}
+    artboard_ids = {str(row["id"]) for row in normalized["artboards"]}
     for row in normalized["objects"]:
         kind = str(row["kind"])
+        content = dict(row.get("content") or {})
+        vector_recovery = content.get("figma_vector_geometry_recovery")
+        vector_recovery = (
+            vector_recovery
+            if isinstance(vector_recovery, Mapping)
+            else {}
+        )
         status = "native"
         reason = "Maps to an editable Figma node"
         if kind == "motion_actor":
             status = "baked"
             reason = "Motion actors require a poster-frame image in Figma"
+        elif (
+            kind == "path"
+            and vector_recovery.get("source") == "figma_render_api"
+        ):
+            status = "converted"
+            reason = (
+                "Exact Figma SVG render is preserved, but editable vector "
+                "path geometry is unavailable"
+            )
         elif kind not in {
             "frame",
             "group",
@@ -2181,6 +4740,44 @@ def inspect_figma_compatibility(
             status = "blocked"
             reason = f"Unsupported Painter UI kind: {kind}"
         rows.append({"id": row["id"], "status": status, "reason": reason})
+        auto_layout_recovery = content.get("figma_auto_layout_recovery")
+        if isinstance(auto_layout_recovery, Mapping):
+            rows.append(
+                {
+                    "id": f"{row['id']}:transformed-auto-layout",
+                    "status": "converted",
+                    "reason": (
+                        "Transformed Figma Auto Layout is preserved as "
+                        "snapshot absolute geometry with recovery metadata"
+                    ),
+                }
+            )
+            if auto_layout_recovery.get("outer_affine_ignored"):
+                rows.append(
+                    {
+                        "id": f"{row['id']}:outer-affine-transform",
+                        "status": "blocked",
+                        "reason": str(
+                            auto_layout_recovery.get("outer_affine_reason")
+                            or "outer_affine_snapshot_requires_transform_support"
+                        ),
+                    }
+                )
+        affine_recovery = content.get("figma_affine_snapshot_geometry")
+        if (
+            isinstance(affine_recovery, Mapping)
+            and str(affine_recovery.get("status") or "").startswith("blocked_")
+        ):
+            rows.append(
+                {
+                    "id": f"{row['id']}:affine-transform",
+                    "status": "blocked",
+                    "reason": str(
+                        affine_recovery.get("reason")
+                        or "figma_affine_snapshot_requires_transform_support"
+                    ),
+                }
+            )
         mask = dict(row.get("mask") or {})
         if mask.get("enabled"):
             rows.append(
@@ -2190,7 +4787,6 @@ def inspect_figma_compatibility(
                     "reason": "Maps to an editable Figma mask node",
                 }
             )
-        content = dict(row.get("content") or {})
         if (content.get("boolean") or {}).get("enabled"):
             rows.append(
                 {
@@ -2207,7 +4803,150 @@ def inspect_figma_compatibility(
                     "reason": "Maps to Figma character-range text styles",
                 }
             )
+        for paint in content.get("figma_unsupported_paints", []):
+            rows.append(
+                {
+                    "id": f"{row['id']}:figma-paint:{paint.get('type')}",
+                    "status": "blocked",
+                    "reason": (
+                        f"Figma {paint.get('type')} on {paint.get('target')} "
+                        "requires a conic/diamond UI material or deterministic bake"
+                    ),
+                }
+            )
+        for index, image_reason in enumerate(
+            content.get("figma_image_render_blockers", [])
+        ):
+            rows.append(
+                {
+                    "id": f"{row['id']}:figma-image:{index}",
+                    "status": "blocked",
+                    "reason": str(image_reason),
+                }
+            )
+        image_rotation = _number(content.get("image_rotation"), 0.0)
+        if abs(image_rotation / 90.0 - round(image_rotation / 90.0)) > 0.0001:
+            rows.append(
+                {
+                    "id": f"{row['id']}:figma-image-rotation",
+                    "status": "blocked",
+                    "reason": (
+                        "Figma image rotation must use 90-degree increments"
+                    ),
+                }
+            )
+        for binding in content.get("figma_variable_bindings", []):
+            if not isinstance(binding, Mapping):
+                continue
+            binding_status = str(binding.get("status") or "")
+            if binding_status == "native":
+                continue
+            rows.append(
+                {
+                    "id": (
+                        f"{row['id']}:figma-variable:"
+                        f"{binding.get('field')}:"
+                        f"{binding.get('alias_index', 0)}"
+                    ),
+                    "status": "blocked",
+                    "reason": (
+                        "figma_variable_binding_requires_token_relink: "
+                        f"{binding.get('reason') or 'unresolved_binding'} "
+                        f"({binding.get('id') or 'missing id'})"
+                    ),
+                }
+            )
+        for target_path, property_name in row.get(
+            "component_property_bindings",
+            {},
+        ).items():
+            rows.append(
+                {
+                    "id": (
+                        f"{row['id']}:figma-component-property-binding:"
+                        f"{target_path}"
+                    ),
+                    "status": "native",
+                    "reason": (
+                        "Maps to an editable Figma component property "
+                        f"reference: {property_name}"
+                    ),
+                }
+            )
+        recovered_property_bindings = content.get(
+            "figma_component_property_bindings"
+        )
+        recovered_property_bindings = (
+            recovered_property_bindings
+            if isinstance(recovered_property_bindings, Mapping)
+            else {}
+        )
+        raw_property_references = content.get(
+            "figma_component_property_references"
+        )
+        raw_property_references = (
+            raw_property_references
+            if isinstance(raw_property_references, Mapping)
+            else {}
+        )
+        for target_path, property_name in recovered_property_bindings.items():
+            reason = "figma_component_property_binding_requires_component_relink"
+            if str(target_path).startswith("figma_field:"):
+                raw_field = str(target_path).split(":", 1)[1]
+                reason = (
+                    "figma_component_property_reference_field_unsupported"
+                    if raw_field
+                    not in {"characters", "visible", "mainComponent"}
+                    else "figma_component_property_reference_value_missing"
+                )
+                property_name = raw_property_references.get(
+                    raw_field,
+                    property_name,
+                )
+            rows.append(
+                {
+                    "id": (
+                        f"{row['id']}:figma-component-property-recovery:"
+                        f"{target_path}"
+                    ),
+                    "status": "blocked",
+                    "reason": f"{reason}: {property_name}",
+                }
+            )
         style = dict(row.get("style") or {})
+        effects = style.get("effects")
+        if isinstance(effects, list):
+            for effect_index, effect in enumerate(effects):
+                if not isinstance(effect, Mapping):
+                    continue
+                if not bool(effect.get("visible", True)):
+                    continue
+                exact_render = content.get("figma_exact_render")
+                block_reasons = ui_effect_render_block_reasons(
+                    effect,
+                    exact_render=exact_render,
+                )
+                if not block_reasons:
+                    continue
+                render_blockers.append(
+                    {
+                        "id": f"{row['id']}:effect:{effect_index}",
+                        "object_id": row["id"],
+                        "effect_index": effect_index,
+                        "effect_type": str(effect.get("type") or ""),
+                        "status": "blocked",
+                        # Keep the established primary reason stable for
+                        # report consumers. Exact-render safety details are
+                        # additive and do not turn a PNG into an implicit bake.
+                        "reason": block_reasons[0],
+                        "diagnostics": block_reasons[1:],
+                        "exact_render_available": isinstance(
+                            exact_render,
+                            Mapping,
+                        ),
+                        "fallback": "ui_material_or_deterministic_bake",
+                    }
+                )
         if style.get("font_axes"):
             rows.append(
                 {
@@ -2231,6 +4970,127 @@ def inspect_figma_compatibility(
                     ),
                 }
             )
+    figma_link = (
+        normalized.get("linked_targets", {}).get("figma", {})
+    )
+    figma_link = figma_link if isinstance(figma_link, Mapping) else {}
+    for binding in figma_link.get("artboard_variable_bindings", []):
+        if not isinstance(binding, Mapping):
+            continue
+        rows.append(
+            {
+                "id": (
+                    f"{binding.get('artboard_id')}:figma-variable:"
+                    f"{binding.get('field')}:"
+                    f"{binding.get('alias_index', 0)}"
+                ),
+                "status": "blocked",
+                "reason": (
+                    "figma_variable_binding_requires_token_relink: "
+                    f"{binding.get('reason') or 'artboard_binding'} "
+                    f"({binding.get('id') or 'missing id'})"
+                ),
+            }
+        )
+    for recovery_index, recovery in enumerate(
+        figma_link.get("reaction_recovery", [])
+    ):
+        if not isinstance(recovery, Mapping):
+            continue
+        recovery_reasons = [
+            str(reason)
+            for reason in recovery.get("reasons", [])
+            if str(reason or "")
+        ]
+        rows.append(
+            {
+                "id": str(
+                    recovery.get("id")
+                    or f"figma-reaction-recovery-{recovery_index}"
+                ),
+                "status": "blocked",
+                "reason": "; ".join(recovery_reasons)
+                or "figma_reaction_recovery_requires_manual_resolution",
+            }
+        )
+    figma_plugin_triggers = {
+        "click",
+        "double_click",
+        "hover",
+        "press",
+        "focus",
+        "keyboard",
+        "delay",
+        "mouse_enter",
+        "mouse_leave",
+        "drag",
+        "gamepad",
+    }
+    figma_plugin_actions = {
+        "navigate",
+        "back",
+        "open_overlay",
+        "close_overlay",
+        "swap_overlay",
+        "scroll_to",
+        "change_variant",
+    }
+    for interaction in normalized["interactions"]:
+        parameters = interaction.get("parameters")
+        parameters = parameters if isinstance(parameters, Mapping) else {}
+        figma_reaction = parameters.get("figma_reaction")
+        figma_reaction = (
+            figma_reaction if isinstance(figma_reaction, Mapping) else {}
+        )
+        status = "native"
+        reason = (
+            "Maps to an editable Figma prototype reaction"
+            if figma_reaction
+            else "Maps to a supported Figma plugin prototype reaction"
+        )
+        if str(interaction.get("trigger") or "") not in figma_plugin_triggers:
+            status = "blocked"
+            reason = (
+                "figma_plugin_trigger_unsupported:"
+                f"{interaction.get('trigger') or 'missing'}"
+            )
+        elif str(interaction.get("action") or "") not in figma_plugin_actions:
+            status = "blocked"
+            reason = (
+                "figma_plugin_action_unsupported:"
+                f"{interaction.get('action') or 'missing'}"
+            )
+        elif str(interaction.get("source_object_id") or "") not in object_ids:
+            status = "blocked"
+            reason = "figma_plugin_reaction_source_missing"
+        else:
+            action = str(interaction.get("action") or "")
+            target_object_id = str(
+                interaction.get("target_object_id") or ""
+            )
+            target_artboard_id = str(
+                interaction.get("target_artboard_id") or ""
+            )
+            component_id = str(interaction.get("component_id") or "")
+            if action in {"navigate", "open_overlay", "swap_overlay"} and not (
+                target_object_id in object_ids
+                or target_artboard_id in artboard_ids
+            ):
+                status = "blocked"
+                reason = "figma_plugin_reaction_destination_missing"
+            elif action == "scroll_to" and target_object_id not in object_ids:
+                status = "blocked"
+                reason = "figma_plugin_scroll_to_object_destination_missing"
+            elif action == "change_variant" and component_id not in component_ids:
+                status = "blocked"
+                reason = "figma_plugin_change_to_component_destination_missing"
+        rows.append(
+            {
+                "id": f"{interaction['id']}:figma-reaction",
+                "status": status,
+                "reason": reason,
+            }
+        )
     supported_property_types = {"enum", "boolean", "text", "instance_swap", "slot"}
     for component in normalized["components"]:
         for property_name, definition in component[
@@ -2313,6 +5173,11 @@ def inspect_figma_compatibility(
         "interaction_count": len(normalized["interactions"]),
         "section_count": len(normalized.get("sections", [])),
         "comment_count": len(review_comments),
+        # These rows do not block a lossless Figma plugin export: Figma can
+        # recreate its own native effects.  They do block a claim of exact
+        # Painter raster preview and are mirrored by the UMG preflight.
+        "render_blocker_count": len(render_blockers),
+        "render_blockers": render_blockers,
     }
 
 
@@ -2438,25 +5303,61 @@ function fillPaint(style) {{
     let rows=Array.isArray(style.effects)?style.effects:[];
     if(!rows.length && style.shadow) rows=[{{type:'drop_shadow',...style.shadow}}];
     return rows
-      .filter(row=>['drop_shadow','inner_shadow','layer_blur','background_blur'].includes(String(row.type||'').toLowerCase()))
+      .filter(row=>['drop_shadow','inner_shadow','layer_blur','background_blur','noise','texture'].includes(String(row.type||'').toLowerCase()))
       .map(row=>{{
         const type=String(row.type||'').toLowerCase();
-        if(type==='layer_blur'||type==='background_blur') return {{
-          type:type==='background_blur'?'BACKGROUND_BLUR':'LAYER_BLUR',
-          radius:Math.max(0,Number(row.radius)||0),
-          visible:true
-        }};
+        if(type==='layer_blur'||type==='background_blur') {{
+          const effect={{
+            type:type==='background_blur'?'BACKGROUND_BLUR':'LAYER_BLUR',
+            radius:Math.max(0,Number(row.radius)||0),
+            visible:row.visible!==false
+          }};
+          const blurType=String(row.blur_type||'').toUpperCase();
+          if(blurType==='NORMAL'||blurType==='PROGRESSIVE') effect.blurType=blurType;
+          if(blurType==='PROGRESSIVE') {{
+            effect.startRadius=Math.max(0,Number(row.start_radius)||0);
+            effect.startOffset={{x:Number(row.start_offset?.x)||0,y:Number(row.start_offset?.y)||0}};
+            effect.endOffset={{x:Number(row.end_offset?.x)||0,y:Number(row.end_offset?.y)||0}};
+          }}
+          return effect;
+        }}
+        if(type==='noise') {{
+          const c=color(row.color||'#000000FF');
+          const effect={{
+            type:'NOISE', color:{{r:c.r,g:c.g,b:c.b,a:c.a}},
+            blendMode:String(row.blend_mode||'NORMAL').toUpperCase(),
+            noiseSize:Math.max(0,Number(row.noise_size)||0),
+            noiseType:String(row.noise_type||'MONOTONE').toUpperCase(),
+            density:Math.max(0,Number(row.density)||0), visible:row.visible!==false
+          }};
+          if(row.noise_size_vector) effect.noiseSizeVector={{x:Number(row.noise_size_vector.x)||0,y:Number(row.noise_size_vector.y)||0}};
+          if(row.secondary_color) {{const s=color(row.secondary_color);effect.secondaryColor={{r:s.r,g:s.g,b:s.b,a:s.a}};}}
+          if(row.opacity!==undefined) effect.opacity=Math.max(0,Math.min(1,Number(row.opacity)||0));
+          return effect;
+        }}
+        if(type==='texture') {{
+          const effect={{
+            type:'TEXTURE', radius:Math.max(0,Number(row.radius)||0),
+            noiseSize:Math.max(0,Number(row.noise_size)||0),
+            clipToShape:!!row.clip_to_shape, visible:row.visible!==false
+          }};
+          if(row.noise_size_vector) effect.noiseSizeVector={{x:Number(row.noise_size_vector.x)||0,y:Number(row.noise_size_vector.y)||0}};
+          return effect;
+        }}
         const c=color(row.color||'#00000040');
-        return {{
+        const effect={{
           type:type==='inner_shadow'?'INNER_SHADOW':'DROP_SHADOW',
-        color:{{r:c.r,g:c.g,b:c.b,a:c.a}},
-        offset:{{x:Number(row.x)||0,y:Number(row.y)||0}},
-        radius:Math.max(0,Number(row.blur)||0),
-        spread:Number(row.spread)||0,
-        blendMode:String(row.blend_mode||'NORMAL').toUpperCase(),
-        visible:true
-      }};
-    }});
+          color:{{r:c.r,g:c.g,b:c.b,a:c.a}},
+          offset:{{x:Number(row.x)||0,y:Number(row.y)||0}},
+          radius:Math.max(0,Number(row.blur)||0),
+          spread:Number(row.spread)||0,
+          blendMode:String(row.blend_mode||'NORMAL').toUpperCase(),
+          visible:row.visible!==false
+        }};
+        if(type==='drop_shadow'&&row.show_shadow_behind_node!==undefined)
+          effect.showShadowBehindNode=!!row.show_shadow_behind_node;
+        return effect;
+      }});
 }}
 function decode64(text) {{
   const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -2467,6 +5368,55 @@ function decode64(text) {{
     if(bits>=8) {{ bits-=8; out.push((buffer>>bits)&255); }}
   }}
   return new Uint8Array(out);
+}}
+function validImageTransform(value) {{
+  return Array.isArray(value) && value.length===2
+    && value.every(axis=>Array.isArray(axis) && axis.length>=3
+      && axis.slice(0,3).every(item=>Number.isFinite(Number(item))))
+    && Math.abs(Number(value[0][0])*Number(value[1][1])
+      - Number(value[1][0])*Number(value[0][1]))>1e-9;
+}}
+function imageCropTransform(content) {{
+  const crop=content.image_crop||content.crop||{{}};
+  if(!(crop.enabled??crop.Enabled)) return null;
+  let x=Number(crop.x??crop.X??0), y=Number(crop.y??crop.Y??0);
+  let width=Number(crop.width??crop.Width??0), height=Number(crop.height??crop.Height??0);
+  const units=String(crop.units??crop.Units??'normalized').toLowerCase();
+  if(['pixel','pixels','px'].includes(units)) {{
+    const sourceWidth=Number(content.original_width||content.source_width||0);
+    const sourceHeight=Number(content.original_height||content.source_height||0);
+    if(sourceWidth<=0||sourceHeight<=0) return null;
+    x/=sourceWidth; width/=sourceWidth; y/=sourceHeight; height/=sourceHeight;
+  }}
+  if(![x,y,width,height].every(Number.isFinite)||width<=0||height<=0) return null;
+  return [[width,0,x],[0,height,y]];
+}}
+function imagePaint(row,imageHash) {{
+  const content=row.content||{{}};
+  let mode=String(content.image_mode||content.image_fit||'FILL').toUpperCase();
+  if(mode==='STRETCH') mode='CROP';
+  if(!['FILL','FIT','CROP','TILE'].includes(mode)) mode='FILL';
+  const result={{type:'IMAGE',scaleMode:mode,imageHash}};
+  if(mode==='CROP') {{
+    const transform=validImageTransform(content.figma_image_transform)
+      ? content.figma_image_transform : imageCropTransform(content);
+    result.imageTransform=transform||[[1,0,0],[0,1,0]];
+  }}
+  const rotation=Number(content.image_rotation??content.rotation??0);
+  if(mode!=='CROP' && Number.isFinite(rotation)
+    && Math.abs(rotation/90-Math.round(rotation/90))<=1e-4)
+    result.rotation=rotation;
+  if(mode==='TILE') result.scalingFactor=Math.max(.0001,Number(content.tile_scale)||1);
+  result.opacity=Math.max(0,Math.min(1,Number(content.image_opacity??1)));
+  result.blendMode=String(content.image_blend_mode||'NORMAL').toUpperCase();
+  const adjustments=content.image_adjustments||content.adjustments||{{}};
+  result.filters={{}};
+  for(const key of ['exposure','contrast','saturation','temperature','tint','highlights','shadows']) {{
+    const value=Number(adjustments[key]||0);
+    if(Number.isFinite(value)&&Math.abs(value)>1e-9)
+      result.filters[key]=Math.max(-1,Math.min(1,value/100));
+  }}
+  return result;
 }}
 function applyFrame(node,row) {{
   const parentRow=objectById.get(row.parent_id);
@@ -2487,6 +5437,18 @@ function applyFrame(node,row) {{
   if('effects' in node) node.effects=effectRows(s);
   if('strokeWeight' in node) node.strokeWeight=Math.max(0,Number(s.stroke_width)||0);
   if('strokeAlign' in node) node.strokeAlign=String(s.stroke_align||'CENTER').toUpperCase();
+  const individualStrokeWeights=s.individual_stroke_weights||{{}};
+  if(Object.keys(individualStrokeWeights).length) {{
+    const sideProperties={{top:'strokeTopWeight',right:'strokeRightWeight',bottom:'strokeBottomWeight',left:'strokeLeftWeight'}};
+    for(const [side,property] of Object.entries(sideProperties)) {{
+      if(property in node) node[property]=Math.max(0,Number(individualStrokeWeights[side])||0);
+    }}
+  }}
+  node.setSharedPluginData('tigerstudio','individual_stroke_weights',JSON.stringify(individualStrokeWeights));
+  if('dashPattern' in node && Array.isArray(s.stroke_dash)) node.dashPattern=s.stroke_dash.map(value=>Math.max(0,Number(value)||0));
+  if('strokeCap' in node && s.stroke_cap) node.strokeCap=String(s.stroke_cap).toUpperCase();
+  if('strokeJoin' in node && s.stroke_join) node.strokeJoin=String(s.stroke_join).toUpperCase();
+  if('strokeMiterLimit' in node && s.stroke_miter_limit!==undefined) node.strokeMiterLimit=Math.max(0,Number(s.stroke_miter_limit)||0);
   if('blendMode' in node) node.blendMode=String(s.blend_mode||'NORMAL').toUpperCase();
   if('cornerRadius' in node && typeof node.cornerRadius==='number') node.cornerRadius=Math.max(0,Number(s.radius)||0);
   if('cornerSmoothing' in node) node.cornerSmoothing=Math.max(0,Math.min(1,Number(s.corner_smoothing)||0));
@@ -2507,7 +5469,7 @@ function applyFrame(node,row) {{
       node.paddingRight=Number(p.right)||0; node.paddingBottom=Number(p.bottom)||0;
       node.itemSpacing=Number(row.layout.gap)||0;
       node.primaryAxisAlignItems={{start:'MIN',center:'CENTER',end:'MAX',space_between:'SPACE_BETWEEN'}}[row.layout.main_alignment]||'MIN';
-      node.counterAxisAlignItems={{start:'MIN',center:'CENTER',end:'MAX',stretch:'MIN'}}[row.layout.cross_alignment]||'MIN';
+      node.counterAxisAlignItems={{start:'MIN',center:'CENTER',end:'MAX',stretch:'MIN',baseline:'BASELINE'}}[row.layout.cross_alignment]||'MIN';
     }}
   }}
 }}
@@ -2540,7 +5502,7 @@ async function createAuthoredNode(row,parent) {{
   const asset=exchange.assets[row.id];
   if(asset && 'fills' in node) {{
     const image=figma.createImage(decode64(asset.base64));
-    node.fills=[{{type:'IMAGE',scaleMode:String((row.content||{{}}).image_mode||'FILL').toUpperCase(),imageHash:image.hash}}];
+    node.fills=[imagePaint(row,image.hash)];
   }}
   for(const [path,tokenId] of Object.entries(row.token_bindings||{{}})) {{
     const variable=tokenVars.get(tokenId); if(!variable) continue;
@@ -2742,13 +5704,81 @@ async function main() {{
     try {{ node.componentPropertyReferences=references; }}
     catch (error) {{ throw new Error(`Component property binding failed for ${{row.id}}: ${{error.message}}`); }}
   }}
+  const reactionsBySource=new Map();
+  const triggerTypes={{
+    click:'ON_CLICK',double_click:'ON_CLICK',hover:'ON_HOVER',
+    press:'MOUSE_DOWN',focus:'ON_KEY_DOWN',keyboard:'ON_KEY_DOWN',
+    delay:'AFTER_TIMEOUT',mouse_enter:'MOUSE_ENTER',
+    mouse_leave:'MOUSE_LEAVE',drag:'ON_DRAG',gamepad:'ON_GAMEPAD'
+  }};
+  const navigationTypes={{
+    navigate:'NAVIGATE',open_overlay:'OVERLAY',swap_overlay:'SWAP',
+    scroll_to:'SCROLL_TO',change_variant:'CHANGE_TO'
+  }};
   for(const link of doc.interactions) {{
-    const source=created.get(link.source_object_id), target=link.action==='change_variant'?components.get(link.component_id):created.get(link.target_artboard_id||link.target_object_id);
-    if(!source || !target || !source.setReactionsAsync) continue;
-    const trigger={{click:'ON_CLICK',double_click:'ON_CLICK',hover:'MOUSE_ENTER',press:'MOUSE_DOWN',focus:'ON_KEY_DOWN',keyboard:'ON_KEY_DOWN'}}[link.trigger]||'ON_CLICK';
-    const navigation=link.action==='change_variant'?'CHANGE_TO':'NAVIGATE';
-    const action=link.action==='back'?{{type:'BACK'}}:{{type:'NODE',destinationId:target.id,navigation,transition:null,preserveScrollPosition:false}};
-    try {{ await source.setReactionsAsync([{{trigger:{{type:trigger}},actions:[action]}}]); }} catch (_) {{}}
+    const source=created.get(link.source_object_id);
+    if(!source)
+      throw new Error(`Reaction source is missing for ${{link.id}}: ${{link.source_object_id}}`);
+    if(!source.setReactionsAsync)
+      throw new Error(`Reaction source cannot author reactions for ${{link.id}}: ${{link.source_object_id}}`);
+    const parameters=link.parameters||{{}};
+    const metadata=parameters.figma_reaction||{{}};
+    const target=link.action==='change_variant'
+      ? components.get(link.component_id)
+      : created.get(link.target_artboard_id||link.target_object_id);
+    const needsTarget=Object.prototype.hasOwnProperty.call(navigationTypes,link.action);
+    if(needsTarget && !target)
+      throw new Error(`Reaction target is missing for ${{link.id}}`);
+    const rawTrigger=metadata.raw_trigger;
+    const trigger=rawTrigger && typeof rawTrigger==='object'
+      ? {{...rawTrigger}}
+      : {{type:triggerTypes[link.trigger]}};
+    if(!trigger.type)
+      throw new Error(`Reaction trigger is unsupported for ${{link.id}}: ${{link.trigger}}`);
+    const rawAction=metadata.raw_action;
+    let action;
+    if(rawAction && typeof rawAction==='object') {{
+      action={{...rawAction}};
+      if(needsTarget) action.destinationId=target.id;
+    }} else if(link.action==='back') action={{type:'BACK'}};
+    else if(link.action==='close_overlay') action={{type:'CLOSE'}};
+    else if(needsTarget) action={{
+      type:'NODE',destinationId:target.id,
+      navigation:navigationTypes[link.action],
+      transition:parameters.figma_transition??null,
+      preserveScrollPosition:!!parameters.preserve_scroll_position
+    }};
+    else throw new Error(`Reaction action is unsupported for ${{link.id}}: ${{link.action}}`);
+    const sourceGroups=reactionsBySource.get(link.source_object_id)||new Map();
+    const reactionIndex=Number(metadata.reaction_index);
+    const groupKey=Number.isFinite(reactionIndex)
+      ? `figma:${{reactionIndex}}` : `interaction:${{link.id}}`;
+    const group=sourceGroups.get(groupKey)||{{
+      order:Number.isFinite(reactionIndex)?reactionIndex:Number.MAX_SAFE_INTEGER,
+      trigger,actions:[]
+    }};
+    const actionIndex=Number(metadata.action_index);
+    group.actions.push({{
+      order:Number.isFinite(actionIndex)?actionIndex:group.actions.length,
+      action
+    }});
+    sourceGroups.set(groupKey,group);
+    reactionsBySource.set(link.source_object_id,sourceGroups);
+  }}
+  for(const [sourceId,sourceGroups] of reactionsBySource) {{
+    const source=created.get(sourceId);
+    if(!source || !source.setReactionsAsync)
+      throw new Error(`Reaction source became unavailable: ${{sourceId}}`);
+    const reactions=[...sourceGroups.values()]
+      .sort((a,b)=>a.order-b.order)
+      .map(group=>({{
+        trigger:group.trigger,
+        actions:group.actions.sort((a,b)=>a.order-b.order).map(row=>row.action)
+      }}));
+    try {{ await source.setReactionsAsync(reactions); }}
+    catch (error) {{
+      throw new Error(`Reaction export failed for ${{sourceId}}: ${{error.message}}`);
+    }}
   }}
   figma.currentPage.selection=doc.artboards.map(x=>created.get(x.id)).filter(Boolean);
   figma.viewport.scrollAndZoomIntoView(figma.currentPage.selection);

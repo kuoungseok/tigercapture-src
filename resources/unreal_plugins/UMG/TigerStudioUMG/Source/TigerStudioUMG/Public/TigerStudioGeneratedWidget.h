@@ -30,6 +30,22 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tiger Studio")
     TArray<FTigerStudioUMGInteractionRecord> TigerInteractions;
 
+    /**
+     * Concrete child-component values owned by this parent class default.
+     * UMG may reconstruct foreign child templates from the child class CDO,
+     * so the parent reapplies these records after its live tree is built.
+     */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentInstanceRecord> TigerComponentInstances;
+
+    /** Apply parent-owned values to live child component trees recursively. */
+    UFUNCTION(BlueprintCallable, Category = "Tiger Studio|Component")
+    void ApplyTigerComponentInstances();
+
+    /** Refresh schema-v19 RoundedCard MID sizes from live widget geometry. */
+    UFUNCTION(BlueprintCallable, Category = "Tiger Studio|Material")
+    void UpdateTigerRoundedCards();
+
     UPROPERTY(BlueprintAssignable, Category = "Tiger Studio")
     FTigerStudioWidgetInteraction OnTigerInteraction;
 
@@ -40,6 +56,7 @@ public:
     void ExecuteTigerInteraction(const FString& ComponentId, const FString& Trigger);
 
 protected:
+    virtual void NativePreConstruct() override;
     virtual void NativeConstruct() override;
 
 private:

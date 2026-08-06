@@ -80,8 +80,14 @@ def add_motion_actor(
     )
 
 
-def motion_actor_rows(value: Mapping[str, Any]) -> list[dict[str, Any]]:
-    document = normalize_ui_document(value)
+def motion_actor_rows(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> list[dict[str, Any]]:
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     return [
         dict(row)
         for row in document["objects"]

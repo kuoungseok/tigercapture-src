@@ -6,6 +6,8 @@ from collections import defaultdict, deque
 from math import hypot
 from typing import Any, Mapping
 
+from app.painter_ui_json_copy import json_deepcopy
+
 
 VECTOR_NODE_KINDS = {"corner", "smooth", "symmetric"}
 VECTOR_SEGMENT_KINDS = {"line", "cubic"}
@@ -262,7 +264,7 @@ def vector_network_to_qpath(value: Any, rect) -> Any:
 
 
 def normalize_vector_content(content: Any) -> dict[str, Any]:
-    result = copy.deepcopy(dict(content)) if isinstance(content, Mapping) else {}
+    result = json_deepcopy(dict(content)) if isinstance(content, Mapping) else {}
     if not isinstance(result.get("vector_network"), Mapping):
         return result
     network = normalize_vector_network(result["vector_network"])

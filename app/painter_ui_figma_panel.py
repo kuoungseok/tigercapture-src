@@ -129,10 +129,16 @@ class PainterUIFigmaPanel(QWidget):
         root.addWidget(self.resource_label)
         root.addStretch(1)
 
-    def _set_resource_summary(self, document: Mapping[str, Any]) -> None:
+    def _set_resource_summary(
+        self,
+        document: Mapping[str, Any],
+        *,
+        normalize: bool = True,
+    ) -> None:
         resources = inspect_figma_resources(
             document,
             available_font_families=QFontDatabase.families(),
+            normalize=normalize,
         )
         missing_images = resources["missing_images"]
         missing_fonts = resources["missing_fonts"]
@@ -156,9 +162,17 @@ class PainterUIFigmaPanel(QWidget):
             )
         self.resource_label.setText(" ".join(details))
 
-    def set_document(self, value: Mapping[str, Any] | None) -> None:
+    def set_document(
+        self,
+        value: Mapping[str, Any] | None,
+        *,
+        normalize: bool = True,
+    ) -> None:
         self._document = dict(value or {})
-        report = inspect_figma_compatibility(self._document)
+        report = inspect_figma_compatibility(
+            self._document,
+            normalize=normalize,
+        )
         counts = report["counts"]
         self.compatibility_label.setText(
             f"{report['artboard_count']} artboards | "
@@ -166,7 +180,7 @@ class PainterUIFigmaPanel(QWidget):
             f"{counts['baked']} baked | {counts['blocked']} blocked"
         )
         self.export_button.setEnabled(counts["blocked"] == 0)
-        self._set_resource_summary(self._document)
+        self._set_resource_summary(self._document, normalize=normalize)
 
     def set_busy(self, busy: bool) -> None:
         self.import_button.setEnabled(not busy)

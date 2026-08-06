@@ -6532,7 +6532,7 @@ AI Script Edit MVP integration:
   `tiger_ui_gradient_custom_hlsl_v1` generator; Unreal builds one translucent
   `MD_UI` Material with a single generated Custom HLSL expression and assigns
   it to a native `UImage` brush. Schema v8 adds the strict
-  `tigerstudio.umg.ui_material.v2` `RoundedCard` record for fixed-geometry leaf
+  `tigerstudio.umg.ui_material.v2` `RoundedCard` record for leaf
   rectangles. It carries solid/linear/radial fill, uses all three Figma handles
   for radial-axis reconstruction, fits TL/TR/BR/BL radii, applies
   continuous-corner smoothing, supports one solid
@@ -6541,10 +6541,24 @@ AI Script Edit MVP integration:
   `tiger_ui_rounded_card_sdf_custom_hlsl_v1` generator emits one validated
   Custom expression; a stable layer `UCanvasPanel` owns layout and animation,
   while its `<LayerId>_Visual` `UImage` expands by the declared padding so
-  outside pixels are not clipped. Stretch/scale anchors and flow/grid size
-  allocation are explicitly blocked with
-  `rounded_card_runtime_resize_requires_dynamic_size_binding` until runtime
-  material-size binding exists. Multiple fills or strokes, gradient strokes,
+  outside pixels are not clipped. Schema v19 adds the required
+  `SizeBinding=FixedSize|WidgetGeometry` field. `FixedSize` preserves the
+  authored schema-v8 CardSize and visual surface. `WidgetGeometry` follows an
+  actual runtime-resized allocation: split Canvas anchors; Horizontal
+  main-axis Fill with Fill alignment or cross-axis Fill; the corresponding
+  Vertical rules; Grid/Overlay Fill on either axis; and component Named Slot
+  roots grafted into a generated Overlay when that Overlay slot fills.
+  Auto/non-Fill flow
+  allocations remain fixed. Immediately before child paint, the generated
+  `UTigerStudioRoundedCardHost` uses the current Slate local geometry to resize
+  the padded visual child and update that widget's MID `CardSize`; Slate local
+  units are already DPI-correct and must not be scaled again. Schema 8-18
+  documents default recursively, including component definitions, to
+  `FixedSize`; schema 19 requires an explicit valid binding. A dynamic
+  allocation paired with `FixedSize` is blocked by
+  `rounded_card_runtime_resize_requires_dynamic_size_binding`. Image Fill has
+  no equivalent dynamic UV binding and remains explicitly blocked for these
+  allocations. Multiple fills or strokes, gradient strokes,
   additional shadows, non-normal effect blending, layer/background blur, and
   rounded Button/Frame/Image backgrounds remain explicit bake/native follow-up
   scope. User-authored/arbitrary HLSL, arbitrary Material graphs, shader fills,

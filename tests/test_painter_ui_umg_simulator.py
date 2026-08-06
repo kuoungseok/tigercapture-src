@@ -100,8 +100,8 @@ def _gradient_material(*, opacity: float = 1.0):
     }
 
 
-def _rounded_card_material():
-    return {
+def _rounded_card_material(*, size_binding: str | None = None):
+    result = {
         "Schema": "tigerstudio.umg.ui_material.v2",
         "Generator": "tiger_ui_rounded_card_sdf_custom_hlsl_v1",
         "Kind": "RoundedCard",
@@ -145,6 +145,9 @@ def _rounded_card_material():
             "Bottom": 30.0,
         },
     }
+    if size_binding is not None:
+        result["SizeBinding"] = size_binding
+    return result
 
 
 def _tiger_document(
@@ -153,7 +156,7 @@ def _tiger_document(
     schema_version: int = 6,
     resources: list[dict] | None = None,
 ):
-    return {
+    result = {
         "SchemaVersion": schema_version,
         "Provider": "painter",
         "DocumentId": "painter-test",
@@ -164,6 +167,39 @@ def _tiger_document(
         "Layers": layers,
         "Interactions": [],
     }
+    if schema_version >= 18:
+        result["Components"] = []
+        result["ComponentInstances"] = []
+    return result
+
+
+def _schema19_layer_defaults(layer: dict) -> dict:
+    result = copy.deepcopy(layer)
+    result.setdefault("Visibility", "Visible")
+    result.setdefault("PanelKind", "None")
+    result.setdefault(
+        "FlowSlot",
+        {
+            "Padding": {
+                "Left": 0.0,
+                "Top": 0.0,
+                "Right": 0.0,
+                "Bottom": 0.0,
+            },
+            "HorizontalAlignment": "Fill",
+            "VerticalAlignment": "Fill",
+            "SizeRule": "Auto",
+            "FillCoefficient": 1.0,
+            "Row": 0,
+            "Column": 0,
+            "RowSpan": 1,
+            "ColumnSpan": 1,
+        },
+    )
+    result.setdefault("SpacingStrategy", "Padding")
+    result.setdefault("SpacerSizeRule", "Auto")
+    result.setdefault("SpacerFillCoefficient", 1.0)
+    return result
 
 
 def test_painter_umg_projection_is_non_mutating_and_uses_adapter_preflight():
@@ -179,8 +215,13 @@ def test_painter_umg_projection_is_non_mutating_and_uses_adapter_preflight():
 
     assert document == before
     assert projection["schema"] == PAINTER_UMG_SIMULATOR_SCHEMA
-    assert projection["contract"]["schema_version"] == (
-        projection["contract"]["supported_schema_version"]
+    # A plain frame now uses the production-default Auto policy. Its children
+    # fit native UOverlaySlot constraints, so the adapter emits schema 17's
+    # Overlay/spacing contract instead of silently retaining Canvas.
+    assert projection["contract"]["schema_version"] == 17
+    assert projection["contract"]["supported_schema_version"] == 19
+    assert projection["contract"]["schema_version"] in (
+        projection["contract"]["supported_schema_versions"]
     )
     assert projection["contract"]["local_preview"] == "compatibility_proxy"
     assert projection["contract"]["authority"] == "unreal_generation_and_capture"
@@ -188,6 +229,211 @@ def test_painter_umg_projection_is_non_mutating_and_uses_adapter_preflight():
     assert projection["ready"] == projection["preflight"]["ok"]
     assert projection["canvas"]["root_widget_class"] == "UCanvasPanel"
     assert projection["document"] is not document
+    group = next(
+        row for row in projection["document"]["objects"]
+        if row["name"] == "Panel"
+    )
+    classification = projection["widgets_by_id"][group["id"]]
+    assert classification["widget_class"] == "UOverlay"
+    assert classification["panel_kind"] == "Overlay"
+    assert classification["spacing_strategy"] == "Padding"
+
+
+def test_schema18_component_preview_expands_instances_properties_and_slots():
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+    from tools.qa_painter_ui_unreal_umg_component import (
+        build_component_contract_evidence,
+    )
+
+    evidence = build_component_contract_evidence()
+    document = evidence["umg_document"]
+    before = copy.deepcopy(document)
+
+    projection = project_tiger_umg_document(document)
+
+    assert document == before
+    assert projection["counts"] == evidence["preflight"]["counts"]
+    assert projection["component_count"] == 2
+    assert projection["component_instance_count"] == 2
+    assert projection["component_summary"]["expanded_instance_count"] == 4
+    assert projection["ready"] is True
+
+    fixture = evidence["fixture"]
+    primary_component_id = evidence["primary_component_id"]
+    dependency_component_id = evidence["dependency_component_id"]
+    primary_class = f"WBP_TS_C_{primary_component_id.replace('-', '_')}_C"
+    dependency_class = (
+        f"WBP_TS_C_{dependency_component_id.replace('-', '_')}_C"
+    )
+    first_id, second_id = fixture["primary_instance_root_ids"]
+    widgets = projection["widgets_by_id"]
+    objects = {
+        row["id"]: row for row in projection["document"]["objects"]
+    }
+
+    for instance_id in (first_id, second_id):
+        instance = widgets[instance_id]
+        assert instance["widget_class"] == primary_class
+        assert instance["generated_widget_type"] == "UUserWidget"
+        assert instance["generator_action"] == "construct_component_instance"
+        nested_id = (
+            f"{instance_id}::{fixture['nested_definition_instance_root_id']}"
+        )
+        assert widgets[nested_id]["widget_class"] == dependency_class
+        assert widgets[nested_id]["component_instance"]["nested"] is True
+
+    title_source_id = fixture["title_source_id"]
+    assert objects[f"{first_id}::{title_source_id}"]["content"]["text"] == (
+        "First card"
+    )
+    assert objects[f"{second_id}::{title_source_id}"]["content"]["text"] == (
+        "Second card"
+    )
+    second_nested_id = (
+        f"{second_id}::{fixture['nested_definition_instance_root_id']}"
+    )
+    assert widgets[second_nested_id]["runtime_visibility"] == "Collapsed"
+    assert objects[second_nested_id]["visible"] is False
+
+    default_slot_source_id = fixture["slot_default_id"]
+    assert f"{first_id}::{default_slot_source_id}" in widgets
+    assert f"{second_id}::{default_slot_source_id}" not in widgets
+    assert fixture["custom_slot_content_id"] in widgets
+    assert widgets[fixture["custom_slot_content_id"]][
+        "component_slot_content"
+    ] == {"instance_id": second_id, "slot_name": "Content"}
+
+    slot_source_id = fixture["slot_source_id"]
+    default_slot = widgets[f"{first_id}::{slot_source_id}"]
+    custom_slot = widgets[f"{second_id}::{slot_source_id}"]
+    assert default_slot["widget_class"] == "UOverlay"
+    assert default_slot["component_slot"]["content_mode"] == "default"
+    assert custom_slot["component_slot"]["content_mode"] == "custom"
+    assert set(custom_slot["component_generated_widgets"].values()) == {
+        "UImage",
+        "UNamedSlot",
+        "UOverlay",
+    }
+
+    root_source_id = evidence["primary_component"]["RootLayerId"]
+    component_root = widgets[f"{first_id}::{root_source_id}"]
+    assert component_root["widget_class"] == "UOverlay"
+    assert component_root["component_generated_widgets"][
+        f"{first_id}::{root_source_id}#background"
+    ] == "UImage"
+    assert component_root["component_content_panel_class"] in {
+        "UCanvasPanel",
+        "UHorizontalBox",
+        "UVerticalBox",
+        "UGridPanel",
+        "UOverlay",
+    }
+
+
+def test_mobile_onboarding_component_visual_fills_its_placement_not_canvas():
+    from app.painter_ui_templates import instantiate_ui_template
+    from app.painter_ui_umg_simulator import project_painter_ui_umg_widgets
+
+    document, _report = instantiate_ui_template("mobile_onboarding")
+    projection = project_painter_ui_umg_widgets(document)
+    placement_id = "ui-object-1-button"
+    definition_visual_id = f"{placement_id}::{placement_id}"
+    widgets = projection["widgets_by_id"]
+    objects = {
+        row["id"]: row for row in projection["document"]["objects"]
+    }
+
+    placement = widgets[placement_id]
+    assert placement["rendered"] is True
+    assert placement["generator_action"] == "construct_component_instance"
+    assert placement["reasons"] == []
+    assert placement["widget_class"] == (
+        "WBP_TS_C_ui_component_primary_button_C"
+    )
+    assert not any(
+        blocker["object_id"] == placement_id
+        and "button_style_missing" in blocker["reasons"]
+        for blocker in projection["blockers"]
+    )
+
+    assert objects[placement_id]["x"] == 24.0
+    assert objects[placement_id]["y"] == 541.0
+    assert objects[placement_id]["width"] == 260.0
+    assert objects[placement_id]["height"] == 56.0
+    assert objects[placement_id]["kind"] == "frame"
+    assert objects[placement_id]["style"]["fill"] == "#00000000"
+
+    definition_visual = widgets[definition_visual_id]
+    assert definition_visual["effective_parent_id"] == placement_id
+    assert definition_visual["slot"]["anchor_minimum"] == {
+        "x": 0.0,
+        "y": 0.0,
+    }
+    assert definition_visual["slot"]["anchor_maximum"] == {
+        "x": 1.0,
+        "y": 1.0,
+    }
+    assert definition_visual["slot"]["resolved_geometry"] == {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 260.0,
+        "height": 56.0,
+    }
+    assert objects[definition_visual_id]["parent_id"] == placement_id
+    assert objects[definition_visual_id]["x"] == 24.0
+    assert objects[definition_visual_id]["y"] == 541.0
+    assert objects[definition_visual_id]["width"] == 260.0
+    assert objects[definition_visual_id]["height"] == 56.0
+    background = objects["__tiger_artboard_background"]
+    assert background["z_index"] < objects[placement_id]["z_index"]
+    assert (
+        objects[placement_id]["z_index"]
+        < objects[definition_visual_id]["z_index"]
+    )
+    assert objects[definition_visual_id]["style"]["fill"] == "#5B6CFFFF"
+
+
+def test_pre_schema18_projection_ignores_component_only_containers():
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+
+    screen = _layer("legacy-screen", kind="Group")
+    screen.update(
+        {
+            "PanelKind": "Canvas",
+            "Visibility": "Visible",
+            "SpacingStrategy": "Padding",
+            "SpacerSizeRule": "Auto",
+            "SpacerFillCoefficient": 1.0,
+        }
+    )
+    ignored_root = _layer("ignored-root", kind="Group")
+    ignored_root.update(copy.deepcopy(screen))
+    ignored_root["Id"] = "ignored-root"
+    ignored_root["Name"] = "ignored-root"
+    legacy = _tiger_document([screen], schema_version=17)
+    legacy["Components"] = [
+        {
+            "Id": "ignored-component",
+            "RootLayerId": "ignored-root",
+            "Layers": [ignored_root],
+        }
+    ]
+    legacy["ComponentInstances"] = [
+        {
+            "Id": "legacy-screen",
+            "LayerId": "legacy-screen",
+            "ComponentId": "ignored-component",
+        }
+    ]
+
+    projection = project_tiger_umg_document(legacy)
+
+    assert projection["component_count"] == 0
+    assert projection["component_instance_count"] == 0
+    assert projection["widgets_by_id"]["legacy-screen"]["widget_class"] == (
+        "UCanvasPanel"
+    )
+    assert not any("::" in row["id"] for row in projection["widgets"])
 
 
 def test_v10_projection_reports_scrollbox_graph_and_fixed_child_contract():
@@ -283,6 +529,11 @@ def test_projection_visualizes_native_and_valid_material_layers():
     }
     assert projection["blockers"] == [
         {
+            "object_id": "baked",
+            "name": "baked",
+            "reasons": ["baked_generation_unavailable"],
+        },
+        {
             "object_id": "blocked",
             "name": "blocked",
             "reasons": ["unsupported_effect"],
@@ -335,7 +586,81 @@ def test_projection_mirrors_canvas_slot_alignment_and_nested_group_coordinates()
     assert objects["child"]["parent_id"] == "group"
     assert projection["widgets_by_id"]["group"]["widget_class"] == "UCanvasPanel"
     assert projection["widgets_by_id"]["child"]["widget_class"] == "UImage"
+    assert projection["widgets_by_id"]["group"]["slot_kind"] == "CanvasPanelSlot"
+    assert projection["widgets_by_id"]["child"]["slot_kind"] == "CanvasPanelSlot"
+    assert projection["widgets_by_id"]["child"]["parent_panel_kind"] == "Canvas"
     assert projection["widgets_by_id"]["child"]["proxy_accuracy"] == "exact_affine"
+
+
+def test_projection_reports_the_concrete_non_canvas_parent_slot_kind() -> None:
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+
+    group = _layer("flow", kind="Group")
+    group["PanelKind"] = "Horizontal"
+    child = _layer("flow-child", parent_id="flow")
+
+    projection = project_tiger_umg_document(
+        _tiger_document([group, child], schema_version=7)
+    )
+    widgets = projection["widgets_by_id"]
+
+    assert widgets["flow"]["slot_kind"] == "CanvasPanelSlot"
+    assert widgets["flow-child"]["slot_kind"] == "HorizontalBoxSlot"
+    assert widgets["flow-child"]["parent_panel_kind"] == "Horizontal"
+
+
+def test_schema17_overlay_projects_native_overlay_slot_metadata() -> None:
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+
+    group = _layer("overlay", kind="Group", size=(300.0, 180.0))
+    group.update(
+        {
+            "PanelKind": "Overlay",
+            "Visibility": "Visible",
+            "SpacingStrategy": "Padding",
+            "SpacerSizeRule": "Auto",
+            "SpacerFillCoefficient": 1.0,
+        }
+    )
+    child = _layer(
+        "overlay-child",
+        parent_id="overlay",
+        size=(80.0, 50.0),
+    )
+    child.update(
+        {
+            "Visibility": "Visible",
+            "FlowSlot": {
+                "Padding": {
+                    "Left": 20.0,
+                    "Top": 30.0,
+                    "Right": 0.0,
+                    "Bottom": 0.0,
+                },
+                "HorizontalAlignment": "Left",
+                "VerticalAlignment": "Top",
+                "SizeRule": "Auto",
+                "FillCoefficient": 1.0,
+            },
+        }
+    )
+
+    projection = project_tiger_umg_document(
+        _tiger_document([group, child], schema_version=17)
+    )
+    widgets = projection["widgets_by_id"]
+
+    assert widgets["overlay"]["widget_class"] == "UOverlay"
+    assert widgets["overlay-child"]["slot_kind"] == "OverlaySlot"
+    assert widgets["overlay-child"]["parent_panel_kind"] == "Overlay"
+    assert widgets["overlay-child"]["slot"]["padding"] == {
+        "left": 20.0,
+        "top": 30.0,
+        "right": 0.0,
+        "bottom": 0.0,
+    }
+    assert widgets["overlay-child"]["slot"]["horizontal_alignment"] == "Left"
+    assert widgets["overlay-child"]["slot"]["vertical_alignment"] == "Top"
 
 
 def test_projection_exposes_only_properties_consumed_by_current_cpp_generator():
@@ -346,9 +671,16 @@ def test_projection_exposes_only_properties_consumed_by_current_cpp_generator():
     widgets = projection["widgets_by_id"]
     objects = {row["id"]: row for row in projection["document"]["objects"]}
 
-    assert widgets[group["id"]]["consumed_properties"][-1] == (
-        "PayloadJson.clip_content"
-    )
+    assert widgets[group["id"]]["widget_class"] == "UOverlay"
+    assert widgets[group["id"]]["panel_kind"] == "Overlay"
+    assert widgets[group["id"]]["spacing_strategy"] == "Padding"
+    assert widgets[group["id"]]["consumed_properties"][-5:] == [
+        "PayloadJson.clip_content",
+        "SpacingStrategy",
+        "SpacerSizeRule",
+        "SpacerFillCoefficient",
+        "Visibility",
+    ]
     assert widgets[text["id"]]["widget_class"] == "UTextBlock"
     assert set(widgets[text["id"]]["consumed_properties"]) >= {
         "PayloadJson.text",
@@ -359,9 +691,11 @@ def test_projection_exposes_only_properties_consumed_by_current_cpp_generator():
     assert "PayloadJson.source_params" not in widgets[button["id"]][
         "consumed_properties"
     ]
-    # Painter's red fill is not consumed for the generated UTigerStudioButton,
-    # so the compatibility proxy must not echo it.
-    assert objects[button["id"]]["style"]["fill"] != "#FF0000FF"
+    # Schema 16 consumes Painter's typed normal button state directly.
+    assert objects[button["id"]]["style"]["fill"] == "#FF0000FF"
+    assert "ButtonStyle.Normal" in widgets[button["id"]][
+        "consumed_properties"
+    ]
     assert objects[text["id"]]["content"]["text"] == "Tiger"
     assert objects[text["id"]]["style"]["text_color"] == "#22AAEEFF"
     assert objects[text["id"]]["style"]["font_size"] == 20.0
@@ -525,6 +859,86 @@ def test_v8_rounded_card_material_preserves_full_appearance_proxy() -> None:
     )
     assert projection["ready"] is True
     assert projection["complete"] is True
+
+
+def test_schema19_widget_geometry_uses_live_host_size_in_local_umg_view() -> None:
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+
+    layer = _layer(
+        "responsive-card",
+        disposition="Material",
+        size=(240.0, 120.0),
+        material=_rounded_card_material(size_binding="WidgetGeometry"),
+    )
+    layer["CanvasSlot"] = {
+        "AnchorMinimum": {"X": 0.0, "Y": 0.0},
+        "AnchorMaximum": {"X": 1.0, "Y": 1.0},
+        "Offsets": {
+            "Left": 20.0,
+            "Top": 30.0,
+            "Right": 40.0,
+            "Bottom": 50.0,
+        },
+        "Alignment": {"X": 0.0, "Y": 0.0},
+    }
+    layer["RenderTransformPivot"] = {"X": 0.5, "Y": 0.5}
+
+    projection = project_tiger_umg_document(
+        _tiger_document([_schema19_layer_defaults(layer)], schema_version=19)
+    )
+    host = projection["widgets_by_id"]["responsive-card"]
+    visual = projection["widgets_by_id"]["responsive-card_Visual"]
+
+    assert host["size_binding"] == "WidgetGeometry"
+    assert "Material.SizeBinding" in host["consumed_properties"]
+    assert host["fixed_material_size"] == {"x": 240.0, "y": 120.0}
+    assert host["live_material_size"] == {"x": 340.0, "y": 220.0}
+    assert visual["live_material_size"] == {"x": 340.0, "y": 220.0}
+    assert visual["runtime_material_parameters"]["CardSize"] == {
+        "x": 340.0,
+        "y": 220.0,
+    }
+    assert visual["slot"]["position"] == {"x": -12.0, "y": -10.0}
+    assert visual["slot"]["size"] == {"x": 380.0, "y": 260.0}
+    assert "Material.SizeBinding" in visual["consumed_properties"]
+    visual_proxy = next(
+        row
+        for row in projection["document"]["objects"]
+        if row["id"] == "responsive-card_Visual"
+    )
+    assert visual_proxy["width"] == 380.0
+    assert visual_proxy["height"] == 260.0
+
+
+def test_schema19_fixed_size_preserves_authored_rounded_card_surface() -> None:
+    from app.painter_ui_umg_simulator import project_tiger_umg_document
+
+    layer = _layer(
+        "fixed-card",
+        disposition="Material",
+        size=(300.0, 160.0),
+        material=_rounded_card_material(size_binding="FixedSize"),
+    )
+    layer["CanvasSlot"] = {
+        "AnchorMinimum": {"X": 0.0, "Y": 0.0},
+        "AnchorMaximum": {"X": 0.0, "Y": 0.0},
+        "Offsets": {
+            "Left": 50.0,
+            "Top": 50.0,
+            "Right": 300.0,
+            "Bottom": 160.0,
+        },
+        "Alignment": {"X": 0.0, "Y": 0.0},
+    }
+    layer["RenderTransformPivot"] = {"X": 0.5, "Y": 0.5}
+    projection = project_tiger_umg_document(
+        _tiger_document([_schema19_layer_defaults(layer)], schema_version=19)
+    )
+    visual = projection["widgets_by_id"]["fixed-card_Visual"]
+
+    assert visual["fixed_material_size"] == {"x": 240.0, "y": 120.0}
+    assert visual["live_material_size"] == {"x": 240.0, "y": 120.0}
+    assert visual["slot"]["size"] == {"x": 280.0, "y": 160.0}
 
 
 def test_pre_v8_rounded_card_is_blocked_without_false_preview() -> None:

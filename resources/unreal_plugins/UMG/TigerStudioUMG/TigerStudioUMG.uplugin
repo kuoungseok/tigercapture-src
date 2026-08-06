@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-	"Version": 11,
-	"VersionName": "1.0.0",
+	"Version": 21,
+	"VersionName": "1.8.2",
   "FriendlyName": "Tiger Studio UMG",
   "Description": "Project-local UMG generation and reimport backend for Tiger Studio authoring tools.",
   "Category": "Tiger Studio",

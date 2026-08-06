@@ -168,3 +168,92 @@ def test_color_control_fits_current_inspector_height_without_manual_scroll() -> 
     assert dialog._paint_inspector_frame.width() > compact_width
     assert dialog._paint_inspector_frame.width() >= 400
     dialog.close()
+
+
+def test_color_disc_never_overlaps_value_slider_across_window_heights() -> None:
+    app = _app()
+    dialog = _dialog()
+    dialog.show()
+    app.processEvents()
+
+    for width, height in (
+        (760, 520),
+        (900, 600),
+        (1000, 650),
+        (1100, 700),
+        (1200, 760),
+        (1932, 1080),
+        (760, 560),
+    ):
+        dialog.resize(width, height)
+        app.processEvents()
+        dialog._sync_color_panel_layout()
+        app.processEvents()
+
+        wheel_frame = dialog._paint_color_wheel_frame
+        value_slider = dialog.value_slider
+        assert value_slider.isVisible()
+        assert all(spin.isVisible() for spin in dialog._color_numeric_spins)
+        if wheel_frame.isVisible():
+            color_page = dialog._paint_color_tabs.widget(1)
+            wheel_bottom = wheel_frame.mapTo(
+                color_page,
+                wheel_frame.rect().bottomLeft(),
+            ).y()
+            slider_top = value_slider.mapTo(
+                color_page,
+                value_slider.rect().topLeft(),
+            ).y()
+            assert wheel_bottom < slider_top, (
+                f"color disc overlaps value slider at {width}x{height}: "
+                f"wheel_bottom={wheel_bottom}, slider_top={slider_top}"
+            )
+
+    dialog.close()
+
+
+def test_color_numeric_row_keeps_controls_separate_and_values_readable() -> None:
+    from PySide6.QtWidgets import QAbstractSpinBox
+
+    app = _app()
+    dialog = _dialog()
+    dialog.show()
+    app.processEvents()
+
+    controls = [dialog._color_numeric_mode, *dialog._color_numeric_spins]
+    for width, height in ((760, 520), (1100, 640), (1932, 1080)):
+        dialog.resize(width, height)
+        app.processEvents()
+        dialog._sync_color_panel_layout()
+        app.processEvents()
+
+        for left, right in zip(controls, controls[1:]):
+            assert left.geometry().right() < right.geometry().left(), (
+                f"numeric color controls overlap at {width}x{height}: "
+                f"{left.geometry()} and {right.geometry()}"
+            )
+        assert dialog._color_numeric_mode.width() == 58
+        assert dialog._color_numeric_mode.maximumWidth() == 58
+        assert dialog._color_numeric_mode.minimumWidth() <= 58
+        assert all(
+            spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
+            for spin in dialog._color_numeric_spins
+        )
+        for spin, maximum_text in zip(
+            dialog._color_numeric_spins,
+            ("255", "255", "255"),
+        ):
+            spin.setValue(255)
+            app.processEvents()
+            text_width = spin.fontMetrics().horizontalAdvance(maximum_text)
+            assert spin.lineEdit().contentsRect().width() >= text_width
+
+    dialog._color_numeric_mode.setCurrentIndex(1)
+    app.processEvents()
+    hue_spin = dialog._color_numeric_spins[0]
+    hue_spin.setValue(359)
+    app.processEvents()
+    assert hue_spin.lineEdit().contentsRect().width() >= hue_spin.fontMetrics().horizontalAdvance(
+        "359°"
+    )
+    dialog.close()

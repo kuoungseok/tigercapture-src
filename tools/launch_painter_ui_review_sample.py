@@ -23,6 +23,19 @@ def main() -> int:
         action="store_true",
         help="Do not open the matching UMG projection window.",
     )
+    parser.add_argument(
+        "--umg-layout-qa",
+        action="store_true",
+        help=(
+            "Add the deterministic Canvas/Overlay/Spacer layout fixture "
+            "used by the real Unreal QA."
+        ),
+    )
+    parser.add_argument(
+        "--select",
+        default="",
+        help="Select an object by exact display name after loading.",
+    )
     args = parser.parse_args()
 
     from PySide6.QtCore import QTimer
@@ -39,14 +52,25 @@ def main() -> int:
     apply_ui_font(app)
 
     document, report = instantiate_ui_template(args.template)
+    if args.umg_layout_qa:
+        from tools.qa_painter_ui_unreal_umg import _anchor_qa_document
+
+        document, _expectations = _anchor_qa_document(document)
     template = report["template"]
     # Start with a meaningful layer selected so the inspector demonstrates the
     # real selection-driven surface instead of an empty page shell.
     selected = next(
         (
             row
+            for preferred_name in (
+                args.select,
+                "Page Heading",
+                "Hero Headline",
+                "Primary CTA",
+            )
+            if preferred_name
             for row in document.get("objects", [])
-            if row.get("name") == "Page Heading"
+            if row.get("name") == preferred_name
         ),
         document.get("objects", [None])[0],
     )
@@ -63,7 +87,10 @@ def main() -> int:
         time_ms=0,
         standalone=True,
     )
-    painter.setWindowTitle(f"페인터 — {template['name']}")
+    title_suffix = " · UMG Layout QA" if args.umg_layout_qa else ""
+    painter.setWindowTitle(
+        f"Painter UI — {template['name']}{title_suffix}"
+    )
     painter.resize(1450, 900)
     registry = ActionRegistry(owner=painter)
     workspace = registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
@@ -79,7 +106,9 @@ def main() -> int:
     umg = None
     if not args.painter_only:
         umg = PainterUMGWidgetView()
-        umg.setWindowTitle(f"UMG 위젯 — {template['name']}")
+        umg.setWindowTitle(
+            f"UMG 위젯 보기 — {template['name']}{title_suffix}"
+        )
         umg.set_document(document)
         umg.resize(1120, 760)
         umg.show()

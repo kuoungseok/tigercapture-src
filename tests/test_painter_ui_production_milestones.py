@@ -175,13 +175,23 @@ def test_painter_uses_shared_umg_document_and_package(tmp_path: Path) -> None:
 
     document = _template_document()
     umg = painter_ui_to_umg_document(document)
-    assert umg["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION
+    assert TIGER_UMG_SCHEMA_VERSION == 13
+    assert umg["SchemaVersion"] == 18
     assert umg["Provider"] == "painter"
     assert umg["Layers"]
-    first_payload = json.loads(umg["Layers"][0]["PayloadJson"])
+    first_payload = json.loads(
+        next(
+            row
+            for row in umg["Layers"]
+            if row["Id"] != "__tiger_artboard_background"
+        )["PayloadJson"]
+    )
     assert "clip_content" in first_payload
     preflight = preflight_painter_umg(document)
-    assert sum(preflight["counts"].values()) == len(umg["Layers"])
+    assert umg["Components"]
+    assert sum(preflight["counts"].values()) == len(umg["Layers"]) + sum(
+        len(component["Layers"]) for component in umg["Components"]
+    )
     package = package_painter_umg(document, tmp_path / "umg")
     assert Path(package["document_path"]).is_file()
     assert package["document"]["Provider"] == "painter"

@@ -16,6 +16,7 @@ TIGER_UMG_ROUNDED_CARD_GENERATOR = (
     "tiger_ui_rounded_card_sdf_custom_hlsl_v1"
 )
 TIGER_UMG_ROUNDED_CARD_DOCUMENT_SCHEMA_VERSION = 8
+TIGER_UMG_ROUNDED_CARD_DYNAMIC_SIZE_DOCUMENT_SCHEMA_VERSION = 19
 TIGER_UMG_MATERIAL_KINDS = {
     "LinearGradient",
     "RadialGradient",
@@ -25,6 +26,7 @@ TIGER_UMG_MATERIAL_LAYER_KINDS = {"Image", "Shape"}
 
 _FILL_KINDS = {"Solid", "LinearGradient", "RadialGradient"}
 _STROKE_ALIGNMENTS = {"Inside", "Center", "Outside"}
+_ROUNDED_CARD_SIZE_BINDINGS = {"FixedSize", "WidgetGeometry"}
 _EPSILON = 0.000001
 
 
@@ -411,6 +413,11 @@ def normalize_umg_rounded_card(
         "Kind": "RoundedCard",
         "CoordinateSpace": "LocalUV",
         "Size": card_size,
+        "SizeBinding": (
+            str(source.get("SizeBinding") or "FixedSize")
+            if direct_record
+            else str(source.get("material_size_binding") or "FixedSize")
+        ),
         "FillKind": fill_kind,
         "FillColor": fill_color,
         "Start": dict(gradient["Start"]),
@@ -551,6 +558,11 @@ def _gradient_validation_reasons(source: Mapping[str, Any]) -> list[str]:
 
 def _rounded_card_validation_reasons(source: Mapping[str, Any]) -> list[str]:
     reasons: list[str] = []
+    if (
+        str(source.get("SizeBinding") or "FixedSize")
+        not in _ROUNDED_CARD_SIZE_BINDINGS
+    ):
+        reasons.append("ui_material_rounded_card_size_binding_invalid")
     size = source.get("Size")
     if (
         not isinstance(size, Mapping)
@@ -677,6 +689,22 @@ def validate_umg_material_record(
         )
         if schema_version < required:
             return [f"ui_material_requires_schema_{required}"]
+        if (
+            rounded_card
+            and schema_version
+            >= TIGER_UMG_ROUNDED_CARD_DYNAMIC_SIZE_DOCUMENT_SCHEMA_VERSION
+            and "SizeBinding" not in source
+        ):
+            return ["ui_material_rounded_card_size_binding_invalid"]
+        if (
+            rounded_card
+            and str(source.get("SizeBinding") or "") == "WidgetGeometry"
+            and schema_version
+            < TIGER_UMG_ROUNDED_CARD_DYNAMIC_SIZE_DOCUMENT_SCHEMA_VERSION
+        ):
+            return [
+                "ui_material_dynamic_size_binding_requires_schema_19"
+            ]
     reasons: list[str] = []
     expected_schema = (
         TIGER_UMG_ROUNDED_CARD_SCHEMA
@@ -860,7 +888,7 @@ def gradient_custom_hlsl(value: Mapping[str, Any]) -> str:
 def _rounded_distance_hlsl(prefix: str, point_expression: str) -> list[str]:
     return [
         f"float2 {prefix}P = {point_expression};",
-        f"float {prefix}Radius = ({prefix}P.x < 0.0) ? (({prefix}P.y < 0.0) ? CornerRadii.x : CornerRadii.w) : (({prefix}P.y < 0.0) ? CornerRadii.y : CornerRadii.z);",
+        f"float {prefix}Radius = ({prefix}P.x < 0.0) ? (({prefix}P.y < 0.0) ? EffectiveCornerRadii.x : EffectiveCornerRadii.w) : (({prefix}P.y < 0.0) ? EffectiveCornerRadii.y : EffectiveCornerRadii.z);",
         f"float2 {prefix}Q = abs({prefix}P) - max(CardSize.xy * 0.5 - float2({prefix}Radius, {prefix}Radius), float2(0.0, 0.0));",
         f"float2 {prefix}Outside = max({prefix}Q, 0.0);",
         f"float {prefix}Power = lerp(2.0, 4.0, saturate(CornerSmoothing));",
@@ -878,6 +906,9 @@ def rounded_card_custom_hlsl(value: Mapping[str, Any]) -> str:
         "float2 PixelPosition = UV * SurfaceSize - VisualPadding.xy;",
         "float2 CardUV = saturate(PixelPosition / max(CardSize.xy, float2(0.000001, 0.000001)));",
         "float2 CardPoint = PixelPosition - CardSize.xy * 0.5;",
+        "float RadiusScaleX = CardSize.x / max(max(CornerRadii.x + CornerRadii.y, CornerRadii.w + CornerRadii.z), 0.000001);",
+        "float RadiusScaleY = CardSize.y / max(max(CornerRadii.x + CornerRadii.w, CornerRadii.y + CornerRadii.z), 0.000001);",
+        "float4 EffectiveCornerRadii = CornerRadii * min(1.0, min(RadiusScaleX, RadiusScaleY));",
         *_rounded_distance_hlsl("Base", "CardPoint"),
         *_rounded_distance_hlsl("Drop", "CardPoint - DropShadowOffset.xy"),
         *_rounded_distance_hlsl("Inner", "CardPoint - InnerShadowOffset.xy"),
@@ -1097,6 +1128,7 @@ __all__ = [
     "TIGER_UMG_CUSTOM_HLSL_GENERATOR",
     "TIGER_UMG_MATERIAL_KINDS",
     "TIGER_UMG_ROUNDED_CARD_DOCUMENT_SCHEMA_VERSION",
+    "TIGER_UMG_ROUNDED_CARD_DYNAMIC_SIZE_DOCUMENT_SCHEMA_VERSION",
     "TIGER_UMG_ROUNDED_CARD_GENERATOR",
     "TIGER_UMG_ROUNDED_CARD_SCHEMA",
     "TIGER_UMG_UI_MATERIAL_DOCUMENT_SCHEMA_VERSION",

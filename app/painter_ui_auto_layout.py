@@ -5,12 +5,17 @@ import copy
 import math
 from typing import Any, Mapping
 
+from app.painter_ui_json_copy import json_deepcopy
 
-_MODES = {"none", "horizontal", "vertical", "grid"}
+
+_MODES = {"none", "horizontal", "vertical", "grid", "overlay"}
 _MAIN_ALIGNMENTS = {"start", "center", "end", "space_between"}
-_CROSS_ALIGNMENTS = {"start", "center", "end", "stretch"}
+_CROSS_ALIGNMENTS = {"start", "center", "end", "stretch", "baseline"}
 _POSITIONING = {"auto", "absolute"}
 _SIZING_MODES = {"fixed", "hug", "fill"}
+_UMG_PANEL_MODES = {"auto", "overlay", "canvas"}
+_UMG_SPACING_STRATEGIES = {"padding", "spacer"}
+_UMG_SPACER_SIZE_RULES = {"auto", "fill"}
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -48,8 +53,71 @@ def _padding(value: Any) -> dict[str, float]:
     return {edge: amount for edge in ("left", "top", "right", "bottom")}
 
 
+def _zero_edges() -> dict[str, float]:
+    return {edge: 0.0 for edge in ("left", "top", "right", "bottom")}
+
+
+def _effective_padding(layout: Mapping[str, Any]) -> dict[str, float]:
+    """Return authored padding plus any Figma layout stroke inset.
+
+    Figma's ``strokesIncludedInLayout`` makes a visible inside/center stroke
+    part of the container's content inset.  The importer records the exact
+    per-edge inset instead of making the generic solver infer paint state.
+    """
+
+    padding = _padding(layout.get("padding"))
+    if not bool(layout.get("include_strokes", False)):
+        return padding
+    insets = _padding(layout.get("stroke_insets"))
+    return {
+        edge: padding[edge] + insets[edge]
+        for edge in ("left", "top", "right", "bottom")
+    }
+
+
+def _child_stroke_outsets(
+    child: Mapping[str, Any],
+    *,
+    include_strokes: bool,
+) -> dict[str, float]:
+    if not include_strokes:
+        return _zero_edges()
+    layout = normalize_ui_auto_layout(child.get("layout"))
+    return _padding(layout.get("stroke_outsets"))
+
+
+def _axis_outsets(
+    child: Mapping[str, Any],
+    *,
+    axis: str,
+    include_strokes: bool,
+) -> tuple[float, float]:
+    outsets = _child_stroke_outsets(
+        child,
+        include_strokes=include_strokes,
+    )
+    if axis == "width":
+        return outsets["left"], outsets["right"]
+    return outsets["top"], outsets["bottom"]
+
+
+def _axis_footprint_size(
+    child: Mapping[str, Any],
+    rect: Mapping[str, float],
+    *,
+    axis: str,
+    include_strokes: bool,
+) -> float:
+    leading, trailing = _axis_outsets(
+        child,
+        axis=axis,
+        include_strokes=include_strokes,
+    )
+    return float(rect[axis]) + leading + trailing
+
+
 def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
-    source = copy.deepcopy(dict(value or {}))
+    source = json_deepcopy(dict(value or {}))
     mode = str(
         source.get("mode")
         or source.get("direction")
@@ -87,11 +155,23 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
         or source.get("vertical_sizing")
         or "fixed"
     ).strip().casefold()
+    umg_panel_mode = str(
+        source.get("umg_panel_mode") or "auto"
+    ).strip().casefold()
+    umg_spacing_strategy = str(
+        source.get("umg_spacing_strategy") or "padding"
+    ).strip().casefold()
+    umg_spacer_size_rule = str(
+        source.get("umg_spacer_size_rule") or "auto"
+    ).strip().casefold()
     source.update(
         {
             "mode": mode if mode in _MODES else "none",
             "padding": _padding(source.get("padding")),
-            "gap": max(0.0, _number(source.get("gap"))),
+            # Figma/Slate both support negative main-axis spacing for
+            # deliberately overlapped stacks. Cross-track spacing remains
+            # non-negative below.
+            "gap": _number(source.get("gap")),
             "cross_gap": max(
                 0.0,
                 _number(
@@ -118,6 +198,25 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
             ),
             "height_sizing": (
                 height_sizing if height_sizing in _SIZING_MODES else "fixed"
+            ),
+            "umg_panel_mode": (
+                umg_panel_mode
+                if umg_panel_mode in _UMG_PANEL_MODES
+                else "auto"
+            ),
+            "umg_spacing_strategy": (
+                umg_spacing_strategy
+                if umg_spacing_strategy in _UMG_SPACING_STRATEGIES
+                else "padding"
+            ),
+            "umg_spacer_size_rule": (
+                umg_spacer_size_rule
+                if umg_spacer_size_rule in _UMG_SPACER_SIZE_RULES
+                else "auto"
+            ),
+            "umg_spacer_fill_coefficient": max(
+                0.0001,
+                _number(source.get("umg_spacer_fill_coefficient"), 1.0),
             ),
             "grid_columns": max(1, int(_number(source.get("grid_columns"), 2))),
             "grid_column_span": max(
@@ -158,6 +257,19 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
         "vertical_sizing",
     ):
         source.pop(legacy_key, None)
+    if "reverse_z_index" in source:
+        # This changes only overlapping-child paint order. It must never be
+        # used to reverse Auto Layout flow iteration.
+        source["reverse_z_index"] = bool(source["reverse_z_index"])
+    if "baseline_offset" in source:
+        # Distance from this child's top edge to the baseline used by its
+        # horizontal Auto Layout parent.  Figma REST/archive payloads do not
+        # expose font ascent directly, so the importer derives this value
+        # from Figma's already-resolved sibling geometry.
+        source["baseline_offset"] = max(
+            0.0,
+            _number(source.get("baseline_offset")),
+        )
     return source
 
 
@@ -229,18 +341,67 @@ def _main_axis_plan(
         return 0.0, gap
     total_without_gap = sum(sizes)
     total = total_without_gap + gap * max(0, len(sizes) - 1)
-    remaining = max(0.0, available - total)
+    # Figma keeps CENTER/END alignment centered on the authored content box
+    # even when children or padding overflow a fixed-size parent.  The free
+    # space is therefore allowed to be negative; clamping it to zero shifts
+    # compressed components toward the leading padding edge.
+    remaining = available - total
     if alignment == "center":
         return remaining * 0.5, gap
     if alignment == "end":
         return remaining, gap
     if alignment == "space_between" and len(sizes) > 1:
-        distributed = max(
-            gap,
-            (available - total_without_gap) / (len(sizes) - 1),
-        )
+        distributed = (
+            available - total_without_gap
+        ) / (len(sizes) - 1)
+        # Figma's SPACE_BETWEEN still fits both edge children when their
+        # combined desired size exceeds the content box.  In that overflow
+        # case the effective spacing becomes negative (intentional overlap)
+        # instead of being clamped back to the authored non-negative gap.
+        # When there is spare room, retain the authored gap as a minimum.
+        if distributed >= 0.0:
+            distributed = max(gap, distributed)
         return 0.0, distributed
     return 0.0, gap
+
+
+def _baseline_line_plan(
+    line: list[Mapping[str, Any]],
+    resolved: Mapping[str, Mapping[str, float]],
+    *,
+    cross_axis: str,
+    include_strokes: bool,
+) -> tuple[float, float]:
+    """Return the baseline position and cross footprint for one flow line.
+
+    ``baseline_offset`` is measured from the widget's own top/left edge.  A
+    child's optional stroke outsets are folded into the line metric while the
+    returned baseline remains relative to the line's footprint origin.
+    Widgets without an authored/imported baseline use their trailing edge,
+    matching the conventional baseline fallback for non-text boxes.
+    """
+
+    metrics: list[tuple[float, float]] = []
+    for child in line:
+        rect = resolved[str(child["id"])]
+        leading, trailing = _axis_outsets(
+            child,
+            axis=cross_axis,
+            include_strokes=include_strokes,
+        )
+        footprint = leading + float(rect[cross_axis]) + trailing
+        child_layout = normalize_ui_auto_layout(child.get("layout"))
+        baseline = leading + _number(
+            child_layout.get("baseline_offset"),
+            float(rect[cross_axis]),
+        )
+        baseline = min(footprint, max(0.0, baseline))
+        metrics.append((baseline, footprint - baseline))
+    if not metrics:
+        return 0.0, 0.0
+    baseline = max(item[0] for item in metrics)
+    descent = max(item[1] for item in metrics)
+    return baseline, baseline + descent
 
 
 def _flow_lines(
@@ -251,6 +412,7 @@ def _flow_lines(
     available: float,
     gap: float,
     wrap: bool,
+    include_strokes: bool = False,
 ) -> list[list[Mapping[str, Any]]]:
     if not rows:
         return []
@@ -261,7 +423,12 @@ def _flow_lines(
     current: list[Mapping[str, Any]] = []
     used = 0.0
     for row in rows:
-        size = float(resolved[str(row["id"])][axis])
+        size = _axis_footprint_size(
+            row,
+            resolved[str(row["id"])],
+            axis=axis,
+            include_strokes=include_strokes,
+        )
         candidate = size if not current else used + gap + size
         if current and candidate > available:
             lines.append(current)
@@ -281,14 +448,40 @@ def _line_content_size(
     *,
     mode: str,
     gap: float,
+    cross_alignment: str = "start",
+    include_strokes: bool = False,
 ) -> tuple[float, float]:
     if not line:
         return 0.0, 0.0
     main_axis = "width" if mode == "horizontal" else "height"
     cross_axis = "height" if mode == "horizontal" else "width"
-    main = sum(float(resolved[str(row["id"])][main_axis]) for row in line)
+    main = sum(
+        _axis_footprint_size(
+            row,
+            resolved[str(row["id"])],
+            axis=main_axis,
+            include_strokes=include_strokes,
+        )
+        for row in line
+    )
     main += gap * max(0, len(line) - 1)
-    cross = max(float(resolved[str(row["id"])][cross_axis]) for row in line)
+    if mode == "horizontal" and cross_alignment == "baseline":
+        _baseline, cross = _baseline_line_plan(
+            line,
+            resolved,
+            cross_axis=cross_axis,
+            include_strokes=include_strokes,
+        )
+    else:
+        cross = max(
+            _axis_footprint_size(
+                row,
+                resolved[str(row["id"])],
+                axis=cross_axis,
+                include_strokes=include_strokes,
+            )
+            for row in line
+        )
     return main, cross
 
 
@@ -356,12 +549,36 @@ def resolve_ui_auto_layout(
 
     roots = [row for row in objects.values() if not str(row.get("parent_id") or "")]
     measured: set[str] = set()
+    effective_visibility: dict[str, bool] = {}
+
+    def is_effectively_visible(
+        object_id: str,
+        stack: tuple[str, ...] = (),
+    ) -> bool:
+        cached = effective_visibility.get(object_id)
+        if cached is not None:
+            return cached
+        row = objects.get(object_id)
+        if row is None or object_id in stack:
+            return True
+        if not bool(row.get("visible", True)):
+            effective_visibility[object_id] = False
+            return False
+        parent_id = str(row.get("parent_id") or "")
+        visible = (
+            is_effectively_visible(parent_id, (*stack, object_id))
+            if parent_id in objects
+            else True
+        )
+        effective_visibility[object_id] = visible
+        return visible
 
     def flow_children(parent_id: str) -> list[Mapping[str, Any]]:
         return [
             child
             for child in children.get(parent_id, [])
-            if normalize_ui_auto_layout(child.get("layout"))["positioning"]
+            if bool(child.get("visible", True))
+            and normalize_ui_auto_layout(child.get("layout"))["positioning"]
             != "absolute"
         ]
 
@@ -372,13 +589,19 @@ def resolve_ui_auto_layout(
         rect = resolved.get(object_id)
         if row is None or rect is None:
             return
+        if not is_effectively_visible(object_id):
+            # A hidden Figma layer is excluded from rendering and from its
+            # parent's flow. Preserve the imported snapshot for its complete
+            # subtree instead of re-running stale component Auto Layout data.
+            measured.add(object_id)
+            return
         for child in children.get(object_id, []):
             measure(str(child["id"]), (*stack, object_id))
         layout = normalize_ui_auto_layout(row.get("layout"))
         mode = layout["mode"]
         rows = flow_children(object_id)
         if mode == "grid" and rows:
-            padding = layout["padding"]
+            padding = _effective_padding(layout)
             columns = int(layout["grid_columns"])
             placements, row_count = grid_auto_layout_placements(rows, columns)
             column_widths = [0.0] * columns
@@ -407,7 +630,8 @@ def resolve_ui_auto_layout(
                     axis="height",
                 )
         elif mode in {"horizontal", "vertical"} and rows:
-            padding = layout["padding"]
+            padding = _effective_padding(layout)
+            include_strokes = bool(layout.get("include_strokes", False))
             main_axis = "width" if mode == "horizontal" else "height"
             cross_axis = "height" if mode == "horizontal" else "width"
             main_padding = (
@@ -429,6 +653,7 @@ def resolve_ui_auto_layout(
                 available=available,
                 gap=layout["gap"],
                 wrap=wrap,
+                include_strokes=include_strokes,
             )
             line_sizes = [
                 _line_content_size(
@@ -436,6 +661,8 @@ def resolve_ui_auto_layout(
                     resolved,
                     mode=mode,
                     gap=layout["gap"],
+                    cross_alignment=layout["cross_alignment"],
+                    include_strokes=include_strokes,
                 )
                 for line in lines
             ]
@@ -470,11 +697,14 @@ def resolve_ui_auto_layout(
         parent_rect = resolved.get(parent_id)
         if parent is None or parent_rect is None:
             return
+        if not is_effectively_visible(parent_id):
+            placed.add(parent_id)
+            return
         layout = normalize_ui_auto_layout(parent.get("layout"))
         mode = layout["mode"]
         rows = flow_children(parent_id)
         if mode == "grid" and rows:
-            padding = layout["padding"]
+            padding = _effective_padding(layout)
             columns = int(layout["grid_columns"])
             placements, row_count = grid_auto_layout_placements(rows, columns)
             content_x = parent_rect["x"] + padding["left"]
@@ -524,16 +754,15 @@ def resolve_ui_auto_layout(
                     "end": max(0.0, cell_height - rect["height"]),
                 }.get(vertical, 0.0)
         elif mode in {"horizontal", "vertical"} and rows:
-            padding = layout["padding"]
+            padding = _effective_padding(layout)
+            include_strokes = bool(layout.get("include_strokes", False))
             content_x = parent_rect["x"] + padding["left"]
             content_y = parent_rect["y"] + padding["top"]
-            content_width = max(
-                0.0,
-                parent_rect["width"] - padding["left"] - padding["right"],
+            content_width = (
+                parent_rect["width"] - padding["left"] - padding["right"]
             )
-            content_height = max(
-                0.0,
-                parent_rect["height"] - padding["top"] - padding["bottom"],
+            content_height = (
+                parent_rect["height"] - padding["top"] - padding["bottom"]
             )
             available_main = (
                 content_width if mode == "horizontal" else content_height
@@ -548,6 +777,7 @@ def resolve_ui_auto_layout(
                 available=available_main,
                 gap=layout["gap"],
                 wrap=bool(layout["wrap"]),
+                include_strokes=include_strokes,
             )
             cross_cursor = content_y if mode == "horizontal" else content_x
             for line in lines:
@@ -562,14 +792,30 @@ def resolve_ui_auto_layout(
                     == "fill"
                 ]
                 fixed_total = sum(
-                    resolved[str(row["id"])][main_axis]
+                    _axis_footprint_size(
+                        row,
+                        resolved[str(row["id"])],
+                        axis=main_axis,
+                        include_strokes=include_strokes,
+                    )
                     for row in line
                     if row not in fill_rows
+                )
+                fill_outset_total = sum(
+                    sum(
+                        _axis_outsets(
+                            row,
+                            axis=main_axis,
+                            include_strokes=include_strokes,
+                        )
+                    )
+                    for row in fill_rows
                 )
                 remaining = max(
                     0.0,
                     available_main
                     - fixed_total
+                    - fill_outset_total
                     - layout["gap"] * max(0, len(line) - 1),
                 )
                 fill_sizes = _distribute_fill_sizes(
@@ -582,11 +828,33 @@ def resolve_ui_auto_layout(
                         str(child["id"])
                     ]
                 line_cross = max(
-                    resolved[str(row["id"])][cross_axis] for row in line
+                    _axis_footprint_size(
+                        row,
+                        resolved[str(row["id"])],
+                        axis=cross_axis,
+                        include_strokes=include_strokes,
+                    )
+                    for row in line
                 )
+                baseline_line = 0.0
+                if mode == "horizontal" and layout["cross_alignment"] == "baseline":
+                    baseline_line, line_cross = _baseline_line_plan(
+                        line,
+                        resolved,
+                        cross_axis=cross_axis,
+                        include_strokes=include_strokes,
+                    )
                 if len(lines) == 1:
                     line_cross = available_cross
-                sizes = [resolved[str(row["id"])][main_axis] for row in line]
+                sizes = [
+                    _axis_footprint_size(
+                        row,
+                        resolved[str(row["id"])],
+                        axis=main_axis,
+                        include_strokes=include_strokes,
+                    )
+                    for row in line
+                ]
                 offset, effective_gap = _main_axis_plan(
                     sizes,
                     available_main,
@@ -604,24 +872,60 @@ def resolve_ui_auto_layout(
                         child_layout[f"{cross_axis}_sizing"] == "fill"
                         or layout["cross_alignment"] == "stretch"
                     )
+                    cross_leading, cross_trailing = _axis_outsets(
+                        child,
+                        axis=cross_axis,
+                        include_strokes=include_strokes,
+                    )
                     if fill_cross:
                         rect[cross_axis] = _bounded_axis_size(
-                            line_cross,
+                            max(
+                                0.0,
+                                line_cross - cross_leading - cross_trailing,
+                            ),
                             child.get("constraints"),
                             axis=cross_axis,
                         )
-                    cross_remaining = max(0.0, line_cross - rect[cross_axis])
-                    cross_offset = {
-                        "center": cross_remaining * 0.5,
-                        "end": cross_remaining,
-                    }.get(layout["cross_alignment"], 0.0)
-                    if mode == "horizontal":
-                        rect["x"] = main_cursor
-                        rect["y"] = cross_cursor + cross_offset
+                    cross_footprint = (
+                        rect[cross_axis] + cross_leading + cross_trailing
+                    )
+                    cross_remaining = line_cross - cross_footprint
+                    if mode == "horizontal" and layout["cross_alignment"] == "baseline":
+                        child_baseline = cross_leading + _number(
+                            child_layout.get("baseline_offset"),
+                            float(rect[cross_axis]),
+                        )
+                        child_baseline = min(
+                            cross_footprint,
+                            max(0.0, child_baseline),
+                        )
+                        cross_offset = baseline_line - child_baseline
                     else:
-                        rect["y"] = main_cursor
-                        rect["x"] = cross_cursor + cross_offset
-                    main_cursor += rect[main_axis] + effective_gap
+                        cross_offset = {
+                            "center": cross_remaining * 0.5,
+                            "end": cross_remaining,
+                        }.get(layout["cross_alignment"], 0.0)
+                    main_leading, main_trailing = _axis_outsets(
+                        child,
+                        axis=main_axis,
+                        include_strokes=include_strokes,
+                    )
+                    if mode == "horizontal":
+                        rect["x"] = main_cursor + main_leading
+                        rect["y"] = (
+                            cross_cursor + cross_offset + cross_leading
+                        )
+                    else:
+                        rect["y"] = main_cursor + main_leading
+                        rect["x"] = (
+                            cross_cursor + cross_offset + cross_leading
+                        )
+                    main_cursor += (
+                        rect[main_axis]
+                        + main_leading
+                        + main_trailing
+                        + effective_gap
+                    )
                 cross_cursor += line_cross + layout["cross_gap"]
         placed.add(parent_id)
         for child in children.get(parent_id, []):

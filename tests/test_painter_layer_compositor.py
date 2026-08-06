@@ -200,3 +200,50 @@ def test_canvas_and_png_export_share_advanced_layer_compositor() -> None:
         assert exported.getpixel(point) == (qt.red(), qt.green(), qt.blue(), qt.alpha())
     canvas.deleteLater()
     app.processEvents()
+
+
+def test_stroke_commit_survives_advanced_layer_composition() -> None:
+    """A blend-mode layer must not break the stroke commit path.
+
+    Reporting the renderer fallback read the cache size before it was bound, so
+    finishing a stroke on a document with a blend mode, a group, a nested layer
+    or a clipping mask raised UnboundLocalError and lost the stroke.
+    """
+
+    _app()
+    from PySide6.QtGui import QImage
+
+    from app.drawing import DrawingCanvas, PaintLayer, Stroke
+
+    for layer in (
+        PaintLayer("paint-layer-1", "Blend", blend_mode="multiply"),
+        PaintLayer("paint-layer-1", "Group", node_type="group"),
+        PaintLayer("paint-layer-1", "Clipped", clipping=True),
+        PaintLayer("paint-layer-1", "Child", parent_id="paint-layer-0"),
+    ):
+        canvas = DrawingCanvas(get_time_ms=lambda: 0)
+        canvas.resize(120, 90)
+        canvas.set_strokes_snapshot(
+            [Stroke(points=[(0.1, 0.1), (0.4, 0.4)], point_pressure=[1.0, 1.0])]
+        )
+        canvas.set_layer_view(
+            visibility={"paint-layer-1": True},
+            order=["paint-layer-1"],
+            layers=[layer],
+        )
+        frame = QImage(
+            canvas.size(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        canvas.render(frame)
+        assert canvas._cpu_stroke_cache_image is not None
+
+        canvas.add_stroke_direct(
+            Stroke(points=[(0.2, 0.2), (0.6, 0.6)], point_pressure=[1.0, 1.0])
+        )
+        assert len(canvas._embedded_strokes) == 2
+        status = canvas._painter_canvas_renderer_status
+        assert status["reason"] == "advanced_layer_composition"
+        assert status["size"] == [120, 90]
+        canvas.close()
+        canvas.deleteLater()

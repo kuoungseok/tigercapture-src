@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, QSizeF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QTransform
 
 
 _IMAGE_MODES = {"fit", "fill", "stretch", "crop", "tile"}
@@ -52,6 +52,27 @@ def normalize_ui_image_content(
         0.05,
         min(16.0, _number(source.get("tile_scale"), 1.0)),
     )
+    source["image_rotation"] = _number(
+        source.get("image_rotation", source.get("rotation")),
+        0.0,
+    )
+    transform = source.get("figma_image_transform")
+    normalized_transform: list[list[float]] = []
+    if (
+        isinstance(transform, (list, tuple))
+        and len(transform) == 2
+        and all(
+            isinstance(axis, (list, tuple)) and len(axis) >= 3
+            for axis in transform
+        )
+    ):
+        candidate = [
+            [_number(transform[row][column], math.nan) for column in range(3)]
+            for row in range(2)
+        ]
+        if all(math.isfinite(value) for axis in candidate for value in axis):
+            normalized_transform = candidate
+    source["figma_image_transform"] = normalized_transform
     source["focal_x"] = max(
         0.0,
         min(1.0, _number(source.get("focal_x"), 0.5)),
@@ -120,6 +141,83 @@ def normalize_ui_image_content(
         )
     }
     return source
+
+
+def _figma_affine_image_transform(
+    value: object,
+    target: QRectF,
+    source_width: float,
+    source_height: float,
+) -> QTransform | None:
+    """Map source pixels into a Figma image-fill target.
+
+    The REST ``imageTransform`` is expressed in normalized object space and
+    maps target positions to normalized source-image positions.  QPainter
+    needs the inverse mapping (source pixels to target coordinates).
+    """
+
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or not all(
+            isinstance(axis, (list, tuple)) and len(axis) >= 3
+            for axis in value
+        )
+        or source_width <= 0.0
+        or source_height <= 0.0
+        or target.width() <= 0.0
+        or target.height() <= 0.0
+    ):
+        return None
+    a, c, offset_x = (_number(item, math.nan) for item in value[0][:3])
+    b, d, offset_y = (_number(item, math.nan) for item in value[1][:3])
+    if not all(
+        math.isfinite(item)
+        for item in (a, b, c, d, offset_x, offset_y)
+    ):
+        return None
+    determinant = a * d - b * c
+    if abs(determinant) <= 1.0e-9:
+        return None
+    inverse_a = d / determinant
+    inverse_b = -b / determinant
+    inverse_c = -c / determinant
+    inverse_d = a / determinant
+    inverse_x = (c * offset_y - d * offset_x) / determinant
+    inverse_y = (b * offset_x - a * offset_y) / determinant
+    return QTransform(
+        target.width() * inverse_a / source_width,
+        target.height() * inverse_b / source_width,
+        target.width() * inverse_c / source_height,
+        target.height() * inverse_d / source_height,
+        target.left() + target.width() * inverse_x,
+        target.top() + target.height() * inverse_y,
+    )
+
+
+def _rotated_image_and_size(
+    image: QImage,
+    logical_width: float,
+    logical_height: float,
+    rotation: float,
+) -> tuple[QImage, float, float]:
+    normalized = math.fmod(float(rotation), 360.0)
+    if abs(normalized) <= 0.0001:
+        return image, logical_width, logical_height
+    transform = QTransform()
+    transform.rotate(normalized)
+    rotated = image.transformed(
+        transform,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    radians = math.radians(normalized)
+    cosine = abs(math.cos(radians))
+    sine = abs(math.sin(radians))
+    return (
+        rotated,
+        logical_width * cosine + logical_height * sine,
+        logical_width * sine + logical_height * cosine,
+    )
 
 
 def _bounded_pair(
@@ -390,13 +488,6 @@ def draw_ui_image(
     if logical_width <= 0.0 or logical_height <= 0.0:
         logical_width = float(image.width())
         logical_height = float(image.height())
-    plan = image_draw_plan(
-        QSizeF(logical_width, logical_height),
-        target,
-        settings,
-    )
-    if not plan:
-        return False
     tint = _ui_color(settings["image_tint"])
     draw_image = image
     if (tint.red(), tint.green(), tint.blue()) != (255, 255, 255):
@@ -412,6 +503,25 @@ def draw_ui_image(
             QColor(tint.red(), tint.green(), tint.blue(), 255),
         )
         tint_painter.end()
+    figma_transform = settings["figma_image_transform"]
+    if not figma_transform:
+        draw_image, logical_width, logical_height = _rotated_image_and_size(
+            draw_image,
+            logical_width,
+            logical_height,
+            float(settings["image_rotation"]),
+        )
+    plan = (
+        []
+        if figma_transform
+        else image_draw_plan(
+            QSizeF(logical_width, logical_height),
+            target,
+            settings,
+        )
+    )
+    if not figma_transform and not plan:
+        return False
     painter.save()
     painter.setOpacity(
         painter.opacity()
@@ -426,7 +536,11 @@ def draw_ui_image(
     if any(float(value) > 0.0001 for value in corner_radii.values()):
         corner_rect = (
             plan[0][0]
-            if settings["image_fit"] == "fit" and len(plan) == 1
+            if (
+                not figma_transform
+                and settings["image_fit"] == "fit"
+                and len(plan) == 1
+            )
             else target
         )
         painter.setClipPath(
@@ -434,8 +548,28 @@ def draw_ui_image(
             Qt.ClipOperation.IntersectClip,
         )
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-    source_scale_x = float(image.width()) / logical_width
-    source_scale_y = float(image.height()) / logical_height
+    if figma_transform:
+        transform = _figma_affine_image_transform(
+            figma_transform,
+            target,
+            float(draw_image.width()),
+            float(draw_image.height()),
+        )
+        if transform is None:
+            painter.restore()
+            return False
+        # Preserve the caller's document/view transform while replacing the
+        # image-local mapping. QTransform composes left-to-right in Qt's
+        # row-vector convention, hence image_to_document * document_to_view.
+        painter.setWorldTransform(
+            transform * painter.worldTransform(),
+            False,
+        )
+        painter.drawImage(QPointF(0.0, 0.0), draw_image)
+        painter.restore()
+        return True
+    source_scale_x = float(draw_image.width()) / logical_width
+    source_scale_y = float(draw_image.height()) / logical_height
     for destination, source in plan:
         painter.drawImage(
             destination,

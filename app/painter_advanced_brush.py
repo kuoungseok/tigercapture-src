@@ -284,6 +284,29 @@ def advanced_dab_alphas(
     return field.reshape(-1).astype(np.float32, copy=False)
 
 
+def advanced_dab_alphas_prefix_stable(settings: Mapping[str, Any]) -> bool:
+    """Whether ``advanced_dab_alphas`` leaves earlier dabs alone as more arrive.
+
+    Every feature above builds its field from ``field.shape[1]`` - the total dab
+    count - so switching one on makes the alpha of dab 3 depend on how many dabs
+    follow it.  A live preview can only extend an image it already painted while
+    they are all off.
+    """
+
+    if bool(settings.get("dual_brush_enabled", False)):
+        return False
+    if bool(settings.get("noise_enabled", False)):
+        return False
+    if bool(settings.get("wet_edges_enabled", False)):
+        return False
+    if bool(settings.get("protect_texture", False)):
+        return False
+    texture = settings.get("texture")
+    if isinstance(texture, Mapping) and bool(texture):
+        return False
+    return True
+
+
 def _unit_percent(value: Any, *, name: str) -> float:
     try:
         number = float(value)
@@ -314,6 +337,7 @@ def _positive_finite(value: Any, *, name: str) -> float:
 __all__ = [
     "WetEdgeState",
     "advanced_dab_alphas",
+    "advanced_dab_alphas_prefix_stable",
     "deterministic_noise_field",
     "dual_brush_intersection",
     "resolve_texture_settings",

@@ -76,6 +76,77 @@ def test_object_shadow_renders_outside_source_geometry() -> None:
     assert image.pixelColor(110, 98).alpha() > 0
 
 
+def test_shadow_effect_blend_mode_is_applied_independently() -> None:
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_object_shadow
+
+    def render(blend_mode: str) -> QColor:
+        image = QImage(40, 40, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QColor("#0000FF"))
+        painter = QPainter(image)
+        assert draw_ui_object_shadow(
+            painter,
+            QRectF(10, 10, 20, 20),
+            "rectangle",
+            {
+                "effects": [
+                    {
+                        "type": "drop_shadow",
+                        "color": "#FF0000FF",
+                        "x": 0,
+                        "y": 0,
+                        "blur": 0,
+                        "spread": 0,
+                        "blend_mode": blend_mode,
+                    }
+                ]
+            },
+        )
+        painter.end()
+        return image.pixelColor(20, 20)
+
+    normal = render("normal")
+    multiplied = render("multiply")
+    added = render("linear_dodge")
+    assert normal.red() > 200
+    assert multiplied.red() < 20
+    assert multiplied != normal
+    assert added.red() > 200 and added.blue() > 200
+
+
+def test_asset_export_applies_object_blend_mode() -> None:
+    _app()
+    from app.painter_ui_asset_export import render_ui_artboard
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    def render(blend_mode: str):
+        document = create_ui_document(40, 40, name="Blend")
+        document["artboards"][0]["background"] = "#0000FFFF"
+        document, _row = add_ui_object(
+            document,
+            kind="rectangle",
+            name="Blend rectangle",
+            x=10,
+            y=10,
+            width=20,
+            height=20,
+            style={"fill": "#FF0000FF", "blend_mode": blend_mode},
+        )
+        return render_ui_artboard(
+            document,
+            document["active_artboard_id"],
+        ).pixelColor(20, 20)
+
+    normal = render("normal")
+    multiplied = render("multiply")
+    assert normal.red() > 200
+    assert multiplied.red() < 20
+    assert multiplied != normal
+
+
 def test_text_renderer_applies_alignment_weight_and_line_height() -> None:
     _app()
     from PySide6.QtCore import QRectF
@@ -156,6 +227,50 @@ def test_figma_auto_width_text_uses_pixel_line_height_without_padding_or_wrap() 
     assert report["wrap_mode"] == "no_wrap"
 
 
+def test_figma_mixed_text_ranges_use_pixel_fonts_without_qt_api_error() -> None:
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QFont, QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_text_block
+
+    image = QImage(640, 100, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    report = draw_ui_text_block(
+        painter,
+        QRectF(0, 0, 620, 80),
+        "Mixed range text",
+        {
+            "font_family": "Arial",
+            "font_size": 18,
+            "font_weight": 400,
+            "text_color": "#FFFFFFFF",
+        },
+        QFont(),
+        scale=1.25,
+        text_ranges=[
+            {
+                "start": 6,
+                "end": 11,
+                "style": {
+                    "font_family": "Arial",
+                    "font_size": 24,
+                    "font_weight": 700,
+                    "italic": True,
+                    "underline": True,
+                    "color": "#E24A68FF",
+                },
+            }
+        ],
+    )
+    painter.end()
+
+    assert report["line_count"] == 1
+    assert report["font_pixel_size"] == 22
+    assert _alpha_bounds(image).width() > 0
+
+
 def test_canvas_object_renderer_calls_shared_style_renderer(monkeypatch) -> None:
     app = _app()
     from PySide6.QtCore import QRectF
@@ -210,6 +325,7 @@ def test_canvas_object_renderer_calls_shared_style_renderer(monkeypatch) -> None
     assert calls[1][0] == "text"
     assert calls[1][1][0] == "Continue"
     assert calls[1][1][1]["text_align"] == "center"
+    assert "shadow" not in calls[1][1][1]
     overlay.deleteLater()
     app.processEvents()
 

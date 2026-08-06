@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
+from app.painter_ui_constraints import capture_ui_constraints
 from app.painter_ui_document import normalize_ui_document, validate_ui_document
 
 
@@ -312,6 +313,7 @@ def _object(
     role: str = "none",
     component_id: str = "",
     focus_order: int = 0,
+    font_size: float | None = None,
 ) -> dict[str, Any]:
     bindings = {"style.fill": fill} if fill else {}
     if text:
@@ -330,7 +332,11 @@ def _object(
             "fill": "#FFFFFF",
             "text_color": "#111111",
             "radius": radius,
-            "font_size": max(14, min(52, int(height * 0.35))),
+            "font_size": (
+                float(font_size)
+                if font_size is not None
+                else max(14, min(52, int(height * 0.35)))
+            ),
         },
         "content": {"text": text} if text else {},
         "token_bindings": bindings,
@@ -343,6 +349,28 @@ def _object(
             "focus_order": focus_order,
         },
     }
+
+
+def _capture_artboard_constraints(
+    objects: list[dict[str, Any]],
+    *,
+    width: float,
+    height: float,
+    modes_by_name: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Capture responsive anchors without moving authored geometry."""
+    parent = {
+        "x": 0.0,
+        "y": 0.0,
+        "width": float(width),
+        "height": float(height),
+    }
+    for row in objects:
+        updates = modes_by_name.get(str(row.get("name") or ""))
+        if updates is None:
+            continue
+        row["constraints"] = capture_ui_constraints(row, parent, updates)
+    return objects
 
 
 def _artboard_objects(
@@ -367,7 +395,29 @@ def _artboard_objects(
                 _object(f"{prefix}-prompt", artboard_id, "button", "Action Prompt", width * 0.5 - 110, height - margin - 64, 220, 48, fill="ui-token-color-accent-soft", text="PRIMARY ACTION", role="definition" if index == 0 else "none", component_id="ui-component-primary-button" if index == 0 else "", focus_order=1),
             ]
         )
-        return objects
+        return _capture_artboard_constraints(
+            objects,
+            width=width,
+            height=height,
+            modes_by_name={
+                "Top Status": {
+                    "horizontal": "stretch",
+                    "vertical": "top",
+                },
+                "Information Rail": {
+                    "horizontal": "right",
+                    "vertical": "stretch",
+                },
+                "Lower Third": {
+                    "horizontal": "left",
+                    "vertical": "bottom",
+                },
+                "Action Prompt": {
+                    "horizontal": "center",
+                    "vertical": "bottom",
+                },
+            },
+        )
 
     if layout == "pitch":
         objects.extend(
@@ -380,7 +430,17 @@ def _artboard_objects(
                 _object(f"{prefix}-button", artboard_id, "button", "Primary CTA", margin, height - margin - 64, 240, 52, fill="ui-token-color-accent", text="Continue", role="definition" if index == 0 else "none", component_id="ui-component-primary-button" if index == 0 else "", focus_order=1),
             ]
         )
-        return objects
+        return _capture_artboard_constraints(
+            objects,
+            width=width,
+            height=height,
+            modes_by_name={
+                "Accent Field": {
+                    "horizontal": "right",
+                    "vertical": "stretch",
+                },
+            },
+        )
 
     if layout == "design_system":
         objects.append(_object(f"{prefix}-headline", artboard_id, "text", "Page Title", margin, margin, width * 0.6, 90, fill="", text=str(spec["headline"])))
@@ -412,20 +472,68 @@ def _artboard_objects(
         columns = 3 if width > 700 else 1
         card_gap = 16
         card_width = (content_width - card_gap * (columns - 1)) / columns
+        if columns > 1:
+            card_top = nav_height + 130
+            card_height = 132
+            card_row_gap = 18
+            chart_top = nav_height + 310
+            chart_height = max(180, height * 0.32)
+        else:
+            # Mobile dashboards stack three metrics, a chart, and a CTA.  The
+            # desktop chart formula used to start the chart at y=612 with a
+            # 270px height on an 844px artboard, placing it below the viewport
+            # and across the CTA.  Use a compact mobile rhythm that leaves all
+            # four regions readable without changing the desktop composition.
+            card_top = nav_height + 118
+            card_height = 112
+            card_row_gap = 12
+            chart_top = card_top + (card_height * 3) + (card_row_gap * 2) + 16
+            cta_top = height - margin - 56
+            chart_height = max(120, min(180, cta_top - chart_top - 24))
         for card_index in range(3):
             column = card_index % columns
             row = card_index // columns
-            objects.append(_object(f"{prefix}-metric-{card_index}", artboard_id, "frame", f"Metric Card {card_index + 1}", content_x + column * (card_width + card_gap), nav_height + 130 + row * 150, card_width, 132, fill="ui-token-color-accent-soft"))
-        objects.append(_object(f"{prefix}-chart", artboard_id, "frame", "Chart Region", content_x, nav_height + (310 if columns > 1 else 560), content_width, max(180, height * 0.32)))
+            objects.append(_object(f"{prefix}-metric-{card_index}", artboard_id, "frame", f"Metric Card {card_index + 1}", content_x + column * (card_width + card_gap), card_top + row * (card_height + card_row_gap), card_width, card_height, fill="ui-token-color-accent-soft"))
+        objects.append(_object(f"{prefix}-chart", artboard_id, "frame", "Chart Region", content_x, chart_top, content_width, chart_height))
         objects.append(_object(f"{prefix}-button", artboard_id, "button", "Primary CTA", content_x, height - margin - 56, min(220, content_width), 48, fill="ui-token-color-accent", text="View details", role="definition" if index == 0 else "none", component_id="ui-component-primary-button" if index == 0 else "", focus_order=1))
         return objects
 
     content_width = width - margin * 2
+    if width <= 700:
+        headline_top = nav_height + margin * 1.5
+        headline_height = 110
+        media_top = headline_top + headline_height + 16
+        media_height = min(212, max(168, height * 0.25))
+        body_top = media_top + media_height + 18
+        body_height = 78
+        button_top = body_top + body_height + 20
+        cards_top = button_top + 56 + 32
+        card_height = min(150, height - margin - cards_top)
+        objects.extend(
+            [
+                _object(f"{prefix}-headline", artboard_id, "text", "Hero Headline", margin, headline_top, content_width, headline_height, fill="", text=str(spec["headline"])),
+                # This is an authored media placeholder, not an image fill: no
+                # source asset or image crop metadata exists yet.  Keep it as
+                # an editable rectangle so Painter and UMG do not advertise a
+                # false image object or block its rounded surface in delivery.
+                _object(f"{prefix}-media", artboard_id, "rectangle", "Hero Media", margin, media_top, content_width, media_height, fill="ui-token-color-accent-soft"),
+                _object(f"{prefix}-body", artboard_id, "text", "Supporting Copy", margin, body_top, content_width, body_height, fill="", text="A complete editable starting point with sensible structure and reusable foundations.", font_size=18),
+                _object(f"{prefix}-button", artboard_id, "button", "Primary CTA", margin, button_top, min(260, content_width), 56, fill="ui-token-color-accent", text="Get started", role="definition" if index == 0 else "none", component_id="ui-component-primary-button" if index == 0 else "", focus_order=1),
+                _object(f"{prefix}-card-a", artboard_id, "frame", "Feature Card A", margin, cards_top, (content_width - 16) / 2, card_height),
+                _object(f"{prefix}-card-b", artboard_id, "frame", "Feature Card B", margin + (content_width + 16) / 2, cards_top, (content_width - 16) / 2, card_height, fill="ui-token-color-accent-soft"),
+            ]
+        )
+        return objects
+
     objects.extend(
         [
             _object(f"{prefix}-headline", artboard_id, "text", "Hero Headline", margin, nav_height + margin * 1.5, content_width * (0.62 if width > 700 else 1), 110, fill="", text=str(spec["headline"])),
-            _object(f"{prefix}-media", artboard_id, "image", "Hero Media", margin if width <= 700 else width * 0.56, nav_height + 160, content_width if width <= 700 else width * 0.38, height * 0.36, fill="ui-token-color-accent-soft"),
-            _object(f"{prefix}-body", artboard_id, "text", "Supporting Copy", margin, nav_height + 160, content_width * (0.46 if width > 700 else 1), 90, fill="", text="A complete editable starting point with sensible structure and reusable foundations."),
+            # This is an authored media placeholder, not an image fill: no
+            # source asset or image crop metadata exists yet.  Keep it as an
+            # editable rectangle so Painter and UMG do not advertise a false
+            # image object or block its rounded surface during delivery.
+            _object(f"{prefix}-media", artboard_id, "rectangle", "Hero Media", margin if width <= 700 else width * 0.56, nav_height + 160, content_width if width <= 700 else width * 0.38, height * 0.36, fill="ui-token-color-accent-soft"),
+            _object(f"{prefix}-body", artboard_id, "text", "Supporting Copy", margin, nav_height + 160, content_width * 0.46, 90, fill="", text="A complete editable starting point with sensible structure and reusable foundations.", font_size=18),
             _object(f"{prefix}-button", artboard_id, "button", "Primary CTA", margin, nav_height + 280, min(260, content_width), 56, fill="ui-token-color-accent", text="Get started", role="definition" if index == 0 else "none", component_id="ui-component-primary-button" if index == 0 else "", focus_order=1),
             _object(f"{prefix}-card-a", artboard_id, "frame", "Feature Card A", margin, height * 0.68, (content_width - 16) / 2, 150),
             _object(f"{prefix}-card-b", artboard_id, "frame", "Feature Card B", margin + (content_width + 16) / 2, height * 0.68, (content_width - 16) / 2, 150, fill="ui-token-color-accent-soft"),

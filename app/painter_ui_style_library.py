@@ -153,9 +153,14 @@ class PainterUIStyleLibrary(QWidget):
         apply_row.addWidget(self.unlink_button)
         layout.addLayout(apply_row)
 
-    def set_document(self, value: Mapping[str, Any]) -> None:
+    def set_document(
+        self,
+        value: Mapping[str, Any],
+        *,
+        normalize: bool = True,
+    ) -> None:
         selected_style_id = self._selected_style_id()
-        self._document = normalize_ui_document(value)
+        self._document = normalize_ui_document(value) if normalize else value
         self._rebuild(selected_style_id)
 
     def _selected_style_id(self) -> str:
@@ -168,7 +173,7 @@ class PainterUIStyleLibrary(QWidget):
 
     def _selected_style(self) -> dict[str, Any] | None:
         style_id = self._selected_style_id()
-        report = inspect_ui_style_library(self._document)
+        report = inspect_ui_style_library(self._document, normalize=False)
         return next(
             (row for row in report["styles"] if row["id"] == style_id),
             None,
@@ -200,7 +205,10 @@ class PainterUIStyleLibrary(QWidget):
             preferred = str(preferred_style_id or self._selected_style_id())
             query = self.search_edit.text().strip().casefold()
             kind_filter = str(self.kind_filter.currentData() or "")
-            report = inspect_ui_style_library(self._document)
+            report = inspect_ui_style_library(
+                self._document,
+                normalize=False,
+            )
             self.tree.clear()
             selected_item = None
             for kind in UI_STYLE_KINDS:

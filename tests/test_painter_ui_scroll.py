@@ -110,6 +110,56 @@ def test_fixed_and_sticky_require_the_figma_parent_contracts() -> None:
     assert "sticky_requires_vertical_overflow" in report["reasons"]
 
 
+def test_layout_diagnostics_reuses_one_scroll_object_index(monkeypatch) -> None:
+    from app import painter_ui_layout_diagnostics as diagnostics
+    from app import painter_ui_scroll
+    from app.painter_ui_document import create_ui_document
+
+    document = create_ui_document(800, 600)
+    document["objects"] = [
+        {
+            "id": f"object-{index}",
+            "kind": "rectangle",
+            "name": f"Object {index}",
+            "artboard_id": "artboard-1",
+            "parent_id": "",
+            "x": float(index),
+            "y": float(index),
+            "width": 10.0,
+            "height": 10.0,
+        }
+        for index in range(40)
+    ]
+    indexes = []
+    original = painter_ui_scroll.inspect_ui_scroll
+
+    def recording_inspection(
+        value,
+        object_id,
+        *,
+        object_index=None,
+    ):
+        indexes.append(object_index)
+        return original(value, object_id, object_index=object_index)
+
+    monkeypatch.setattr(diagnostics, "inspect_ui_scroll", recording_inspection)
+
+    report = diagnostics.diagnose_ui_layout(document)
+
+    assert report["ok"] is True
+    assert len(indexes) == len(document["objects"])
+    assert indexes[0] is not None
+    assert len(indexes[0]) == len(document["objects"])
+    assert all(index_value is indexes[0] for index_value in indexes)
+
+    first_id = document["objects"][0]["id"]
+    assert original(document, first_id) == original(
+        document,
+        first_id,
+        object_index=indexes[0],
+    )
+
+
 def test_inspector_exposes_overflow_for_frames_and_position_for_children() -> None:
     _app()
     from app.painter_ui_inspector import PainterUIInspector

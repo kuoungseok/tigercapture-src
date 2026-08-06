@@ -134,7 +134,10 @@ class PainterUICommentsPanel(QWidget):
 
     def set_document(self, document: Mapping[str, Any]) -> None:
         self._document = document
-        self._comments = [dict(row) for row in inspect_ui_review(document)["comments"]]
+        self._comments = [
+            dict(row)
+            for row in inspect_ui_review(document, normalize=False)["comments"]
+        ]
         selected = self.current_comment_id()
         self._rebuild()
         self.select_comment(selected)

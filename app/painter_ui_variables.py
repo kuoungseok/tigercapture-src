@@ -223,10 +223,16 @@ def normalize_ui_artboard_variable_modes(
     return modes
 
 
-def inspect_ui_variable_collections(value: Mapping[str, Any]) -> dict[str, Any]:
+def inspect_ui_variable_collections(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
-    document = normalize_ui_document(value)
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     token_counts = {
         row["id"]: 0 for row in document["variable_collections"]
     }

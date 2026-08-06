@@ -220,6 +220,7 @@ class PainterUIMotionDeliveryPanel(QWidget):
 
     open_motion_requested = Signal(str)
     preview_hover_requested = Signal(str)
+    bake_flipbook_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -298,8 +299,13 @@ class PainterUIMotionDeliveryPanel(QWidget):
         self.preview_hover_button.clicked.connect(
             lambda: self.preview_hover_requested.emit(self._binding_id)
         )
+        self.bake_flipbook_button = QPushButton("Bake Flipbook")
+        self.bake_flipbook_button.clicked.connect(
+            lambda: self.bake_flipbook_requested.emit(self._binding_id)
+        )
         action_row.addWidget(self.open_motion_button)
         action_row.addWidget(self.preview_hover_button)
+        action_row.addWidget(self.bake_flipbook_button)
         root.addLayout(action_row)
 
         self.setStyleSheet(
@@ -379,6 +385,7 @@ class PainterUIMotionDeliveryPanel(QWidget):
             summary.setVisible(True)
         self.blocker_label.setVisible(True)
         self.open_motion_button.setEnabled(True)
+        self.bake_flipbook_button.setEnabled(True)
 
         object_name = str(
             selection.get("name")
@@ -443,6 +450,7 @@ class PainterUIMotionDeliveryPanel(QWidget):
         self.blocker_label.setVisible(False)
         self.open_motion_button.setEnabled(False)
         self.preview_hover_button.setEnabled(False)
+        self.bake_flipbook_button.setEnabled(False)
 
 
 __all__ = ["PainterUIMotionDeliveryPanel"]

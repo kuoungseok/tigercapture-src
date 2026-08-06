@@ -38,8 +38,14 @@ def _review_target(document: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def inspect_ui_review(value: Mapping[str, Any]) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+def inspect_ui_review(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     target = _review_target(document)
     unresolved = [
         row for row in target["comments"] if not bool(row.get("resolved"))

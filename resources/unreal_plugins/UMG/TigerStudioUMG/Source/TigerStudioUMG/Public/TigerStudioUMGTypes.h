@@ -363,6 +363,11 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGMaterialRecord
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FVector2D Size = FVector2D(100.0, 100.0);
 
+    // FixedSize preserves schema-v8 behavior. WidgetGeometry (schema 19+)
+    // updates CardSize from the live UMG layout geometry at runtime.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString SizeBinding = TEXT("FixedSize");
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString FillKind = TEXT("Solid");
 
@@ -401,6 +406,120 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGMaterialRecord
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     double Opacity = 1.0;
+};
+
+/**
+ * Bounded row-major atlas selector used by the fixed Tiger flipbook UI
+ * material generator.  The document never carries executable HLSL.
+ */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGFlipbookRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Schema;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Generator;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Kind;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString CoordinateSpace;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString AssetId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 Columns = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 Rows = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 FrameCount = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double FramesPerSecond = 12.0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 StartFrame = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    bool Loop = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double Phase = 0.0;
+
+    // -1 animates from Time; 0..FrameCount-1 selects a deterministic frame.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 StaticFrameOverride = -1;
+};
+
+/**
+ * One visual state in the provider-neutral native UButton style contract.
+ * Font metrics are carried per state so unsupported runtime-varying metrics
+ * can be rejected instead of being silently flattened by Slate.
+ */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGButtonStateRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Fill = TEXT("#4A4A4AFF");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Stroke = TEXT("#777777FF");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double StrokeWidth = 1.0;
+
+    // X/Y/Z/W = top-left/top-right/bottom-right/bottom-left.
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FVector4 CornerRadii = FVector4(2.0, 2.0, 2.0, 2.0);
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString TextColor = TEXT("#FFFFFFFF");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double FontSize = 24.0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    int32 FontWeight = 700;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double Opacity = 1.0;
+};
+
+/**
+ * Schema-v16 typed ButtonStyle.  The four records map directly to the native
+ * FButtonStyle state brushes and foreground colors during generation.
+ */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGButtonStyleRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Schema;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    bool Enabled = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGButtonStateRecord Normal;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGButtonStateRecord Hovered;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGButtonStateRecord Pressed;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGButtonStateRecord Disabled;
 };
 
 USTRUCT(BlueprintType)
@@ -447,11 +566,25 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGLayerRecord
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FTigerStudioUMGFlowSlotRecord FlowSlot;
 
+    /** Schema 17 panel spacing: legacy slot margins or native linear spacers. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString SpacingStrategy = TEXT("Padding");
+
+    /** Size rule used by synthetic USpacer slots when SpacingStrategy=Spacer. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString SpacerSizeRule = TEXT("Auto");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    double SpacerFillCoefficient = 1.0;
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString ScrollOverflow = TEXT("None");
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString ScrollPosition = TEXT("Scroll");
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Visibility = TEXT("Visible");
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FVector2D RenderTransformPivot = FVector2D(0.5, 0.5);
@@ -472,7 +605,152 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGLayerRecord
     FTigerStudioUMGMaterialRecord Material;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGFlipbookRecord Flipbook;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FTigerStudioUMGButtonStyleRecord ButtonStyle;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString PayloadJson;
+};
+
+/** One supported component property target inside a generated component WBP. */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentPropertyBindingRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString LayerId;
+
+    /** Provider-neutral property path such as content.text or visible. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString TargetPath;
+};
+
+/** Schema-v18 strongly typed authoring property for a reusable component. */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentPropertyRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Name;
+
+    /** text, boolean, number, enum, instance_swap, or slot. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Type;
+
+    /** Canonical JSON scalar. It is never evaluated as code. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString DefaultValueJson;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> Values;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Description;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentPropertyBindingRecord> Bindings;
+};
+
+/** A Figma/Painter Slot exposed as one native UMG Named Slot. */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentSlotRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Name;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString LayerId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    bool ExposeOnInstanceOnly = true;
+};
+
+/** One reusable component (or one member of a component variant family). */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentRecord
+{
+    GENERATED_BODY()
+
+    /** Stable provider component id; it also owns the generated asset path. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Id;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Name;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString RootLayerId;
+
+    /** Empty for a family root, otherwise the stable family component id. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString BaseComponentId;
+
+    /** Canonical JSON object recording this member's static variant tuple. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString VariantValuesJson;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> DependencyComponentIds;
+
+    /** Definition-local layers. They are not duplicated in screen Layers. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGLayerRecord> Layers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentPropertyRecord> Properties;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentSlotRecord> Slots;
+};
+
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentSlotContentRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString SlotName;
+
+    /** Each root is grafted under one generated wrapper when there are many. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FString> RootLayerIds;
+};
+
+/** One reusable component placed in a screen Widget Blueprint. */
+USTRUCT(BlueprintType)
+struct TIGERSTUDIOUMG_API FTigerStudioUMGComponentInstanceRecord
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString Id;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString ComponentId;
+
+    /** Screen placeholder layer whose layout hosts the child UUserWidget. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString LayerId;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString ParentId;
+
+    /** Canonical JSON object keyed by component property name. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString PropertyValuesJson;
+
+    /** Canonical source-layer path/value overrides retained for diagnostics. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString ResolvedOverridesJson;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentSlotContentRecord> SlotContents;
 };
 
 USTRUCT(BlueprintType)
@@ -481,7 +759,7 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGDocumentRecord
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
-    int32 SchemaVersion = 11;
+    int32 SchemaVersion = 19;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString Provider;
@@ -506,6 +784,12 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGDocumentRecord
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     TArray<FTigerStudioUMGResourceRecord> Resources;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentRecord> Components;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    TArray<FTigerStudioUMGComponentInstanceRecord> ComponentInstances;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     TArray<FTigerStudioUMGLayerRecord> Layers;

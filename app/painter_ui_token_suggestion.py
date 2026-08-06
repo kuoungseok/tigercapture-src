@@ -114,10 +114,13 @@ def suggest_ui_tokens(
     *,
     object_id: str = "",
     property_path: str = "",
+    normalize: bool = True,
 ) -> dict[str, Any]:
     """Return exact, type-safe token matches without mutating the document."""
 
-    document = normalize_ui_document(value)
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     selected_id = str(
         object_id or document.get("selection", {}).get("object_id") or ""
     )

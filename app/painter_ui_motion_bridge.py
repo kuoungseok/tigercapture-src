@@ -115,6 +115,8 @@ def resolved_ui_geometry(
                 1.0, parent_geometry["height"] - top - bottom
             )
             for child in children.get(parent_id, []):
+                if not bool(child.get("visible", True)):
+                    continue
                 child_layout = (
                     child["layout"]
                     if isinstance(child.get("layout"), Mapping)
@@ -174,8 +176,12 @@ def resolved_ui_geometry(
 def linked_motion_binding_ref(
     value: Mapping[str, Any],
     object_id: str,
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
     target = target if isinstance(target, Mapping) else {}
     bindings = target.get("object_bindings")
@@ -199,15 +205,27 @@ def linked_motion_binding_ref(
 def linked_motion_composition_id(
     value: Mapping[str, Any],
     object_id: str,
+    *,
+    normalize: bool = True,
 ) -> str:
-    return linked_motion_binding_ref(value, object_id)["composition_id"]
+    return linked_motion_binding_ref(
+        value,
+        object_id,
+        normalize=normalize,
+    )["composition_id"]
 
 
 def linked_motion_binding_id(
     value: Mapping[str, Any],
     object_id: str,
+    *,
+    normalize: bool = True,
 ) -> str:
-    return linked_motion_binding_ref(value, object_id)["binding_id"]
+    return linked_motion_binding_ref(
+        value,
+        object_id,
+        normalize=normalize,
+    )["binding_id"]
 
 
 def attach_motion_composition(
@@ -272,8 +290,12 @@ def _binding_for_object(
 def inspect_motion_binding_links(
     value: Mapping[str, Any],
     compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     objects_by_id = {row["id"]: row for row in document["objects"]}
     object_ids = set(objects_by_id)
     target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
@@ -286,7 +308,7 @@ def inspect_motion_binding_links(
     resolved_binding_ids: set[str] = set()
     composition_to_binding: dict[str, str] = {}
     for object_id in sorted(str(key) for key in raw_bindings):
-        ref = linked_motion_binding_ref(document, object_id)
+        ref = linked_motion_binding_ref(document, object_id, normalize=False)
         composition = _composition_value(
             compositions, ref["composition_id"]
         )

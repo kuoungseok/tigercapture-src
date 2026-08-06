@@ -3,6 +3,83 @@ from __future__ import annotations
 import pytest
 
 
+def test_schema17_overlay_and_spacing_panel_contract_is_explicit() -> None:
+    from app.unreal_umg_layout import validate_umg_panel_record
+
+    overlay = {
+        "Kind": "Group",
+        "PanelKind": "Overlay",
+        "SpacingStrategy": "Padding",
+        "SpacerSizeRule": "Auto",
+        "SpacerFillCoefficient": 1.0,
+    }
+    assert validate_umg_panel_record(
+        overlay,
+        document_schema_version=16,
+    ) == ["umg_overlay_panel_requires_schema_17"]
+    assert validate_umg_panel_record(
+        overlay,
+        document_schema_version=17,
+    ) == []
+
+    linear_spacer = {
+        **overlay,
+        "PanelKind": "Horizontal",
+        "SpacingStrategy": "Spacer",
+        "SpacerSizeRule": "Fill",
+        "SpacerFillCoefficient": 2.0,
+    }
+    assert validate_umg_panel_record(
+        linear_spacer,
+        document_schema_version=17,
+    ) == []
+    assert validate_umg_panel_record(
+        {**linear_spacer, "PanelKind": "Overlay"},
+        document_schema_version=17,
+    ) == ["umg_spacer_strategy_requires_linear_panel"]
+
+
+def test_schema_16_widget_visibility_contract_is_intentionally_narrow() -> None:
+    from app.unreal_umg_layout import validate_umg_widget_visibility
+
+    assert (
+        validate_umg_widget_visibility(
+            "Visible",
+            document_schema_version=15,
+        )
+        == []
+    )
+    assert (
+        validate_umg_widget_visibility(
+            "HitTestInvisible",
+            document_schema_version=16,
+        )
+        == []
+    )
+    for unsupported in ("Collapsed", "Hidden", "SelfHitTestInvisible"):
+        errors = validate_umg_widget_visibility(
+            unsupported,
+            document_schema_version=16,
+        )
+        assert errors == ["umg_visibility_unsupported"]
+    assert validate_umg_widget_visibility(
+        {"value": "Visible"},
+        document_schema_version=16,
+    ) == ["umg_visibility_record_invalid"]
+    assert validate_umg_widget_visibility(
+        None,
+        document_schema_version=16,
+    ) == ["umg_visibility_record_invalid"]
+    assert validate_umg_widget_visibility(
+        None,
+        document_schema_version=15,
+    ) == []
+    assert validate_umg_widget_visibility(
+        "HitTestInvisible",
+        document_schema_version=15,
+    ) == ["umg_visibility_requires_schema_16"]
+
+
 def _assert_vector(value, expected) -> None:
     assert value["X"] == pytest.approx(expected[0])
     assert value["Y"] == pytest.approx(expected[1])
@@ -38,7 +115,7 @@ def test_motion_document_v9_separates_canvas_slot_and_render_pivot() -> None:
     )
     exported = document["Layers"][0]
 
-    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 11
+    assert document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 13
     _assert_vector(exported["Position"], (120.0, 80.0))
     _assert_vector(exported["Size"], (200.0, 40.0))
     _assert_vector(exported["Anchor"], (0.25, 0.75))
@@ -126,8 +203,10 @@ def test_painter_adapter_maps_all_constraint_modes_to_canvas_slot(
     )
 
     umg_document = painter_ui_to_umg_document(document)
-    assert PAINTER_UMG_ADAPTER_SCHEMA.endswith(".v7")
-    exported = umg_document["Layers"][0]
+    assert PAINTER_UMG_ADAPTER_SCHEMA.endswith(".v12")
+    exported = next(
+        item for item in umg_document["Layers"] if item["Id"] == row["id"]
+    )
 
     _assert_vector(exported["Position"], (60.0, 98.0))
     _assert_vector(exported["Size"], (100.0, 60.0))
@@ -146,7 +225,7 @@ def test_painter_adapter_uses_current_resolved_constraint_geometry() -> None:
     from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
     document = create_ui_document(400, 300)
-    document, _row = add_ui_object(
+    document, row = add_ui_object(
         document,
         kind="button",
         x=280,
@@ -168,7 +247,11 @@ def test_painter_adapter_uses_current_resolved_constraint_geometry() -> None:
     document["artboards"][0]["width"] = 600.0
     document["artboards"][0]["height"] = 500.0
 
-    exported = painter_ui_to_umg_document(document)["Layers"][0]
+    exported = next(
+        item
+        for item in painter_ui_to_umg_document(document)["Layers"]
+        if item["Id"] == row["id"]
+    )
 
     _assert_vector(exported["Position"], (500.0, 470.0))
     slot = exported["CanvasSlot"]
@@ -233,7 +316,7 @@ def test_painter_adapter_emits_fractional_custom_point_anchor() -> None:
     from app.painter_ui_document import add_ui_object, create_ui_document
     from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
-    document, _row = add_ui_object(
+    document, row = add_ui_object(
         create_ui_document(400, 300),
         kind="button",
         x=100,
@@ -257,7 +340,11 @@ def test_painter_adapter_emits_fractional_custom_point_anchor() -> None:
         },
     )
 
-    exported = painter_ui_to_umg_document(document)["Layers"][0]
+    exported = next(
+        item
+        for item in painter_ui_to_umg_document(document)["Layers"]
+        if item["Id"] == row["id"]
+    )
 
     _assert_vector(exported["Position"], (120.0, 90.0))
     _assert_vector(exported["RenderTransformPivot"], (0.25, 0.75))
@@ -273,7 +360,7 @@ def test_painter_adapter_emits_fractional_custom_stretched_anchor() -> None:
     from app.painter_ui_document import add_ui_object, create_ui_document
     from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
-    document, _row = add_ui_object(
+    document, row = add_ui_object(
         create_ui_document(400, 300),
         kind="frame",
         x=100,
@@ -295,7 +382,11 @@ def test_painter_adapter_emits_fractional_custom_stretched_anchor() -> None:
         },
     )
 
-    exported = painter_ui_to_umg_document(document)["Layers"][0]
+    exported = next(
+        item
+        for item in painter_ui_to_umg_document(document)["Layers"]
+        if item["Id"] == row["id"]
+    )
 
     slot = exported["CanvasSlot"]
     _assert_vector(slot["AnchorMinimum"], (0.2, 0.1))

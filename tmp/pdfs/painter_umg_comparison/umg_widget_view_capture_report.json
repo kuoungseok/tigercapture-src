@@ -1,0 +1,1525 @@
+{
+  "schema": "tigerstudio.painter_umg_widget_view_pdf_capture.v1",
+  "ok": true,
+  "source_batch_report": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\batch_report.json",
+  "capture_size": [
+    1920,
+    1080
+  ],
+  "requested_count": 21,
+  "captured_count": 21,
+  "captures": [
+    {
+      "screen_id": "mobile_onboarding:artboard-1",
+      "template_id": "mobile_onboarding",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Welcome",
+        "index": 0,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\01_mobile_onboarding_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          81.591,
+          89.482,
+          93.787
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\01_mobile_onboarding_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          99.763,
+          109.836,
+          113.804
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "mobile_onboarding:artboard-2",
+      "template_id": "mobile_onboarding",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Discover",
+        "index": 1,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\02_mobile_onboarding_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          81.583,
+          89.468,
+          93.761
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\02_mobile_onboarding_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          99.76,
+          109.836,
+          113.805
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "mobile_onboarding:artboard-3",
+      "template_id": "mobile_onboarding",
+      "artboard_id": "artboard-3",
+      "artboard": {
+        "id": "artboard-3",
+        "name": "Ready",
+        "index": 2,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-3-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\03_mobile_onboarding_artboard-3.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          81.583,
+          89.468,
+          93.761
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\03_mobile_onboarding_artboard-3.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          99.76,
+          109.836,
+          113.805
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "mobile_finance:artboard-1",
+      "template_id": "mobile_finance",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Overview",
+        "index": 0,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\04_mobile_finance_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          85.009,
+          90.829,
+          94.022
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\04_mobile_finance_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          103.783,
+          111.336,
+          113.597
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 6,
+      "material_count": 4,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "mobile_finance:artboard-2",
+      "template_id": "mobile_finance",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Activity",
+        "index": 1,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\05_mobile_finance_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          85.002,
+          90.816,
+          93.997
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\05_mobile_finance_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          103.783,
+          111.333,
+          113.604
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 6,
+      "material_count": 4,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "saas_dashboard:artboard-1",
+      "template_id": "saas_dashboard",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Desktop",
+        "index": 0,
+        "width": 1440.0,
+        "height": 900.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\06_saas_dashboard_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          126.481,
+          129.826,
+          136.494
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\06_saas_dashboard_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          126.616,
+          130.072,
+          136.811
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 4,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "saas_dashboard:artboard-2",
+      "template_id": "saas_dashboard",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Mobile",
+        "index": 1,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\07_saas_dashboard_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          85.901,
+          89.451,
+          97.001
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\07_saas_dashboard_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          105.247,
+          109.265,
+          118.333
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 6,
+      "material_count": 4,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "analytics_command_center:artboard-1",
+      "template_id": "analytics_command_center",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Command Center",
+        "index": 0,
+        "width": 1440.0,
+        "height": 900.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\08_analytics_command_center_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          124.67,
+          130.343,
+          135.276
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\08_analytics_command_center_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          124.805,
+          130.536,
+          135.581
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 4,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "commerce_product:artboard-1",
+      "template_id": "commerce_product",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Product Desktop",
+        "index": 0,
+        "width": 1440.0,
+        "height": 960.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\09_commerce_product_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          151.133,
+          150.066,
+          151.125
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\09_commerce_product_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          151.374,
+          150.537,
+          151.797
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "commerce_product:artboard-2",
+      "template_id": "commerce_product",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Product Mobile",
+        "index": 1,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\10_commerce_product_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          88.122,
+          88.336,
+          91.853
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\10_commerce_product_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          109.235,
+          108.231,
+          110.926
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "portfolio_case_study:artboard-1",
+      "template_id": "portfolio_case_study",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Case Study",
+        "index": 0,
+        "width": 1440.0,
+        "height": 1024.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\11_portfolio_case_study_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          148.969,
+          152.283,
+          152.161
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\11_portfolio_case_study_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          150.103,
+          153.536,
+          153.616
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "game_hud:artboard-1",
+      "template_id": "game_hud",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Gameplay 16:9",
+        "index": 0,
+        "width": 1920.0,
+        "height": 1080.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-prompt",
+      "selection_name": "Action Prompt",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\12_game_hud_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          103.52,
+          119.136,
+          117.519
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\12_game_hud_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          104.747,
+          120.352,
+          118.929
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 4,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "broadcast_overlay:artboard-1",
+      "template_id": "broadcast_overlay",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Program 16:9",
+        "index": 0,
+        "width": 1920.0,
+        "height": 1080.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-prompt",
+      "selection_name": "Action Prompt",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\13_broadcast_overlay_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          117.702,
+          117.145,
+          122.034
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\13_broadcast_overlay_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          118.729,
+          118.404,
+          123.393
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 4,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "pitch_deck_cover:artboard-1",
+      "template_id": "pitch_deck_cover",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Cover",
+        "index": 0,
+        "width": 1920.0,
+        "height": 1080.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\14_pitch_deck_cover_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          132.812,
+          127.533,
+          114.345
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\14_pitch_deck_cover_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          133.37,
+          128.385,
+          115.677
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 5,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "pitch_deck_cover:artboard-2",
+      "template_id": "pitch_deck_cover",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Proof",
+        "index": 1,
+        "width": 1920.0,
+        "height": 1080.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\15_pitch_deck_cover_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          132.8,
+          127.515,
+          114.316
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\15_pitch_deck_cover_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          133.366,
+          128.384,
+          115.681
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 5,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "pitch_deck_cover:artboard-3",
+      "template_id": "pitch_deck_cover",
+      "artboard_id": "artboard-3",
+      "artboard": {
+        "id": "artboard-3",
+        "name": "Next",
+        "index": 2,
+        "width": 1920.0,
+        "height": 1080.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-3-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\16_pitch_deck_cover_artboard-3.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          132.799,
+          127.514,
+          114.315
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\16_pitch_deck_cover_artboard-3.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          133.366,
+          128.384,
+          115.681
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 5,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "wireframe_user_flow:artboard-1",
+      "template_id": "wireframe_user_flow",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Desktop Flow",
+        "index": 0,
+        "width": 1280.0,
+        "height": 800.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\17_wireframe_user_flow_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          138.731,
+          141.016,
+          144.508
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\17_wireframe_user_flow_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          139.148,
+          141.583,
+          145.234
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "wireframe_user_flow:artboard-2",
+      "template_id": "wireframe_user_flow",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Mobile Flow",
+        "index": 1,
+        "width": 390.0,
+        "height": 844.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\18_wireframe_user_flow_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          84.863,
+          87.717,
+          92.37
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\18_wireframe_user_flow_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          104.395,
+          107.21,
+          111.605
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "accessible_checkout:artboard-1",
+      "template_id": "accessible_checkout",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Checkout",
+        "index": 0,
+        "width": 1080.0,
+        "height": 900.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary CTA",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\19_accessible_checkout_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          148.903,
+          152.994,
+          160.33
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\19_accessible_checkout_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          172.978,
+          177.337,
+          185.096
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 7,
+      "material_count": 3,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "design_system_starter:artboard-1",
+      "template_id": "design_system_starter",
+      "artboard_id": "artboard-1",
+      "artboard": {
+        "id": "artboard-1",
+        "name": "Foundations",
+        "index": 0,
+        "width": 1440.0,
+        "height": 1024.0,
+        "is_default": true
+      },
+      "selection_id": "ui-object-1-button",
+      "selection_name": "Primary Button",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\20_design_system_starter_artboard-1.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          144.645,
+          148.6,
+          160.554
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\20_design_system_starter_artboard-1.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          146.065,
+          150.159,
+          162.114
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 4,
+      "material_count": 6,
+      "baked_count": 0,
+      "blocked_count": 0
+    },
+    {
+      "screen_id": "design_system_starter:artboard-2",
+      "template_id": "design_system_starter",
+      "artboard_id": "artboard-2",
+      "artboard": {
+        "id": "artboard-2",
+        "name": "Components",
+        "index": 1,
+        "width": 1440.0,
+        "height": 1024.0,
+        "is_default": false
+      },
+      "selection_id": "ui-object-2-button",
+      "selection_name": "Primary Button",
+      "preparation_mode": "builtin_template_visual_compatibility",
+      "tool_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\21_design_system_starter_artboard-2.png",
+      "tool_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          144.645,
+          148.601,
+          160.555
+        ],
+        "visible_content": true
+      },
+      "umg_widget_view_capture": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\21_design_system_starter_artboard-2.png",
+      "umg_widget_view_evidence": {
+        "width": 1920,
+        "height": 1080,
+        "extrema": [
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ],
+          [
+            0,
+            255
+          ]
+        ],
+        "mean": [
+          146.062,
+          150.16,
+          162.115
+        ],
+        "visible_content": true
+      },
+      "projection_ready": true,
+      "projection_complete": true,
+      "native_count": 4,
+      "material_count": 6,
+      "baked_count": 0,
+      "blocked_count": 0
+    }
+  ]
+}

@@ -34,6 +34,10 @@ def test_auto_layout_normalizes_aliases_and_preserves_positioning() -> None:
         "wrap": False,
         "width_sizing": "fixed",
         "height_sizing": "fixed",
+        "umg_panel_mode": "auto",
+        "umg_spacing_strategy": "padding",
+        "umg_spacer_size_rule": "auto",
+        "umg_spacer_fill_coefficient": 1.0,
         "grid_columns": 2,
         "grid_column_span": 1,
         "grid_row_span": 1,
@@ -90,6 +94,233 @@ def test_horizontal_auto_layout_applies_padding_gap_and_alignment() -> None:
         "width": 70.0,
         "height": 40.0,
     }
+
+
+def test_auto_layout_preserves_negative_main_gap_as_overlap() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600)
+    document, parent = add_ui_object(
+        document,
+        kind="frame",
+        x=100,
+        y=50,
+        width=400,
+        height=60,
+    )
+    document["objects"][0]["layout"] = {
+        "mode": "horizontal",
+        "gap": -20,
+        "cross_gap": -5,
+        "width_sizing": "hug",
+        "reverse_z_index": True,
+    }
+    child_ids: list[str] = []
+    for _index in range(3):
+        document, child = add_ui_object(
+            document,
+            kind="rectangle",
+            parent_id=parent["id"],
+            width=80,
+            height=20,
+        )
+        child_ids.append(child["id"])
+
+    geometry = resolve_ui_constraints(document)
+    normalized = document["objects"][0]["layout"]
+
+    assert geometry[parent["id"]]["width"] == 200.0
+    assert [geometry[child_id]["x"] for child_id in child_ids] == [
+        100.0,
+        160.0,
+        220.0,
+    ]
+    # Normalization preserves Figma's negative main-axis overlap, keeps
+    # cross-track spacing non-negative, and does not treat reverse Z as flow.
+    from app.painter_ui_auto_layout import normalize_ui_auto_layout
+
+    normalized = normalize_ui_auto_layout(normalized)
+    assert normalized["gap"] == -20.0
+    assert normalized["cross_gap"] == 0.0
+    assert normalized["reverse_z_index"] is True
+
+
+def test_space_between_uses_negative_effective_gap_when_children_overflow() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, parent = add_ui_object(
+        create_ui_document(320, 180),
+        kind="frame",
+        x=20,
+        y=30,
+        width=100,
+        height=40,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "horizontal",
+        "main_alignment": "space_between",
+        "gap": 0,
+    }
+    child_ids: list[str] = []
+    for _index in range(3):
+        document, child = add_ui_object(
+            document,
+            kind="rectangle",
+            parent_id=parent["id"],
+            width=50,
+            height=20,
+        )
+        child_ids.append(child["id"])
+
+    geometry = resolve_ui_constraints(document)
+
+    # The 150px desired width is fitted into 100px by two -25px spaces.
+    assert [geometry[child_id]["x"] for child_id in child_ids] == [
+        20.0,
+        45.0,
+        70.0,
+    ]
+    assert geometry[child_ids[-1]]["x"] + 50.0 == 120.0
+
+
+def test_center_alignment_preserves_negative_space_when_padding_overflows() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, parent = add_ui_object(
+        create_ui_document(320, 180),
+        kind="frame",
+        x=20,
+        y=30,
+        width=100,
+        height=12,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "vertical",
+        "padding": 16,
+        "main_alignment": "center",
+        "cross_alignment": "center",
+    }
+    document, child = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=parent["id"],
+        width=24,
+        height=2,
+    )
+
+    geometry = resolve_ui_constraints(document)
+
+    # Figma keeps the item centered in the 12px parent even though the
+    # authored 16px top/bottom padding makes the nominal content height -20.
+    assert geometry[child["id"]]["y"] == 35.0
+    # Cross-axis center uses the same signed free-space rule.
+    assert geometry[child["id"]]["x"] == 58.0
+
+
+def test_horizontal_baseline_alignment_uses_preserved_child_offsets() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, parent = add_ui_object(
+        create_ui_document(800, 400),
+        kind="frame",
+        x=100,
+        y=50,
+        width=545,
+        height=1,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "horizontal",
+        "padding": 24,
+        "gap": 38,
+        "cross_alignment": "baseline",
+        "height_sizing": "hug",
+    }
+    child_ids: list[str] = []
+    for width, height, baseline_offset in (
+        (129, 55, 51),
+        (215, 92, 78),
+        (77, 35, 35),
+    ):
+        document, child = add_ui_object(
+            document,
+            kind="frame",
+            parent_id=parent["id"],
+            width=width,
+            height=height,
+        )
+        document["objects"][-1]["layout"]["baseline_offset"] = baseline_offset
+        child_ids.append(child["id"])
+
+    geometry = resolve_ui_constraints(document)
+
+    assert geometry[parent["id"]]["height"] == 140.0
+    assert [geometry[child_id]["y"] for child_id in child_ids] == [
+        101.0,
+        74.0,
+        117.0,
+    ]
+    assert {
+        geometry[child_id]["y"]
+        + document["objects"][index + 1]["layout"]["baseline_offset"]
+        for index, child_id in enumerate(child_ids)
+    } == {152.0}
+
+
+def test_auto_layout_stroke_insets_reduce_fill_content_box() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, parent = add_ui_object(
+        create_ui_document(800, 600),
+        kind="frame",
+        x=100,
+        y=50,
+        width=300,
+        height=98,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "horizontal",
+        "padding": 8,
+        "gap": 12,
+        "include_strokes": True,
+        "stroke_insets": {
+            "left": 24,
+            "top": 24,
+            "right": 24,
+            "bottom": 24,
+        },
+    }
+    child_ids: list[str] = []
+    for _index in range(3):
+        document, child = add_ui_object(
+            document,
+            kind="rectangle",
+            parent_id=parent["id"],
+            width=20,
+            height=20,
+        )
+        document["objects"][-1]["layout"] = {
+            "width_sizing": "fill",
+            "height_sizing": "fill",
+        }
+        child_ids.append(child["id"])
+
+    geometry = resolve_ui_constraints(document)
+
+    assert [geometry[child_id]["x"] for child_id in child_ids] == [
+        132.0,
+        214.66666666666669,
+        297.33333333333337,
+    ]
+    assert all(
+        abs(geometry[child_id]["width"] - 70.66666666666667) < 0.0001
+        for child_id in child_ids
+    )
+    assert all(geometry[child_id]["height"] == 34.0 for child_id in child_ids)
 
 
 def test_vertical_auto_layout_stretches_cross_axis_and_skips_absolute_child() -> None:
@@ -155,6 +386,125 @@ def test_vertical_auto_layout_stretches_cross_axis_and_skips_absolute_child() ->
         "y": 420.0,
         "width": 30.0,
         "height": 30.0,
+    }
+
+
+def test_auto_layout_excludes_hidden_children_from_flow_and_hug_size() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600)
+    document, parent = add_ui_object(
+        document,
+        kind="frame",
+        x=20,
+        y=30,
+        width=500,
+        height=60,
+    )
+    document["objects"][0]["layout"] = {
+        "mode": "horizontal",
+        "padding": {"left": 5, "top": 0, "right": 5, "bottom": 0},
+        "gap": 10,
+        "width_sizing": "hug",
+    }
+    document, first = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=parent["id"],
+        width=40,
+        height=20,
+    )
+    document, hidden = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=parent["id"],
+        width=100,
+        height=20,
+    )
+    document["objects"][-1]["visible"] = False
+    document, last = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=parent["id"],
+        width=60,
+        height=20,
+    )
+
+    geometry = resolve_ui_constraints(document)
+
+    assert geometry[parent["id"]]["width"] == 120.0
+    assert geometry[first["id"]]["x"] == 25.0
+    assert geometry[last["id"]]["x"] == 75.0
+    assert geometry[hidden["id"]]["width"] == 100.0
+
+
+def test_hidden_auto_layout_subtree_preserves_imported_snapshot_geometry() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, hidden = add_ui_object(
+        create_ui_document(1600, 1200),
+        kind="frame",
+        x=904,
+        y=240,
+        width=223.75,
+        height=545,
+    )
+    document["objects"][-1]["visible"] = False
+    document["objects"][-1]["layout"] = {
+        "mode": "vertical",
+        "gap": 15,
+        "width_sizing": "hug",
+        "height_sizing": "hug",
+    }
+    document, child = add_ui_object(
+        document,
+        kind="frame",
+        parent_id=hidden["id"],
+        x=904,
+        y=424,
+        width=358,
+        height=136,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "vertical",
+        "gap": 32,
+        "width_sizing": "hug",
+        "height_sizing": "hug",
+    }
+    document, descendant = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=child["id"],
+        x=928,
+        y=448,
+        width=290,
+        height=24,
+    )
+
+    geometry = resolve_ui_constraints(document)
+
+    # Hidden instance descendants may carry unscaled component geometry while
+    # the hidden root has a valid scaled AABB. Neither is rendered, so the
+    # solver must preserve the finite source snapshot rather than reflow it.
+    assert geometry[hidden["id"]] == {
+        "x": 904.0,
+        "y": 240.0,
+        "width": 223.75,
+        "height": 545.0,
+    }
+    assert geometry[child["id"]] == {
+        "x": 904.0,
+        "y": 424.0,
+        "width": 358.0,
+        "height": 136.0,
+    }
+    assert geometry[descendant["id"]] == {
+        "x": 928.0,
+        "y": 448.0,
+        "width": 290.0,
+        "height": 24.0,
     }
 
 
@@ -358,6 +708,99 @@ def test_sizing_control_discloses_hug_and_fill_only_in_valid_context() -> None:
     app.processEvents()
 
 
+def test_inspector_emits_umg_spacer_fill_strategy_as_one_layout_record() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, _row = add_ui_object(
+        create_ui_document(),
+        kind="frame",
+        name="Responsive row",
+    )
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    inspector.show()
+    app.processEvents()
+    emitted: list[dict] = []
+    inspector.properties_changed.connect(
+        lambda _object_id, changes: emitted.append(changes)
+    )
+
+    inspector.auto_layout_horizontal_button.click()
+    inspector.auto_layout_umg_spacing_combo.setCurrentIndex(
+        inspector.auto_layout_umg_spacing_combo.findData("spacer_fill")
+    )
+    inspector.auto_layout_umg_spacer_fill_spin.setValue(2.75)
+    app.processEvents()
+
+    layout = emitted[-1]["layout"]
+    assert layout["mode"] == "horizontal"
+    assert layout["umg_spacing_strategy"] == "spacer"
+    assert layout["umg_spacer_size_rule"] == "fill"
+    assert layout["umg_spacer_fill_coefficient"] == 2.75
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_loads_spacing_strategy_and_discloses_only_valid_modes() -> None:
+    app = _app()
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+    )
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, row = add_ui_object(
+        create_ui_document(),
+        kind="frame",
+        name="Spacing panel",
+    )
+    source = next(item for item in document["objects"] if item["id"] == row["id"])
+    source["layout"] = {
+        "mode": "vertical",
+        "umg_spacing_strategy": "spacer",
+        "umg_spacer_size_rule": "fill",
+        "umg_spacer_fill_coefficient": 3.25,
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(select_ui_object(document, row["id"]))
+    inspector.show()
+    app.processEvents()
+
+    assert not inspector.auto_layout_umg_spacing_control.isHidden()
+    assert inspector.auto_layout_umg_spacing_combo.isEnabled()
+    assert (
+        inspector.auto_layout_umg_spacing_combo.currentData()
+        == "spacer_fill"
+    )
+    assert not inspector.auto_layout_umg_spacer_fill_spin.isHidden()
+    assert inspector.auto_layout_umg_spacer_fill_spin.value() == 3.25
+    assert "상위 크기" in inspector.auto_layout_umg_spacing_hint.text()
+    assert "Weight" in inspector.auto_layout_umg_spacing_hint.text()
+
+    source["layout"] = {
+        **source["layout"],
+        "mode": "overlay",
+    }
+    inspector.set_document(select_ui_object(document, row["id"]))
+    app.processEvents()
+    assert inspector.auto_layout_overlay_button.isChecked()
+    assert not inspector.auto_layout_umg_spacing_control.isHidden()
+    assert not inspector.auto_layout_umg_spacing_combo.isEnabled()
+    assert inspector.auto_layout_umg_spacing_combo.currentData() == "padding"
+    assert inspector.auto_layout_umg_spacer_fill_spin.isHidden()
+    assert "Canvas" in inspector.auto_layout_umg_spacing_hint.text()
+
+    source["layout"] = {**source["layout"], "mode": "grid"}
+    inspector.set_document(select_ui_object(document, row["id"]))
+    app.processEvents()
+    assert inspector.auto_layout_umg_spacing_control.isHidden()
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_emits_auto_layout_properties() -> None:
     app = _app()
     from app.painter_ui_document import add_ui_object, create_ui_document
@@ -379,6 +822,9 @@ def test_inspector_emits_auto_layout_properties() -> None:
     inspector.auto_layout_vertical_button.click()
     assert inspector.auto_layout_vertical_button.isChecked()
     inspector.auto_layout_horizontal_button.click()
+    assert inspector.auto_layout_gap_spin.minimum() == -10000.0
+    assert inspector.auto_layout_gap_spin.maximum() == 10000.0
+    assert inspector.auto_layout_cross_gap_spin.minimum() == 0.0
     for edge, value in {
         "left": 16,
         "top": 8,
@@ -386,7 +832,7 @@ def test_inspector_emits_auto_layout_properties() -> None:
         "bottom": 8,
     }.items():
         inspector.auto_layout_padding_controls[edge].setValue(value)
-    inspector.auto_layout_gap_spin.setValue(12)
+    inspector.auto_layout_gap_spin.setValue(-12)
     inspector.auto_layout_cross_gap_spin.setValue(18)
     inspector.auto_layout_main_combo.setCurrentIndex(
         inspector.auto_layout_main_combo.findData("space_between")
@@ -406,7 +852,7 @@ def test_inspector_emits_auto_layout_properties() -> None:
     assert emitted[-1]["layout"] == {
         "mode": "horizontal",
         "padding": {"left": 16.0, "top": 8.0, "right": 16.0, "bottom": 8.0},
-        "gap": 12.0,
+        "gap": -12.0,
         "cross_gap": 18.0,
         "main_alignment": "space_between",
         "cross_alignment": "center",
@@ -414,6 +860,10 @@ def test_inspector_emits_auto_layout_properties() -> None:
         "wrap": True,
         "width_sizing": "hug",
         "height_sizing": "fixed",
+        "umg_panel_mode": "auto",
+        "umg_spacing_strategy": "padding",
+        "umg_spacer_size_rule": "auto",
+        "umg_spacer_fill_coefficient": 1.0,
         "grid_columns": 2,
         "grid_column_span": 1,
         "grid_row_span": 1,
@@ -640,6 +1090,10 @@ def test_inspector_alignment_grid_auto_gap_and_wrap_disclosure() -> None:
     )
     inspector.auto_layout_horizontal_button.click()
     assert inspector.auto_layout_wrap_check.isHidden() is False
+    assert inspector.auto_layout_cross_combo.findData("baseline") >= 0
+    assert inspector.auto_layout_baseline_button.isHidden() is False
+    inspector.auto_layout_baseline_button.click()
+    assert emitted[-1]["layout"]["cross_alignment"] == "baseline"
     inspector.auto_layout_gap_auto_button.click()
     assert emitted[-1]["layout"]["main_alignment"] == "space_between"
     assert inspector.auto_layout_gap_spin.isEnabled() is False
@@ -786,6 +1240,15 @@ def test_canvas_spacing_drag_follows_axis_and_modifier_contract() -> None:
     }
     vertical = apply_auto_layout_canvas_click(vertical, "mode_vertical")
     assert vertical["wrap"] is False
+    baseline = apply_auto_layout_canvas_click(
+        {"mode": "horizontal", "cross_alignment": "stretch"},
+        "cross_alignment",
+    )
+    assert baseline["cross_alignment"] == "baseline"
+    assert apply_auto_layout_canvas_click(
+        baseline,
+        "cross_alignment",
+    )["cross_alignment"] == "start"
     unchanged_x = apply_auto_layout_canvas_drag(
         vertical,
         "gap",
@@ -808,6 +1271,20 @@ def test_canvas_spacing_drag_follows_axis_and_modifier_contract() -> None:
         big_nudge=True,
     )
     assert big_nudge["gap"] == 18.0
+    negative_overlap = apply_auto_layout_canvas_drag(
+        vertical,
+        "gap",
+        QPointF(0, -20),
+        scale=1.0,
+    )
+    assert negative_overlap["gap"] == -12.0
+    cross_gap_stays_nonnegative = apply_auto_layout_canvas_drag(
+        {**vertical, "cross_gap": 4},
+        "cross_gap",
+        QPointF(0, -20),
+        scale=1.0,
+    )
+    assert cross_gap_stays_nonnegative["cross_gap"] == 0.0
 
     opposite = apply_auto_layout_canvas_drag(
         vertical,

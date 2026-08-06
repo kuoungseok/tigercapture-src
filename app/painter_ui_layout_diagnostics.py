@@ -29,10 +29,14 @@ def _diagnostic(
     }
 
 
-def diagnose_ui_layout(document: Mapping[str, Any]) -> dict[str, Any]:
+def diagnose_ui_layout(
+    document: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
     from app.painter_ui_themes import resolve_ui_theme_document
 
-    document = resolve_ui_theme_document(document)
+    document = resolve_ui_theme_document(document, normalize=normalize)
     diagnostics: list[dict[str, str]] = []
     objects = {
         str(row["id"]): row
@@ -113,7 +117,11 @@ def diagnose_ui_layout(document: Mapping[str, Any]) -> dict[str, Any]:
                     )
                 )
 
-        scroll_report = inspect_ui_scroll(document, object_id)
+        scroll_report = inspect_ui_scroll(
+            document,
+            object_id,
+            object_index=objects,
+        )
         for reason in scroll_report["reasons"]:
             diagnostics.append(
                 _diagnostic(

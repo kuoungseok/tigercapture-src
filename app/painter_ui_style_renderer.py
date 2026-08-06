@@ -28,6 +28,28 @@ from PySide6.QtGui import (
 from PySide6.QtSvg import QSvgRenderer
 
 
+def ui_composition_mode(value: object):
+    """Map Painter/Figma blend names to the closest deterministic Qt mode."""
+    normalized = str(value or "normal").strip().casefold().replace("-", "_")
+    return {
+        "multiply": QPainter.CompositionMode.CompositionMode_Multiply,
+        "screen": QPainter.CompositionMode.CompositionMode_Screen,
+        "overlay": QPainter.CompositionMode.CompositionMode_Overlay,
+        "darken": QPainter.CompositionMode.CompositionMode_Darken,
+        "lighten": QPainter.CompositionMode.CompositionMode_Lighten,
+        "color_dodge": QPainter.CompositionMode.CompositionMode_ColorDodge,
+        "color_burn": QPainter.CompositionMode.CompositionMode_ColorBurn,
+        "hard_light": QPainter.CompositionMode.CompositionMode_HardLight,
+        "soft_light": QPainter.CompositionMode.CompositionMode_SoftLight,
+        "difference": QPainter.CompositionMode.CompositionMode_Difference,
+        "exclusion": QPainter.CompositionMode.CompositionMode_Exclusion,
+        "linear_dodge": QPainter.CompositionMode.CompositionMode_Plus,
+    }.get(
+        normalized,
+        QPainter.CompositionMode.CompositionMode_SourceOver,
+    )
+
+
 def ui_color(value: object, fallback: str = "#000000") -> QColor:
     """Parse UI colors as CSS-style RGB/RGBA rather than Qt's ARGB shorthand."""
     text = str(value or "").strip()
@@ -218,15 +240,10 @@ def ui_fill_brush(
             surface.fill(Qt.GlobalColor.transparent)
             painter = QPainter(surface)
             local_rect = QRectF(0, 0, width, height)
-            modes = {
-                "multiply": QPainter.CompositionMode.CompositionMode_Multiply,
-                "screen": QPainter.CompositionMode.CompositionMode_Screen,
-                "overlay": QPainter.CompositionMode.CompositionMode_Overlay,
-                "darken": QPainter.CompositionMode.CompositionMode_Darken,
-                "lighten": QPainter.CompositionMode.CompositionMode_Lighten,
-            }
             for paint in reversed(visible):
-                painter.setCompositionMode(modes.get(str(paint.get("blend_mode") or "normal"), QPainter.CompositionMode.CompositionMode_SourceOver))
+                painter.setCompositionMode(
+                    ui_composition_mode(paint.get("blend_mode"))
+                )
                 painter.fillRect(local_rect, _paint_brush(paint, local_rect))
             painter.end()
             brush = QBrush(surface)
@@ -280,7 +297,63 @@ def has_ui_vector_geometry(content: object) -> bool:
         _svg_geometry_rows(content.get("vector_fill_geometry"))
         or _svg_geometry_rows(content.get("vector_stroke_geometry"))
         or _svg_geometry_rows(content.get("vector_paths"))
+        or str(content.get("vector_render_path") or "").strip()
     )
+
+
+def has_ui_figma_expanded_stroke_geometry(content: object) -> bool:
+    """Return whether imported Figma strokeGeometry is an exact outline."""
+
+    if not isinstance(content, Mapping):
+        return False
+    metadata = content.get("figma_stroke_geometry")
+    return (
+        isinstance(metadata, Mapping)
+        and str(metadata.get("representation") or "").casefold()
+        == "expanded_outline"
+        and bool(_svg_geometry_rows(content.get("vector_stroke_geometry")))
+    )
+
+
+@lru_cache(maxsize=64)
+def _read_ui_vector_svg_asset(
+    path_text: str,
+    modified_ns: int,
+    size: int,
+) -> bytes:
+    del modified_ns
+    if size <= 0 or size > 16 * 1024 * 1024:
+        return b""
+    try:
+        return Path(path_text).read_bytes()
+    except OSError:
+        return b""
+
+
+def _draw_ui_vector_svg_asset(
+    painter: QPainter,
+    rect: QRectF,
+    path_text: object,
+) -> bool:
+    path = Path(str(path_text or "")).expanduser()
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    if not path.is_file() or path.suffix.casefold() != ".svg":
+        return False
+    data = _read_ui_vector_svg_asset(
+        str(path.resolve()),
+        int(stat.st_mtime_ns),
+        int(stat.st_size),
+    )
+    if not data:
+        return False
+    renderer = QSvgRenderer(QByteArray(data))
+    if not renderer.isValid():
+        return False
+    renderer.render(painter, rect)
+    return True
 
 
 def draw_ui_vector_paths(
@@ -292,6 +365,12 @@ def draw_ui_vector_paths(
     """Render Figma SVG path geometry without substituting a bounding box."""
     if not isinstance(content, Mapping):
         return False
+    if _draw_ui_vector_svg_asset(
+        painter,
+        rect,
+        content.get("vector_render_path"),
+    ):
+        return True
     if isinstance(content.get("vector_network"), Mapping):
         from app.painter_ui_vector_network import vector_network_to_qpath
 
@@ -405,7 +484,49 @@ def draw_ui_vector_paths(
     dash_attribute = (
         f' stroke-dasharray="{html.escape(dash, quote=True)}"' if dash else ""
     )
-    stroke_markup = "".join(
+    stroke_geometry = content.get("figma_stroke_geometry")
+    expanded_stroke_geometry = (
+        isinstance(stroke_geometry, Mapping)
+        and str(stroke_geometry.get("representation") or "").casefold()
+        == "expanded_outline"
+    )
+    source_viewport = (
+        stroke_geometry.get("viewport")
+        if isinstance(stroke_geometry, Mapping)
+        and isinstance(stroke_geometry.get("viewport"), Mapping)
+        else {}
+    )
+    source_width = max(
+        0.0001,
+        float(source_viewport.get("width", rect.width()) or rect.width()),
+    )
+    source_height = max(
+        0.0001,
+        float(source_viewport.get("height", rect.height()) or rect.height()),
+    )
+    expanded_stroke_rows = (
+        [row for row in stroke_rows if "z" in row["path"].casefold()]
+        if expanded_stroke_geometry
+        else []
+    )
+    centerline_stroke_rows = (
+        [row for row in stroke_rows if row not in expanded_stroke_rows]
+        if expanded_stroke_geometry
+        else stroke_rows
+    )
+    # Figma REST strokeGeometry is normally an expanded outline, not a
+    # centerline to stroke again. Filling its closed subpaths preserves
+    # individual edge weights, inside/outside alignment, joins, caps, and
+    # dashes exactly. Keep an open-path fallback for older/synthetic payloads.
+    expanded_stroke_markup = "".join(
+        (
+            f'<path d="{html.escape(row["path"], quote=True)}" '
+            f'fill="{stroke.name()}" fill-opacity="{stroke.alphaF():.6f}" '
+            f'fill-rule="{row["fill_rule"]}" stroke="none"/>'
+        )
+        for row in expanded_stroke_rows
+    )
+    centerline_stroke_markup = "".join(
         (
             f'<path d="{html.escape(row["path"], quote=True)}" fill="none" '
             f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.6f}" '
@@ -414,19 +535,119 @@ def draw_ui_vector_paths(
             f'stroke-miterlimit="{max(0.0, float(style.get("stroke_miter_limit") or 4.0)):.6f}"'
             f"{dash_attribute}/>"
         )
-        for row in stroke_rows
+        for row in centerline_stroke_rows
     )
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" '
-        f'width="{rect.width():.6f}" height="{rect.height():.6f}" '
-        f'viewBox="0 0 {rect.width():.6f} {rect.height():.6f}">'
+        'overflow="visible" '
+        f'width="{source_width:.6f}" height="{source_height:.6f}" '
+        f'viewBox="0 0 {source_width:.6f} {source_height:.6f}">'
         f"<defs>{gradient_markup}</defs>"
-        f"{fill_markup}{stroke_markup}</svg>"
+        f"{fill_markup}{centerline_stroke_markup}</svg>"
     )
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     if not renderer.isValid():
         return False
     renderer.render(painter, rect)
+    if expanded_stroke_markup:
+        individual_weights = style.get("individual_stroke_weights")
+        stroke_extent = max(
+            [stroke_width]
+            + (
+                [
+                    max(0.0, float(value or 0.0))
+                    for value in individual_weights.values()
+                ]
+                if isinstance(individual_weights, Mapping)
+                else []
+            )
+        )
+        logical_scale = max(
+            rect.width() / source_width,
+            rect.height() / source_height,
+        )
+        padding = max(2.0, math.ceil(stroke_extent * logical_scale + 2.0))
+        logical_width = max(1.0, rect.width() + padding * 2.0)
+        logical_height = max(1.0, rect.height() + padding * 2.0)
+        raster_scale = min(
+            1.0,
+            4096.0 / logical_width,
+            4096.0 / logical_height,
+            math.sqrt((16.0 * 1024.0 * 1024.0) / (logical_width * logical_height)),
+        )
+        surface_width = max(1, int(math.ceil(logical_width * raster_scale)))
+        surface_height = max(1, int(math.ceil(logical_height * raster_scale)))
+        target = QRectF(
+            padding * raster_scale,
+            padding * raster_scale,
+            rect.width() * raster_scale,
+            rect.height() * raster_scale,
+        )
+        stroke_surface = QImage(
+            surface_width,
+            surface_height,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        stroke_surface.fill(Qt.GlobalColor.transparent)
+        stroke_svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" overflow="visible" '
+            f'width="{source_width:.6f}" height="{source_height:.6f}" '
+            f'viewBox="0 0 {source_width:.6f} {source_height:.6f}">'
+            f"{expanded_stroke_markup}</svg>"
+        )
+        stroke_renderer = QSvgRenderer(
+            QByteArray(stroke_svg.encode("utf-8"))
+        )
+        stroke_painter = QPainter(stroke_surface)
+        stroke_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        stroke_renderer.render(stroke_painter, target)
+        stroke_painter.end()
+
+        stroke_align = str(style.get("stroke_align") or "center").casefold()
+        if fill_rows and stroke_align in {"inside", "outside"}:
+            mask_markup = "".join(
+                (
+                    f'<path d="{html.escape(row["path"], quote=True)}" '
+                    f'fill="#FFFFFF" fill-rule="{row["fill_rule"]}"/>'
+                )
+                for row in fill_rows
+            )
+            mask_svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" overflow="visible" '
+                f'width="{source_width:.6f}" height="{source_height:.6f}" '
+                f'viewBox="0 0 {source_width:.6f} {source_height:.6f}">'
+                f"{mask_markup}</svg>"
+            )
+            mask_surface = QImage(
+                surface_width,
+                surface_height,
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            mask_surface.fill(Qt.GlobalColor.transparent)
+            mask_painter = QPainter(mask_surface)
+            mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            QSvgRenderer(QByteArray(mask_svg.encode("utf-8"))).render(
+                mask_painter,
+                target,
+            )
+            mask_painter.end()
+            compositor = QPainter(stroke_surface)
+            compositor.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_DestinationIn
+                if stroke_align == "inside"
+                else QPainter.CompositionMode.CompositionMode_DestinationOut
+            )
+            compositor.drawImage(0, 0, mask_surface)
+            compositor.end()
+        painter.drawImage(
+            QRectF(
+                rect.left() - padding,
+                rect.top() - padding,
+                logical_width,
+                logical_height,
+            ),
+            stroke_surface,
+        )
     return True
 
 
@@ -514,6 +735,10 @@ def ui_blur_radius(
         for row in effects
         if isinstance(row, Mapping)
         and str(row.get("type") or "").casefold() == effect_type
+        and str(
+            row.get("blur_type", row.get("blurType")) or "normal"
+        ).casefold()
+        != "progressive"
     ]
     return max(radii, default=0.0) * max(0.001, float(scale))
 
@@ -644,6 +869,9 @@ def draw_ui_object_shadow(
     painter.setPen(Qt.PenStyle.NoPen)
     rendered = False
     for shadow in shadows:
+        painter.setCompositionMode(
+            ui_composition_mode(shadow.get("blend_mode"))
+        )
         rendered = (
             _draw_outer_shadow(
                 painter,
@@ -678,6 +906,9 @@ def draw_ui_object_inner_shadows(
     painter.setBrush(Qt.BrushStyle.NoBrush)
     rendered = False
     for shadow in shadows:
+        painter.setCompositionMode(
+            ui_composition_mode(shadow.get("blend_mode"))
+        )
         color = ui_color(shadow.get("color"), "#00000066")
         if color.alpha() <= 0:
             continue
@@ -714,6 +945,7 @@ def _layout_text(
     wrap_mode: QTextOption.WrapMode,
     vertical_alignment: str,
     text_ranges: object = None,
+    text_range_scale: float = 1.0,
 ) -> tuple[QTextLayout, list[Any], float]:
     normalized_text = (
         text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\u2028")
@@ -730,17 +962,39 @@ def _layout_text(
             values = values if isinstance(values, Mapping) else {}
             if end <= start or not values:
                 continue
-            char_format = QTextCharFormat()
+            # QTextCharFormat has no setFontPixelSize in PySide6.  Build a
+            # QFont from the already-resolved base font so Figma character
+            # ranges retain pixel sizing without converting through DPI-
+            # dependent point sizes.
+            range_font = QFont(font)
             if values.get("font_family"):
-                char_format.setFontFamily(str(values["font_family"]))
+                from app.font_fallback import registered_design_font_family
+
+                range_font.setFamily(
+                    registered_design_font_family(str(values["font_family"]))
+                )
             if values.get("font_size") is not None:
-                char_format.setFontPixelSize(
-                    max(1.0, float(values["font_size"]))
+                range_font.setPixelSize(
+                    max(
+                        1,
+                        int(
+                            round(
+                                float(values["font_size"])
+                                * max(0.001, float(text_range_scale))
+                            )
+                        ),
+                    )
                 )
             if values.get("font_weight") is not None:
-                char_format.setFontWeight(int(values["font_weight"]))
-            char_format.setFontItalic(bool(values.get("italic", False)))
-            char_format.setFontUnderline(bool(values.get("underline", False)))
+                range_font.setWeight(
+                    QFont.Weight(
+                        max(100, min(900, int(values["font_weight"])))
+                    )
+                )
+            range_font.setItalic(bool(values.get("italic", False)))
+            range_font.setUnderline(bool(values.get("underline", False)))
+            char_format = QTextCharFormat()
+            char_format.setFont(range_font)
             if values.get("color"):
                 char_format.setForeground(
                     ui_color(values["color"], "#F2F5F9")
@@ -833,6 +1087,7 @@ def draw_ui_text_block(
         wrap_mode,
         vertical_alignment,
         text_ranges,
+        scale,
     )
 
     painter.save()
@@ -845,6 +1100,9 @@ def draw_ui_text_block(
     for shadow in shadows:
         shadow_color = ui_color(shadow.get("color"), "#00000066")
         if shadow_color.alpha() > 0:
+            painter.setCompositionMode(
+                ui_composition_mode(shadow.get("blend_mode"))
+            )
             offset = QPointF(
                 float(shadow.get("x") or 0.0) * scale,
                 float(shadow.get("y") or 0.0) * scale,
@@ -899,7 +1157,11 @@ __all__ = [
     "draw_ui_object_inner_shadows",
     "draw_ui_object_shadow",
     "draw_ui_text_block",
+    "draw_ui_vector_paths",
+    "has_ui_figma_expanded_stroke_geometry",
+    "has_ui_vector_geometry",
     "ui_fill_brush",
+    "ui_composition_mode",
     "ui_color",
     "ui_font",
     "ui_text_alignment",

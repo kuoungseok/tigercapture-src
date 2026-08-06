@@ -69,6 +69,19 @@ payload = {{
     "generated_asset_class": asset.get_class().get_name() if asset is not None else "",
     "generated_widget_count": int(read_property(result, "generated_widget_count") or 0),
     "generated_animation_count": int(read_property(result, "generated_animation_count") or 0),
+    "generated_component_count": int(read_property(result, "generated_component_count") or 0),
+    "generated_component_asset_paths": {{
+        str(key): str(value)
+        for key, value in dict(
+            read_property(result, "generated_component_asset_paths") or {{}}
+        ).items()
+    }},
+    "generated_component_class_paths": {{
+        str(key): str(value)
+        for key, value in dict(
+            read_property(result, "generated_component_class_paths") or {{}}
+        ).items()
+    }},
     "imported_asset_paths": [
         str(item) for item in (read_property(result, "imported_asset_paths") or [])
     ],
@@ -79,6 +92,18 @@ payload = {{
         str(key): str(value)
         for key, value in dict(
             read_property(result, "generated_widget_classes") or {{}}
+        ).items()
+    }},
+    "generated_button_style_audit": {{
+        str(key): str(value)
+        for key, value in dict(
+            read_property(result, "generated_button_style_audit") or {{}}
+        ).items()
+    }},
+    "generated_widget_visibility_audit": {{
+        str(key): str(value)
+        for key, value in dict(
+            read_property(result, "generated_widget_visibility_audit") or {{}}
         ).items()
     }},
     "warnings": [str(item) for item in (read_property(result, "warnings") or [])],

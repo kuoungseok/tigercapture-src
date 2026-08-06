@@ -43,6 +43,7 @@ from app.painter_ui_document import normalize_ui_document
 from app.icons import app_icon, icon_size
 from app.painter_i18n import painter_text
 from app.painter_ui_sizing_control import PainterUISizingControl
+from app.painter_ui_umg_panel_selector import PainterUIUMGPanelSelector
 from app.color_picker_widget import ColorPaletteStrip, color_edit_with_picker
 
 
@@ -406,6 +407,7 @@ class PainterUIInspector(QWidget):
     section_requested = Signal(str, str, object)
     motion_open_requested = Signal(str)
     motion_preview_hover_requested = Signal(str)
+    motion_bake_flipbook_requested = Signal(str)
     motion_binding_migrate_requested = Signal(str)
     motion_binding_relink_requested = Signal(str, str, str)
     motion_binding_detach_requested = Signal(str)
@@ -1103,6 +1105,9 @@ class PainterUIInspector(QWidget):
         self.motion_delivery_panel.preview_hover_requested.connect(
             self.motion_preview_hover_requested
         )
+        self.motion_delivery_panel.bake_flipbook_requested.connect(
+            self.motion_bake_flipbook_requested
+        )
         motion_layout.addWidget(self.motion_binding_panel)
         motion_layout.addWidget(self.motion_delivery_panel)
         motion_layout.addStretch(1)
@@ -1749,6 +1754,7 @@ class PainterUIInspector(QWidget):
             ("Horizontal", "horizontal"),
             ("Vertical", "vertical"),
             ("Grid", "grid"),
+            ("Overlay (UMG stack)", "overlay"),
         ):
             self.auto_layout_mode_combo.addItem(label, mode)
         self.auto_layout_mode_combo.currentIndexChanged.connect(
@@ -1767,10 +1773,15 @@ class PainterUIInspector(QWidget):
         self.auto_layout_horizontal_button = QPushButton("→")
         self.auto_layout_vertical_button = QPushButton("↓")
         self.auto_layout_grid_button = QPushButton("▦")
+        self.auto_layout_overlay_button = QPushButton("O")
         for button, tooltip in (
             (self.auto_layout_horizontal_button, "Horizontal flow"),
             (self.auto_layout_vertical_button, "Vertical flow"),
             (self.auto_layout_grid_button, "Grid flow (beta)"),
+            (
+                self.auto_layout_overlay_button,
+                "Overlay stack (native UMG alignment and padding)",
+            ),
         ):
             button.setCheckable(True)
             button.setToolTip(tooltip)
@@ -1791,7 +1802,62 @@ class PainterUIInspector(QWidget):
                 self.auto_layout_mode_combo.findData("grid")
             )
         )
+        self.auto_layout_overlay_button.clicked.connect(
+            lambda: self.auto_layout_mode_combo.setCurrentIndex(
+                self.auto_layout_mode_combo.findData("overlay")
+            )
+        )
         form.addRow("Flow", self.auto_layout_flow_control)
+        self.auto_layout_umg_panel_control = PainterUIUMGPanelSelector(
+            show_title=False
+        )
+        self.auto_layout_umg_panel_control.mode_changed.connect(
+            lambda _mode: self._emit_properties()
+        )
+        form.addRow("UMG Panel", self.auto_layout_umg_panel_control)
+        self.auto_layout_umg_spacing_control = QFrame()
+        umg_spacing_layout = QVBoxLayout(
+            self.auto_layout_umg_spacing_control
+        )
+        umg_spacing_layout.setContentsMargins(0, 0, 0, 0)
+        umg_spacing_layout.setSpacing(3)
+        umg_spacing_row = QHBoxLayout()
+        umg_spacing_row.setContentsMargins(0, 0, 0, 0)
+        umg_spacing_row.setSpacing(4)
+        umg_spacing_label = QLabel("간격 방식")
+        self.auto_layout_umg_spacing_combo = QComboBox()
+        for label, strategy in (
+            ("Padding (슬롯 여백)", "padding"),
+            ("Spacer Auto (고정)", "spacer_auto"),
+            ("Spacer Fill (비례)", "spacer_fill"),
+        ):
+            self.auto_layout_umg_spacing_combo.addItem(label, strategy)
+        self.auto_layout_umg_spacing_combo.currentIndexChanged.connect(
+            self._sync_auto_layout_control_states
+        )
+        self.auto_layout_umg_spacing_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        self.auto_layout_umg_spacer_fill_spin = (
+            PainterUIDragDoubleSpinBox()
+        )
+        self.auto_layout_umg_spacer_fill_spin.setRange(0.0001, 1000.0)
+        self.auto_layout_umg_spacer_fill_spin.setDecimals(2)
+        self.auto_layout_umg_spacer_fill_spin.setPrefix("Weight ")
+        self.auto_layout_umg_spacer_fill_spin.setResetValue(1.0)
+        self.auto_layout_umg_spacer_fill_spin.setValue(1.0)
+        self.auto_layout_umg_spacer_fill_spin.valueChanged.connect(
+            self._emit_properties
+        )
+        umg_spacing_row.addWidget(umg_spacing_label)
+        umg_spacing_row.addWidget(self.auto_layout_umg_spacing_combo, 1)
+        umg_spacing_row.addWidget(self.auto_layout_umg_spacer_fill_spin)
+        umg_spacing_layout.addLayout(umg_spacing_row)
+        self.auto_layout_umg_spacing_hint = QLabel()
+        self.auto_layout_umg_spacing_hint.setObjectName("PaintMuted")
+        self.auto_layout_umg_spacing_hint.setWordWrap(True)
+        umg_spacing_layout.addWidget(self.auto_layout_umg_spacing_hint)
+        form.addRow(self.auto_layout_umg_spacing_control)
         auto_grid = QFrame()
         auto_grid_layout = QGridLayout(auto_grid)
         auto_grid_layout.setContentsMargins(0, 0, 0, 0)
@@ -1970,7 +2036,7 @@ class PainterUIInspector(QWidget):
         auto_flow_layout.setContentsMargins(0, 0, 0, 0)
         auto_flow_layout.setSpacing(3)
         self.auto_layout_gap_spin = PainterUIDragDoubleSpinBox()
-        self.auto_layout_gap_spin.setRange(0.0, 10000.0)
+        self.auto_layout_gap_spin.setRange(-10000.0, 10000.0)
         self.auto_layout_gap_spin.setDecimals(1)
         self.auto_layout_gap_spin.setPrefix("Gap ")
         self.auto_layout_gap_spin.setSuffix(" px")
@@ -2024,6 +2090,7 @@ class PainterUIInspector(QWidget):
             ("Center", "center"),
             ("End", "end"),
             ("Stretch", "stretch"),
+            ("Baseline", "baseline"),
         ):
             self.auto_layout_cross_combo.addItem(label, alignment)
         self.auto_layout_cross_combo.currentIndexChanged.connect(
@@ -2070,7 +2137,16 @@ class PainterUIInspector(QWidget):
         self.auto_layout_positioning_combo.currentIndexChanged.connect(
             self._emit_properties
         )
+        self.auto_layout_baseline_button = QPushButton("Baseline")
+        self.auto_layout_baseline_button.setCheckable(True)
+        self.auto_layout_baseline_button.setToolTip(
+            "Align horizontal Auto Layout children to their text baseline"
+        )
+        self.auto_layout_baseline_button.clicked.connect(
+            self._set_auto_layout_baseline
+        )
         auto_cross_layout.addWidget(self.auto_layout_cross_combo)
+        auto_cross_layout.addWidget(self.auto_layout_baseline_button)
         auto_cross_layout.addWidget(self.auto_layout_positioning_combo)
         form.addRow("Align / Position", auto_cross)
         self.opacity_spin = PainterUIDragSpinBox()
@@ -2082,7 +2158,7 @@ class PainterUIInspector(QWidget):
         self.fill_edit = QLineEdit()
         self.fill_edit.setPlaceholderText("#RRGGBB")
         self.fill_edit.editingFinished.connect(self._emit_properties)
-        fill_field, self.fill_color_picker = color_edit_with_picker(
+        self.fill_field, self.fill_color_picker = color_edit_with_picker(
             self.fill_edit,
             title="Choose fill color",
         )
@@ -2090,11 +2166,11 @@ class PainterUIInspector(QWidget):
         self.fill_color_picker.clicked.connect(
             lambda: self._open_common_paint_editor(stroke=False)
         )
-        form.addRow("Fill", fill_field)
+        form.addRow("Fill", self.fill_field)
         self.stroke_edit = QLineEdit()
         self.stroke_edit.setPlaceholderText("#RRGGBB")
         self.stroke_edit.editingFinished.connect(self._emit_properties)
-        stroke_field, self.stroke_color_picker = color_edit_with_picker(
+        self.stroke_field, self.stroke_color_picker = color_edit_with_picker(
             self.stroke_edit,
             title="Choose stroke color",
         )
@@ -2102,7 +2178,7 @@ class PainterUIInspector(QWidget):
         self.stroke_color_picker.clicked.connect(
             lambda: self._open_common_paint_editor(stroke=True)
         )
-        form.addRow("Stroke", stroke_field)
+        form.addRow("Stroke", self.stroke_field)
         self.stroke_width_spin = PainterUIDragDoubleSpinBox()
         self.stroke_width_spin.setRange(0.0, 64.0)
         self.stroke_width_spin.setDecimals(1)
@@ -2765,6 +2841,7 @@ class PainterUIInspector(QWidget):
             "auto_layout": (
                 auto_layout_entry,
                 self.auto_layout_flow_control,
+                self.auto_layout_umg_panel_control,
                 self.auto_layout_grid_controls,
                 auto_sizing,
                 auto_padding,
@@ -2776,8 +2853,8 @@ class PainterUIInspector(QWidget):
             "token_suggestions": (self.token_suggestion_panel,),
             "appearance": (
                 self.opacity_spin,
-                self.fill_edit,
-                self.stroke_edit,
+                self.fill_field,
+                self.stroke_field,
                 self.stroke_width_spin,
                 self.radius_spin,
                 self.appearance_button,
@@ -3146,17 +3223,22 @@ class PainterUIInspector(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
+        # Every panel below is read-only, so they share this one canonical
+        # document instead of each deep copying it.  On a large imported Figma
+        # file those defensive copies were most of the cost of a single click.
         self.comments_panel.set_document(self._document)
         self._sync_token_suggestions()
-        self.component_library.set_document(self._document)
-        self.style_library.set_document(self._document)
+        self.component_library.set_document(self._document, normalize=False)
+        self.style_library.set_document(self._document, normalize=False)
         self.library_panel.set_document(self._document)
-        self.token_library.set_document(self._document)
-        self.prototype_panel.set_document(self._document)
-        self.production_panel.set_document(self._document)
+        self.token_library.set_document(self._document, normalize=False)
+        self.prototype_panel.set_document(self._document, normalize=False)
+        self.production_panel.set_document(self._document, normalize=False)
         from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
 
-        self.dev_panel.set_report(inspect_ui_dev_handoff(self._document))
+        self.dev_panel.set_report(
+            inspect_ui_dev_handoff(self._document, normalize=False)
+        )
         active_page = self._document["active_page_id"]
         active = self._document["active_artboard_id"]
         self._syncing = True
@@ -3208,7 +3290,7 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_token_suggestion import suggest_ui_tokens
 
         self.token_suggestion_panel.set_report(
-            suggest_ui_tokens(self._document)
+            suggest_ui_tokens(self._document, normalize=False)
         )
 
     def _selected_id(self) -> str:
@@ -3395,6 +3477,11 @@ class PainterUIInspector(QWidget):
             self.component_status_label.setText("Not a component")
             self.auto_layout_status_label.setText("Select an object")
             self.auto_layout_status_label.setToolTip("")
+            self.auto_layout_umg_panel_control.set_context(
+                self._document,
+                None,
+                editable=False,
+            )
             self.component_state_combo.setCurrentIndex(0)
             self.component_variant_combo.clear()
             self._rebuild_component_variant_property_controls(None, None)
@@ -3751,6 +3838,11 @@ class PainterUIInspector(QWidget):
         layout = normalize_ui_auto_layout(row.get("layout"))
         mode_index = self.auto_layout_mode_combo.findData(layout["mode"])
         self.auto_layout_mode_combo.setCurrentIndex(max(0, mode_index))
+        self.auto_layout_umg_panel_control.set_context(
+            self._document,
+            base_row,
+            editable=not bool(base_row.get("locked", False)),
+        )
         self.auto_layout_grid_columns_spin.setValue(int(layout["grid_columns"]))
         self.auto_layout_grid_column_span_spin.setValue(
             int(layout["grid_column_span"])
@@ -3787,6 +3879,22 @@ class PainterUIInspector(QWidget):
         )
         self.auto_layout_height_sizing_combo.setCurrentIndex(
             max(0, height_sizing_index)
+        )
+        spacing_option = (
+            "padding"
+            if layout["umg_spacing_strategy"] == "padding"
+            else "spacer_fill"
+            if layout["umg_spacer_size_rule"] == "fill"
+            else "spacer_auto"
+        )
+        spacing_index = self.auto_layout_umg_spacing_combo.findData(
+            spacing_option
+        )
+        self.auto_layout_umg_spacing_combo.setCurrentIndex(
+            max(0, spacing_index)
+        )
+        self.auto_layout_umg_spacer_fill_spin.setValue(
+            float(layout["umg_spacer_fill_coefficient"])
         )
         self.auto_layout_wrap_check.setChecked(bool(layout["wrap"]))
         self._sync_auto_layout_control_states()
@@ -3974,7 +4082,7 @@ class PainterUIInspector(QWidget):
             and str(row.get("kind") or "") == "frame"
         )
         if frame_selected:
-            self.frame_selection_panel.set_frame(row)
+            self.frame_selection_panel.set_frame(row, self._document)
         shape_selected = bool(
             count == 1
             and row is not None
@@ -4680,7 +4788,7 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_size_spin.setEnabled(uniform or centered)
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout
 
-        report = diagnose_ui_layout(self._document)
+        report = diagnose_ui_layout(self._document, normalize=False)
         diagnostics = [
             row
             for row in report["diagnostics"]
@@ -5428,6 +5536,25 @@ class PainterUIInspector(QWidget):
                 "height_sizing": (
                     self.auto_layout_height_sizing_combo.currentData() or "fixed"
                 ),
+                "umg_panel_mode": (
+                    self.auto_layout_umg_panel_control.mode_combo.currentData()
+                    or "auto"
+                ),
+                "umg_spacing_strategy": (
+                    "padding"
+                    if self.auto_layout_umg_spacing_combo.currentData()
+                    == "padding"
+                    else "spacer"
+                ),
+                "umg_spacer_size_rule": (
+                    "fill"
+                    if self.auto_layout_umg_spacing_combo.currentData()
+                    == "spacer_fill"
+                    else "auto"
+                ),
+                "umg_spacer_fill_coefficient": float(
+                    self.auto_layout_umg_spacer_fill_spin.value()
+                ),
                 "grid_columns": int(self.auto_layout_grid_columns_spin.value()),
                 "grid_column_span": int(
                     self.auto_layout_grid_column_span_spin.value()
@@ -5644,6 +5771,20 @@ class PainterUIInspector(QWidget):
         self._sync_auto_layout_control_states()
         self._emit_properties()
 
+    def _set_auto_layout_baseline(self, checked: bool) -> None:
+        if not checked:
+            return
+        index = self.auto_layout_cross_combo.findData("baseline")
+        if index < 0:
+            return
+        self.auto_layout_cross_combo.blockSignals(True)
+        try:
+            self.auto_layout_cross_combo.setCurrentIndex(index)
+        finally:
+            self.auto_layout_cross_combo.blockSignals(False)
+        self._sync_auto_layout_control_states()
+        self._emit_properties()
+
     def _sync_auto_layout_control_states(self) -> None:
         row = self._selected_row()
         selected_count = len(
@@ -5656,7 +5797,7 @@ class PainterUIInspector(QWidget):
         active = (
             is_container
             and self.auto_layout_mode_combo.currentData()
-            in {"horizontal", "vertical", "grid"}
+            in {"horizontal", "vertical", "grid", "overlay"}
         )
         self.auto_layout_add_button.setEnabled(selected_count > 0 and not active)
         self.auto_layout_add_button.setVisible(not active)
@@ -5667,7 +5808,50 @@ class PainterUIInspector(QWidget):
         self.auto_layout_horizontal_button.setChecked(mode == "horizontal")
         self.auto_layout_vertical_button.setChecked(mode == "vertical")
         self.auto_layout_grid_button.setChecked(mode == "grid")
+        self.auto_layout_overlay_button.setChecked(mode == "overlay")
         self.auto_layout_flow_control.setEnabled(is_container)
+        is_linear_panel = bool(
+            is_container and mode in {"horizontal", "vertical"}
+        )
+        is_overlay_panel = bool(is_container and mode == "overlay")
+        if not is_linear_panel and (
+            self.auto_layout_umg_spacing_combo.currentData() != "padding"
+        ):
+            self.auto_layout_umg_spacing_combo.blockSignals(True)
+            try:
+                self.auto_layout_umg_spacing_combo.setCurrentIndex(
+                    self.auto_layout_umg_spacing_combo.findData("padding")
+                )
+            finally:
+                self.auto_layout_umg_spacing_combo.blockSignals(False)
+        self.auto_layout_umg_spacing_control.setVisible(
+            is_linear_panel or is_overlay_panel
+        )
+        self.auto_layout_umg_spacing_combo.setEnabled(is_linear_panel)
+        spacer_fill_selected = (
+            self.auto_layout_umg_spacing_combo.currentData()
+            == "spacer_fill"
+        )
+        self.auto_layout_umg_spacer_fill_spin.setVisible(
+            is_linear_panel and spacer_fill_selected
+        )
+        self.auto_layout_umg_spacer_fill_spin.setEnabled(
+            is_linear_panel and spacer_fill_selected
+        )
+        self.auto_layout_umg_spacing_hint.setText(
+            "Overlay는 UOverlaySlot Padding으로 고정됩니다. "
+            "상위 크기에 반응하는 비례 배치는 Canvas 앵커나 "
+            "ScaleBox를 사용하세요."
+            if is_overlay_panel
+            else "상위 크기가 바뀌면 남은 공간을 Weight 비율로 "
+            "나누는 native USpacer입니다."
+            if spacer_fill_selected
+            else "고정 폭/높이의 독립 native USpacer를 생성합니다."
+            if self.auto_layout_umg_spacing_combo.currentData()
+            == "spacer_auto"
+            else "UMG 슬롯의 고정 Padding입니다. 상위 크기의 남는 "
+            "공간을 비례 분배하지 않습니다."
+        )
         parent = None
         if row is not None and row.get("parent_id"):
             parent = next(
@@ -5682,6 +5866,11 @@ class PainterUIInspector(QWidget):
         parent_layout = normalize_ui_auto_layout(
             parent.get("layout") if parent is not None else None
         )
+        is_flow_layout = active and mode in {
+            "horizontal",
+            "vertical",
+            "grid",
+        }
         is_grid = active and mode == "grid"
         is_grid_child = (
             row is not None
@@ -5710,24 +5899,32 @@ class PainterUIInspector(QWidget):
         gap_auto = self.auto_layout_main_combo.currentData() == "space_between"
         self.auto_layout_gap_auto_button.setChecked(gap_auto)
         self.auto_layout_gap_auto_button.setEnabled(
-            active and not is_wrapped and not is_grid
+            is_flow_layout and not is_wrapped and not is_grid
         )
-        self.auto_layout_gap_spin.setEnabled(active and not gap_auto)
+        self.auto_layout_gap_spin.setEnabled(is_flow_layout and not gap_auto)
         positions = {"start": 0, "center": 1, "end": 2}
         main = str(self.auto_layout_main_combo.currentData() or "start")
         cross = str(self.auto_layout_cross_combo.currentData() or "start")
-        if mode == "vertical":
+        if cross == "baseline":
+            selected_alignment = (-1, -1)
+        elif mode == "vertical":
             selected_alignment = (positions.get(main, 0), positions.get(cross, 0))
         else:
             selected_alignment = (positions.get(cross, 0), positions.get(main, 0))
         for position, button in self.auto_layout_alignment_buttons.items():
             button.setChecked(position == selected_alignment)
-            button.setEnabled(active)
+            button.setEnabled(is_flow_layout)
+        baseline_available = active and mode == "horizontal"
+        self.auto_layout_baseline_button.setVisible(mode == "horizontal")
+        self.auto_layout_baseline_button.setEnabled(baseline_available)
+        self.auto_layout_baseline_button.setChecked(
+            baseline_available and cross == "baseline"
+        )
         self.auto_layout_width_sizing_combo.setEnabled(row is not None)
         self.auto_layout_height_sizing_combo.setEnabled(row is not None)
         self.auto_layout_width_sizing_control.setEnabled(row is not None)
         self.auto_layout_height_sizing_control.setEnabled(row is not None)
-        can_hug = active
+        can_hug = is_flow_layout
         can_fill = (
             parent is not None
             and parent_layout["mode"] in {"horizontal", "vertical", "grid"}
@@ -5746,7 +5943,7 @@ class PainterUIInspector(QWidget):
             self.auto_layout_cross_combo,
             *self.auto_layout_padding_controls.values(),
         ):
-            widget.setEnabled(active)
+            widget.setEnabled(is_flow_layout)
         self.auto_layout_positioning_combo.setEnabled(
             row is not None and bool(row.get("parent_id"))
         )
@@ -5773,7 +5970,10 @@ class PainterUIInspector(QWidget):
         object_id = str(row["id"])
         diagnostics = [
             item
-            for item in diagnose_ui_layout(self._document)["diagnostics"]
+            for item in diagnose_ui_layout(
+                self._document,
+                normalize=False,
+            )["diagnostics"]
             if item["owner_id"] == object_id
             or item["related_id"] == object_id
         ]

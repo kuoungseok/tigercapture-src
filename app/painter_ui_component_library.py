@@ -19,8 +19,14 @@ from PySide6.QtWidgets import (
 from app.painter_ui_document import normalize_ui_document
 
 
-def inspect_ui_component_library(value: Mapping[str, Any]) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+def inspect_ui_component_library(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     components = {row["id"]: row for row in document["components"]}
     instance_counts = {
         component_id: sum(
@@ -138,9 +144,16 @@ class PainterUIComponentLibrary(QWidget):
             command_layout.addWidget(button)
         layout.addWidget(commands)
 
-    def set_document(self, value: Mapping[str, Any]) -> None:
+    def set_document(
+        self,
+        value: Mapping[str, Any],
+        *,
+        normalize: bool = True,
+    ) -> None:
         selected_component_id = self._selected_component_id()
-        self._document = normalize_ui_document(value)
+        # Read-only panel: an already-canonical document needs no private
+        # copy, and copying one costs seconds on a large imported file.
+        self._document = normalize_ui_document(value) if normalize else value
         self._rebuild(selected_component_id)
 
     def select_component(self, component_id: str) -> bool:
@@ -173,7 +186,10 @@ class PainterUIComponentLibrary(QWidget):
         try:
             preferred = str(preferred_component_id or self._selected_component_id())
             query = self.search_edit.text().strip().casefold()
-            report = inspect_ui_component_library(self._document)
+            report = inspect_ui_component_library(
+                self._document,
+                normalize=False,
+            )
             self.tree.clear()
             selected_item: QTreeWidgetItem | None = None
             for family in report["families"]:
@@ -251,7 +267,10 @@ class PainterUIComponentLibrary(QWidget):
             self.status_label.setText("No components")
             return
         self.name_edit.setText(str(component["name"]))
-        report = inspect_ui_component_library(self._document)
+        report = inspect_ui_component_library(
+            self._document,
+            normalize=False,
+        )
         family = next(
             (
                 row

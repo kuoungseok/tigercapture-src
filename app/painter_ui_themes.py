@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import copy
+import math
 import re
 from typing import Any, Mapping
+
+from app.painter_ui_json_copy import json_deepcopy
 
 
 UI_THEME_MODES = ("light", "dark", "high_contrast")
@@ -87,7 +90,7 @@ def _set_binding_path(row: dict[str, Any], path: str, value: Any) -> bool:
     if len(parts) == 1:
         if parts[0] not in _BINDING_SCALARS:
             return False
-        row[parts[0]] = copy.deepcopy(value)
+        row[parts[0]] = json_deepcopy(value)
         return True
     if parts[0] not in _BINDING_ROOTS:
         return False
@@ -101,8 +104,99 @@ def _set_binding_path(row: dict[str, Any], path: str, value: Any) -> bool:
             current = dict(current)
             target[part] = current
         target = current
-    target[parts[-1]] = copy.deepcopy(value)
+    target[parts[-1]] = json_deepcopy(value)
     return True
+
+
+def _synchronize_canonical_style_binding(
+    row: dict[str, Any],
+    path: str,
+    value: Any,
+) -> None:
+    """Keep legacy token paths aligned with the canonical paint stacks.
+
+    ``style.fill``, ``style.stroke`` and ``style.stroke_width`` predate the
+    Figma-style ``fills``/``strokes`` records.  Normalization retains both
+    representations for compatibility, while render/export code consumes the
+    canonical records.  Applying a token only to the legacy shortcut would
+    therefore leave a stale paint color or width in preview and UMG output.
+
+    A binding addresses the first paint, matching the Figma exchange path.  We
+    never replace an authored gradient/image/shader paint with a solid color.
+    """
+
+    normalized_path = str(path or "")
+    if normalized_path not in {
+        "style.fill",
+        "style.stroke",
+        "style.stroke_width",
+    }:
+        return
+    style_value = row.get("style")
+    if not isinstance(style_value, Mapping):
+        return
+    if not isinstance(style_value, dict):
+        style_value = dict(style_value)
+        row["style"] = style_value
+    style = style_value
+
+    if normalized_path in {"style.fill", "style.stroke"}:
+        if not isinstance(value, str) or not value.strip():
+            return
+        paint_key = "fills" if normalized_path == "style.fill" else "strokes"
+        paints_value = style.get(paint_key)
+        paints = list(paints_value) if isinstance(paints_value, list) else []
+        if not paints:
+            # A resolved legacy solid still needs a canonical record.  This is
+            # normally relevant only to old documents because current
+            # normalization already materializes legacy paints.
+            from app.painter_ui_advanced_appearance import normalize_ui_paint
+
+            paint_source: dict[str, Any] = {"color": value}
+            if paint_key == "strokes":
+                paint_source.update(
+                    {
+                        "width": style.get("stroke_width", 1.0),
+                        "align": style.get("stroke_align", "center"),
+                    }
+                )
+            style[paint_key] = [
+                normalize_ui_paint(
+                    paint_source,
+                    stroke=paint_key == "strokes",
+                )
+            ]
+            return
+        first_paint = paints[0]
+        if not isinstance(first_paint, Mapping):
+            return
+        if str(first_paint.get("type") or "solid").strip().casefold() != "solid":
+            return
+        updated_paint = json_deepcopy(dict(first_paint))
+        updated_paint["color"] = json_deepcopy(value)
+        paints[0] = updated_paint
+        style[paint_key] = paints
+        return
+
+    if isinstance(value, bool):
+        return
+    try:
+        width = float(value)
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(width):
+        return
+    strokes_value = style.get("strokes")
+    if not isinstance(strokes_value, list) or not strokes_value:
+        return
+    first_stroke = strokes_value[0]
+    if not isinstance(first_stroke, Mapping):
+        return
+    strokes = list(strokes_value)
+    updated_stroke = json_deepcopy(dict(first_stroke))
+    updated_stroke["width"] = max(0.0, width)
+    strokes[0] = updated_stroke
+    style["strokes"] = strokes
 
 
 def resolve_ui_theme_object(
@@ -112,7 +206,7 @@ def resolve_ui_theme_object(
     tokens: Mapping[str, Mapping[str, Any]],
     variable_modes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    resolved = copy.deepcopy(dict(row))
+    resolved = json_deepcopy(dict(row))
     applied: dict[str, dict[str, Any]] = {}
     normalized_theme = normalize_ui_theme(theme)
     bindings = row.get("token_bindings")
@@ -127,14 +221,42 @@ def resolve_ui_theme_object(
         )
         if value is None or not _set_binding_path(resolved, str(path), value):
             continue
+        _synchronize_canonical_style_binding(resolved, str(path), value)
         applied[str(path)] = {
             "token_id": token_id,
             "alias_chain": chain,
-            "value": copy.deepcopy(value),
+            "value": json_deepcopy(value),
         }
     resolved["resolved_theme"] = normalized_theme
     resolved["resolved_tokens"] = applied
     return resolved
+
+
+# Resolution reads objects, artboards, components, tokens and variables, but
+# never the selection or the revision counter.  Clicking an object therefore
+# asks for the exact same resolved document again, and on a large imported file
+# recomputing it costs seconds.  Digesting the document minus those two volatile
+# keys is ~0.1s, so a small cache turns a click into a copy instead of a solve.
+_RESOLVED_CACHE: dict[bytes, dict[str, Any]] = {}
+_RESOLVED_CACHE_LIMIT = 4
+_RESOLVED_CACHE_MIN_OBJECTS = 400
+
+
+def _resolved_cache_key(document: Mapping[str, Any]) -> bytes | None:
+    if type(document) is not dict:
+        return None
+    objects = document.get("objects")
+    if not isinstance(objects, list) or len(objects) < _RESOLVED_CACHE_MIN_OBJECTS:
+        return None
+    from app.painter_ui_document import canonical_payload_digest
+
+    return canonical_payload_digest(
+        {
+            key: item
+            for key, item in document.items()
+            if key not in {"selection", "revision"}
+        }
+    )
 
 
 def resolve_ui_theme_document(
@@ -145,6 +267,17 @@ def resolve_ui_theme_document(
     from app.painter_ui_components import resolve_ui_component_document
     from app.painter_ui_document import normalize_ui_document
     from app.painter_ui_responsive import resolve_ui_responsive_document
+
+    cache_key = _resolved_cache_key(value)
+    if cache_key is not None:
+        cached = _RESOLVED_CACHE.get(cache_key)
+        if cached is not None:
+            resolved = json_deepcopy(cached)
+            resolved["selection"] = json_deepcopy(
+                dict(value.get("selection") or {})
+            )
+            resolved["revision"] = value.get("revision", 0)
+            return resolved
 
     document = resolve_ui_component_document(
         normalize_ui_document(value) if normalize else value,
@@ -171,6 +304,10 @@ def resolve_ui_theme_document(
     ]
     document["resolved_themes"] = artboard_themes
     document["resolved_variable_modes"] = artboard_variable_modes
+    if cache_key is not None:
+        _RESOLVED_CACHE[cache_key] = json_deepcopy(document)
+        while len(_RESOLVED_CACHE) > _RESOLVED_CACHE_LIMIT:
+            _RESOLVED_CACHE.pop(next(iter(_RESOLVED_CACHE)))
     return document
 
 
@@ -195,7 +332,7 @@ def inspect_ui_theme(value: Mapping[str, Any], *, artboard_id: str = "") -> dict
         "objects": [
             {
                 "object_id": row["id"],
-                "resolved_tokens": copy.deepcopy(row["resolved_tokens"]),
+                "resolved_tokens": json_deepcopy(row["resolved_tokens"]),
             }
             for row in objects
             if row["resolved_tokens"]

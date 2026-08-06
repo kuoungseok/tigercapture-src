@@ -41,18 +41,22 @@ def _layer(document: dict, object_id: str) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("kind", "umg_kind"),
+    ("kind", "umg_kind", "expected_schema"),
     [
-        ("rectangle", "Image"),
-        ("frame", "Group"),
-        ("button", "Button"),
-        ("image", "Image"),
+        ("rectangle", "Image", 16),
+        # Painter's production-default Auto panel policy maps a Frame to the
+        # schema-17 Overlay contract, including when its only visual is an
+        # ImageFill surface.
+        ("frame", "Group", 17),
+        ("button", "Button", 16),
+        ("image", "Image", 16),
     ],
 )
 def test_painter_content_image_fill_uses_shared_typed_resource(
     tmp_path: Path,
     kind: str,
     umg_kind: str,
+    expected_schema: int,
 ) -> None:
     texture = _texture(tmp_path, f"{kind}.png")
     document, row = add_ui_object(
@@ -77,7 +81,8 @@ def test_painter_content_image_fill_uses_shared_typed_resource(
     layer = _layer(exported, row["id"])
     fill = layer["ImageFill"]
 
-    assert exported["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 11
+    assert TIGER_UMG_SCHEMA_VERSION == 13
+    assert exported["SchemaVersion"] == expected_schema
     assert layer["Kind"] == umg_kind
     assert layer["Disposition"] == "Native"
     assert layer["AssetId"] == fill["AssetId"] == exported["Resources"][0]["Id"]
@@ -309,6 +314,64 @@ def test_painter_crop_content_maps_to_native_source_region(
         "Width": 0.5,
         "Height": 0.6,
     }
+
+
+def test_figma_axis_aligned_image_transform_reuses_native_crop_contract(
+    tmp_path: Path,
+) -> None:
+    texture = _texture(tmp_path)
+    document, row = add_ui_object(
+        create_ui_document(320, 180),
+        kind="image",
+        content={
+            "source_path": str(texture),
+            "image_fit": "stretch",
+            "figma_image_transform": [
+                [0.6, 0.0, 0.2],
+                [0.0, 0.5, 0.25],
+            ],
+        },
+    )
+
+    layer = _layer(painter_ui_to_umg_document(document), row["id"])
+
+    assert layer["Disposition"] == "Native"
+    assert layer["ImageFill"]["Mode"] == "Crop"
+    assert layer["ImageFill"]["Crop"] == {
+        "Enabled": True,
+        "Units": "Normalized",
+        "X": 0.2,
+        "Y": 0.25,
+        "Width": 0.6,
+        "Height": 0.5,
+    }
+
+
+def test_figma_skewed_image_transform_and_shadows_filter_are_explicitly_blocked(
+    tmp_path: Path,
+) -> None:
+    texture = _texture(tmp_path)
+    document, row = add_ui_object(
+        create_ui_document(320, 180),
+        kind="image",
+        content={
+            "source_path": str(texture),
+            "image_fit": "stretch",
+            "figma_image_transform": [
+                [1.0, 0.2, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            "image_adjustments": {"shadows": 25},
+        },
+    )
+
+    layer = _layer(painter_ui_to_umg_document(document), row["id"])
+
+    assert layer["Disposition"] == "Blocked"
+    assert {
+        "image_fill_adjustments_require_ui_material_or_bake",
+        "image_fill_transform_requires_ui_material_or_bake",
+    } <= set(layer["BlockReasons"])
 
 
 def test_painter_fill_with_runtime_size_and_ellipse_are_not_claimed_native(

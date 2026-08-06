@@ -93,6 +93,111 @@ def test_draw_ui_image_renders_real_source_and_missing_source_falls_back(
     app.processEvents()
 
 
+def test_figma_affine_image_transform_samples_normalized_source_uv(
+    tmp_path,
+) -> None:
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.painter_ui_image_renderer import draw_ui_image
+
+    source_path = tmp_path / "figma-crop.png"
+    source = QImage(100, 60, QImage.Format.Format_ARGB32)
+    source.fill(QColor("#DD3344"))
+    source.fill(QColor("#35B96B"))
+    painter = QPainter(source)
+    painter.fillRect(0, 0, 50, 60, QColor("#DD3344"))
+    painter.end()
+    assert source.save(str(source_path), "PNG")
+
+    right_half = QImage(100, 60, QImage.Format.Format_ARGB32)
+    right_half.fill(QColor("#101010"))
+    painter = QPainter(right_half)
+    assert draw_ui_image(
+        painter,
+        QRectF(0, 0, 100, 60),
+        {
+            "source_path": str(source_path),
+            "image_fit": "stretch",
+            # Figma REST transforms target-normalized positions into source
+            # UVs, so this selects source U=0.5..1.0.
+            "figma_image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
+        },
+    )
+    painter.end()
+    assert right_half.pixelColor(10, 30).name() == "#35b96b"
+    assert right_half.pixelColor(90, 30).name() == "#35b96b"
+
+    scaled_view = QImage(200, 120, QImage.Format.Format_ARGB32)
+    scaled_view.fill(QColor("#101010"))
+    painter = QPainter(scaled_view)
+    painter.scale(2.0, 2.0)
+    assert draw_ui_image(
+        painter,
+        QRectF(0, 0, 100, 60),
+        {
+            "source_path": str(source_path),
+            "image_fit": "stretch",
+            "figma_image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
+        },
+    )
+    painter.end()
+    assert scaled_view.pixelColor(20, 60).name() == "#35b96b"
+    assert scaled_view.pixelColor(180, 60).name() == "#35b96b"
+
+    left_half = QImage(100, 60, QImage.Format.Format_ARGB32)
+    left_half.fill(QColor("#101010"))
+    painter = QPainter(left_half)
+    assert draw_ui_image(
+        painter,
+        QRectF(0, 0, 100, 60),
+        {
+            "source_path": str(source_path),
+            "image_fit": "stretch",
+            "figma_image_transform": [[0.5, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        },
+    )
+    painter.end()
+    assert left_half.pixelColor(10, 30).name() == "#dd3344"
+    assert left_half.pixelColor(90, 30).name() == "#dd3344"
+
+
+def test_figma_image_rotation_is_applied_before_fit_planning(tmp_path) -> None:
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.painter_ui_image_renderer import draw_ui_image
+
+    source_path = tmp_path / "figma-rotation.png"
+    source = QImage(40, 20, QImage.Format.Format_ARGB32)
+    source.fill(QColor("#E13D52"))
+    painter = QPainter(source)
+    painter.fillRect(20, 0, 20, 20, QColor("#3BAA70"))
+    painter.end()
+    assert source.save(str(source_path), "PNG")
+
+    output = QImage(40, 40, QImage.Format.Format_ARGB32)
+    output.fill(QColor("#101010"))
+    painter = QPainter(output)
+    assert draw_ui_image(
+        painter,
+        QRectF(0, 0, 40, 40),
+        {
+            "source_path": str(source_path),
+            "image_fit": "stretch",
+            "image_rotation": 90,
+        },
+    )
+    painter.end()
+    assert output.pixelColor(20, 6).name() != output.pixelColor(20, 34).name()
+    assert {
+        output.pixelColor(20, 6).name(),
+        output.pixelColor(20, 34).name(),
+    } == {"#e13d52", "#3baa70"}
+
+
 def test_image_content_normalization_preserves_unrelated_metadata() -> None:
     from app.painter_ui_image_renderer import normalize_ui_image_content
 

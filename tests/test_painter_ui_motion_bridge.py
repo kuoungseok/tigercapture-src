@@ -87,6 +87,28 @@ def test_painter_ui_motion_mapping_uses_stable_object_ids() -> None:
     )
 
 
+def test_motion_auto_layout_excludes_hidden_children_from_flow() -> None:
+    from app.painter_ui_document import add_ui_object
+    from app.painter_ui_motion_bridge import resolved_ui_geometry
+
+    document, group, first, second = _auto_layout_document()
+    document["objects"][2]["visible"] = False
+    document, last = add_ui_object(
+        document,
+        kind="button",
+        name="Finish",
+        parent_id=group["id"],
+        width=60,
+        height=40,
+    )
+
+    geometry = resolved_ui_geometry(document)
+
+    assert geometry[first["id"]]["x"] == pytest.approx(30.0)
+    assert geometry[last["id"]]["x"] == pytest.approx(118.0)
+    assert geometry[second["id"]]["width"] == pytest.approx(120.0)
+
+
 def test_auto_layout_change_rebases_motion_without_losing_offset() -> None:
     from app.motion_designer.schema import Keyframe
     from app.painter_ui_document import update_ui_object

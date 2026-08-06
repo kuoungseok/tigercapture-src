@@ -37,6 +37,16 @@ def _gradient(*, kind: str = "linear", opacity: float = 0.5):
     }
 
 
+def _painter_layer(document: dict, object_id: str) -> dict:
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    return next(
+        row
+        for row in painter_ui_to_umg_document(document)["Layers"]
+        if row["Id"] == object_id
+    )
+
+
 def test_gradient_normalization_emits_provider_neutral_material_contract() -> None:
     material = normalize_umg_gradient(
         {
@@ -195,7 +205,8 @@ def test_painter_gradient_exports_valid_material_and_passes_preflight() -> None:
     layer = next(item for item in umg_document["Layers"] if item["Id"] == row["id"])
     payload = json.loads(layer["PayloadJson"])
 
-    assert umg_document["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION == 11
+    assert TIGER_UMG_SCHEMA_VERSION == 13
+    assert umg_document["SchemaVersion"] == 16
     assert layer["Disposition"] == "Material"
     assert layer["Kind"] == "Image"
     assert layer["BlockReasons"] == []
@@ -207,7 +218,7 @@ def test_painter_gradient_exports_valid_material_and_passes_preflight() -> None:
     ) == []
     assert payload["umg_mapping"] == "ui_material_custom_hlsl"
     assert preflight_painter_umg(document)["counts"] == {
-        "Native": 0,
+        "Native": 1,
         "Material": 1,
         "Baked": 0,
         "Blocked": 0,
@@ -225,7 +236,7 @@ def test_motion_and_painter_share_the_same_gradient_material_record() -> None:
     )
 
     gradient = _gradient(kind="radial", opacity=0.75)
-    painter_document, _row = add_ui_object(
+    painter_document, painter_row = add_ui_object(
         create_ui_document(320, 180),
         kind="rectangle",
         style={"fill_gradient": gradient},
@@ -239,7 +250,7 @@ def test_motion_and_painter_share_the_same_gradient_material_record() -> None:
         ),
     )
 
-    painter_layer = painter_ui_to_umg_document(painter_document)["Layers"][0]
+    painter_layer = _painter_layer(painter_document, painter_row["id"])
     motion_document = motion_composition_to_umg_document(
         MotionComposition(id="motion-material", layers=[motion_layer])
     )
@@ -249,7 +260,7 @@ def test_motion_and_painter_share_the_same_gradient_material_record() -> None:
     assert motion_export["Disposition"] == "Material"
     assert painter_layer["Material"] == motion_export["Material"]
     assert preflight_umg_document(motion_document) == {
-        "schema_version": 11,
+        "schema_version": 13,
         "ok": True,
         "counts": {
             "Native": 0,
@@ -261,20 +272,132 @@ def test_motion_and_painter_share_the_same_gradient_material_record() -> None:
     }
 
 
-def test_gradient_material_scope_remains_leaf_rectangles_only() -> None:
+@pytest.mark.parametrize("kind", ["frame", "group"])
+def test_painted_leaf_container_uses_existing_rectangle_material_path(
+    kind: str,
+) -> None:
     from app.painter_ui_document import add_ui_object, create_ui_document
-    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
-    document, _frame = add_ui_object(
+    document, container = add_ui_object(
+        create_ui_document(320, 180),
+        kind=kind,
+        style={"fill_gradient": _gradient()},
+    )
+    layer = _painter_layer(document, container["id"])
+    payload = json.loads(layer["PayloadJson"])
+
+    assert layer["Id"] == container["id"]
+    assert layer["Kind"] == "Image"
+    assert layer["Disposition"] == "Material"
+    assert layer["BlockReasons"] == []
+    assert layer["Material"]["Kind"] in {"LinearGradient", "RadialGradient"}
+    assert payload["source_kind"] == kind
+    assert payload["umg_leaf_rectangle_classification"] == {
+        "classification": "painted_leaf_container",
+        "original_source_kind": kind,
+        "effective_source_kind": "rectangle",
+        "effective_widget_kind": "Image",
+        "preserves_container_semantics": False,
+        "authored_panel_kind": "Overlay",
+        "authored_spacing_strategy": "Padding",
+        "authored_spacer_size_rule": "Auto",
+        "authored_spacer_fill_coefficient": 1.0,
+    }
+    assert payload["auto_layout"]["panel_classification"] == {
+        "policy": "auto",
+        "requested": "auto",
+        "effective": "Overlay",
+        "reasons": ["all_children_support_overlay_slots"],
+    }
+
+
+def test_painted_container_with_child_keeps_group_semantics() -> None:
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, frame = add_ui_object(
         create_ui_document(320, 180),
         kind="frame",
         style={"fill_gradient": _gradient()},
     )
-    layer = painter_ui_to_umg_document(document)["Layers"][0]
+    document, _child = add_ui_object(
+        document,
+        kind="text",
+        parent_id=frame["id"],
+        content={"text": "Child"},
+    )
+    layer = _painter_layer(document, frame["id"])
+    payload = json.loads(layer["PayloadJson"])
 
+    assert layer["Kind"] == "Group"
     assert layer["Disposition"] == "Blocked"
-    assert layer["Material"] == {}
     assert "gradient_material_requires_leaf_rectangle" in layer["BlockReasons"]
+    assert payload["umg_leaf_rectangle_classification"] == {}
+
+
+def test_saas_dashboard_leaf_frames_export_as_native_or_material_images() -> None:
+    from app.painter_ui_templates import instantiate_ui_template
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, _report = instantiate_ui_template("saas_dashboard")
+    target_names = {
+        "Metric Card 1",
+        "Metric Card 2",
+        "Metric Card 3",
+        "Chart Region",
+    }
+    for artboard in document["artboards"]:
+        artboard_id = str(artboard["id"])
+        source_rows = {
+            row["id"]: row
+            for row in document["objects"]
+            if row["artboard_id"] == artboard_id
+            and row["name"] in target_names
+        }
+        exported = painter_ui_to_umg_document(
+            document,
+            artboard_id=artboard_id,
+        )
+        layers = {row["Id"]: row for row in exported["Layers"]}
+
+        assert len(source_rows) == 4
+        for object_id, source in source_rows.items():
+            layer = layers[object_id]
+            payload = json.loads(layer["PayloadJson"])
+            assert layer["Name"] == source["name"]
+            assert layer["Kind"] == "Image"
+            assert layer["Disposition"] == "Material"
+            assert layer["BlockReasons"] == []
+            assert layer["Material"]["Kind"] == "RoundedCard"
+            assert layer["Material"]["Generator"] == (
+                TIGER_UMG_ROUNDED_CARD_GENERATOR
+            )
+            assert layer["Size"] == {
+                "X": pytest.approx(source["width"]),
+                "Y": pytest.approx(source["height"]),
+            }
+            assert layer["Position"] == {
+                "X": pytest.approx(source["x"] + source["width"] * 0.5),
+                "Y": pytest.approx(source["y"] + source["height"] * 0.5),
+            }
+            assert payload["source_kind"] == "frame"
+            assert payload["umg_leaf_rectangle_classification"][
+                "classification"
+            ] == "painted_leaf_container"
+            assert "advanced_appearance_requires_leaf_rectangle" not in (
+                payload["umg_block_reasons"]
+            )
+
+        navigation = next(
+            row
+            for row in exported["Layers"]
+            if row["Name"] == "Navigation"
+        )
+        assert navigation["Kind"] == "Image"
+        assert navigation["Disposition"] == "Native"
+        assert navigation["Material"] == {}
+        assert json.loads(navigation["PayloadJson"])[
+            "painter_conversion"
+        ] == "painted_leaf_container_to_slate_image"
 
 
 def test_rounded_card_normalization_fits_independent_radii_to_size() -> None:
@@ -299,6 +422,7 @@ def test_rounded_card_normalization_fits_independent_radii_to_size() -> None:
     assert material["FillKind"] == "Solid"
     assert material["FillColor"] == "#123456CC"
     assert material["Size"] == {"X": 100.0, "Y": 50.0}
+    assert material["SizeBinding"] == "FixedSize"
     assert material["CornerSmoothing"] == 1.0
     radii = material["CornerRadii"]
     assert radii["X"] + radii["W"] == pytest.approx(50.0)
@@ -312,6 +436,37 @@ def test_rounded_card_normalization_fits_independent_radii_to_size() -> None:
         material,
         document_schema_version=7,
     ) == ["ui_material_requires_schema_8"]
+
+
+def test_dynamic_rounded_card_size_binding_requires_schema_19() -> None:
+    material = normalize_umg_rounded_card(
+        {"fill": "#123456FF", "radius": 12},
+        size={"X": 100, "Y": 50},
+    )
+    material["SizeBinding"] = "WidgetGeometry"
+
+    assert validate_umg_material_record(
+        material,
+        layer_kind="Image",
+        document_schema_version=19,
+    ) == []
+    assert validate_umg_material_record(
+        material,
+        layer_kind="Image",
+        document_schema_version=18,
+    ) == ["ui_material_dynamic_size_binding_requires_schema_19"]
+    missing = copy.deepcopy(material)
+    missing.pop("SizeBinding")
+    assert validate_umg_material_record(
+        missing,
+        layer_kind="Image",
+        document_schema_version=18,
+    ) == []
+    assert validate_umg_material_record(
+        missing,
+        layer_kind="Image",
+        document_schema_version=19,
+    ) == ["ui_material_rounded_card_size_binding_invalid"]
 
 
 def test_rounded_card_validation_rejects_invalid_geometry_and_padding() -> None:
@@ -466,18 +621,6 @@ def test_rounded_card_gradient_stroke_shadows_and_padding_export() -> None:
             {"effects": [{"type": "background_blur", "radius": 8}]},
             "background_blur_requires_native_umg_widget",
         ),
-        (
-            "frame",
-            {
-                "corner_radii": {
-                    "top_left": 12,
-                    "top_right": 4,
-                    "bottom_right": 12,
-                    "bottom_left": 4,
-                }
-            },
-            "advanced_appearance_requires_leaf_rectangle",
-        ),
     ],
 )
 def test_rounded_card_preflight_explicitly_blocks_unsupported_appearance(
@@ -488,12 +631,12 @@ def test_rounded_card_preflight_explicitly_blocks_unsupported_appearance(
     from app.painter_ui_document import add_ui_object, create_ui_document
     from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
-    document, _row = add_ui_object(
+    document, row = add_ui_object(
         create_ui_document(320, 180),
         kind=kind,
         style=style,
     )
-    layer = painter_ui_to_umg_document(document)["Layers"][0]
+    layer = _painter_layer(document, row["id"])
 
     assert layer["Disposition"] == "Blocked"
     assert layer["Material"] == {}
@@ -529,6 +672,10 @@ def test_rounded_card_graph_preview_and_hlsl_use_fixed_v2_generator() -> None:
     assert "float BasePower = lerp(2.0, 4.0" in code
     assert "float2 SurfaceSize = max(CardSize.xy + float2(VisualPadding.x" in code
     assert "float2 PixelPosition = UV * SurfaceSize - VisualPadding.xy;" in code
+    assert "float RadiusScaleX = CardSize.x /" in code
+    assert "float RadiusScaleY = CardSize.y /" in code
+    assert "float4 EffectiveCornerRadii = CornerRadii *" in code
+    assert "? EffectiveCornerRadii.x : EffectiveCornerRadii.w" in code
     assert "CardPoint - DropShadowOffset.xy" in code
     assert "CardPoint - InnerShadowOffset.xy" in code
     assert "float OuterOffset = (Alignment < 0.5) ? 0.0" in code
@@ -575,7 +722,7 @@ def test_rounded_card_radial_hlsl_consumes_two_axis_basis() -> None:
     assert "length(CardUV - GradientStart.xy) / GradientRadius" not in code
 
 
-def test_uniform_radius_blocks_visible_non_rectangles_but_not_text() -> None:
+def test_uniform_radius_converts_leaf_frame_but_keeps_other_widget_rules() -> None:
     from app.painter_ui_document import add_ui_object, create_ui_document
     from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
@@ -585,25 +732,38 @@ def test_uniform_radius_blocks_visible_non_rectangles_but_not_text() -> None:
         document, row = add_ui_object(
             document,
             kind=kind,
-            style={"radius": 8},
+            style={
+                "radius": 8,
+                **({"fill": "#FFFFFFFF"} if kind == "frame" else {}),
+            },
         )
         ids[kind] = row["id"]
 
     layers = {
         row["Id"]: row for row in painter_ui_to_umg_document(document)["Layers"]
     }
-    for kind in ("frame", "button", "image"):
-        layer = layers[ids[kind]]
-        assert layer["Disposition"] == "Blocked"
-        assert layer["BlockReasons"] == [
-            "advanced_appearance_requires_leaf_rectangle"
-        ]
+    frame_layer = layers[ids["frame"]]
+    assert frame_layer["Kind"] == "Image"
+    assert frame_layer["Disposition"] == "Material"
+    assert frame_layer["Material"]["Kind"] == "RoundedCard"
+    image_layer = layers[ids["image"]]
+    assert image_layer["Disposition"] == "Blocked"
+    assert image_layer["BlockReasons"] == [
+        "advanced_appearance_requires_leaf_rectangle"
+    ]
+    assert layers[ids["button"]]["Disposition"] == "Native"
+    assert layers[ids["button"]]["ButtonStyle"]["Normal"]["CornerRadii"] == {
+        "X": 8.0,
+        "Y": 8.0,
+        "Z": 8.0,
+        "W": 8.0,
+    }
     assert layers[ids["text"]]["Disposition"] == "Native"
     assert layers[ids["text"]]["BlockReasons"] == []
 
 
 @pytest.mark.parametrize("mode", ["stretch", "scale", "custom"])
-def test_rounded_card_blocks_runtime_resizing_canvas_constraints(mode: str) -> None:
+def test_rounded_card_binds_runtime_resizing_canvas_constraints(mode: str) -> None:
     from app.painter_ui_document import (
         add_ui_object,
         create_ui_document,
@@ -631,20 +791,240 @@ def test_rounded_card_blocks_runtime_resizing_canvas_constraints(mode: str) -> N
         card["id"],
         {"constraints": constraints},
     )
-    layer = painter_ui_to_umg_document(document)["Layers"][0]
+    layer = _painter_layer(document, card["id"])
 
-    assert layer["Disposition"] == "Blocked"
-    assert layer["Material"] == {}
-    assert layer["BlockReasons"] == [
-        "rounded_card_runtime_resize_requires_dynamic_size_binding"
+    assert layer["Disposition"] == "Material"
+    assert layer["Material"]["Kind"] == "RoundedCard"
+    assert layer["Material"]["SizeBinding"] == "WidgetGeometry"
+    assert layer["BlockReasons"] == []
+
+
+def test_dynamic_rounded_card_document_uses_schema_19_and_fixed_fallback_blocks() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import (
+        _preflight_painter_umg_document,
+        painter_ui_to_umg_document,
+    )
+
+    document, card = add_ui_object(
+        create_ui_document(400, 300),
+        kind="rectangle",
+        style={"fill": "#245DA8FF", "radius": 12},
+    )
+    document, _ = update_ui_object(
+        document,
+        card["id"],
+        {"constraints": {"horizontal": "stretch", "vertical": "top"}},
+    )
+    exported = painter_ui_to_umg_document(document)
+    layer = next(row for row in exported["Layers"] if row["Id"] == card["id"])
+
+    assert exported["SchemaVersion"] == 19
+    assert _preflight_painter_umg_document(exported)["ok"] is True
+
+    fixed = copy.deepcopy(exported)
+    fixed_layer = next(row for row in fixed["Layers"] if row["Id"] == card["id"])
+    fixed_layer["Material"]["SizeBinding"] = "FixedSize"
+    preflight = _preflight_painter_umg_document(fixed)
+    assert preflight["ok"] is False
+    assert preflight["blockers"] == [
+        {
+            "object_id": card["id"],
+            "name": layer["Name"],
+            "reasons": [
+                "rounded_card_runtime_resize_requires_dynamic_size_binding"
+            ],
+        }
     ]
-    assert json.loads(layer["PayloadJson"])["umg_block_reasons"] == (
-        layer["BlockReasons"]
+
+
+def test_blocked_dynamic_card_does_not_promote_unrelated_fixed_materials() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, blocked = add_ui_object(
+        create_ui_document(400, 300),
+        kind="rectangle",
+        name="Masked dynamic card",
+        style={"fill": "#245DA8FF", "radius": 12},
+    )
+    document, _ = update_ui_object(
+        document,
+        blocked["id"],
+        {
+            "constraints": {"horizontal": "stretch", "vertical": "top"},
+            "mask": {"enabled": True, "target_ids": []},
+        },
+    )
+    document, fixed = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Fixed card",
+        style={"fill": "#123456FF", "radius": 8},
+    )
+
+    exported = painter_ui_to_umg_document(document)
+    layers = {row["Id"]: row for row in exported["Layers"]}
+
+    assert layers[blocked["id"]]["Disposition"] == "Blocked"
+    assert layers[blocked["id"]]["Material"] == {}
+    assert exported["SchemaVersion"] == 16
+    assert layers[fixed["id"]]["Disposition"] == "Material"
+    assert "SizeBinding" not in layers[fixed["id"]]["Material"]
+
+
+@pytest.mark.parametrize(
+    ("horizontal", "expected_binding", "expected_schema"),
+    [
+        ("stretch", "WidgetGeometry", 19),
+        ("left", None, 17),
+    ],
+)
+def test_overlay_rounded_card_binds_only_fill_allocations(
+    horizontal: str,
+    expected_binding: str | None,
+    expected_schema: int,
+) -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, frame = add_ui_object(
+        create_ui_document(500, 320),
+        kind="frame",
+        x=20,
+        y=20,
+        width=400,
+        height=240,
+    )
+    document, _ = update_ui_object(
+        document,
+        frame["id"],
+        {"layout": {"mode": "overlay"}},
+    )
+    document, card = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=frame["id"],
+        x=40,
+        y=50,
+        width=120,
+        height=60,
+        style={"fill": "#245DA8FF", "radius": 12},
+    )
+    document, _ = update_ui_object(
+        document,
+        card["id"],
+        {"constraints": {"horizontal": horizontal, "vertical": "top"}},
+    )
+
+    exported = painter_ui_to_umg_document(document)
+    layer = next(row for row in exported["Layers"] if row["Id"] == card["id"])
+
+    assert exported["SchemaVersion"] == expected_schema
+    assert layer["Disposition"] == "Material"
+    assert layer["BlockReasons"] == []
+    assert layer["Material"].get("SizeBinding") == expected_binding
+    assert layer["FlowSlot"]["HorizontalAlignment"] == (
+        "Fill" if horizontal == "stretch" else "Left"
     )
 
 
-@pytest.mark.parametrize("mode", ["horizontal", "grid"])
-def test_rounded_card_blocks_runtime_resizing_flow_or_grid_parent(mode: str) -> None:
+def test_synthetic_named_slot_overlay_ignores_stale_canvas_anchors() -> None:
+    from app.painter_ui_umg_adapter import _umg_layer_requires_runtime_size
+
+    layer = {
+        "Id": "slot-root",
+        "ParentId": "component-instance",
+        "CanvasSlot": {
+            "AnchorMinimum": {"X": 0.0, "Y": 0.0},
+            "AnchorMaximum": {"X": 1.0, "Y": 1.0},
+        },
+        "FlowSlot": {
+            "HorizontalAlignment": "Left",
+            "VerticalAlignment": "Top",
+            "SizeRule": "Auto",
+        },
+    }
+    synthetic = {"slot-root"}
+
+    assert _umg_layer_requires_runtime_size(
+        layer,
+        {"component-instance": "Canvas"},
+        synthetic_overlay_root_ids=synthetic,
+    ) is False
+    layer["FlowSlot"]["HorizontalAlignment"] = "Fill"
+    assert _umg_layer_requires_runtime_size(
+        layer,
+        {"component-instance": "Canvas"},
+        synthetic_overlay_root_ids=synthetic,
+    ) is True
+
+
+def test_schema19_mixes_legacy_gradient_and_explicit_dynamic_rounded_card() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import (
+        _preflight_painter_umg_document,
+        painter_ui_to_umg_document,
+    )
+
+    document, gradient = add_ui_object(
+        create_ui_document(500, 320),
+        kind="rectangle",
+        name="Legacy Gradient",
+        style={"fill_gradient": _gradient()},
+    )
+    document, card = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Dynamic Card",
+        style={"fill": "#245DA8FF", "radius": 12},
+    )
+    document, _ = update_ui_object(
+        document,
+        card["id"],
+        {"constraints": {"horizontal": "stretch", "vertical": "top"}},
+    )
+    exported = painter_ui_to_umg_document(document)
+    layers = {row["Id"]: row for row in exported["Layers"]}
+
+    assert exported["SchemaVersion"] == 19
+    assert layers[gradient["id"]]["Material"]["Schema"] == (
+        TIGER_UMG_UI_MATERIAL_SCHEMA
+    )
+    assert "SizeBinding" not in layers[gradient["id"]]["Material"]
+    assert layers[card["id"]]["Material"]["SizeBinding"] == "WidgetGeometry"
+    assert _preflight_painter_umg_document(exported)["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "child_layout", "expected_binding"),
+    [
+        ("horizontal", {}, None),
+        ("horizontal", {"width_sizing": "fill"}, "WidgetGeometry"),
+        ("grid", {}, "WidgetGeometry"),
+    ],
+)
+def test_rounded_card_binds_only_actual_runtime_resizing_flow_allocations(
+    mode: str,
+    child_layout: dict,
+    expected_binding: str | None,
+) -> None:
     from app.painter_ui_document import (
         add_ui_object,
         create_ui_document,
@@ -676,14 +1056,19 @@ def test_rounded_card_blocks_runtime_resizing_flow_or_grid_parent(mode: str) -> 
         parent_id=frame["id"],
         style={"fill": "#245DA8FF", "radius": 12},
     )
-    layers = {
-        row["Id"]: row for row in painter_ui_to_umg_document(document)["Layers"]
-    }
+    if child_layout:
+        document, _ = update_ui_object(
+            document,
+            card["id"],
+            {"layout": child_layout},
+        )
+    exported = painter_ui_to_umg_document(document)
+    layers = {row["Id"]: row for row in exported["Layers"]}
 
-    assert layers[card["id"]]["Disposition"] == "Blocked"
-    assert layers[card["id"]]["BlockReasons"] == [
-        "rounded_card_runtime_resize_requires_dynamic_size_binding"
-    ]
+    assert layers[card["id"]]["Disposition"] == "Material"
+    assert layers[card["id"]]["Material"].get("SizeBinding") == expected_binding
+    assert layers[card["id"]]["BlockReasons"] == []
+    assert exported["SchemaVersion"] == (19 if expected_binding else 16)
 
 
 def test_legacy_gradient_can_still_use_runtime_resizing_canvas_constraints() -> None:
@@ -704,7 +1089,7 @@ def test_legacy_gradient_can_still_use_runtime_resizing_canvas_constraints() -> 
         gradient["id"],
         {"constraints": {"horizontal": "stretch", "vertical": "top"}},
     )
-    layer = painter_ui_to_umg_document(document)["Layers"][0]
+    layer = _painter_layer(document, gradient["id"])
 
     assert layer["Disposition"] == "Material"
     assert layer["Material"]["Schema"] == TIGER_UMG_UI_MATERIAL_SCHEMA

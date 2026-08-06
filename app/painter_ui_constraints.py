@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF
 
+from app.painter_ui_json_copy import json_deepcopy
+
 
 _HORIZONTAL = {"left", "center", "right", "stretch", "scale", "custom"}
 _VERTICAL = {"top", "center", "bottom", "stretch", "scale", "custom"}
@@ -40,7 +42,7 @@ def normalize_ui_constraints(
     width: float = 160.0,
     height: float = 64.0,
 ) -> dict[str, Any]:
-    source = copy.deepcopy(dict(value or {}))
+    source = json_deepcopy(dict(value or {}))
     horizontal = str(source.get("horizontal") or "left").strip().casefold()
     vertical = str(source.get("vertical") or "top").strip().casefold()
     source["horizontal"] = horizontal if horizontal in _HORIZONTAL else "left"
@@ -183,6 +185,13 @@ def constraint_parent_geometry(
     row: Mapping[str, Any],
     geometry: Mapping[str, Mapping[str, float]] | None = None,
 ) -> dict[str, float]:
+    """Return a row's parent rect.
+
+    This public helper intentionally keeps its long-standing mapping-only API.
+    Bulk resolution builds the two ID indexes once and uses the indexed helper
+    below; rebuilding them here would make a single lookup slower and would not
+    help callers that only need one parent.
+    """
     parent_id = str(row.get("parent_id") or "")
     if parent_id:
         parent = next(
@@ -198,6 +207,29 @@ def constraint_parent_geometry(
         for item in document["artboards"]
         if item["id"] == row["artboard_id"]
     )
+    return {
+        "x": 0.0,
+        "y": 0.0,
+        "width": float(artboard["width"]),
+        "height": float(artboard["height"]),
+    }
+
+
+def _indexed_constraint_parent_geometry(
+    row: Mapping[str, Any],
+    geometry: Mapping[str, Mapping[str, float]],
+    objects_by_id: Mapping[str, Mapping[str, Any]],
+    artboards_by_id: Mapping[str, Mapping[str, Any]],
+) -> dict[str, float]:
+    """Indexed equivalent used by document-wide constraint resolution."""
+    parent_id = str(row.get("parent_id") or "")
+    if parent_id:
+        parent_geometry = geometry.get(parent_id, objects_by_id[parent_id])
+        return {
+            key: float(parent_geometry[key])
+            for key in ("x", "y", "width", "height")
+        }
+    artboard = artboards_by_id[str(row["artboard_id"])]
     return {
         "x": 0.0,
         "y": 0.0,
@@ -286,6 +318,9 @@ def resolve_ui_constraints(
     base_geometry: Mapping[str, Mapping[str, float]] | None = None,
 ) -> dict[str, dict[str, float]]:
     objects = {str(row["id"]): row for row in document["objects"]}
+    artboards = {
+        str(row["id"]): row for row in document["artboards"]
+    }
     geometry = {
         object_id: {
             key: float((base_geometry or {}).get(object_id, row)[key])
@@ -302,7 +337,12 @@ def resolve_ui_constraints(
         parent_id = str(row.get("parent_id") or "")
         if parent_id in objects:
             resolve(parent_id, (*stack, object_id))
-        parent = constraint_parent_geometry(document, row, geometry)
+        parent = _indexed_constraint_parent_geometry(
+            row,
+            geometry,
+            objects,
+            artboards,
+        )
         rect = geometry[object_id]
         constraints = normalize_ui_constraints(
             row.get("constraints"),

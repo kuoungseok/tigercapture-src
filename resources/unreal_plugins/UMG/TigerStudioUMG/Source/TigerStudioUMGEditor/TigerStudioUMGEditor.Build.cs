@@ -22,6 +22,7 @@ public class TigerStudioUMGEditor : ModuleRules
                 "AssetTools",
                 "BlueprintGraph",
                 "EditorSubsystem",
+                "ImageWrapper",
                 "Json",
                 "JsonUtilities",
                 "Kismet",
@@ -30,11 +31,14 @@ public class TigerStudioUMGEditor : ModuleRules
                 "MovieScene",
                 "MovieSceneTracks",
                 "Projects",
+                "RenderCore",
                 "Slate",
                 "SlateCore",
                 "UMG",
                 "UMGEditor",
                 "UnrealEd"
             });
+
+        AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
     }
 }

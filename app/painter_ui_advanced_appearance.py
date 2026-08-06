@@ -11,6 +11,7 @@ from app.painter_ui_document import (
     normalize_ui_document,
     update_ui_object,
 )
+from app.painter_ui_json_copy import json_deepcopy
 
 
 UI_OBJECT_BLEND_MODES = set(UI_EFFECT_BLEND_MODES) | {
@@ -28,6 +29,7 @@ UI_PAINT_TYPES = {
     "shader",
 }
 UI_STROKE_ALIGNS = {"inside", "center", "outside"}
+UI_INDIVIDUAL_STROKE_SIDES = ("top", "right", "bottom", "left")
 
 
 def _number(value: object, default: float = 0.0) -> float:
@@ -85,9 +87,9 @@ def normalize_ui_paint(value: object, *, stroke: bool = False) -> dict[str, Any]
         result["original_width"] = max(0.0, _number(row.get("original_width"), 0.0))
         result["original_height"] = max(0.0, _number(row.get("original_height"), 0.0))
         if isinstance(row.get("crop"), (Mapping, list, tuple)):
-            result["crop"] = copy.deepcopy(row["crop"])
+            result["crop"] = json_deepcopy(row["crop"])
         if isinstance(row.get("figma_image_transform"), list):
-            result["figma_image_transform"] = copy.deepcopy(
+            result["figma_image_transform"] = json_deepcopy(
                 row["figma_image_transform"]
             )
         if paint_type == "image":
@@ -108,7 +110,7 @@ def normalize_ui_paint(value: object, *, stroke: bool = False) -> dict[str, Any]
     elif paint_type == "shader":
         result["shader_preset"] = str(row.get("shader_preset") or "mesh_gradient").strip().casefold()
         parameters = row.get("shader_parameters") if isinstance(row.get("shader_parameters"), Mapping) else {}
-        result["shader_parameters"] = copy.deepcopy(dict(parameters))
+        result["shader_parameters"] = json_deepcopy(dict(parameters))
     if stroke:
         result["width"] = max(0.0, _number(row.get("width"), 1.0))
         align = str(row.get("align") or "center").strip().casefold()
@@ -134,8 +136,24 @@ def normalize_ui_corner_radii(value: object, fallback: float = 0.0) -> dict[str,
     }
 
 
+def normalize_ui_individual_stroke_weights(value: object) -> dict[str, float]:
+    """Normalize Figma's per-edge rectangle stroke widths.
+
+    An empty mapping means that the object uses the legacy uniform
+    ``stroke_width``.  Keeping this as an explicit style field prevents a
+    mixed border from silently collapsing to Figma's fallback strokeWeight.
+    """
+
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        side: max(0.0, _number(value.get(side)))
+        for side in UI_INDIVIDUAL_STROKE_SIDES
+    }
+
+
 def normalize_ui_advanced_style(value: object) -> dict[str, Any]:
-    style = copy.deepcopy(dict(value)) if isinstance(value, Mapping) else {}
+    style = json_deepcopy(dict(value)) if isinstance(value, Mapping) else {}
     from app.painter_ui_typography import normalize_ui_font_axes
 
     axes = normalize_ui_font_axes(style.get("font_axes"))
@@ -175,6 +193,35 @@ def normalize_ui_advanced_style(value: object) -> dict[str, Any]:
     )
     align = str(style.get("stroke_align") or "center").strip().casefold()
     style["stroke_align"] = align if align in UI_STROKE_ALIGNS else "center"
+    if "stroke_cap" in style:
+        style["stroke_cap"] = str(
+            style.get("stroke_cap") or "none"
+        ).strip().casefold()
+    if "stroke_join" in style:
+        style["stroke_join"] = str(
+            style.get("stroke_join") or "miter"
+        ).strip().casefold()
+    if "stroke_miter_limit" in style:
+        style["stroke_miter_limit"] = max(
+            0.0,
+            _number(style.get("stroke_miter_limit"), 4.0),
+        )
+    if "stroke_dash" in style:
+        style["stroke_dash"] = [
+            max(0.0, _number(value))
+            for value in (
+                style.get("stroke_dash")
+                if isinstance(style.get("stroke_dash"), list)
+                else []
+            )
+        ]
+    individual_stroke_weights = normalize_ui_individual_stroke_weights(
+        style.get("individual_stroke_weights")
+    )
+    if individual_stroke_weights:
+        style["individual_stroke_weights"] = individual_stroke_weights
+    else:
+        style.pop("individual_stroke_weights", None)
     return style
 
 
@@ -310,6 +357,7 @@ __all__ = [
     "mutate_ui_paint",
     "normalize_ui_advanced_style",
     "normalize_ui_corner_radii",
+    "normalize_ui_individual_stroke_weights",
     "normalize_ui_paint",
     "normalize_ui_paints",
     "set_ui_corner_geometry",

@@ -1,0 +1,2593 @@
+{
+  "schema": "tigercapture.painter.figma_document_corpus.v2",
+  "description": "Audited release gate: 20 fast fixtures, 2 standalone geometry fixtures, and 78 disjoint selectors from two pinned CC BY Figma Community REST archives.",
+  "storage_root": "external/assets/figma/compat_corpus",
+  "includes": [
+    {
+      "path": "manifest.json"
+    },
+    {
+      "path": "nightly_manifest.json",
+      "case_ids": [
+        "grida.stroke.file",
+        "grida.vector-frame.nodes"
+      ]
+    }
+  ],
+  "source_artifacts": {
+    "grida.auto-layout": {
+      "source": {
+        "repository": "gridaco/grida",
+        "commit": "5909675470e89f793becbd6d556c56485bcef7f9",
+        "path": "fixtures/test-figma/community/784448220678228461-figma-auto-layout-playground.zip",
+        "url": "https://raw.githubusercontent.com/gridaco/grida/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-figma/community/784448220678228461-figma-auto-layout-playground.zip",
+        "html_url": "https://github.com/gridaco/grida/blob/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-figma/community/784448220678228461-figma-auto-layout-playground.zip",
+        "license": "CC-BY-4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "license_evidence_url": "https://github.com/gridaco/grida/blob/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-fig/community/README.md",
+        "license_scope": "Figma Community design fixture and its REST archive",
+        "creator": "Figma",
+        "original_url": "https://www.figma.com/community/file/784448220678228461",
+        "modifications": "Grida added export settings to each top-level frame; TigerCapture only extracts the supplied REST document and images for local QA.",
+        "attribution": "Auto Layout Playground by Figma, CC BY 4.0; REST archive distributed by Grida with top-level export settings added."
+      },
+      "artifact": {
+        "relative_path": "nightly/grida.auto-layout.archive/source.zip",
+        "bytes": 49545287,
+        "sha256": "cf114bed3e45ad14564cc2bb34c7ef39612c3836ab007ace3455f17b4d43f2f8"
+      }
+    },
+    "grida.radix-icons": {
+      "source": {
+        "repository": "gridaco/grida",
+        "commit": "5909675470e89f793becbd6d556c56485bcef7f9",
+        "path": "fixtures/test-figma/community/1510053249065427020-workos-radix-icons.zip",
+        "url": "https://raw.githubusercontent.com/gridaco/grida/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-figma/community/1510053249065427020-workos-radix-icons.zip",
+        "html_url": "https://github.com/gridaco/grida/blob/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-figma/community/1510053249065427020-workos-radix-icons.zip",
+        "license": "CC-BY-4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "license_evidence_url": "https://github.com/gridaco/grida/blob/5909675470e89f793becbd6d556c56485bcef7f9/fixtures/test-fig/community/README.md",
+        "license_scope": "Figma Community design fixture and its REST archive",
+        "creator": "WorkOS",
+        "original_url": "https://www.figma.com/community/file/1510053249065427020",
+        "modifications": "Grida added overrides for each icon component; TigerCapture only extracts the supplied REST document and images for local QA.",
+        "attribution": "Radix Icons by WorkOS, CC BY 4.0; REST archive distributed by Grida with icon component overrides added."
+      },
+      "artifact": {
+        "relative_path": "nightly/grida.radix-icons.archive/source.zip",
+        "bytes": 1365887,
+        "sha256": "c017920d4d78ee9d2f02f57707230cbf04b1e93502540f7b07a2b456b8eeeac6"
+      }
+    }
+  },
+  "coverage": {
+    "expected_case_count": 100,
+    "expected_selector_case_count": 78,
+    "min_selector_original_sources": 2,
+    "min_selector_nodes": 7578,
+    "max_missing_image_count": 0,
+    "selector_min_source_feature_cases": {
+      "image_fill": 48,
+      "vector_geometry_complete": 74,
+      "auto_layout": 78,
+      "component": 12,
+      "component_set": 2,
+      "instance": 50,
+      "text": 68,
+      "text_ranges": 46,
+      "mask": 11,
+      "effects": 41,
+      "boolean_operation": 41,
+      "variable_bindings": 57,
+      "figma_variable_binding_alias": 57
+    }
+  },
+  "cases": [
+    {
+      "id": "release.auto.2450-2169",
+      "title": "Components (2450:2169)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2450:2169",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2450:2169"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Components",
+        "subtree_sha256": "e8d7acddf07310d9565c7113455c230c3678929d20f0f36cb56d4321a7c5b74f",
+        "semantic_sha256": "d74de3637fbfd08d26bc8ad1a3b087b139cf828833e87a4f157483b5da9a2e89",
+        "observed_nodes": 75,
+        "observed_json_bytes": 230065,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 74,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10035",
+      "title": "Help center documentation (2411:10035)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10035",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10035"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Help center documentation",
+        "subtree_sha256": "cc9cc38fb546280dbe55222637c17b196186797b137782ca63197db2a01fd082",
+        "semantic_sha256": "94761af3839fd0a244157124001688517c8002e25c6f2c1337987ba7c527c88e",
+        "observed_nodes": 114,
+        "observed_json_bytes": 155956,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 113,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10150",
+      "title": "Auto Layout resources (2411:10150)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10150",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10150"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout resources",
+        "subtree_sha256": "298cf95a06574eb3e6d023f09f4b7e24c99344a5a4b05b77d537e9615456d14b",
+        "semantic_sha256": "5435c5db74eba1becbeedb296b256d3c915eb500fd0c79bcb36572d0dae39dbb",
+        "observed_nodes": 91,
+        "observed_json_bytes": 126514,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 90,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10235",
+      "title": "Reorder the stack (2411:10235)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10235",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10235"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Reorder the stack",
+        "subtree_sha256": "8d613be040e02523be23ee42b717ef7cdef43189d24f3990fa2bf8ffe9b8d5f9",
+        "semantic_sha256": "19dca405241eb6a20f1352d69ba21d3a391cc283507c6cad907e37600207caf5",
+        "observed_nodes": 70,
+        "observed_json_bytes": 112510,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 69,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10277",
+      "title": "Resize a card, and have its contents expand (2411:10277)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10277",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10277"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Resize a card, and have its contents expand",
+        "subtree_sha256": "f40109abca79c52debd33cf73dfff63b459bb6c0105ee11d15c281f7afdbab18",
+        "semantic_sha256": "329c97aec03d06cd568ef583d5f11250d392151bd0dc91e44e7114387ea6bc9a",
+        "observed_nodes": 38,
+        "observed_json_bytes": 47042,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 37,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10315",
+      "title": "Including stroke values (2411:10315)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10315",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10315"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Including stroke values",
+        "subtree_sha256": "ea0bde5426739dbe705b1149ae37dfde4e144f452ef33574b1130036c1b788d8",
+        "semantic_sha256": "fa3064ca847c2758b4a51b6a7a3e23724f39308d2787582363afbd4a5b76735f",
+        "observed_nodes": 81,
+        "observed_json_bytes": 121372,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 80,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10372",
+      "title": "Canvas stacking (2411:10372)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10372",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10372"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Canvas stacking",
+        "subtree_sha256": "3825bebf650f9f2db0227e306b6b5986d67e185f40704b41f26eab346de22ef4",
+        "semantic_sha256": "a3b305d9c272339160b21dc029161f28c2076171aaa5f6b02088fbbdd80647f4",
+        "observed_nodes": 57,
+        "observed_json_bytes": 98196,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 56,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10413",
+      "title": "Text truncation (2411:10413)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10413",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10413"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Text truncation",
+        "subtree_sha256": "8d6623d551a72aee7c1054acc509b8eb4d43aa936b38df43aa9a76457c844d1d",
+        "semantic_sha256": "3e711776d4b3018ac6b12d2bd1c82b35c81d74d41bba91089acaef22ecf6a20d",
+        "observed_nodes": 48,
+        "observed_json_bytes": 67030,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 47,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10451",
+      "title": "Text baseline alignment (2411:10451)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10451",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10451"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Text baseline alignment",
+        "subtree_sha256": "8cdf57bd507e4b2e8c89c79be4187a942f913e31e3cd058cd5a6c92b185f1049",
+        "semantic_sha256": "0dffe65eae0c422ff05b0be9b98b55dd2250eb7e358a9acb84bef88a73030e26",
+        "observed_nodes": 32,
+        "observed_json_bytes": 83994,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 31,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10483",
+      "title": "Additional settings (2411:10483)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10483",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10483"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Additional settings",
+        "subtree_sha256": "4276f7e5d669f840503ea38ac630b0d56b8af05e1a41f7ebe92d790fc271d590",
+        "semantic_sha256": "6f9eb061e8c18fb40fecb140b917b3393adbd719df07de3524183a3238441d57",
+        "observed_nodes": 44,
+        "observed_json_bytes": 96338,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 43,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10506",
+      "title": "Adjust placement of absolute items (2411:10506)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10506",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10506"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Adjust placement of absolute items",
+        "subtree_sha256": "7a5d69e71a4a61c137f1f2933b7d781e93ea153d5319904fa296f179c3b989f4",
+        "semantic_sha256": "abceb0c06a366ed795f701cceaf9a0aa09806690c8fd1ede590902442eb76a6f",
+        "observed_nodes": 74,
+        "observed_json_bytes": 138460,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 73,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10559",
+      "title": "Toggle absolute position (2411:10559)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10559",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10559"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Toggle absolute position",
+        "subtree_sha256": "0da4cdec4eac967ea68b01606053e590f823a552f2f47ac420e93cc5fabb8ca0",
+        "semantic_sha256": "cf02137f7e89adc653be97aae3f34b6e86320ef72fdb9c6bfec118f5b33d63b4",
+        "observed_nodes": 53,
+        "observed_json_bytes": 83734,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 52,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10606",
+      "title": "Ignoring Auto Layout? Use constraints (2411:10606)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10606",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10606"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Ignoring Auto Layout? Use constraints",
+        "subtree_sha256": "ecda624a2ee59d723e4b3fd96fad2c8e1acfda2917dc8a390f0690793618b753",
+        "semantic_sha256": "51248ff0f67fb0295d188205071f32df603a1ff84bef4599ad7ddff00d05b676",
+        "observed_nodes": 63,
+        "observed_json_bytes": 95909,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 62,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10651",
+      "title": "Identify items that ignore Auto Layout (2411:10651)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10651",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10651"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Identify items that ignore Auto Layout",
+        "subtree_sha256": "e92fd3636dada7f32c6b27567687035f79d893b6f45651b6e24ca6eaa8321a82",
+        "semantic_sha256": "1e251b9c8f8c900b2e187f7ab490e66ee652515de8c1020ce3e4456da38b48fa",
+        "observed_nodes": 34,
+        "observed_json_bytes": 56141,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 33,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10673",
+      "title": "Ignoring Auto Layout (2411:10673)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10673",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10673"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Ignoring Auto Layout",
+        "subtree_sha256": "5b72f49e1a0ed66974ec751c2fda424eb42721ed34bc9650bf9a4fd5fc435fde",
+        "semantic_sha256": "a0f1b7c554d202b653cad9e7e53dd40aca63bec19e4d9b17efa6af90aa769fe4",
+        "observed_nodes": 76,
+        "observed_json_bytes": 108551,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 75,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10734",
+      "title": "Absolute positioning (2411:10734)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10734",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10734"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Absolute positioning",
+        "subtree_sha256": "deab8b876ca5414fc7f27f6f7f1c550453808e491d66f2f3ab61b8276f570d29",
+        "semantic_sha256": "ceb81337220cae241e907d8fa90a0ac87a21bdff06b462b2a7b539ec12e43e9e",
+        "observed_nodes": 33,
+        "observed_json_bytes": 47260,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 32,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10756",
+      "title": "Apply negative spacing (2411:10756)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10756",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10756"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Apply negative spacing",
+        "subtree_sha256": "bfc070b3b65150e6befc3ae20b91c3131389201d946ca9e9148e4bad24faaf1b",
+        "semantic_sha256": "9cf6e51746d4b742b0ff9864bc163a0fce8efcef3282465609bf49ab7361db59",
+        "observed_nodes": 66,
+        "observed_json_bytes": 86985,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 65,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10795",
+      "title": "Adjust spacing and padding on canvas (2411:10795)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10795",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10795"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Adjust spacing and padding on canvas",
+        "subtree_sha256": "76cd475469768bee6cbd13d69870cd992cd5831d3af8b07aaaf380f7db380aef",
+        "semantic_sha256": "8fa8f1a92dc5ae09e11750d415859f203c0bc488a31716a56118065037baa5c4",
+        "observed_nodes": 56,
+        "observed_json_bytes": 68047,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 55,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10851",
+      "title": "Change spacing modes and alignment (2411:10851)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10851",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10851"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Change spacing modes and alignment",
+        "subtree_sha256": "baf810eb7aeb329e0b2cf43f9fe268ad6187c205b0a96f33b8566360c34dad43",
+        "semantic_sha256": "cae0c2a299e1fc6f216d051b85023f8c6598a1f9a0d1a556941cb16baf58c2ba",
+        "observed_nodes": 56,
+        "observed_json_bytes": 81354,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 55,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10907",
+      "title": "Adjust direction (2411:10907)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10907",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10907"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Adjust direction",
+        "subtree_sha256": "5e7a878a7a9cdd87877c4d5b023ca3bc8611e8534d83e43a557862d6ff03d7cc",
+        "semantic_sha256": "665646a1f3f4c3ce066c4ab37787101db2e72afe8baeb7268d889e3fdf6de7ef",
+        "observed_nodes": 44,
+        "observed_json_bytes": 61446,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 43,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10951",
+      "title": "Auto spacing (2411:10951)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10951",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10951"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto spacing",
+        "subtree_sha256": "43b421fc33a2fceb4b948aecbe78730c3d80a5005bd26628ee5b7a6e7f452e3c",
+        "semantic_sha256": "2f432e7f8e1d88b79ebc86aa0c043adc24a8b2e7d66ba85bba784d82d33392d7",
+        "observed_nodes": 70,
+        "observed_json_bytes": 102869,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 69,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-10995",
+      "title": "(Gap) Spacing (2411:10995)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:10995",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:10995"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "(Gap) Spacing",
+        "subtree_sha256": "6272c4f407faeba88b0d8c701f5d20cc57726ac3aad27ebb83e9cfa9eb9c8ed0",
+        "semantic_sha256": "e86908001438fdd6f08d9ab4a3f2ee4cbf58a083cd10111e574c94739424df03",
+        "observed_nodes": 84,
+        "observed_json_bytes": 165012,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 83,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11725",
+      "title": "Alignment (2411:11725)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11725",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11725"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Alignment",
+        "subtree_sha256": "c6fac425596f491b69300455e059b0bd81bc36f6982468c94502ef5686d8858a",
+        "semantic_sha256": "10cd9803b2eb3fa04b953245754f66c0163f4300d3b24a2cd5e5d9411cd99ec7",
+        "observed_nodes": 54,
+        "observed_json_bytes": 77776,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 53,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11765",
+      "title": "Direction (2411:11765)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11765",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11765"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Direction",
+        "subtree_sha256": "ddea3b5103fd88dec741dcc0fd5a98e7c839b73aff52a19aa0f6b9646271412f",
+        "semantic_sha256": "1123eb5fdfd04ea78348fcf951f3ee4f1403d181c729343f55fedb6cb8964b87",
+        "observed_nodes": 90,
+        "observed_json_bytes": 151858,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 89,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11823",
+      "title": "Direction, spacing, and padding (2411:11823)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11823",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11823"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Direction, spacing, and padding",
+        "subtree_sha256": "a9d341ac2186828d6a8bb92fcda1a574f9ccb6e6f67fefa54448ea6c263cddbc",
+        "semantic_sha256": "65e4462fa663fd202cf853b28fe53be795a903585ce71990e56758ee9625da48",
+        "observed_nodes": 44,
+        "observed_json_bytes": 105513,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 43,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11847",
+      "title": "Make a card expand to fit its content (2411:11847)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11847",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11847"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Make a card expand to fit its content",
+        "subtree_sha256": "eff2e45716edf1722dcb62e01497d46ee65bd256d86f3bb07602632f5f466574",
+        "semantic_sha256": "c56f1403c585a5fc3cf31f27ede599a0cb44203bf219c283b6e103cffe6a2b45",
+        "observed_nodes": 55,
+        "observed_json_bytes": 67335,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 54,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11898",
+      "title": "Maximum Width (2411:11898)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11898",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11898"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Maximum Width",
+        "subtree_sha256": "19a2e4595ccfee2032734480d9db75fafa30d681fb243e08f492d7d9dcde5b7e",
+        "semantic_sha256": "e0b62a7159c15a2e6f1b841ea5592012fa80c69d0f3672f61e420a64066a7576",
+        "observed_nodes": 38,
+        "observed_json_bytes": 48079,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 37,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11936",
+      "title": "Minimum Width (2411:11936)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11936",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11936"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Minimum Width",
+        "subtree_sha256": "b82cc98d890a1cf89e2434478653a3da3ab6b6ac412db59449e36d6dd21083be",
+        "semantic_sha256": "f6b0d288d918e3ecb4c6d0a3d9ce5779418c16a956db5c8238959626e4fc1484",
+        "observed_nodes": 40,
+        "observed_json_bytes": 50774,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 39,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-11976",
+      "title": "Resize nested items (2411:11976)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:11976",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:11976"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Resize nested items",
+        "subtree_sha256": "5b1277d842b753395132b6e8e5d636a1383ba128bb593c976d0d68a5ab19d341",
+        "semantic_sha256": "6fee39aadcd0ba27fce1ca99c0d0a91f52aa6f191133d8a66c44c21ed762273d",
+        "observed_nodes": 44,
+        "observed_json_bytes": 53484,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 43,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12020",
+      "title": "Constraints for resizing (2411:12020)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12020",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12020"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Constraints for resizing",
+        "subtree_sha256": "0d140a3a4e75c3c3c20050eebb97432c7b5359e485c2cf8c92800dc400f0cfa7",
+        "semantic_sha256": "5f55087a3de7a4fc478a4fd1a35166cd52e073d1a5bfcffe2efd08129b9dc732",
+        "observed_nodes": 52,
+        "observed_json_bytes": 74472,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 51,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12067",
+      "title": "Maximum Width (2411:12067)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12067",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12067"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Maximum Width",
+        "subtree_sha256": "e37bde7cdf26e29bc76b2adcd2ed3b79cdd01451d9919bcc9cafbd5dedbdf257",
+        "semantic_sha256": "934980215d6e8e93ae6c0d85dc8b66cc0e825414e4a83171e4795d2d0e113639",
+        "observed_nodes": 54,
+        "observed_json_bytes": 77541,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 53,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12119",
+      "title": "Minimum Width (2411:12119)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12119",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12119"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Minimum Width",
+        "subtree_sha256": "2653234f13b96a987775466cae59a9dc9a1e0c02dbb35551f7b66eaec6ec7593",
+        "semantic_sha256": "c9e2babfbda60c0a3f6b03f7067ba29e0b78289d97921852f99eaee55fbec7d6",
+        "observed_nodes": 53,
+        "observed_json_bytes": 75786,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 52,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12170",
+      "title": "Fill container (2411:12170)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12170",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12170"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Fill container",
+        "subtree_sha256": "1ac01f680458c4433bddd1a5bc81c05ee92239bc48e94f6f1f7c842fed7aa118",
+        "semantic_sha256": "9baf02c93c55bb8ede4c67976826fc92f783f90b512cb3221225fa35ed150f11",
+        "observed_nodes": 55,
+        "observed_json_bytes": 80854,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 54,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12213",
+      "title": "Fixed sizes (2411:12213)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12213",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12213"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Fixed sizes",
+        "subtree_sha256": "c2fbc45aa8cadee02d14f3bf8a30cab9ebf73bed528719cc212e1dd92c21b785",
+        "semantic_sha256": "d1f8637bd9b20804cf9d82c6a971318fa9c73fd9da8ceb6af6964ed15a035051",
+        "observed_nodes": 59,
+        "observed_json_bytes": 85286,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 58,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12258",
+      "title": "Hug contents (2411:12258)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12258",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12258"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Hug contents",
+        "subtree_sha256": "26465584372018edb854b20273c2101beb9abc73ed5433a0f742fccc476b5f6f",
+        "semantic_sha256": "e878147aa40cd321fe3bf8a1f25fea2f62ff76726654629ca53490ce072b740e",
+        "observed_nodes": 58,
+        "observed_json_bytes": 82154,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 57,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12302",
+      "title": "Flexible resizing (2411:12302)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12302",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12302"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Flexible resizing",
+        "subtree_sha256": "714cc5d7359a154120eb89b5bae5ac18155b8e9bc81bf1fa636127c98f7d317f",
+        "semantic_sha256": "8d65a60453f3b175dab66e8a3310b07c3e07aed74a669d32330860c7e7fc6976",
+        "observed_nodes": 46,
+        "observed_json_bytes": 74036,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 45,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12336",
+      "title": "Resizing and alignment (2411:12336)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12336",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12336"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Resizing and alignment",
+        "subtree_sha256": "635a3ce64c51e1a653bd9de2ca6c963b9d851bd269acc6b6653374be503bbfd0",
+        "semantic_sha256": "5d6aa6c5d7f0e82bc04894c4a603a92fc8540cbe7e84ed935882d758279a4fad",
+        "observed_nodes": 37,
+        "observed_json_bytes": 59276,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 36,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12355",
+      "title": "Auto Layout instance control (2411:12355)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12355",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12355"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout instance control",
+        "subtree_sha256": "ed3b819afe8c2bea96e2ec9bfb46f7c704eb2e579e5aadde6776912bbe6ebd1c",
+        "semantic_sha256": "b33b321ead9116fb58eb9ff9ca12a25cbe0d430e97644df47111d78e8676fe0f",
+        "observed_nodes": 50,
+        "observed_json_bytes": 68077,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 49,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12394",
+      "title": "Add and \u2028reorder items (2411:12394)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12394",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12394"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Add and \u2028reorder items",
+        "subtree_sha256": "70575d136d41d40a4f79d00aa4c8b206d4856f6abd295284b05138873004bbd1",
+        "semantic_sha256": "880e36f647fc411c622ca46e8cc43e62907fe1ecc2c4890d5b92f1c603c9f919",
+        "observed_nodes": 54,
+        "observed_json_bytes": 69465,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 53,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12448",
+      "title": "Make an expandable search bar (2411:12448)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12448",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12448"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Make an expandable search bar",
+        "subtree_sha256": "55beee120fa8290422b04014c4a5f6f01880aa8d91a2ad3f48db897b79b8ed78",
+        "semantic_sha256": "1238caa987ff5e6c0dcdcd6546cbdadae80a05d1e980e21cc278dc4bce3fba7a",
+        "observed_nodes": 40,
+        "observed_json_bytes": 49774,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 39,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12487",
+      "title": "Components and nested Auto Layout (2411:12487)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12487",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12487"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Components and nested Auto Layout",
+        "subtree_sha256": "8e3d4026480ba7c9c1e8c7460c8273e490cf09736b6dd3c73c0d1c8098d86532",
+        "semantic_sha256": "a8b41ec3880f5267fa2a8ddfa674c897830cb71049309bedc203b6db4465f24b",
+        "observed_nodes": 119,
+        "observed_json_bytes": 199851,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 118,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12555",
+      "title": "Nesting into Auto Layout frames (2411:12555)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12555",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12555"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Nesting into Auto Layout frames",
+        "subtree_sha256": "77928bae4fd3d1f8e0508db0343a34f86d794a667e8ecc6c4784a54b4ce1f725",
+        "semantic_sha256": "6156467e94de88ede2e64d46e691c356f8f2899f72c4b540b01ff8183927aa2b",
+        "observed_nodes": 52,
+        "observed_json_bytes": 77918,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 51,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12600",
+      "title": "Auto Layout children (2411:12600)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12600",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12600"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout children",
+        "subtree_sha256": "2fde414e436d9e6d9d614ff2143e41f1d57207fb3d6fe730f1164d2671ecbc71",
+        "semantic_sha256": "23b3f14fc81ce9baf8d91cf6b5be742fa3e69f207e3ec3249dbeb5e1252b6035",
+        "observed_nodes": 74,
+        "observed_json_bytes": 127320,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 73,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12660",
+      "title": "Adjustments on the canvas (2411:12660)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12660",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12660"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Adjustments on the canvas",
+        "subtree_sha256": "f461cc0a0cbb9591b9e847e7b0d30dd26f7a0a35ace06194f6de3550e32b0270",
+        "semantic_sha256": "f876ca6063a1abf691474081f6a0440fc64dab05e4664a5465b23fc531726fa4",
+        "observed_nodes": 126,
+        "observed_json_bytes": 241782,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 125,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12734",
+      "title": "Auto Layout settings and controls (2411:12734)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12734",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12734"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout settings and controls",
+        "subtree_sha256": "2877a60c0893a66da0df16983031e8dabfd71023b6e1b453ae1db5c792b5f5a3",
+        "semantic_sha256": "acd8257b2c0b40b6555f44aabb74d748ce4778777c5023387e6f15b7b547e25b",
+        "observed_nodes": 22,
+        "observed_json_bytes": 38130,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 21,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12756",
+      "title": "Basics (2411:12756)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12756",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12756"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Basics",
+        "subtree_sha256": "15b312e6a9710d7c0dbd8f90c6267058a19a180ee0eba34df70db66674426696",
+        "semantic_sha256": "616763bb7a0c086c36296bbf6983d162aa4773a99c197e48e0ff3cf20d9c8da5",
+        "observed_nodes": 52,
+        "observed_json_bytes": 98560,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 51,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12784",
+      "title": "Let Figma suggest Auto Layout frames (2411:12784)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12784",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12784"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Let Figma suggest Auto Layout frames",
+        "subtree_sha256": "ced6341dd0c2bad6c19b5a315bd732b98296225ff32cdb71f4aa2368a5942ba6",
+        "semantic_sha256": "07e7ea8c2e32b155b2f1680b6ec571cbb056821610122c64fbb2b328bc2dbf9e",
+        "observed_nodes": 122,
+        "observed_json_bytes": 153201,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 121,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12858",
+      "title": "Suggest Auto Layout (2411:12858)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12858",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12858"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Suggest Auto Layout",
+        "subtree_sha256": "a3b1f36a71cb7f25002317a0418c61c1678840933e10844e941182bda541b1f8",
+        "semantic_sha256": "13eb636f4e9a59ff1e5f40138032f6a52c1e01a1b3280da6eb534f3ac001b9f4",
+        "observed_nodes": 46,
+        "observed_json_bytes": 68563,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 45,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12903",
+      "title": "Auto Layout frames (2411:12903)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12903",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12903"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout frames",
+        "subtree_sha256": "4a43b9f3edc4f8fe35ae91e83fb6bbbc3824e1c214195eac0bb0fc340305893a",
+        "semantic_sha256": "cf4ecbbf67206d32851647b4296b268301c469a137b3b11b6c6fbf0cb5697165",
+        "observed_nodes": 62,
+        "observed_json_bytes": 85566,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 61,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-12965",
+      "title": "Removing Auto Layout (2411:12965)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:12965",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:12965"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Removing Auto Layout",
+        "subtree_sha256": "2ad0fb376f8f149cac3de0ddd923b887b2a188e1be45893a2104b27463a0e43d",
+        "semantic_sha256": "a9e07147c405e377a53e71ce1b9de72d9e672380f8181aa4e3cb319fd1666be5",
+        "observed_nodes": 55,
+        "observed_json_bytes": 82919,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 54,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-13020",
+      "title": "Enabling Auto Layout frames (2411:13020)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:13020",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:13020"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Enabling Auto Layout frames",
+        "subtree_sha256": "506bee65244d88587bd8f3e4416c5a5676a525771bf0ee12a9e03ea6971dbbb5",
+        "semantic_sha256": "fc6dca3728e7a9c3eeaf2b23c1e4d8ac125292567bb29350ca3b830db2c6abc2",
+        "observed_nodes": 85,
+        "observed_json_bytes": 116739,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 84,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-13105",
+      "title": "Introduction to Auto Layout (2411:13105)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:13105",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:13105"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Introduction to Auto Layout",
+        "subtree_sha256": "e3448a9dcb133c2470dc5366392a38d9bb167ee484b385a8590a9a0d99927ea1",
+        "semantic_sha256": "a7818d5385bba89dcb9886b8e2b65931a1dc57bd505e9e28c65f836172d0a3ed",
+        "observed_nodes": 71,
+        "observed_json_bytes": 135426,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 70,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-13148",
+      "title": "Contents (2411:13148)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:13148",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:13148"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Contents",
+        "subtree_sha256": "6ba0bdb91f69176a78e0a08849a79063b5b8aaed135eb8077fccf5ca8412ab94",
+        "semantic_sha256": "db2daa1d153dcd205519bf5a1c646613bd8ec5e8fd8dbcd6ee8bc637f000029c",
+        "observed_nodes": 21,
+        "observed_json_bytes": 33287,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 20,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2443-1885",
+      "title": "Choose your current Figma UI (2443:1885)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2443:1885",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2443:1885"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Choose your current Figma UI",
+        "subtree_sha256": "451de4f66391ca3783013c58c5e8b986f9817cf9c7e503e56442c8ae6a953edc",
+        "semantic_sha256": "df529a53ac2c9108693b4f660d3d40bd4f12882c8f6e1223e755e491405a00dc",
+        "observed_nodes": 15,
+        "observed_json_bytes": 20845,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 14,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-13170",
+      "title": "Auto Layout (2411:13170)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:13170",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:13170"
+        ],
+        "expected_type": "SECTION",
+        "expected_name": "Auto Layout",
+        "subtree_sha256": "75b532b2445c9057f64a61c6cc1e3f1693b8a292652575deb0e5a8505e53730e",
+        "semantic_sha256": "98e67efcc85226caf774d045a92179a1d62bf073f0953410b0ea4082ad28cd50",
+        "observed_nodes": 91,
+        "observed_json_bytes": 128919,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 90,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2411-13999",
+      "title": "Keyboard shortcuts (2411:13999)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2411:13999",
+        "ancestor_canvas_id": "2411:1174",
+        "ancestry": [
+          "0:0",
+          "2411:1174",
+          "2411:13999"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Keyboard shortcuts",
+        "subtree_sha256": "9ba13f9b03c076b5931407cc68305693cfcaafbfa0d4e22f990a9dc27170d4c8",
+        "semantic_sha256": "52660bacc1ada6cf0068ef9440f1f31615d1ac3beab911db33d944510a86d133",
+        "observed_nodes": 234,
+        "observed_json_bytes": 285268,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 233,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1993-3156",
+      "title": "Advanced card with wrapping and min widths (1993:3156)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1993:3156",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1993:3156"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Advanced card with wrapping and min widths",
+        "subtree_sha256": "c1aaaa2f793b5406968e6b057b8519dd2632d70efb89bf0125fa3d04c40a6292",
+        "semantic_sha256": "ae071175afa0b73e93c6e81d36c32962a1f4a122e5ef60741cc18a650512104f",
+        "observed_nodes": 87,
+        "observed_json_bytes": 107672,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 86,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.2495-1898",
+      "title": "Task card tutorial assets  (2495:1898)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2495:1898",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "2495:1898"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Task card tutorial assets ",
+        "subtree_sha256": "907c19bd0a090319089b880a9a2485fbbcc153f36101046efb4757069ed26fd3",
+        "semantic_sha256": "c5f5271773fa14f82b5be5d7cb00f02539f675b05bc9090fb53436931a821cdf",
+        "observed_nodes": 159,
+        "observed_json_bytes": 270170,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 158,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1350",
+      "title": "Edit a task card (1620:1350)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1350",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1350"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Edit a task card",
+        "subtree_sha256": "a4a3f330f51515d1b8bad5320cbe31222f5057ac652a86a182d94f86756dab3d",
+        "semantic_sha256": "9841e68f0ff5b4ede411f631538efa312b7f7b0fd2da03073bbd68c9e4d65139",
+        "observed_nodes": 90,
+        "observed_json_bytes": 124040,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 89,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1440",
+      "title": "Apply baseline alignment (1620:1440)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1440",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1440"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Apply baseline alignment",
+        "subtree_sha256": "948b03c0d0f2a64380c2050f0b958010ec08a042304b29153036af2c96f31bc3",
+        "semantic_sha256": "acf08651c9ac52d9d0216546c3bf715b2a67d0884ae450b3eb0c54f4b4e434c0",
+        "observed_nodes": 49,
+        "observed_json_bytes": 73676,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 48,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1519",
+      "title": "Discover all of the latest auto layout features (1620:1519)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1519",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1519"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Discover all of the latest auto layout features",
+        "subtree_sha256": "7a84af974382d361736dd77dee71a568f3e6c03869214d3f6e85055d719dc98b",
+        "semantic_sha256": "8cf8758c4e46270b571a880d8e45384063a896304edd7e9e9d421c9bef236747",
+        "observed_nodes": 38,
+        "observed_json_bytes": 59772,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 37,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1554",
+      "title": "Additional examples (1620:1554)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1554",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1554"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Additional examples",
+        "subtree_sha256": "5be0ca8043930879cab7319d72058a89b1df95edb1a5038298e02c246c3db0de",
+        "semantic_sha256": "ecc6f8b92b7eba3e25de62f55379ddbe0b87d55bf897b887eebcc76bfcc5c064",
+        "observed_nodes": 18,
+        "observed_json_bytes": 21128,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 17,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1667",
+      "title": "Inspect panel (1620:1667)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1667",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1667"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Inspect panel",
+        "subtree_sha256": "2c250ad195edde7a67e90e8012e9eb2c2f9f5a45f6b425fb392f191784d3a6d3",
+        "semantic_sha256": "1d1fdeecc65dd14ed23e9c0e2491e282aa8cd8b30f6d51312dcd8577bcc832da",
+        "observed_nodes": 37,
+        "observed_json_bytes": 55982,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 36,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-1694",
+      "title": "Absolute positioning and constraints (1620:1694)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:1694",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:1694"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Absolute positioning and constraints",
+        "subtree_sha256": "ac3aaa7dba6b428432a8434856c18933b3157c3a2bce1b68d7d99809c3c91b8e",
+        "semantic_sha256": "bf8e3cb36c69a14500510f152583777a5cf0cb3590b41fac58454a72d8b1684a",
+        "observed_nodes": 61,
+        "observed_json_bytes": 83980,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 60,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1749-3056",
+      "title": "Direction: Wrap (1749:3056)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1749:3056",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1749:3056"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Direction: Wrap",
+        "subtree_sha256": "77805e72662485d2f3581f0ca44a897bbbb0cd83e46ced473f44543e5cd87a20",
+        "semantic_sha256": "e7c9808aea4a7c46c42bc38e2067e9f03d88a4e474a4a136ca236e13b5503021",
+        "observed_nodes": 59,
+        "observed_json_bytes": 89235,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 58,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1620-2915",
+      "title": "Make an auto layout nav bar (1620:2915)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1620:2915",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1620:2915"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Make an auto layout nav bar",
+        "subtree_sha256": "54249acd6134beb2a4f8da2ca1f410560cd2b61cc9a7c1721aaac394e8af2cec",
+        "semantic_sha256": "e0423a0cd87449690d38a67557e1090b38d9bee6bc73cf18c10d9d65647491a4",
+        "observed_nodes": 49,
+        "observed_json_bytes": 65083,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 48,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.auto.1730-3063",
+      "title": "Auto layout \u2014 Cover (1730:3063)",
+      "artifact_ref": "grida.auto-layout",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "1730:3063",
+        "ancestor_canvas_id": "1620:1097",
+        "ancestry": [
+          "0:0",
+          "1620:1097",
+          "1730:3063"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Auto layout \u2014 Cover",
+        "subtree_sha256": "61451929be100eea48ffc30c3ed1418d52a738a3e402f8b68f8391b93af65a55",
+        "semantic_sha256": "4d3aaa63c58239513374d34b97024b89db6d626c647388ede6c9197164d4be1a",
+        "observed_nodes": 89,
+        "observed_json_bytes": 108748,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 88,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "auto_layout"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4197",
+      "title": "Logos (2001:4197)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4197",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4197"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Logos",
+        "subtree_sha256": "1d8590065df58af4c768d9583288dc61dfc53d10a4eff863e45f557de218f153",
+        "semantic_sha256": "ee8343295a2d1ae32d432f3fdb3196e4a79b05a2d702f888f991facfe78b46c5",
+        "observed_nodes": 92,
+        "observed_json_bytes": 217252,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 91,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4290",
+      "title": "Abstract (2001:4290)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4290",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4290"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Abstract",
+        "subtree_sha256": "b5770be255adb9985e13b2f96beb06f705d836ab6d2387942e354c8295b912a4",
+        "semantic_sha256": "2b615a7252ad0895b0fcecc8b426bcad1224c2c4f1f9c55392622a4919305c80",
+        "observed_nodes": 290,
+        "observed_json_bytes": 506514,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 289,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4581",
+      "title": "Borders and corners (2001:4581)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4581",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4581"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Borders and corners",
+        "subtree_sha256": "59d3f532a94259cf3e511069139a3d76f3727a1c223c3cd411d7269a49a2c27a",
+        "semantic_sha256": "5d340c775598eb6531e0fbef1bce014f7e6d815f82e7d7b67b6ab66ac7a6e15f",
+        "observed_nodes": 243,
+        "observed_json_bytes": 283097,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 242,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4819",
+      "title": "Alignment (2001:4819)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4819",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4819"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Alignment",
+        "subtree_sha256": "57a03224242c385454e9c8a93ed1120159fe7099141ba0c584e4f43fde844cf2",
+        "semantic_sha256": "914594d35df2adb8fd8a255596834c22487e956c5667606319ae06a26c2b8b36",
+        "observed_nodes": 75,
+        "observed_json_bytes": 93053,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 74,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4895",
+      "title": "Music (2001:4895)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4895",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4895"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Music",
+        "subtree_sha256": "609baaee1d56b010014a2c5bd0f9144264d5d2eb170ff947c31a8fa23da90696",
+        "semantic_sha256": "c611d0029b525922097360c76abe60223494cbfe7f272a019d9ea89526c1961b",
+        "observed_nodes": 51,
+        "observed_json_bytes": 79016,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 50,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-4947",
+      "title": "Typography (2001:4947)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:4947",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:4947"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Typography",
+        "subtree_sha256": "19bcead78e43e861a65914f0868c04bb15354dcecbc529e815ae2e5cea6a2efe",
+        "semantic_sha256": "79dace46eef5817dccb1a0c1a58861e31843dea3992b6bd5283daa70479792e5",
+        "observed_nodes": 175,
+        "observed_json_bytes": 428759,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 174,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-5123",
+      "title": "Objects (2001:5123)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:5123",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:5123"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Objects",
+        "subtree_sha256": "2dcbbf52bc46796880445d8a7bbd190a93300541223900324d0bc3a4dc83aad0",
+        "semantic_sha256": "2e10c5c8e0a4e01bb88dfc5a48f111cd60e70f1c479c257ad4d80286f8268e17",
+        "observed_nodes": 486,
+        "observed_json_bytes": 953848,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 485,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-5604",
+      "title": "Design (2001:5604)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:5604",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:5604"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Design",
+        "subtree_sha256": "c3339a90093b55011a09145fe60fe6b25b4ed14e97b64282b43dc25ca2bde528",
+        "semantic_sha256": "3109e5719416984a8046e4dc7367b1d327f62f71baea7596e3afc8425a3caa61",
+        "observed_nodes": 312,
+        "observed_json_bytes": 651698,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 311,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-5917",
+      "title": "Components (2001:5917)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:5917",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:5917"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Components",
+        "subtree_sha256": "b8a85625cba9f4cc934097402c0f3f0b4810ab59ec3f45bf17a6716c3f0abca3",
+        "semantic_sha256": "68efdbade9ce11f792ca01c5c70d9fa38cc1773d53eaff8db50ca9906f4c24b8",
+        "observed_nodes": 179,
+        "observed_json_bytes": 287179,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 178,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.2001-6097",
+      "title": "Arrows (2001:6097)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "2001:6097",
+        "ancestor_canvas_id": "0:1",
+        "ancestry": [
+          "0:0",
+          "0:1",
+          "2001:4196",
+          "2001:6097"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Arrows",
+        "subtree_sha256": "f37df3cb507d3273b3644c6395ba415a6bad4d79de3e28092c49eb58170ce651",
+        "semantic_sha256": "b8a5458c58833ea6847f1bcbb1e9d645cb8672cb5218fbbdebf9a0b6cebce45c",
+        "observed_nodes": 122,
+        "observed_json_bytes": 175625,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 121,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    },
+    {
+      "id": "release.radix.4-7679",
+      "title": "Cover (4:7679)",
+      "artifact_ref": "grida.radix-icons",
+      "selector": {
+        "kind": "node_subtree",
+        "node_id": "4:7679",
+        "ancestor_canvas_id": "1:3892",
+        "ancestry": [
+          "0:0",
+          "1:3892",
+          "4:7679"
+        ],
+        "expected_type": "FRAME",
+        "expected_name": "Cover",
+        "subtree_sha256": "cf9c869e692b46b23e00eaa006fab5e3fc09fa99cef84e65f2f9a564e3f36a6b",
+        "semantic_sha256": "c19f2643083b4ca8291fc3c9661a849593ef1a1ea4d94ddb8a8feeb287126cd1",
+        "observed_nodes": 1288,
+        "observed_json_bytes": 2384025,
+        "wrapper": "promote_to_original_canvas"
+      },
+      "expectations": {
+        "min_artboards": 1,
+        "min_objects": 1287,
+        "required_source_features": [
+          "auto_layout"
+        ],
+        "preserve_features": [
+          "path_geometry"
+        ]
+      }
+    }
+  ]
+}

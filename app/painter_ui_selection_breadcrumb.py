@@ -31,7 +31,8 @@ class PainterUISelectionBreadcrumb(QFrame):
                 widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
-        path = ui_selection_path(document)
+        # The inspector hands this a canonical document.
+        path = ui_selection_path(document, normalize=False)
         if len(path) < 2:
             self.hide()
             return

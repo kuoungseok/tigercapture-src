@@ -34,8 +34,14 @@ from app.painter_ui_variables import (
 TOKEN_BINDING_PATHS = UI_VARIABLE_SCOPES
 
 
-def inspect_ui_token_library(value: Mapping[str, Any]) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+def inspect_ui_token_library(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    # Read-only inspection: callers holding a canonical document skip the
+    # defensive copy, which dominates click latency on large files.
+    document = normalize_ui_document(value) if normalize else value
     bindings: dict[str, list[dict[str, str]]] = {
         row["id"]: [] for row in document["tokens"]
     }
@@ -84,7 +90,10 @@ def inspect_ui_token_library(value: Mapping[str, Any]) -> dict[str, Any]:
         "token_count": len(tokens),
         "used_count": sum(not row["unused"] for row in tokens),
         "unused_count": sum(row["unused"] for row in tokens),
-        "collections": inspect_ui_variable_collections(document)["collections"],
+        "collections": inspect_ui_variable_collections(
+            document,
+            normalize=False,
+        )["collections"],
         "kinds": {
             kind: [row for row in tokens if row["kind"] == kind]
             for kind in sorted(UI_TOKEN_KINDS)
@@ -340,10 +349,15 @@ class PainterUITokenLibrary(QWidget):
         binding_row.addWidget(self.unbind_button)
         layout.addLayout(binding_row)
 
-    def set_document(self, value: Mapping[str, Any]) -> None:
+    def set_document(
+        self,
+        value: Mapping[str, Any],
+        *,
+        normalize: bool = True,
+    ) -> None:
         selected_token_id = self._selected_token_id()
         selected_collection_id = str(self.collection_combo.currentData() or "")
-        self._document = normalize_ui_document(value)
+        self._document = normalize_ui_document(value) if normalize else value
         self._sync_collections(selected_collection_id)
         self._rebuild(selected_token_id)
 
@@ -452,7 +466,10 @@ class PainterUITokenLibrary(QWidget):
             query = self.search_edit.text().strip().casefold()
             kind_filter = str(self.kind_filter.currentData() or "")
             collection_id = self._selected_collection_id()
-            report = inspect_ui_token_library(self._document)
+            report = inspect_ui_token_library(
+                self._document,
+                normalize=False,
+            )
             self.tree.clear()
             selected_item: QTreeWidgetItem | None = None
             for kind, tokens in report["kinds"].items():
@@ -559,7 +576,7 @@ class PainterUITokenLibrary(QWidget):
         self.alias_combo.setCurrentIndex(max(0, alias_index))
         self.description_edit.setText(str(token["description"]))
         self.scope_edit.setText(", ".join(token["scope"]))
-        report = inspect_ui_token_library(self._document)
+        report = inspect_ui_token_library(self._document, normalize=False)
         row = next(item for item in report["tokens"] if item["id"] == token["id"])
         alias_names = [
             str((self._token(alias_id) or {}).get("name") or alias_id)

@@ -441,6 +441,7 @@ def _web_css_snippet(
             "center": "center",
             "end": "flex-end",
             "stretch": "stretch",
+            "baseline": "baseline",
         }.get(str(layout.get("cross_alignment") or "start"), "flex-start")
         declarations.extend(
             [f"justify-content: {main};", f"align-items: {cross};"]

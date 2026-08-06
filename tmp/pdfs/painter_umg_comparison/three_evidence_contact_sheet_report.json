@@ -1,0 +1,1085 @@
+{
+  "schema": "tigerstudio.painter_umg.three_evidence_contact_sheet_qa.v1",
+  "ok": true,
+  "generated_at": "2026-08-06T05:42:33.907146+00:00",
+  "expected_count": 21,
+  "sample_count": 21,
+  "sources": {
+    "painter_capture_report": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_view_capture_report.json",
+    "unreal_batch_report": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\batch_report.json",
+    "comparison_pdf": "E:\\ClaudeCodeApp\\GifCam\\output\\pdf\\painter_umg_sample_comparison.pdf"
+  },
+  "validation": {
+    "capture_size": [
+      1920,
+      1080
+    ],
+    "pdf_page_count": 21,
+    "pdf_is_newer_than_capture_report": true,
+    "matched_screen_ids": 21,
+    "unreal_wgc_captures": 21,
+    "projection_complete_count": 21,
+    "blocked_count": 0
+  },
+  "contact_sheet": {
+    "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\three_evidence_contact_sheet.png",
+    "width": 1940,
+    "height": 10164,
+    "rows": 21,
+    "columns": 3,
+    "evidence_per_sample": 3,
+    "placeholder_count": 0
+  },
+  "samples": [
+    {
+      "index": 1,
+      "screen_id": "mobile_onboarding:artboard-1",
+      "sample_name": "Mobile Onboarding Flow",
+      "artboard_name": "Welcome",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\01_mobile_onboarding_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 74.957,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\01_mobile_onboarding_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 85.711,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\01_mobile_onboarding\\painter_umg_unreal_editor.png",
+        "width": 2205,
+        "height": 1876,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 86.054,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 2,
+      "screen_id": "mobile_onboarding:artboard-2",
+      "sample_name": "Mobile Onboarding Flow",
+      "artboard_name": "Discover",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\02_mobile_onboarding_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 75.069,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\02_mobile_onboarding_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 85.707,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\01_mobile_onboarding__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2210,
+        "height": 1881,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 85.935,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 3,
+      "screen_id": "mobile_onboarding:artboard-3",
+      "sample_name": "Mobile Onboarding Flow",
+      "artboard_name": "Ready",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\03_mobile_onboarding_artboard-3.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 75.069,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\03_mobile_onboarding_artboard-3.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 85.707,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\01_mobile_onboarding__artboard-3\\painter_umg_unreal_editor.png",
+        "width": 2215,
+        "height": 1886,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 85.784,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 4,
+      "screen_id": "mobile_finance:artboard-1",
+      "sample_name": "Personal Finance Mobile",
+      "artboard_name": "Overview",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\04_mobile_finance_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 77.287,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\04_mobile_finance_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.624,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\02_mobile_finance\\painter_umg_unreal_editor.png",
+        "width": 2220,
+        "height": 1891,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.706,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 5,
+      "screen_id": "mobile_finance:artboard-2",
+      "sample_name": "Personal Finance Mobile",
+      "artboard_name": "Activity",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\05_mobile_finance_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 77.395,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\05_mobile_finance_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.621,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\02_mobile_finance__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2225,
+        "height": 1896,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.594,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 6,
+      "screen_id": "saas_dashboard:artboard-1",
+      "sample_name": "Responsive SaaS Dashboard",
+      "artboard_name": "Desktop",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\06_saas_dashboard_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 102.251,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\06_saas_dashboard_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 100.258,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\03_saas_dashboard\\painter_umg_unreal_editor.png",
+        "width": 2230,
+        "height": 1901,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 67.887,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 7,
+      "screen_id": "saas_dashboard:artboard-2",
+      "sample_name": "Responsive SaaS Dashboard",
+      "artboard_name": "Mobile",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\07_saas_dashboard_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 77.143,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\07_saas_dashboard_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.428,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\03_saas_dashboard__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2235,
+        "height": 1906,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.059,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 8,
+      "screen_id": "analytics_command_center:artboard-1",
+      "sample_name": "Analytics Command Center",
+      "artboard_name": "Command Center",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\08_analytics_command_center_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 102.394,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\08_analytics_command_center_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 100.416,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\04_analytics_command_center\\painter_umg_unreal_editor.png",
+        "width": 2240,
+        "height": 1911,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 67.583,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 9,
+      "screen_id": "commerce_product:artboard-1",
+      "sample_name": "Editorial Product Detail",
+      "artboard_name": "Product Desktop",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\09_commerce_product_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 102.041,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\09_commerce_product_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 99.977,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\05_commerce_product\\painter_umg_unreal_editor.png",
+        "width": 2245,
+        "height": 1916,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 73.363,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 10,
+      "screen_id": "commerce_product:artboard-2",
+      "sample_name": "Editorial Product Detail",
+      "artboard_name": "Product Mobile",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\10_commerce_product_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 76.999,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\10_commerce_product_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 87.822,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\05_commerce_product__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2250,
+        "height": 1921,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 86.783,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 11,
+      "screen_id": "portfolio_case_study:artboard-1",
+      "sample_name": "Designer Case Study",
+      "artboard_name": "Case Study",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\11_portfolio_case_study_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 97.791,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\11_portfolio_case_study_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 95.67,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\06_portfolio_case_study\\painter_umg_unreal_editor.png",
+        "width": 2255,
+        "height": 1926,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 71.931,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 12,
+      "screen_id": "game_hud:artboard-1",
+      "sample_name": "Tactical Game HUD",
+      "artboard_name": "Gameplay 16:9",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\12_game_hud_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 95.519,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\12_game_hud_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 93.693,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\07_game_hud\\painter_umg_unreal_editor.png",
+        "width": 2260,
+        "height": 1931,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 55.218,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 13,
+      "screen_id": "broadcast_overlay:artboard-1",
+      "sample_name": "Live Broadcast Overlay",
+      "artboard_name": "Program 16:9",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\13_broadcast_overlay_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 99.889,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\13_broadcast_overlay_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 98.067,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\08_broadcast_overlay\\painter_umg_unreal_editor.png",
+        "width": 2265,
+        "height": 1936,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 57.328,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 14,
+      "screen_id": "pitch_deck_cover:artboard-1",
+      "sample_name": "Product Pitch Story",
+      "artboard_name": "Cover",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\14_pitch_deck_cover_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 92.63,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\14_pitch_deck_cover_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 90.621,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\09_pitch_deck_cover\\painter_umg_unreal_editor.png",
+        "width": 2270,
+        "height": 1941,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 57.037,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 15,
+      "screen_id": "pitch_deck_cover:artboard-2",
+      "sample_name": "Product Pitch Story",
+      "artboard_name": "Proof",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\15_pitch_deck_cover_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 92.729,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\15_pitch_deck_cover_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 90.619,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\09_pitch_deck_cover__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2275,
+        "height": 1946,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 56.87,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 16,
+      "screen_id": "pitch_deck_cover:artboard-3",
+      "sample_name": "Product Pitch Story",
+      "artboard_name": "Next",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\16_pitch_deck_cover_artboard-3.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 92.729,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\16_pitch_deck_cover_artboard-3.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 90.619,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\09_pitch_deck_cover__artboard-3\\painter_umg_unreal_editor.png",
+        "width": 2280,
+        "height": 1951,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 56.766,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 17,
+      "screen_id": "wireframe_user_flow:artboard-1",
+      "sample_name": "Product Wireframe Flow",
+      "artboard_name": "Desktop Flow",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\17_wireframe_user_flow_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 97.948,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\17_wireframe_user_flow_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 95.883,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\10_wireframe_user_flow\\painter_umg_unreal_editor.png",
+        "width": 2285,
+        "height": 1956,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 77.603,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 18,
+      "screen_id": "wireframe_user_flow:artboard-2",
+      "sample_name": "Product Wireframe Flow",
+      "artboard_name": "Mobile Flow",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\18_wireframe_user_flow_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 74.361,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\18_wireframe_user_flow_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 84.723,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\10_wireframe_user_flow__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2290,
+        "height": 1961,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 82.769,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 19,
+      "screen_id": "accessible_checkout:artboard-1",
+      "sample_name": "Accessible Checkout Form",
+      "artboard_name": "Checkout",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\19_accessible_checkout_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 104.107,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\19_accessible_checkout_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 100.241,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\11_accessible_checkout\\painter_umg_unreal_editor.png",
+        "width": 2295,
+        "height": 1966,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 79.899,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 20,
+      "screen_id": "design_system_starter:artboard-1",
+      "sample_name": "Design System Starter",
+      "artboard_name": "Foundations",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\20_design_system_starter_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 101.323,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\20_design_system_starter_artboard-1.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 99.311,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\12_design_system_starter\\painter_umg_unreal_editor.png",
+        "width": 2300,
+        "height": 1971,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 71.36,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    },
+    {
+      "index": 21,
+      "screen_id": "design_system_starter:artboard-2",
+      "sample_name": "Design System Starter",
+      "artboard_name": "Components",
+      "tool": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\tool_window_captures\\21_design_system_starter_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 101.322,
+        "visible_content": true,
+        "capture_kind": "actual_painter_tool_qwidget_grab"
+      },
+      "simulator": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\tmp\\pdfs\\painter_umg_comparison\\umg_widget_views\\21_design_system_starter_artboard-2.png",
+        "width": 1920,
+        "height": 1080,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 99.309,
+        "visible_content": true,
+        "capture_kind": "actual_painter_umg_widget_view_qwidget_grab",
+        "projection_ready": true,
+        "projection_complete": true,
+        "blocked_count": 0
+      },
+      "unreal": {
+        "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\painter_ui_designer\\unreal_umg_all_samples_20260806\\builtins_batch_final\\samples\\12_design_system_starter__artboard-2\\painter_umg_unreal_editor.png",
+        "width": 2305,
+        "height": 1976,
+        "luminance_extrema": [
+          0,
+          255
+        ],
+        "luminance_dynamic_range": 255,
+        "luminance_stddev": 71.113,
+        "visible_content": true,
+        "capture_kind": "actual_unreal_widget_blueprint_designer_wgc",
+        "backend": "wgc_window",
+        "status": "captured"
+      }
+    }
+  ]
+}

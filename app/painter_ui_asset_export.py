@@ -10,11 +10,27 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QTransform,
+)
 
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_image_renderer import draw_ui_image
-from app.painter_ui_style_renderer import draw_ui_vector_paths
+from app.painter_ui_style_renderer import (
+    draw_ui_object_inner_shadows,
+    draw_ui_object_shadow,
+    draw_ui_vector_paths,
+    has_ui_figma_expanded_stroke_geometry,
+    ui_composition_mode,
+    ui_color,
+    ui_fill_brush,
+)
 
 
 ASSET_EXPORT_SCHEMA = "tigerstudio.painter.ui.asset_export.v1"
@@ -46,8 +62,7 @@ def _hash_file(path: Path) -> str:
 
 
 def _color(value: Any, fallback: str = "#00000000") -> QColor:
-    color = QColor(str(value or fallback))
-    return color if color.isValid() else QColor(fallback)
+    return ui_color(value, fallback)
 
 
 def _svg_color(value: Any, fallback: str = "#00000000") -> tuple[str, float]:
@@ -68,12 +83,14 @@ def _objects_for_artboard(
         if row["artboard_id"] == artboard_id and row["visible"]
     ]
     from app.painter_ui_boolean_geometry import boolean_operand_ids
+    from app.painter_ui_paint_order import apply_ui_reverse_z_paint_order
 
     hidden_operands = boolean_operand_ids(rows)
-    return sorted(
+    ordered = sorted(
         (row for row in rows if row["id"] not in hidden_operands),
         key=lambda row: (int(row["z_index"]), row["id"]),
     )
+    return apply_ui_reverse_z_paint_order(ordered)
 
 
 def _image_fill_clip_path(
@@ -135,6 +152,26 @@ def render_ui_artboard(
         for row in document["objects"]
         if row["artboard_id"] == str(artboard_id)
     ]
+    from app.painter_ui_mask_renderer import (
+        apply_ui_pixel_mask,
+        ui_mask_render_mode,
+        ui_mask_uses_pixel_compositing,
+    )
+    from app.painter_ui_masks import (
+        index_ui_mask_rendering,
+        ui_mask_render_groups,
+    )
+
+    mask_source_by_target, mask_source_object_ids = (
+        index_ui_mask_rendering(all_rows)
+    )
+    mask_groups = ui_mask_render_groups(all_rows)
+    pixel_mask_group_by_target: dict[str, dict[str, Any]] = {}
+    for group in mask_groups:
+        if not ui_mask_uses_pixel_compositing(group["source"]):
+            continue
+        for target_id in group["target_ids"]:
+            pixel_mask_group_by_target.setdefault(target_id, group)
 
     def document_rect(row: Mapping[str, Any]) -> QRectF:
         return QRectF(
@@ -144,7 +181,7 @@ def render_ui_artboard(
             float(row["height"]),
         )
 
-    for row in _objects_for_artboard(document, str(artboard_id)):
+    def paint_row(target_painter: QPainter, row: Mapping[str, Any]) -> None:
         rect = QRectF(
             float(row["x"]),
             float(row["y"]),
@@ -153,21 +190,33 @@ def render_ui_artboard(
         )
         style = dict(row.get("style") or {})
         content = dict(row.get("content") or {})
-        painter.save()
-        painter.setOpacity(float(row["opacity"]))
+        target_painter.save()
+        target_painter.setOpacity(float(row["opacity"]))
+        target_painter.setCompositionMode(
+            ui_composition_mode(style.get("blend_mode"))
+        )
         pivot_x = rect.left() + rect.width() * float(row.get("pivot_x", 0.5))
         pivot_y = rect.top() + rect.height() * float(row.get("pivot_y", 0.5))
-        painter.translate(pivot_x, pivot_y)
-        painter.rotate(float(row["rotation"]))
-        painter.translate(-pivot_x, -pivot_y)
-        fill = _color(style.get("fill"), "#00000000")
+        target_painter.translate(pivot_x, pivot_y)
+        target_painter.rotate(float(row["rotation"]))
+        target_painter.translate(-pivot_x, -pivot_y)
+        fill = ui_fill_brush(style, rect)
         stroke_width = max(0.0, float(style.get("stroke_width", 0.0) or 0.0))
         pen = QPen(_color(style.get("stroke"), "#00000000"))
         pen.setWidthF(stroke_width)
-        painter.setPen(pen if stroke_width > 0.0 else Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
+        target_painter.setPen(
+            pen if stroke_width > 0.0 else Qt.PenStyle.NoPen
+        )
+        target_painter.setBrush(fill)
         radius = max(0.0, float(style.get("radius", 0.0) or 0.0))
         kind = row["kind"]
+        draw_ui_object_shadow(
+            target_painter,
+            rect,
+            str(kind),
+            style,
+        )
+        inner_shadow_drawn = False
         from app.painter_ui_boolean_geometry import resolve_ui_boolean_path
 
         boolean_path = resolve_ui_boolean_path(
@@ -175,49 +224,63 @@ def render_ui_artboard(
             row,
             document_rect,
         )
+        use_figma_stroke_geometry = (
+            has_ui_figma_expanded_stroke_geometry(content)
+            and kind not in {"image", "text"}
+            and not str(content.get("source_path") or "").strip()
+        )
         if boolean_path is not None:
-            painter.drawPath(boolean_path)
+            target_painter.drawPath(boolean_path)
+        elif use_figma_stroke_geometry:
+            draw_ui_vector_paths(target_painter, rect, content, style)
         elif kind == "ellipse":
-            painter.drawEllipse(rect)
+            target_painter.drawEllipse(rect)
             _draw_image_fill(
-                painter,
+                target_painter,
                 rect,
                 kind,
                 radius,
                 content,
             )
         elif kind == "line":
-            painter.drawLine(rect.topLeft(), rect.bottomRight())
+            target_painter.drawLine(rect.topLeft(), rect.bottomRight())
         elif kind in {"polygon", "star", "arc"}:
             from app.painter_ui_parametric_shapes import (
                 parametric_shape_path,
             )
 
-            painter.drawPath(
+            target_painter.drawPath(
                 parametric_shape_path(rect, kind, content)
             )
         elif kind == "image":
             if not _draw_image_fill(
-                painter,
+                target_painter,
                 rect,
                 kind,
                 radius,
                 content,
             ):
-                painter.fillRect(rect, QColor("#323842"))
-                painter.setPen(QPen(QColor("#9AA6B2"), 1.0))
-                painter.drawLine(rect.topLeft(), rect.bottomRight())
-                painter.drawLine(rect.topRight(), rect.bottomLeft())
+                target_painter.fillRect(rect, QColor("#323842"))
+                target_painter.setPen(QPen(QColor("#9AA6B2"), 1.0))
+                target_painter.drawLine(rect.topLeft(), rect.bottomRight())
+                target_painter.drawLine(rect.topRight(), rect.bottomLeft())
         elif kind in {"text", "button"}:
             if kind == "button":
-                painter.drawRoundedRect(rect, radius, radius)
+                target_painter.drawRoundedRect(rect, radius, radius)
                 _draw_image_fill(
-                    painter,
+                    target_painter,
                     rect,
                     kind,
                     radius,
                     content,
                 )
+                draw_ui_object_inner_shadows(
+                    target_painter,
+                    rect,
+                    str(kind),
+                    style,
+                )
+                inner_shadow_drawn = True
             font = QFont(str(style.get("font_family") or "Arial"))
             font.setPixelSize(max(1, int(float(style.get("font_size", 16.0)))))
             font.setWeight(
@@ -232,8 +295,10 @@ def render_ui_artboard(
             from app.painter_ui_typography import apply_ui_font_axes
 
             apply_ui_font_axes(font, style.get("font_axes"))
-            painter.setFont(font)
-            painter.setPen(_color(style.get("text_color"), "#111111"))
+            target_painter.setFont(font)
+            target_painter.setPen(
+                _color(style.get("text_color"), "#111111")
+            )
             alignment = {
                 "center": Qt.AlignmentFlag.AlignCenter,
                 "right": Qt.AlignmentFlag.AlignRight
@@ -242,30 +307,165 @@ def render_ui_artboard(
                 str(style.get("text_align") or "left"),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             )
-            painter.drawText(
+            target_painter.drawText(
                 rect,
                 alignment | Qt.TextFlag.TextWordWrap,
                 str(content.get("text") or row["name"]),
             )
         elif kind == "path":
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(target_painter, rect, content, style)
         elif kind == "progress":
-            painter.drawRoundedRect(rect, radius, radius)
+            target_painter.drawRoundedRect(rect, radius, radius)
             progress = min(1.0, max(0.0, float(content.get("value", 0.5))))
-            painter.fillRect(
+            target_painter.fillRect(
                 QRectF(rect.x(), rect.y(), rect.width() * progress, rect.height()),
                 _color(style.get("progress_fill"), "#4F7CFF"),
             )
         else:
-            painter.drawRoundedRect(rect, radius, radius)
+            target_painter.drawRoundedRect(rect, radius, radius)
             if kind in {"frame", "rectangle"}:
                 _draw_image_fill(
-                    painter,
+                    target_painter,
                     rect,
                     kind,
                     radius,
                     content,
                 )
+        if not inner_shadow_drawn:
+            draw_ui_object_inner_shadows(
+                target_painter,
+                rect,
+                str(kind),
+                style,
+            )
+        target_painter.restore()
+
+    def transparent_surface(crop: QRect) -> QImage:
+        result = QImage(
+            crop.width(),
+            crop.height(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        result.fill(Qt.GlobalColor.transparent)
+        return result
+
+    ordered_rows = _objects_for_artboard(document, str(artboard_id))
+
+    def group_document_bounds(object_ids: set[str]) -> QRectF:
+        bounds = QRectF()
+        for candidate in ordered_rows:
+            if str(candidate.get("id") or "") not in object_ids:
+                continue
+            rect = document_rect(candidate)
+            bounds = rect if bounds.isNull() else bounds.united(rect)
+        return bounds
+
+    def pixel_group_crop(group: Mapping[str, Any]) -> QRect:
+        target_bounds = group_document_bounds(set(group["target_ids"]))
+        source_bounds = group_document_bounds(set(group["source_ids"]))
+        mask = group.get("mask")
+        mask = mask if isinstance(mask, Mapping) else {}
+        bounds = target_bounds
+        if not bool(mask.get("inverted", False)):
+            bounds = target_bounds.intersected(source_bounds)
+        pixel_bounds = QRectF(
+            bounds.x() * scale,
+            bounds.y() * scale,
+            bounds.width() * scale,
+            bounds.height() * scale,
+        )
+        return pixel_bounds.toAlignedRect().intersected(image.rect())
+
+    def render_group_rows(object_ids: set[str], crop: QRect) -> QImage:
+        result = transparent_surface(crop)
+        group_painter = QPainter(result)
+        group_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        group_painter.setTransform(
+            QTransform(
+                scale,
+                0.0,
+                0.0,
+                scale,
+                -float(crop.left()),
+                -float(crop.top()),
+            )
+        )
+        for candidate in ordered_rows:
+            if str(candidate.get("id") or "") in object_ids:
+                paint_row(group_painter, candidate)
+        group_painter.end()
+        return result
+
+    def apply_hard_mask_clip(
+        target_painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        mask_source = mask_source_by_target.get(str(row.get("id") or ""))
+        if mask_source is None:
+            return
+        from app.painter_ui_boolean_geometry import ui_object_shape_path
+
+        mask_row, mask = mask_source
+        mask_rect = document_rect(mask_row)
+        mask_path = ui_object_shape_path(
+            mask_row,
+            mask_rect,
+            geometry_scale=1.0,
+        )
+        if mask.get("inverted"):
+            outer = QPainterPath()
+            outer.addRect(
+                QRectF(
+                    0.0,
+                    0.0,
+                    float(artboard["width"]),
+                    float(artboard["height"]),
+                )
+            )
+            mask_path = outer.subtracted(mask_path)
+        target_painter.setClipPath(
+            mask_path,
+            Qt.ClipOperation.IntersectClip,
+        )
+
+    painted_pixel_mask_sources: set[str] = set()
+    for row in ordered_rows:
+        object_id = str(row.get("id") or "")
+        group = pixel_mask_group_by_target.get(object_id)
+        if group is not None:
+            source_id = str(group["source"].get("id") or "")
+            if source_id not in painted_pixel_mask_sources:
+                crop = pixel_group_crop(group)
+                if crop.isEmpty():
+                    painted_pixel_mask_sources.add(source_id)
+                    continue
+                target_layer = render_group_rows(
+                    set(group["target_ids"]),
+                    crop,
+                )
+                mask_layer = render_group_rows(
+                    set(group["source_ids"]),
+                    crop,
+                )
+                mask = group.get("mask")
+                mask = mask if isinstance(mask, Mapping) else {}
+                masked = apply_ui_pixel_mask(
+                    target_layer,
+                    mask_layer,
+                    mode=ui_mask_render_mode(group["source"]),
+                    inverted=bool(mask.get("inverted", False)),
+                )
+                painter.save()
+                painter.resetTransform()
+                painter.drawImage(crop.topLeft(), masked)
+                painter.restore()
+                painted_pixel_mask_sources.add(source_id)
+            continue
+        if object_id in mask_source_object_ids:
+            continue
+        painter.save()
+        apply_hard_mask_clip(painter, row)
+        paint_row(painter, row)
         painter.restore()
     painter.end()
     return image
@@ -280,7 +480,7 @@ def _svg_for_artboard(
         for row in _objects_for_artboard(document, artboard["id"])
         if row["kind"] not in _VECTOR_KINDS
         or row.get("style", {}).get("paint_layer_id")
-        or row.get("style", {}).get("mask")
+        or bool(row.get("mask", {}).get("enabled"))
         or row.get("style", {}).get("material")
     ]
     if blocked:

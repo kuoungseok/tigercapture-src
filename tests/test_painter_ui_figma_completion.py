@@ -400,6 +400,136 @@ def test_figma_advanced_features_import_and_export(tmp_path) -> None:
     assert "figma.union" in code
 
 
+def test_figma_gradient_alpha_mask_uses_pixels_and_keeps_umg_bake() -> None:
+    from app.painter_ui_figma import import_figma_payload
+    from app.painter_ui_umg_adapter import preflight_painter_umg
+
+    payload = {
+        "name": "Gradient Alpha Mask",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "1:0",
+                    "type": "CANVAS",
+                    "name": "Page",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "FRAME",
+                            "name": "Cover",
+                            "absoluteBoundingBox": {
+                                "x": 0,
+                                "y": 0,
+                                "width": 200,
+                                "height": 100,
+                            },
+                            "children": [
+                                {
+                                    "id": "2:1",
+                                    "type": "RECTANGLE",
+                                    "name": "Mask",
+                                    "isMask": True,
+                                    "maskType": "ALPHA",
+                                    "absoluteBoundingBox": {
+                                        "x": 80,
+                                        "y": 0,
+                                        "width": 120,
+                                        "height": 100,
+                                    },
+                                    "fills": [
+                                        {
+                                            "type": "GRADIENT_LINEAR",
+                                            "gradientStops": [
+                                                {
+                                                    "position": 0,
+                                                    "color": {
+                                                        "r": 0,
+                                                        "g": 0,
+                                                        "b": 0,
+                                                        "a": 1,
+                                                    },
+                                                },
+                                                {
+                                                    "position": 1,
+                                                    "color": {
+                                                        "r": 0,
+                                                        "g": 0,
+                                                        "b": 0,
+                                                        "a": 0,
+                                                    },
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                },
+                                {
+                                    "id": "2:2",
+                                    "type": "FRAME",
+                                    "name": "Icons",
+                                    "absoluteBoundingBox": {
+                                        "x": 0,
+                                        "y": 0,
+                                        "width": 200,
+                                        "height": 100,
+                                    },
+                                    "children": [
+                                        {
+                                            "id": "2:3",
+                                            "type": "RECTANGLE",
+                                            "name": "Icon",
+                                            "absoluteBoundingBox": {
+                                                "x": 0,
+                                                "y": 0,
+                                                "width": 200,
+                                                "height": 100,
+                                            },
+                                            "fills": [
+                                                {
+                                                    "type": "SOLID",
+                                                    "color": {
+                                                        "r": 1,
+                                                        "g": 1,
+                                                        "b": 1,
+                                                    },
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    document, report = import_figma_payload(payload, source="snapshot")
+    mask = next(row for row in document["objects"] if row["name"] == "Mask")
+    figma_mask = mask["content"]["figma_mask"]
+
+    assert figma_mask == {
+        "type": "alpha",
+        "requires_raster_alpha": True,
+        "workspace_rendering": "pixel_alpha",
+    }
+    assert not any(
+        "raster_alpha_reduced_to_geometry_clip" in warning
+        for warning in report["warnings"]
+    )
+
+    preflight = preflight_painter_umg(document)
+    reasons = {
+        reason
+        for blocker in preflight["blockers"]
+        for reason in blocker["reasons"]
+    }
+    assert "painter_ui_mask_requires_umg_material_or_bake" in reasons
+    assert "figma_mask_raster_alpha_requires_deterministic_bake" in reasons
+
+
 def test_umg_preflight_explicitly_blocks_unimplemented_advanced_features() -> None:
     from app.painter_ui_masks import create_ui_mask
     from app.painter_ui_text_ranges import set_ui_text_range_style
@@ -427,6 +557,72 @@ def test_umg_preflight_explicitly_blocks_unimplemented_advanced_features() -> No
     }
     assert "painter_ui_mask_requires_umg_material_or_bake" in reasons
     assert "mixed_text_ranges_require_rich_text_conversion" in reasons
+
+
+def test_asset_renderer_hides_mask_source_and_clips_target_subtree() -> None:
+    from app.painter_ui_asset_export import render_ui_artboard
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_masks import create_ui_mask
+
+    document, mask = add_ui_object(
+        create_ui_document(100, 80),
+        kind="rectangle",
+        name="Mask",
+        x=0,
+        y=0,
+        width=50,
+        height=50,
+        style={
+            "fill": "#000000",
+            "stroke": "#00000000",
+            "stroke_width": 0,
+        },
+    )
+    document, target = add_ui_object(
+        document,
+        kind="frame",
+        name="Target",
+        x=0,
+        y=0,
+        width=100,
+        height=20,
+        style={
+            "fill": "#00000000",
+            "stroke": "#00000000",
+            "stroke_width": 0,
+        },
+    )
+    document, _child = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Target Child",
+        parent_id=target["id"],
+        x=0,
+        y=0,
+        width=100,
+        height=20,
+        style={
+            "fill": "#FF0000",
+            "stroke": "#00000000",
+            "stroke_width": 0,
+        },
+    )
+    document, _mask = create_ui_mask(
+        document,
+        mask["id"],
+        target_ids=[target["id"]],
+    )
+
+    image = render_ui_artboard(
+        document,
+        document["active_artboard_id"],
+    )
+
+    assert image.pixelColor(10, 10).red() > 240
+    assert image.pixelColor(75, 10).red() > 240
+    assert image.pixelColor(75, 10).green() > 240
+    assert image.pixelColor(10, 35).red() > 240
+    assert image.pixelColor(10, 35).green() > 240
 
 
 def test_m1b7_nested_figma_boolean_import_hierarchy_and_export_order(

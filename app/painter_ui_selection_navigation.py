@@ -110,8 +110,12 @@ def sibling_ui_object_id(
 def ui_selection_path(
     value: Mapping[str, Any] | None,
     object_id: str = "",
+    *,
+    normalize: bool = True,
 ) -> list[dict[str, Any]]:
-    document = normalize_ui_document(value)
+    # Read-only: callers holding a canonical document skip the defensive
+    # copy, which dominates click latency on large imported files.
+    document = normalize_ui_document(value) if normalize else value
     target = str(
         object_id
         or document["selection"]["object_id"]

@@ -7,7 +7,7 @@ import json
 import math
 from typing import Any, Mapping
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Signal, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, QTimer, Signal, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -36,9 +36,11 @@ from app.painter_ui_style_renderer import (
     draw_ui_text_block,
     draw_ui_vector_paths,
     blur_ui_image,
+    has_ui_figma_expanded_stroke_geometry,
     has_ui_vector_geometry,
     ui_blur_radius,
     ui_color,
+    ui_composition_mode,
     ui_fill_brush,
 )
 
@@ -72,6 +74,31 @@ _STICKY_SHAPE_TOOLS = {
     "arc",
 }
 _HANDLE_NAMES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
+
+# At overview zoom levels a pixel cannot carry the exact vector, text and
+# effect detail of every Figma node.  Rendering those details anyway is both
+# misleading (minimum-width pens/text become enormous) and prohibitively
+# expensive.  Below this scale the canvas uses a bounded-cost silhouette LOD;
+# zooming into a board automatically restores the exact renderer.
+_OVERVIEW_LOD_SCALE = 0.12
+_MIN_PROJECTED_OBJECT_SIZE = 0.35
+
+# Cached artboard surfaces used to cover the whole board, so they grew with the
+# zoom level: a 400% view of a 1440x900 board is a 20 MP image, and because the
+# cache key carries the view scale every zoom step rebuilt it from scratch.
+# Surfaces are now clipped to the part of the board the canvas can actually
+# show, which bounds both work and memory by the window instead of the zoom.
+# The clip is padded and snapped to a grid in artboard-local pixels so ordinary
+# panning - and any board that fits on screen whole - still hits the cache.
+_ARTBOARD_SURFACE_GRID = 128
+_ARTBOARD_SURFACE_MARGIN = 64.0
+_ARTBOARD_SURFACE_PIXEL_CAP = 16_000_000
+_ARTBOARD_SURFACE_PIXEL_BUDGET = 24_000_000
+# How long the view has to hold still before the canvas stops reusing stretched
+# surfaces and rasterises the boards exactly again.  Short enough to feel like
+# the picture sharpens as the gesture ends, long enough that a wheel burst or a
+# drag never pays a rebuild between two input events.
+_VIEW_GESTURE_SETTLE_MS = 90
 
 
 def _document_render_fingerprint(document: Mapping[str, Any]) -> str:
@@ -128,10 +155,35 @@ class PainterUIDesignOverlay(QWidget):
         self._effective_document = self._document
         self._document_render_signature: tuple[Any, ...] | None = None
         self._effective_objects_by_id: dict[str, dict[str, Any]] = {}
+        self._artboards_by_id: dict[str, dict[str, Any]] = {}
+        self._objects_by_artboard: dict[str, list[dict[str, Any]]] = {}
         self._mask_source_by_target: dict[
             str,
             tuple[dict[str, Any], dict[str, Any]],
         ] = {}
+        self._mask_source_object_ids: set[str] = set()
+        self._pixel_mask_group_by_target: dict[str, dict[str, Any]] = {}
+        self._last_pixel_mask_render_metrics: dict[str, Any] = {}
+        self._last_paint_metrics: dict[str, Any] = {}
+        self._overview_artboard_cache: dict[tuple[Any, ...], QImage] = {}
+        self._exact_artboard_cache: dict[tuple[Any, ...], QImage] = {}
+        self._overview_rows_by_artboard: dict[
+            str,
+            list[dict[str, Any]],
+        ] = {}
+        self._overview_candidate_count = 0
+        self._row_cull_boxes: dict[
+            str,
+            tuple[float, float, float, float, float],
+        ] = {}
+        self._artboard_surface_meta: dict[
+            tuple[Any, ...],
+            tuple[tuple[Any, ...], float, int, int, int, int],
+        ] = {}
+        self._view_gesture_active = False
+        self._view_gesture_timer: QTimer | None = None
+        self._approximate_artboard_count = 0
+        self._deferred_artboard_count = 0
         self._boolean_operand_id_cache: set[str] = set()
         self._boolean_path_cache: dict[str, QPainterPath | None] = {}
         self._tool = "select"
@@ -186,6 +238,7 @@ class PainterUIDesignOverlay(QWidget):
         self._snap_size = 8.0
         self._view_scale: float | None = None
         self._view_offset = QPointF()
+        self._render_view_offset_override: QPointF | None = None
         self._resolved_geometry: dict[str, dict[str, float]] = {}
         self._motion_preview: dict[str, dict[str, Any]] = {}
         self._motion_actor_compositions: dict[str, Any] = {}
@@ -346,6 +399,12 @@ class PainterUIDesignOverlay(QWidget):
         )
         self._rebuild_document_indexes()
         self._boolean_path_cache.clear()
+        self._overview_artboard_cache.clear()
+        self._exact_artboard_cache.clear()
+        self._artboard_surface_meta.clear()
+        self._cancel_view_gesture()
+        self._overview_rows_by_artboard.clear()
+        self._overview_candidate_count = 0
 
     def set_empty_page_mode(self, enabled: bool) -> None:
         """Hide the internal root artboard for a Figma-style empty page."""
@@ -353,23 +412,37 @@ class PainterUIDesignOverlay(QWidget):
         self.update()
 
     def _rebuild_document_indexes(self) -> None:
+        self._row_cull_boxes.clear()
         objects = list(self._effective_document.get("objects") or [])
+        self._artboards_by_id = {
+            str(row["id"]): row
+            for row in self._document.get("artboards", [])
+        }
         self._effective_objects_by_id = {
             str(row["id"]): row for row in objects
         }
-        self._mask_source_by_target = {}
+        self._objects_by_artboard = {}
         for row in objects:
-            mask = row.get("mask")
-            if not isinstance(mask, dict) or not mask.get("enabled"):
+            self._objects_by_artboard.setdefault(
+                str(row.get("artboard_id") or ""),
+                [],
+            ).append(row)
+        from app.painter_ui_mask_renderer import ui_mask_uses_pixel_compositing
+        from app.painter_ui_masks import (
+            index_ui_mask_rendering,
+            ui_mask_render_groups,
+        )
+
+        (
+            self._mask_source_by_target,
+            self._mask_source_object_ids,
+        ) = index_ui_mask_rendering(objects)
+        self._pixel_mask_group_by_target = {}
+        for group in ui_mask_render_groups(objects):
+            if not ui_mask_uses_pixel_compositing(group["source"]):
                 continue
-            normalized_mask = dict(mask)
-            for target_id in mask.get("target_ids", []):
-                key = str(target_id or "")
-                if key and key not in self._mask_source_by_target:
-                    self._mask_source_by_target[key] = (
-                        row,
-                        normalized_mask,
-                    )
+            for target_id in group["target_ids"]:
+                self._pixel_mask_group_by_target.setdefault(target_id, group)
         from app.painter_ui_boolean_geometry import boolean_operand_ids
 
         self._boolean_operand_id_cache = boolean_operand_ids(objects)
@@ -585,6 +658,13 @@ class PainterUIDesignOverlay(QWidget):
                 and not is_ui_boolean_group(row)
             ):
                 target = ""
+        if target != self._edit_scope_id:
+            self._overview_rows_by_artboard.clear()
+            self._overview_candidate_count = 0
+            self._overview_artboard_cache.clear()
+            self._exact_artboard_cache.clear()
+            self._artboard_surface_meta.clear()
+            self._cancel_view_gesture()
         self._edit_scope_id = target
         self.update()
         return target
@@ -632,7 +712,7 @@ class PainterUIDesignOverlay(QWidget):
         painter.save()
         painter.setClipRect(viewport)
         for grid in layout["layout_grids"] if layout_guides_visible else []:
-            color = QColor(str(grid["color"]))
+            color = ui_color(grid["color"], "#000000")
             line_color = QColor(color)
             line_color.setAlpha(max(48, line_color.alpha()))
             mode = grid["mode"] if grid["visible"] else "none"
@@ -756,6 +836,12 @@ class PainterUIDesignOverlay(QWidget):
             if isinstance(state, Mapping)
         }
         self._boolean_path_cache.clear()
+        self._overview_artboard_cache.clear()
+        self._exact_artboard_cache.clear()
+        self._artboard_surface_meta.clear()
+        self._cancel_view_gesture()
+        self._overview_rows_by_artboard.clear()
+        self._overview_candidate_count = 0
         self.update()
 
     def set_motion_actor_sources(
@@ -1085,6 +1171,11 @@ class PainterUIDesignOverlay(QWidget):
         return scale, offset
 
     def _view_transform(self) -> tuple[float, QPointF]:
+        if self._render_view_offset_override is not None:
+            scale = self._view_scale
+            if scale is None:
+                scale = self._fit_transform(self._scene_bounds())[0]
+            return float(scale), QPointF(self._render_view_offset_override)
         if self._view_scale is None:
             return self._fit_transform(self._scene_bounds())
         return self._view_scale, QPointF(self._view_offset)
@@ -1188,11 +1279,7 @@ class PainterUIDesignOverlay(QWidget):
         )
         if row is None:
             return False
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
+        artboard = self._row_artboard(row)
         bounds = QRectF(
             float(artboard["x"]) + float(row["x"]),
             float(artboard["y"]) + float(row["y"]),
@@ -1216,11 +1303,7 @@ class PainterUIDesignOverlay(QWidget):
         )
         if row is None:
             return False
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
+        artboard = self._row_artboard(row)
         bounds = QRectF(
             float(artboard["x"]) + float(row["x"]),
             float(artboard["y"]) + float(row["y"]),
@@ -1232,12 +1315,111 @@ class PainterUIDesignOverlay(QWidget):
         self._emit_view_changed()
         return True
 
+    def _begin_view_gesture(self) -> None:
+        """Mark the view as being dragged or zoomed right now.
+
+        Rasterising a board costs tens of milliseconds on a large document, so
+        while the view keeps moving the canvas reuses the surfaces it already
+        has, stretched into place, and only rebuilds them once the view holds
+        still for a moment.  Without this every wheel notch and every crossing
+        of a surface boundary paid a full rebuild inside the input frame.
+        """
+        self._view_gesture_active = True
+        if self._view_gesture_timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(_VIEW_GESTURE_SETTLE_MS)
+            timer.timeout.connect(self._end_view_gesture)
+            self._view_gesture_timer = timer
+        self._view_gesture_timer.start(_VIEW_GESTURE_SETTLE_MS)
+
+    def _end_view_gesture(self) -> None:
+        if not self._view_gesture_active:
+            return
+        self._view_gesture_active = False
+        self.update()
+
+    def _cancel_view_gesture(self) -> None:
+        """Stop reusing stand-ins because the surfaces they came from are gone.
+
+        Anything that drops the surface caches - a new document, a changed edit
+        scope, a motion preview - leaves nothing to stand in, so a gesture that
+        is still counting down would paint boards as bare backgrounds.
+        """
+        self._view_gesture_active = False
+        if self._view_gesture_timer is not None:
+            self._view_gesture_timer.stop()
+
+    def _approximate_artboard_surface(
+        self,
+        cache: dict[tuple[Any, ...], QImage],
+        variant: tuple[Any, ...],
+        artboard: Mapping[str, Any],
+        *,
+        scale: float,
+        needed: QRectF,
+    ) -> tuple[QImage, QRectF] | None:
+        """Best already-rasterised surface to stand in for ``needed``.
+
+        ``needed`` is in canvas pixels.  Candidates are surfaces of the same
+        board and variant, ranked by how close their scale is to the current one;
+        a candidate that is within one doubling and covers most of what is needed
+        always wins over one that is not, so a moving view degrades gradually
+        rather than jumping between good and poor stand-ins.  Returns the winner
+        with the canvas rect it has to be stretched into, or ``None`` when the
+        board has never been rasterised at all.
+        """
+        if needed.isEmpty():
+            return None
+        _scale, offset = self._view_transform()
+        board_x = float(artboard.get("x") or 0.0)
+        board_y = float(artboard.get("y") or 0.0)
+        needed_area = needed.width() * needed.height()
+        best: tuple[bool, float, QImage, QRectF] | None = None
+        for key, image in cache.items():
+            meta = self._artboard_surface_meta.get(key)
+            if meta is None or meta[0] != variant:
+                continue
+            have_scale = float(meta[1])
+            if have_scale <= 0.0:
+                continue
+            ratio = scale / have_scale
+            target = QRectF(
+                offset.x() + (board_x + meta[2] / have_scale) * scale,
+                offset.y() + (board_y + meta[3] / have_scale) * scale,
+                meta[4] * ratio,
+                meta[5] * ratio,
+            )
+            overlap = target.intersected(needed)
+            coverage = (
+                (overlap.width() * overlap.height()) / needed_area
+                if needed_area > 0.0
+                else 0.0
+            )
+            if coverage <= 0.0:
+                continue
+            faithful = 0.5 <= ratio <= 2.0 and coverage >= 0.5
+            distance = abs(math.log(ratio)) if ratio > 0.0 else 99.0
+            candidate = (not faithful, distance, image, target)
+            if best is None or candidate[:2] < best[:2]:
+                best = candidate
+        if best is None:
+            # A board nobody has rasterised yet cannot be approximated.  Leaving
+            # it to the settle frame keeps the moving view inside its frame
+            # budget; the board shows its background for a few frames instead of
+            # stalling the drag on a full rasterisation.
+            self._deferred_artboard_count += 1
+            return None
+        self._approximate_artboard_count += 1
+        return best[2], best[3]
+
     def set_zoom_percent(
         self,
         percent: float,
         *,
         anchor: QPointF | None = None,
     ) -> dict[str, Any]:
+        self._begin_view_gesture()
         old_scale, old_offset = self._view_transform()
         point = QPointF(anchor) if anchor is not None else QPointF(
             float(self.width()) * 0.5,
@@ -1267,6 +1449,7 @@ class PainterUIDesignOverlay(QWidget):
         x: float | None = None,
         y: float | None = None,
     ) -> dict[str, Any]:
+        self._begin_view_gesture()
         scale, offset = self._view_transform()
         self._view_scale = scale
         self._view_offset = self._clamped_view_offset(
@@ -1375,12 +1558,23 @@ class PainterUIDesignOverlay(QWidget):
             (point.y() - viewport.y()) / max(0.0001, scale),
         )
 
-    def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
-        artboard = next(
+    def _row_artboard(self, row: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Board a row belongs to, from the index instead of a linear scan.
+
+        The paint path asks this once or twice per row, so on a document with
+        dozens of boards the scan it replaces was a measurable share of a frame.
+        """
+        artboard = self._artboards_by_id.get(str(row.get("artboard_id") or ""))
+        if artboard is not None:
+            return artboard
+        return next(
             item
             for item in self._document["artboards"]
             if item["id"] == row["artboard_id"]
         )
+
+    def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
+        artboard = self._row_artboard(row)
         viewport, scale = self._artboard_viewport(artboard)
         geometry = self._resolved_geometry.get(str(row["id"]), row)
         x = float(geometry["x"])
@@ -1585,19 +1779,29 @@ class PainterUIDesignOverlay(QWidget):
         enabled: bool,
         state: Mapping[str, Any] | None = None,
     ) -> None:
-        self._prototype_preview_enabled = bool(enabled)
-        self._prototype_preview_state = (
+        resolved_state = (
             copy.deepcopy(dict(state))
             if isinstance(state, Mapping)
             else {}
         )
+        # The canvas refresh calls this on every interaction, and resolving
+        # themes, constraints and Auto Layout again costs seconds on an
+        # imported Figma file.  ``set_document`` already rebuilt for the
+        # current document, so only a real preview change needs another pass.
+        changed = (
+            bool(enabled) != bool(self._prototype_preview_enabled)
+            or resolved_state != self._prototype_preview_state
+        )
+        self._prototype_preview_enabled = bool(enabled)
+        self._prototype_preview_state = resolved_state
         self._prototype_pressed_object_id = ""
         self._prototype_hover_object_id = ""
         self._prototype_focus_object_id = ""
         if self._prototype_preview_enabled:
             self._cancel_interaction()
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        self._rebuild_effective_document()
+        if changed:
+            self._rebuild_effective_document()
         self.update()
 
     def set_prototype_preview_state(
@@ -1716,6 +1920,13 @@ class PainterUIDesignOverlay(QWidget):
     def object_ids_at(self, x: float, y: float) -> list[str]:
         position = QPointF(float(x), float(y))
         hits: list[str] = []
+        hit_artboard_ids = {
+            str(artboard["id"])
+            for artboard in self._document.get("artboards", [])
+            if self._artboard_viewport(artboard)[0].contains(position)
+        }
+        if not hit_artboard_ids:
+            return hits
         scope_ids = self._edit_scope_object_ids()
         candidates = (
             self._outline_objects(reverse=True)
@@ -1723,6 +1934,8 @@ class PainterUIDesignOverlay(QWidget):
             else self._visible_objects(reverse=True)
         )
         for row in candidates:
+            if str(row.get("artboard_id") or "") not in hit_artboard_ids:
+                continue
             if scope_ids and str(row["id"]) not in scope_ids:
                 continue
             if (
@@ -2916,6 +3129,7 @@ class PainterUIDesignOverlay(QWidget):
             self._effective_document,
             resolved_ui_geometry(self._effective_document),
         )
+        self._row_cull_boxes.clear()
         self._boolean_path_cache.clear()
         self.update()
 
@@ -3464,7 +3678,7 @@ class PainterUIDesignOverlay(QWidget):
             preview_visibility = (
                 self._prototype_preview_state.get("object_visibility") or {}
             )
-        return sorted(
+        rows = sorted(
             (
                 row
                 for row in self._effective_document["objects"]
@@ -3477,8 +3691,11 @@ class PainterUIDesignOverlay(QWidget):
                 and bool(preview_visibility.get(row["id"], True))
             ),
             key=lambda row: row["z_index"],
-            reverse=reverse,
         )
+        from app.painter_ui_paint_order import apply_ui_reverse_z_paint_order
+
+        ordered = apply_ui_reverse_z_paint_order(rows)
+        return list(reversed(ordered)) if reverse else ordered
 
     def _outline_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
         """Expose nested Boolean and optionally hidden rows for x-ray outlines."""
@@ -3554,11 +3771,7 @@ class PainterUIDesignOverlay(QWidget):
 
     def _clip_path(self, row: Mapping[str, Any]) -> QPainterPath:
         rect = self._object_rect(row)
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
+        artboard = self._row_artboard(row)
         _viewport, scale = self._artboard_viewport(artboard)
         radius = max(
             0.0,
@@ -3652,11 +3865,7 @@ class PainterUIDesignOverlay(QWidget):
         mask_row, mask = source
         path = self._object_shape_path(mask_row)
         if mask.get("inverted"):
-            artboard = next(
-                item
-                for item in self._document["artboards"]
-                if item["id"] == row["artboard_id"]
-            )
+            artboard = self._row_artboard(row)
             viewport, _scale = self._artboard_viewport(artboard)
             outer = QPainterPath()
             outer.addRect(viewport)
@@ -3709,22 +3918,7 @@ class PainterUIDesignOverlay(QWidget):
 
     @staticmethod
     def _composition_mode(blend_mode: object):
-        return {
-            "multiply": QPainter.CompositionMode.CompositionMode_Multiply,
-            "screen": QPainter.CompositionMode.CompositionMode_Screen,
-            "overlay": QPainter.CompositionMode.CompositionMode_Overlay,
-            "darken": QPainter.CompositionMode.CompositionMode_Darken,
-            "lighten": QPainter.CompositionMode.CompositionMode_Lighten,
-            "difference": QPainter.CompositionMode.CompositionMode_Difference,
-            "exclusion": QPainter.CompositionMode.CompositionMode_Exclusion,
-            "color_dodge": QPainter.CompositionMode.CompositionMode_ColorDodge,
-            "color_burn": QPainter.CompositionMode.CompositionMode_ColorBurn,
-            "hard_light": QPainter.CompositionMode.CompositionMode_HardLight,
-            "soft_light": QPainter.CompositionMode.CompositionMode_SoftLight,
-        }.get(
-            str(blend_mode or "normal").casefold(),
-            QPainter.CompositionMode.CompositionMode_SourceOver,
-        )
+        return ui_composition_mode(blend_mode)
 
     def _paint_object(
         self,
@@ -3732,15 +3926,21 @@ class PainterUIDesignOverlay(QWidget):
         row: Mapping[str, Any],
         *,
         surface: QImage | None = None,
+        render_mask_source: bool = False,
     ) -> None:
+        # A mask source remains selectable/editable and gets a dedicated
+        # outline indicator, but its pixels only define the mask.  Painting it
+        # as normal content is what produced the opaque gradient rectangle in
+        # imported Figma documents.
+        if (
+            not render_mask_source
+            and str(row.get("id") or "") in self._mask_source_object_ids
+        ):
+            return
         rect = self._object_rect(row)
         style = row["style"]
         kind = str(row["kind"])
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
+        artboard = self._row_artboard(row)
         _viewport, scale = self._artboard_viewport(artboard)
         if surface is not None:
             draw_ui_background_blur(
@@ -3809,11 +4009,7 @@ class PainterUIDesignOverlay(QWidget):
                 )
             painter.restore()
             return
-        artboard = next(
-            item
-            for item in self._document["artboards"]
-            if item["id"] == row["artboard_id"]
-        )
+        artboard = self._row_artboard(row)
         _viewport, scale = self._artboard_viewport(artboard)
         content = row.get("content", {})
         boolean_enabled = bool(
@@ -3839,8 +4035,23 @@ class PainterUIDesignOverlay(QWidget):
         painter.setBrush(fill)
 
         boolean_path = self._boolean_path(row)
-        if boolean_path is not None:
+        use_figma_stroke_geometry = (
+            has_ui_figma_expanded_stroke_geometry(content)
+            and kind not in {"image", "text"}
+            and not str(content.get("source_path") or "").strip()
+        )
+        if boolean_path is not None and not boolean_path.isEmpty():
             painter.drawPath(boolean_path)
+        elif boolean_enabled and has_ui_vector_geometry(content):
+            # Imported Figma BOOLEAN_OPERATION nodes carry the canonical
+            # flattened fillGeometry on the host as well as editable operand
+            # ids.  Some operand kinds intentionally have no vector-network
+            # representation, so resolving the editable Boolean can be empty.
+            # Paint the pinned host geometry in that case instead of hiding
+            # both the operands and the visible Boolean result.
+            draw_ui_vector_paths(painter, rect, content, style)
+        elif use_figma_stroke_geometry:
+            draw_ui_vector_paths(painter, rect, content, style)
         elif kind == "ellipse":
             painter.drawEllipse(rect)
         elif kind == "line":
@@ -3958,6 +4169,19 @@ class PainterUIDesignOverlay(QWidget):
             text_style = style
             if kind == "text" and "shadow" in style and "text_shadow" not in style:
                 text_style = {**style, "text_shadow": style["shadow"]}
+            elif kind != "text":
+                # A Button/Frame drop shadow belongs to its shape.  Passing
+                # that same object effect into the text helper painted a
+                # second, word-shaped shadow below flattened button labels.
+                text_style = dict(style)
+                text_style.pop("shadow", None)
+                text_style["effects"] = [
+                    effect
+                    for effect in style.get("effects", [])
+                    if isinstance(effect, Mapping)
+                    and str(effect.get("type") or "").casefold()
+                    not in {"drop_shadow", "inner_shadow"}
+                ]
             draw_ui_text_block(
                 painter,
                 rect,
@@ -4104,7 +4328,710 @@ class PainterUIDesignOverlay(QWidget):
             painter.drawRect(rect)
         painter.restore()
 
+    def _paint_scene_row(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        *,
+        surface: QImage,
+        layer_outlines: bool = False,
+        apply_object_mask: bool = True,
+        render_mask_source: bool = False,
+        dim_outside_edit_scope: bool = True,
+    ) -> None:
+        """Paint one row with the same transforms used by the live canvas."""
+
+        painter.save()
+        if not layer_outlines:
+            self._apply_parent_clips(painter, row)
+            if apply_object_mask:
+                self._apply_object_mask(painter, row)
+        rect = self._object_rect(row)
+        rotation = self._display_rotation(row)
+        content = row.get("content") or {}
+        content = content if isinstance(content, Mapping) else {}
+        flip_x = bool(content.get("flip_x", False))
+        flip_y = bool(content.get("flip_y", False))
+        # Resolving the pivot normalizes the row's constraints, which is wasted
+        # on the overwhelming majority of rows that are neither rotated nor
+        # flipped - and it was being paid for every row of every frame.
+        if abs(rotation) >= 0.001 or flip_x or flip_y:
+            pivot = ui_pivot_point(rect, row.get("constraints"))
+            if abs(rotation) >= 0.001:
+                painter.translate(pivot)
+                painter.rotate(-rotation)
+                painter.translate(-pivot)
+            if flip_x or flip_y:
+                painter.translate(pivot)
+                painter.scale(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0)
+                painter.translate(-pivot)
+        display_row = dict(row)
+        display_row["opacity"] = self._display_opacity(row)
+        if dim_outside_edit_scope and not self._row_in_edit_scope(row):
+            display_row["opacity"] *= 0.2
+        if layer_outlines:
+            self._paint_object_outline(painter, display_row)
+        else:
+            self._paint_object(
+                painter,
+                display_row,
+                surface=surface,
+                render_mask_source=render_mask_source,
+            )
+        painter.restore()
+
+    def _row_effect_padding(
+        self,
+        row: Mapping[str, Any],
+        *,
+        scale: float | None = None,
+    ) -> float:
+        """Canvas pixels a row's blur and shadows reach beyond its own rect."""
+        style = row.get("style")
+        style = style if isinstance(style, Mapping) else {}
+        if scale is None:
+            artboard = self._row_artboard(row)
+            _viewport, scale = self._artboard_viewport(artboard)
+        padding = ui_blur_radius(
+            style,
+            "layer_blur",
+            scale=scale,
+        ) * 3.0
+        shadows: list[Mapping[str, Any]] = []
+        effects = style.get("effects")
+        if isinstance(effects, list):
+            shadows.extend(
+                effect
+                for effect in effects
+                if isinstance(effect, Mapping)
+                and str(effect.get("type") or "").casefold()
+                == "drop_shadow"
+            )
+        for key in ("shadow", "text_shadow"):
+            shadow = style.get(key)
+            if isinstance(shadow, Mapping):
+                shadows.append(shadow)
+        for shadow in shadows:
+            padding = max(
+                padding,
+                (
+                    abs(float(shadow.get("x") or 0.0))
+                    + abs(float(shadow.get("y") or 0.0))
+                    + max(0.0, float(shadow.get("blur") or 0.0))
+                    + abs(float(shadow.get("spread") or 0.0))
+                )
+                * float(scale),
+            )
+        return max(1.0, padding + 2.0)
+
+    def _render_pixel_mask_group(
+        self,
+        surface: QImage,
+        paint_rows: list[dict[str, Any]],
+        group: Mapping[str, Any],
+    ) -> tuple[QImage, QPointF]:
+        """Composite a target subtree once, then apply alpha/luminance."""
+
+        target_ids = set(group.get("target_ids") or [])
+        source_ids = set(group.get("source_ids") or [])
+
+        effect_padding = self._row_effect_padding
+
+        def bounds_for(object_ids: set[str]) -> QRectF:
+            bounds = QRectF()
+            for row in paint_rows:
+                if str(row.get("id") or "") not in object_ids:
+                    continue
+                padding = effect_padding(row)
+                rect = self._object_rect(row).adjusted(
+                    -padding,
+                    -padding,
+                    padding,
+                    padding,
+                )
+                bounds = rect if bounds.isNull() else bounds.united(rect)
+            return bounds
+
+        mask = group.get("mask")
+        mask = mask if isinstance(mask, Mapping) else {}
+        target_bounds = bounds_for(target_ids)
+        source_bounds = bounds_for(source_ids)
+        render_bounds = target_bounds
+        if not bool(mask.get("inverted", False)):
+            render_bounds = target_bounds.intersected(source_bounds)
+        crop = render_bounds.toAlignedRect().intersected(surface.rect())
+        if crop.isEmpty():
+            return QImage(), QPointF()
+
+        layer = QImage(
+            crop.width(),
+            crop.height(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        layer.fill(Qt.GlobalColor.transparent)
+        layer_painter = QPainter(layer)
+        layer_painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            not self._pixel_preview_enabled,
+        )
+        layer_painter.translate(-crop.left(), -crop.top())
+        for row in paint_rows:
+            if str(row.get("id") or "") not in target_ids:
+                continue
+            self._paint_scene_row(
+                layer_painter,
+                row,
+                surface=surface,
+                apply_object_mask=False,
+            )
+        layer_painter.end()
+
+        mask_surface = QImage(
+            crop.width(),
+            crop.height(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        mask_surface.fill(Qt.GlobalColor.transparent)
+        mask_painter = QPainter(mask_surface)
+        mask_painter.setRenderHint(
+            QPainter.RenderHint.Antialiasing,
+            not self._pixel_preview_enabled,
+        )
+        mask_painter.translate(-crop.left(), -crop.top())
+        for row in paint_rows:
+            if str(row.get("id") or "") not in source_ids:
+                continue
+            self._paint_scene_row(
+                mask_painter,
+                row,
+                surface=mask_surface,
+                apply_object_mask=False,
+                render_mask_source=True,
+                dim_outside_edit_scope=False,
+            )
+        mask_painter.end()
+
+        from app.painter_ui_mask_renderer import (
+            apply_ui_pixel_mask,
+            ui_mask_render_mode,
+        )
+
+        result = apply_ui_pixel_mask(
+            layer,
+            mask_surface,
+            mode=ui_mask_render_mode(group["source"]),
+            inverted=bool(mask.get("inverted", False)),
+        )
+        crop_pixels = crop.width() * crop.height()
+        full_pixels = surface.width() * surface.height()
+        self._last_pixel_mask_render_metrics = {
+            "crop_width": crop.width(),
+            "crop_height": crop.height(),
+            "crop_pixels": crop_pixels,
+            "full_surface_pixels": full_pixels,
+            "crop_ratio": crop_pixels / max(1, full_pixels),
+            # target RGBA + source RGBA + result RGBA + Alpha8
+            "estimated_peak_bytes": crop_pixels * 13,
+        }
+        return result, QPointF(float(crop.left()), float(crop.top()))
+
+    def _row_cull_box(
+        self,
+        row: Mapping[str, Any],
+    ) -> tuple[float, float, float, float, float] | None:
+        """Scene-space bounds and effect reach of a row, cached per document.
+
+        Culling used to call ``_object_rect`` for every row of every visible
+        board on every frame - an artboard lookup, a view transform and a
+        ``QRectF`` each - which on a large imported file cost more than painting
+        the handful of rows that survive.  These numbers only depend on the
+        document, so they are derived once and mapped into canvas space with two
+        multiplications per row instead.
+
+        Returns ``None`` when the row cannot be bounded cheaply, which callers
+        must read as "keep it" and fall back to the exact rect.
+        """
+        object_id = str(row.get("id") or "")
+        cached = self._row_cull_boxes.get(object_id)
+        if cached is not None:
+            return cached
+        if object_id in self._motion_preview:
+            return None
+        artboard = self._artboards_by_id.get(str(row.get("artboard_id") or ""))
+        if artboard is None:
+            return None
+        geometry = self._resolved_geometry.get(object_id, row)
+        try:
+            box = (
+                float(artboard["x"]) + float(geometry["x"]),
+                float(artboard["y"]) + float(geometry["y"]),
+                float(geometry["width"]),
+                float(geometry["height"]),
+                self._row_effect_padding(row, scale=1.0),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+        self._row_cull_boxes[object_id] = box
+        return box
+
+    def _paint_rows_in_view(
+        self,
+        rows: list[dict[str, Any]],
+        visible_artboard_ids: set[str],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Cull rows before any vector, effect, clip or text work is done."""
+
+        canvas = QRectF(self.rect()).adjusted(-8.0, -8.0, 8.0, 8.0)
+        left_edge = canvas.left()
+        top_edge = canvas.top()
+        right_edge = canvas.right()
+        bottom_edge = canvas.bottom()
+        scale, offset = self._view_transform()
+        origin_x = offset.x()
+        origin_y = offset.y()
+        visible: list[dict[str, Any]] = []
+        culled = 0
+        for row in rows:
+            if str(row.get("artboard_id") or "") not in visible_artboard_ids:
+                culled += 1
+                continue
+            box = self._row_cull_box(row)
+            if box is not None:
+                width = box[2] * scale
+                height = box[3] * scale
+                x = origin_x + box[0] * scale
+                y = origin_y + box[1] * scale
+                left = min(x, x + width) - 4.0
+                top = min(y, y + height) - 4.0
+                if (
+                    max(abs(width), abs(height)) < _MIN_PROJECTED_OBJECT_SIZE
+                    or left > right_edge
+                    or top > bottom_edge
+                    or left + abs(width) + 8.0 < left_edge
+                    or top + abs(height) + 8.0 < top_edge
+                ):
+                    culled += 1
+                    continue
+                visible.append(row)
+                continue
+            rect = self._object_rect(row)
+            if (
+                max(abs(rect.width()), abs(rect.height()))
+                < _MIN_PROJECTED_OBJECT_SIZE
+                or not rect.adjusted(-4.0, -4.0, 4.0, 4.0).intersects(canvas)
+            ):
+                culled += 1
+                continue
+            visible.append(row)
+        return visible, culled
+
+    @staticmethod
+    def _overview_color(
+        row: Mapping[str, Any],
+        style: Mapping[str, Any],
+    ) -> QColor:
+        kind = str(row.get("kind") or "")
+        fallback = "#D6DAE1" if kind == "image" else "#506884"
+        key = "text_color" if kind == "text" else "fill"
+        color = ui_color(style.get(key), fallback)
+        paints = style.get("fills")
+        if isinstance(paints, list):
+            for paint in paints:
+                if not isinstance(paint, Mapping) or not paint.get("visible", True):
+                    continue
+                candidate = ui_color(paint.get("color"), "#00000000")
+                if candidate.alpha() > 0:
+                    color = candidate
+                    break
+        return color
+
+    def _paint_scene_row_overview(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        *,
+        scale: float,
+    ) -> None:
+        """Paint a stable, bounded-cost silhouette for document overview."""
+
+        kind = str(row.get("kind") or "")
+        if kind == "group":
+            return
+        artboard = self._artboards_by_id.get(str(row.get("artboard_id") or ""))
+        if artboard is None:
+            return
+        artboard_rect, _ = self._artboard_viewport(artboard)
+        rect = self._object_rect(row).intersected(artboard_rect)
+        if rect.isEmpty():
+            return
+        style = row.get("style")
+        style = style if isinstance(style, Mapping) else {}
+        color = self._overview_color(row, style)
+        opacity = max(
+            0.0,
+            min(1.0, float(row.get("opacity", 1.0)))
+        )
+        color.setAlphaF(color.alphaF() * opacity)
+        stroke_width = max(0.0, float(style.get("stroke_width") or 0.0) * scale)
+        stroke = ui_color(style.get("stroke"), "#00000000")
+        stroke.setAlphaF(stroke.alphaF() * opacity)
+
+        painter.save()
+        painter.setClipRect(artboard_rect)
+        painter.setPen(
+            QPen(stroke, stroke_width)
+            if stroke.alpha() > 0 and stroke_width >= 0.6
+            else QPen(Qt.PenStyle.NoPen)
+        )
+        painter.setBrush(color)
+        if kind == "text":
+            label = str((row.get("content") or {}).get("text") or row.get("name") or "")
+            projected_font = float(style.get("font_size") or 12.0) * scale
+            if projected_font >= 4.0 and rect.width() >= 8.0:
+                font = QFont(painter.font())
+                font.setPixelSize(max(4, min(24, int(round(projected_font)))))
+                painter.setFont(font)
+                painter.setPen(color)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawText(
+                    rect,
+                    Qt.AlignmentFlag.AlignLeft
+                    | Qt.AlignmentFlag.AlignVCenter,
+                    label,
+                )
+            else:
+                band = QRectF(rect)
+                band.setHeight(max(0.7, min(2.0, rect.height())))
+                band.moveCenter(rect.center())
+                painter.fillRect(band, color)
+        elif kind == "ellipse":
+            painter.drawEllipse(rect)
+        elif kind in {"line", "arrow"}:
+            pen_color = stroke if stroke.alpha() > 0 else color
+            painter.setPen(QPen(pen_color, max(0.6, stroke_width)))
+            painter.drawLine(rect.topLeft(), rect.bottomRight())
+        else:
+            radius = max(0.0, float(style.get("radius") or 0.0) * scale)
+            painter.drawRoundedRect(rect, radius, radius)
+        painter.restore()
+
+    def _artboard_surface_rect(
+        self,
+        viewport: QRectF,
+    ) -> tuple[int, int, int, int]:
+        """Artboard-local box worth rasterising for the current view.
+
+        ``viewport`` is the board rect in canvas pixels.  The result is an
+        ``(left, top, width, height)`` box inside it, in the same pixels, so a
+        caller can both size its surface and place it back on the canvas.
+
+        The box is snapped to a grid anchored on the board rather than on the
+        window, so panning only invalidates the boards it moves across an edge
+        of, and a board that fits on screen whole always yields the same box.
+        """
+        full_width = max(1, int(math.ceil(viewport.width())))
+        full_height = max(1, int(math.ceil(viewport.height())))
+        canvas = QRectF(self.rect()).adjusted(
+            -_ARTBOARD_SURFACE_MARGIN,
+            -_ARTBOARD_SURFACE_MARGIN,
+            _ARTBOARD_SURFACE_MARGIN,
+            _ARTBOARD_SURFACE_MARGIN,
+        )
+        visible = viewport.intersected(canvas)
+        if visible.isEmpty():
+            # Callers cull boards against a tighter margin, so this is only
+            # reachable for one sitting exactly on the boundary.
+            return (
+                0,
+                0,
+                min(full_width, _ARTBOARD_SURFACE_GRID),
+                min(full_height, _ARTBOARD_SURFACE_GRID),
+            )
+        local = visible.translated(-viewport.topLeft())
+        grid = _ARTBOARD_SURFACE_GRID
+        # Growing by a whole cell before snapping guarantees at least one cell
+        # of rendered margin beyond the canvas, so effects that sample their
+        # backdrop still have something to sample at the window edge.
+        left = max(0, (int(math.floor(local.left() / grid)) - 1) * grid)
+        top = max(0, (int(math.floor(local.top() / grid)) - 1) * grid)
+        right = min(full_width, (int(math.ceil(local.right() / grid)) + 1) * grid)
+        bottom = min(full_height, (int(math.ceil(local.bottom() / grid)) + 1) * grid)
+        return left, top, max(1, right - left), max(1, bottom - top)
+
+    def _artboard_surface_rows(
+        self,
+        rows: list[dict[str, Any]],
+        surface: QRectF,
+        *,
+        scale: float,
+    ) -> list[dict[str, Any]]:
+        """Drop rows a clipped surface cannot show, before any paint work.
+
+        A row is kept when its rect grown by its own blur and shadow reach
+        touches the surface, because those effects paint outside the rect and a
+        board's whole surface is no longer rasterised.  Mask participants always
+        stay: the mask compositor derives its bounds from the rows it is handed,
+        so dropping one member would move the rest.
+        """
+        if not rows:
+            return rows
+        left_edge = surface.left()
+        top_edge = surface.top()
+        right_edge = surface.right()
+        bottom_edge = surface.bottom()
+        _scale, offset = self._view_transform()
+        origin_x = offset.x()
+        origin_y = offset.y()
+        kept: list[dict[str, Any]] = []
+        for row in rows:
+            object_id = str(row.get("id") or "")
+            if (
+                object_id in self._pixel_mask_group_by_target
+                or object_id in self._mask_source_object_ids
+            ):
+                kept.append(row)
+                continue
+            box = self._row_cull_box(row)
+            if box is None:
+                kept.append(row)
+                continue
+            padding = max(4.0, box[4] * scale)
+            width = abs(box[2] * scale)
+            height = abs(box[3] * scale)
+            left = min(0.0, box[2] * scale) + origin_x + box[0] * scale
+            top = min(0.0, box[3] * scale) + origin_y + box[1] * scale
+            if (
+                left - padding > right_edge
+                or top - padding > bottom_edge
+                or left + width + padding < left_edge
+                or top + height + padding < top_edge
+            ):
+                continue
+            kept.append(row)
+        return kept
+
+    def _store_artboard_surface(
+        self,
+        cache: dict[tuple[Any, ...], QImage],
+        key: tuple[Any, ...],
+        image: QImage,
+        meta: tuple[tuple[Any, ...], float, int, int, int, int],
+    ) -> None:
+        """Cache a surface while keeping total rasterised area bounded.
+
+        ``meta`` records which board, scale and box the surface holds so a later
+        frame can stretch it into place instead of rebuilding it.  Eviction is
+        oldest-first, so a frame only ever discards surfaces from earlier frames
+        unless that single frame needs more than the whole budget - which takes
+        several 4K-sized boards at once.
+        """
+        pixels = image.width() * image.height()
+        if pixels > _ARTBOARD_SURFACE_PIXEL_CAP:
+            return
+        cache[key] = image
+        self._artboard_surface_meta[key] = meta
+        total = sum(
+            entry.width() * entry.height() for entry in cache.values()
+        )
+        while total > _ARTBOARD_SURFACE_PIXEL_BUDGET and len(cache) > 1:
+            oldest = next(iter(cache))
+            if oldest == key:
+                break
+            total -= cache[oldest].width() * cache[oldest].height()
+            cache.pop(oldest, None)
+            self._artboard_surface_meta.pop(oldest, None)
+
+    @staticmethod
+    def _draw_artboard_surface(
+        painter: QPainter,
+        image: QImage,
+        target: QRectF,
+    ) -> None:
+        """Blit a board surface, stretching it only when it is a stand-in."""
+        if (
+            image.width() == int(round(target.width()))
+            and image.height() == int(round(target.height()))
+        ):
+            painter.drawImage(target.topLeft(), image)
+            return
+        painter.save()
+        painter.setRenderHint(
+            QPainter.RenderHint.SmoothPixmapTransform,
+            True,
+        )
+        painter.drawImage(target, image)
+        painter.restore()
+
+    def _overview_artboard_image(
+        self,
+        artboard: Mapping[str, Any],
+        rows: list[dict[str, Any]],
+        *,
+        scale: float,
+    ) -> tuple[QImage, QRectF] | None:
+        viewport, _ = self._artboard_viewport(artboard)
+        left, top, width, height = self._artboard_surface_rect(viewport)
+        target = QRectF(
+            viewport.left() + float(left),
+            viewport.top() + float(top),
+            float(width),
+            float(height),
+        )
+        variant = (
+            self._document_render_signature,
+            str(artboard.get("id") or ""),
+        )
+        key = variant + (round(float(scale), 6), left, top, width, height)
+        cached = self._overview_artboard_cache.get(key)
+        if cached is not None:
+            return cached, target
+        if self._view_gesture_active:
+            return self._approximate_artboard_surface(
+                self._overview_artboard_cache,
+                variant,
+                artboard,
+                scale=scale,
+                needed=target,
+            )
+        image = QImage(
+            width,
+            height,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.translate(-target.left(), -target.top())
+        for row in rows:
+            if str(row.get("id") or "") in self._mask_source_object_ids:
+                continue
+            self._paint_scene_row_overview(
+                painter,
+                row,
+                scale=scale,
+            )
+        painter.end()
+        self._store_artboard_surface(
+            self._overview_artboard_cache,
+            key,
+            image,
+            (variant, float(scale), left, top, width, height),
+        )
+        return image, target
+
+    def _exact_artboard_image(
+        self,
+        artboard: Mapping[str, Any],
+        rows: list[dict[str, Any]],
+        *,
+        scale: float,
+    ) -> tuple[QImage, QRectF] | None:
+        viewport, _ = self._artboard_viewport(artboard)
+        left, top, width, height = self._artboard_surface_rect(viewport)
+        target = QRectF(
+            viewport.left() + float(left),
+            viewport.top() + float(top),
+            float(width),
+            float(height),
+        )
+        variant = (
+            self._document_render_signature,
+            str(artboard.get("id") or ""),
+            bool(self._pixel_preview_enabled),
+            bool(self._layout_guides_visible),
+            bool(self._pixel_grid_visible),
+        )
+        key = variant + (round(float(scale), 6), left, top, width, height)
+        cached = self._exact_artboard_cache.get(key)
+        if cached is not None:
+            return cached, target
+        if self._view_gesture_active:
+            return self._approximate_artboard_surface(
+                self._exact_artboard_cache,
+                variant,
+                artboard,
+                scale=scale,
+                needed=target,
+            )
+
+        # Culling here rather than at the call site keeps the surface honest:
+        # the rows that survive are exactly the ones this box can show, and the
+        # box already extends a grid cell past the canvas.
+        rows = self._artboard_surface_rows(
+            rows,
+            target,
+            scale=scale,
+        )
+        surface = QImage(
+            width,
+            height,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        surface.fill(ui_color(artboard.get("background"), "#FFFFFF"))
+        old_override = self._render_view_offset_override
+        old_boolean_cache = self._boolean_path_cache
+        # Shifting the override by the box origin makes every downstream
+        # ``_view_transform`` consumer paint in surface pixels, clipped board
+        # layout and mask compositing included.
+        self._render_view_offset_override = QPointF(
+            -float(artboard.get("x") or 0.0) * scale - float(left),
+            -float(artboard.get("y") or 0.0) * scale - float(top),
+        )
+        self._boolean_path_cache = {}
+        try:
+            painter = QPainter(surface)
+            painter.setRenderHint(
+                QPainter.RenderHint.Antialiasing,
+                not self._pixel_preview_enabled,
+            )
+            local_viewport, local_scale = self._artboard_viewport(artboard)
+            self._paint_artboard_layout(
+                painter,
+                artboard,
+                local_viewport,
+                local_scale,
+                layout_guides_visible=self._layout_guides_visible,
+                pixel_grid_visible=self._pixel_grid_visible,
+            )
+            painted_mask_sources: set[str] = set()
+            for row in rows:
+                object_id = str(row.get("id") or "")
+                group = self._pixel_mask_group_by_target.get(object_id)
+                if group is not None:
+                    source_id = str(group["source"].get("id") or "")
+                    if source_id not in painted_mask_sources:
+                        masked_group, masked_origin = self._render_pixel_mask_group(
+                            surface,
+                            rows,
+                            group,
+                        )
+                        painter.drawImage(masked_origin, masked_group)
+                        painted_mask_sources.add(source_id)
+                    continue
+                if object_id in self._mask_source_object_ids:
+                    continue
+                self._paint_scene_row(
+                    painter,
+                    row,
+                    surface=surface,
+                    layer_outlines=False,
+                )
+            painter.end()
+        finally:
+            self._render_view_offset_override = old_override
+            self._boolean_path_cache = old_boolean_cache
+
+        self._store_artboard_surface(
+            self._exact_artboard_cache,
+            key,
+            surface,
+            (variant, float(scale), left, top, width, height),
+        )
+        return surface, target
+
     def paintEvent(self, _event) -> None:
+        self._approximate_artboard_count = 0
+        self._deferred_artboard_count = 0
         empty_page = bool(self._empty_page_mode and not self._document["objects"])
         canvas_color = QColor("#F5F5F5" if empty_page else "#3F4145")
         surface = QImage(
@@ -4119,6 +5046,29 @@ class PainterUIDesignOverlay(QWidget):
             not self._pixel_preview_enabled,
         )
         scene_painter.fillRect(self.rect(), canvas_color)
+        view_scale, offset = self._view_transform()
+        overview_lod = bool(
+            view_scale < _OVERVIEW_LOD_SCALE
+            and not self._prototype_preview_enabled
+            and not self._layer_outlines_visible
+        )
+        exact_cache_enabled = bool(
+            not overview_lod
+            and not self._prototype_preview_enabled
+            and not self._layer_outlines_visible
+            and not self._motion_preview
+            and not self._motion_actor_compositions
+            and not self._text_edit_object_id
+            and not self._vector_edit_object_id
+            and not self._image_focal_edit_object_id
+        )
+        canvas_viewport = QRectF(self.rect()).adjusted(
+            -8.0,
+            -8.0,
+            8.0,
+            8.0,
+        )
+        visible_artboard_ids: set[str] = set()
         active_id = self._document["active_artboard_id"]
         preview_artboards: set[str] | None = None
         if self._prototype_preview_enabled:
@@ -4152,19 +5102,23 @@ class PainterUIDesignOverlay(QWidget):
             )
             if scaffold_artboard and not self._prototype_preview_enabled:
                 continue
+            if not viewport.intersects(canvas_viewport):
+                continue
+            visible_artboard_ids.add(str(artboard["id"]))
             scene_painter.fillRect(
                 viewport,
-                QColor(str(artboard.get("background") or "#FFFFFF")),
+                ui_color(artboard.get("background"), "#FFFFFF"),
             )
             if not self._prototype_preview_enabled:
-                self._paint_artboard_layout(
-                    scene_painter,
-                    artboard,
-                    viewport,
-                    scale,
-                    layout_guides_visible=self._layout_guides_visible,
-                    pixel_grid_visible=self._pixel_grid_visible,
-                )
+                if not overview_lod:
+                    self._paint_artboard_layout(
+                        scene_painter,
+                        artboard,
+                        viewport,
+                        scale,
+                        layout_guides_visible=self._layout_guides_visible,
+                        pixel_grid_visible=self._pixel_grid_visible,
+                    )
                 scene_painter.setBrush(Qt.BrushStyle.NoBrush)
                 scene_painter.setPen(
                     QPen(
@@ -4175,13 +5129,13 @@ class PainterUIDesignOverlay(QWidget):
                     )
                 )
                 scene_painter.drawRect(viewport)
-                if self._artboard_labels_visible:
+                if self._artboard_labels_visible and viewport.width() >= 18.0:
                     scene_painter.setPen(QColor("#B7C0CD"))
                     scene_painter.drawText(
                         QPointF(viewport.left(), viewport.top() - 7.0),
                         str(artboard["name"]),
                     )
-        scale, offset = self._view_transform()
+        scale = view_scale
         for section in (
             [] if self._prototype_preview_enabled
             else self._document.get("sections", [])
@@ -4192,6 +5146,8 @@ class PainterUIDesignOverlay(QWidget):
                 float(section["width"]) * scale,
                 float(section["height"]) * scale,
             )
+            if not section_rect.intersects(canvas_viewport):
+                continue
             scene_painter.setBrush(Qt.BrushStyle.NoBrush)
             scene_painter.setPen(
                 QPen(QColor("#8B93A7"), 1.0, Qt.PenStyle.DashLine)
@@ -4215,7 +5171,7 @@ class PainterUIDesignOverlay(QWidget):
                     Qt.AlignmentFlag.AlignCenter,
                     section_name,
                 )
-        if not self._prototype_preview_enabled:
+        if not self._prototype_preview_enabled and not overview_lod:
             from app.painter_ui_components import component_set_canvas_bounds
 
             for component in self._document.get("components", []):
@@ -4240,49 +5196,163 @@ class PainterUIDesignOverlay(QWidget):
                     str(bounds.get("name") or "Component Set"),
                 )
                 scene_painter.restore()
-        paint_rows = (
-            self._outline_objects()
-            if self._layer_outlines_visible
-            else self._visible_objects()
-        )
-        for row in paint_rows:
-            scene_painter.save()
-            if not self._layer_outlines_visible:
-                self._apply_parent_clips(scene_painter, row)
-                self._apply_object_mask(scene_painter, row)
-            rect = self._object_rect(row)
-            rotation = self._display_rotation(row)
-            pivot = ui_pivot_point(rect, row.get("constraints"))
-            if abs(rotation) >= 0.001:
-                scene_painter.translate(pivot)
-                scene_painter.rotate(-rotation)
-                scene_painter.translate(-pivot)
-            content = dict(row.get("content") or {})
-            flip_x = bool(content.get("flip_x", False))
-            flip_y = bool(content.get("flip_y", False))
-            if flip_x or flip_y:
-                scene_painter.translate(pivot)
-                scene_painter.scale(-1.0 if flip_x else 1.0, -1.0 if flip_y else 1.0)
-                scene_painter.translate(-pivot)
-            display_row = dict(row)
-            display_row["opacity"] = self._display_opacity(row)
-            if not self._row_in_edit_scope(row):
-                display_row["opacity"] *= 0.2
-            if self._layer_outlines_visible:
-                self._paint_object_outline(scene_painter, display_row)
-            else:
-                self._paint_object(
-                    scene_painter,
-                    display_row,
-                    surface=surface,
+        painted_pixel_mask_sources: set[str] = set()
+        if overview_lod:
+            if not self._overview_rows_by_artboard:
+                overview_rows = self._visible_objects()
+                self._overview_candidate_count = len(overview_rows)
+                for row in overview_rows:
+                    self._overview_rows_by_artboard.setdefault(
+                        str(row.get("artboard_id") or ""),
+                        [],
+                    ).append(row)
+            painted_object_count = sum(
+                len(self._overview_rows_by_artboard.get(artboard_id, []))
+                for artboard_id in visible_artboard_ids
+            )
+            culled_object_count = max(
+                0,
+                self._overview_candidate_count - painted_object_count,
+            )
+            for artboard in self._document.get("artboards", []):
+                artboard_id = str(artboard.get("id") or "")
+                if artboard_id not in visible_artboard_ids:
+                    continue
+                painted = self._overview_artboard_image(
+                    artboard,
+                    self._overview_rows_by_artboard.get(artboard_id, []),
+                    scale=view_scale,
                 )
-            scene_painter.restore()
-        if self._artboard_labels_visible and not self._prototype_preview_enabled:
+                if painted is not None:
+                    self._draw_artboard_surface(scene_painter, *painted)
+            interaction_ids = {
+                str(value)
+                for value in self._document.get("selection", {}).get(
+                    "object_ids",
+                    [],
+                )
+                if str(value or "")
+            }
+            if self._layer_hover_object_id:
+                interaction_ids.add(str(self._layer_hover_object_id))
+            paint_rows = [
+                self._effective_objects_by_id[object_id]
+                for object_id in interaction_ids
+                if object_id in self._effective_objects_by_id
+                and str(
+                    self._effective_objects_by_id[object_id].get(
+                        "artboard_id"
+                    )
+                    or ""
+                )
+                in visible_artboard_ids
+            ]
+            candidate_object_count = self._overview_candidate_count
+        else:
+            if exact_cache_enabled:
+                if not self._overview_rows_by_artboard:
+                    ordered_rows = self._visible_objects()
+                    self._overview_candidate_count = len(ordered_rows)
+                    for row in ordered_rows:
+                        self._overview_rows_by_artboard.setdefault(
+                            str(row.get("artboard_id") or ""),
+                            [],
+                        ).append(row)
+                all_paint_rows = [
+                    row
+                    for artboard_id in visible_artboard_ids
+                    for row in self._overview_rows_by_artboard.get(
+                        artboard_id,
+                        [],
+                    )
+                ]
+                candidate_object_count = self._overview_candidate_count
+            else:
+                all_paint_rows = (
+                    self._outline_objects()
+                    if self._layer_outlines_visible
+                    else self._visible_objects()
+                )
+                candidate_object_count = len(all_paint_rows)
+            paint_rows, culled_object_count = self._paint_rows_in_view(
+                all_paint_rows,
+                visible_artboard_ids,
+            )
+            painted_object_count = len(paint_rows)
+            if exact_cache_enabled:
+                rows_by_artboard: dict[str, list[dict[str, Any]]] = {}
+                for row in all_paint_rows:
+                    if (
+                        str(row.get("artboard_id") or "")
+                        not in visible_artboard_ids
+                    ):
+                        continue
+                    rows_by_artboard.setdefault(
+                        str(row.get("artboard_id") or ""),
+                        [],
+                    ).append(row)
+                # The cached surfaces are clipped to the view and cull their own
+                # rows, so the honest painted count is the in-view set rather
+                # than every row of every visible board.
+                culled_object_count = max(
+                    0,
+                    int(candidate_object_count) - painted_object_count,
+                )
+                for artboard in self._document.get("artboards", []):
+                    artboard_id = str(artboard.get("id") or "")
+                    if artboard_id not in visible_artboard_ids:
+                        continue
+                    painted = self._exact_artboard_image(
+                        artboard,
+                        rows_by_artboard.get(artboard_id, []),
+                        scale=view_scale,
+                    )
+                    if painted is not None:
+                        self._draw_artboard_surface(
+                            scene_painter,
+                            *painted,
+                        )
+            else:
+                for row in paint_rows:
+                    object_id = str(row.get("id") or "")
+                    if not self._layer_outlines_visible:
+                        group = self._pixel_mask_group_by_target.get(object_id)
+                        if group is not None:
+                            source_id = str(group["source"].get("id") or "")
+                            if source_id not in painted_pixel_mask_sources:
+                                masked_group, masked_origin = (
+                                    self._render_pixel_mask_group(
+                                        surface,
+                                        paint_rows,
+                                        group,
+                                    )
+                                )
+                                scene_painter.drawImage(
+                                    masked_origin,
+                                    masked_group,
+                                )
+                                painted_pixel_mask_sources.add(source_id)
+                            continue
+                        if object_id in self._mask_source_object_ids:
+                            continue
+                    self._paint_scene_row(
+                        scene_painter,
+                        row,
+                        surface=surface,
+                        layer_outlines=self._layer_outlines_visible,
+                    )
+        if (
+            self._artboard_labels_visible
+            and not self._prototype_preview_enabled
+            and not overview_lod
+        ):
             selected_ids = set(
                 self._document.get("selection", {}).get("object_ids", [])
             )
-            for row in self._visible_objects():
+            for row in paint_rows:
                 if str(row.get("kind") or "") != "frame":
+                    continue
+                if str(row.get("parent_id") or ""):
                     continue
                 if bool((row.get("content") or {}).get("export_slice", False)):
                     continue
@@ -4295,6 +5365,23 @@ class PainterUIDesignOverlay(QWidget):
                     QPointF(rect.left(), rect.top() - 9.0),
                     str(row.get("name") or "Frame"),
                 )
+        self._last_paint_metrics = {
+            "mode": "overview_lod" if overview_lod else "exact",
+            "view_scale": float(view_scale),
+            "artboard_count": len(self._document.get("artboards", [])),
+            "visible_artboard_count": len(visible_artboard_ids),
+            "candidate_object_count": int(candidate_object_count),
+            "painted_object_count": int(painted_object_count),
+            "culled_object_count": int(culled_object_count),
+            "overview_cache_entries": len(self._overview_artboard_cache),
+            "exact_cache_entries": len(self._exact_artboard_cache),
+            "exact_cache_enabled": bool(exact_cache_enabled),
+            "view_gesture_active": bool(self._view_gesture_active),
+            "approximate_artboard_count": int(
+                self._approximate_artboard_count
+            ),
+            "deferred_artboard_count": int(self._deferred_artboard_count),
+        }
         scene_painter.end()
 
         painter = QPainter(self)
@@ -4328,7 +5415,7 @@ class PainterUIDesignOverlay(QWidget):
             hover_row = next(
                 (
                     row
-                    for row in self._visible_objects()
+                    for row in paint_rows
                     if str(row["id"]) == self._layer_hover_object_id
                 ),
                 None,
@@ -4370,7 +5457,7 @@ class PainterUIDesignOverlay(QWidget):
             if len(selected_rows) > 1
             else QRectF()
         )
-        for row in self._visible_objects():
+        for row in (paint_rows if selected_ids else ()):
             if not self._row_in_edit_scope(row):
                 continue
             is_selected = row["id"] in selected_ids
@@ -5865,6 +6952,7 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         if self._interaction == "pan":
+            self._begin_view_gesture()
             self._view_scale, _offset = self._view_transform()
             self._view_offset = self._clamped_view_offset(
                 self._view_scale,
@@ -6549,6 +7637,10 @@ class PainterUIDesignOverlay(QWidget):
         event.ignore()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._interaction == "pan":
+            # Letting go of a drag is a definite end of the gesture, so sharpen
+            # now instead of waiting for the settle timer.
+            self._end_view_gesture()
         if self._prototype_preview_enabled:
             hit_ids = self.object_ids_at(
                 float(event.position().x()),

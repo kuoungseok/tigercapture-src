@@ -143,6 +143,7 @@ def test_whole_object_clipboard_survives_native_tspaint_round_trip(
     save_report = save_painter_document(
         path,
         {
+            "document": {"width": 1, "height": 1},
             "workspace": {"mode": "ui_design"},
             "ui_document": updated,
         },
@@ -150,8 +151,8 @@ def test_whole_object_clipboard_survives_native_tspaint_round_trip(
     restored_payload, load_report = load_painter_document(path)
     restored = restored_payload["ui_document"]
 
-    assert save_report["format"] == "tigerstudio.painter.document.v3"
-    assert load_report["format"] == "tigerstudio.painter.document.v3"
+    assert save_report["format"] == "tigerstudio.painter.document.v4"
+    assert load_report["format"] == "tigerstudio.painter.document.v4"
     assert validate_ui_document(restored)["ok"] is True
     assert restored["version"] == updated["version"]
     pasted_root = next(

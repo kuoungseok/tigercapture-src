@@ -57,6 +57,7 @@ from PySide6.QtGui import (
     qGray,
 )
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QAbstractItemView,
     QCheckBox,
     QColorDialog,
@@ -3381,6 +3382,10 @@ class DrawingCanvas(QWidget):
         self._cpu_stroke_cache_key: tuple | None = None
         self._cpu_stroke_cache_image: QImage | None = None
         self._live_stroke_cache_image: QImage | None = None
+        self._live_dynamic_stream = None
+        self._live_dynamic_cap_dabs: list[dict[str, object]] = []
+        self._live_dynamic_cap_cfg: dict[str, object] = {}
+        self._live_dynamic_cap_color: QColor = QColor(255, 50, 50)
         self._live_stroke_cache_size: tuple[int, int] = (0, 0)
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._brush_hud_press_global: QPointF | None = None
@@ -4496,6 +4501,11 @@ class DrawingCanvas(QWidget):
         key = self._cpu_stroke_cache_key
         if image is None or image.isNull() or key is None:
             return False
+        # Read the cache size before any early return: the advanced-composition
+        # branch below reports it, and reading it there raised
+        # UnboundLocalError, which killed the stroke commit outright.
+        w = image.width()
+        h = image.height()
         if self._layer_rasters:
             return False
         if any(
@@ -4515,8 +4525,6 @@ class DrawingCanvas(QWidget):
                 "size": [int(w), int(h)],
             }
             return False
-        w = image.width()
-        h = image.height()
         t_ms = int(self._get_time_ms())
         if key != (
             int(previous_revision),
@@ -4617,6 +4625,18 @@ class DrawingCanvas(QWidget):
                 self._clip_to_layer_mask(painter, mask, w, h)
             try:
                 painter.drawImage(0, 0, self._live_stroke_cache_image)
+                cap_dabs = getattr(self, "_live_dynamic_cap_dabs", None)
+                if cap_dabs:
+                    from app.painter_brush_dynamics import paint_dynamic_dabs
+
+                    # These sit at the stroke's last authored point and move
+                    # with the pointer, so the live image never owns them.
+                    paint_dynamic_dabs(
+                        painter,
+                        cap_dabs,
+                        self._live_dynamic_cap_cfg,
+                        self._live_dynamic_cap_color,
+                    )
             finally:
                 if len(mask) >= 3:
                     painter.restore()
@@ -6213,6 +6233,10 @@ class DrawingCanvas(QWidget):
         self._current_load = []
         self._live_stroke_cache_image = None
         self._live_stroke_cache_size = (0, 0)
+        self._live_dynamic_cap_dabs = []
+        stream = getattr(self, "_live_dynamic_stream", None)
+        if stream is not None:
+            stream.reset()
         self._perspective_stroke_axis_name = ""
         self._perspective_stroke_direction = None
 
@@ -6379,6 +6403,53 @@ class DrawingCanvas(QWidget):
                 masked.end()
         return image
 
+    def _paint_live_dynamic_increment(self, w: int, h: int) -> bool:
+        """Extend the live image with only the dabs the stroke just gained.
+
+        Returns False when the stroke cannot be extended - a smudge/mixer brush,
+        an advanced feature whose alpha field depends on the total dab count, or
+        a path over the dab budget - and the caller repaints the whole prefix.
+        """
+        from app.painter_brush_dynamics import (
+            DynamicDabStream,
+            normalize_brush_dynamics,
+        )
+
+        stream = getattr(self, "_live_dynamic_stream", None)
+        if stream is None:
+            stream = DynamicDabStream()
+            self._live_dynamic_stream = stream
+        preview_stroke = self._current_stroke_snapshot(w, h, start=0)
+        increment = stream.update(preview_stroke, w, h)
+        if increment is None:
+            self._live_dynamic_cap_dabs = []
+            stream.reset()
+            return False
+        stable, cap = increment
+        opacity_scale = self._layer_opacity.get(self._active_layer_id, 100) / 100.0
+        color = QColor(*preview_stroke.color)
+        color.setAlpha(
+            max(0, min(255, int(preview_stroke.opacity * opacity_scale)))
+        )
+        cfg = normalize_brush_dynamics(
+            getattr(preview_stroke, "brush_dynamics", {}) or {}
+        )
+        if stable:
+            from app.painter_brush_dynamics import paint_dynamic_dabs
+
+            live_painter = QPainter(self._live_stroke_cache_image)
+            live_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            try:
+                paint_dynamic_dabs(live_painter, stable, cfg, color)
+            finally:
+                live_painter.end()
+        # The cap dabs sit at the last authored point and move with the pointer,
+        # so they are drawn over the live image every frame instead of into it.
+        self._live_dynamic_cap_dabs = list(cap)
+        self._live_dynamic_cap_cfg = cfg
+        self._live_dynamic_cap_color = color
+        return True
+
     def _paint_latest_live_stroke_segment(self) -> None:
         """Append the latest canonical segment with the commit renderer."""
         if not self._current_points:
@@ -6405,6 +6476,8 @@ class DrawingCanvas(QWidget):
         dynamic_enabled = bool(
             dict(getattr(self, "_brush_dynamics", {}) or {}).get("enabled", False)
         )
+        if dynamic_enabled and self._paint_live_dynamic_increment(w, h):
+            return
         if dynamic_enabled:
             # Dynamic spacing/scatter and stabilization depend on the authored
             # stroke prefix. Repaint that bounded prefix so the live image is
@@ -11370,8 +11443,15 @@ class PaintDialog(QDialog):
         numeric_row.setContentsMargins(0, 0, 0, 0)
         numeric_row.setSpacing(3)
         self._color_numeric_mode = QComboBox()
+        self._color_numeric_mode.setObjectName("PaintColorNumericMode")
         self._color_numeric_mode.addItem("RGB", "rgb")
         self._color_numeric_mode.addItem("HSB", "hsb")
+        # The application-wide combo style reserves 118 px, which makes this
+        # compact row intrude into the first numeric field.  Keep this control
+        # deliberately local so the four fields retain their requested gaps.
+        self._color_numeric_mode.setStyleSheet(
+            "QComboBox#PaintColorNumericMode { min-width: 0px; padding: 3px 4px; }"
+        )
         self._color_numeric_mode.setFixedWidth(58)
         self._color_numeric_mode.currentIndexChanged.connect(
             self._sync_numeric_color_controls
@@ -11379,7 +11459,12 @@ class PaintDialog(QDialog):
         numeric_row.addWidget(self._color_numeric_mode)
         self._color_numeric_spins = []
         for _index in range(3):
-            spin = QSpinBox()
+            spin = PainterHoverWheelSpinBox()
+            spin.setObjectName("PaintColorNumericSpin")
+            # Steppers consume most of a 58 px field and obscure three-digit
+            # values such as 255 and 359 degrees. Values remain editable and
+            # support the Painter hover-wheel interaction without the buttons.
+            spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
             spin.setRange(0, 255)
             spin.setFixedWidth(58)
             spin.valueChanged.connect(self._on_numeric_color_changed)
@@ -11669,6 +11754,9 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.motion_preview_hover_requested.connect(
             lambda _binding_id: self._set_painter_ui_motion_preview(True)
+        )
+        self._paint_ui_inspector.motion_bake_flipbook_requested.connect(
+            lambda _binding_id: self._bake_selected_painter_ui_flipbook()
         )
         self._paint_ui_inspector.motion_binding_migrate_requested.connect(
             self._migrate_painter_ui_motion_bindings
@@ -15028,7 +15116,8 @@ class PaintDialog(QDialog):
                         "kind": row["kind"],
                     }
                     for row in ui_selection_path(
-                        getattr(self, "_painter_ui_document", None)
+                        getattr(self, "_painter_ui_document", None),
+                        normalize=False,
                     )
                 ],
             }
@@ -17773,7 +17862,7 @@ class PaintDialog(QDialog):
     def _compare_painter_ui_dev_revision(self) -> None:
         from app.painter_ui_review import inspect_ui_review
 
-        review = inspect_ui_review(self._painter_ui_document)
+        review = inspect_ui_review(self._painter_ui_document, normalize=False)
         checkpoints = review.get("checkpoints") or []
         if not checkpoints:
             self._painter_ui_production_status(
@@ -20265,10 +20354,29 @@ class PaintDialog(QDialog):
         self._refresh_painter_ui_overlay()
         return dict(report)
 
+    def _painter_ui_refresh_inputs(self) -> tuple:
+        """Cheap identity of everything ``_refresh_painter_ui_overlay`` reads.
+
+        ``_painter_ui_document`` is only ever replaced wholesale - every
+        document helper returns a new dict - so object identity is a sound
+        change signal without hashing 30 MB of rows.
+        """
+        return (
+            id(getattr(self, "_painter_ui_document", None)),
+            bool(getattr(self, "_painter_ui_prototype_preview_enabled", False)),
+            id(getattr(self, "_painter_ui_prototype_state", None)),
+            int(getattr(self, "_painter_ui_motion_time_ms", 0) or 0),
+            str(getattr(self, "_painter_ui_stress_preview_preset", "") or ""),
+            str(getattr(self, "_painter_ui_stress_preview_object_id", "") or ""),
+            bool(getattr(self, "_painter_ui_empty_page_mode", False)),
+            str(getattr(self, "_canvas_workspace_mode", "paint")),
+        )
+
     def _refresh_painter_ui_overlay(self) -> None:
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is None:
             return
+        self._painter_ui_refresh_state = self._painter_ui_refresh_inputs()
         preview_document, stress_report = (
             self._painter_ui_stress_preview_document()
         )
@@ -20446,6 +20554,7 @@ class PaintDialog(QDialog):
                     getattr(self, "_painter_ui_document", {}),
                     selected,
                     getattr(self, "_painter_ui_motion_compositions", {}),
+                    normalize=False,
                 )
             inspector.set_motion_delivery_report(report)
             from app.painter_ui_motion_bridge import (
@@ -20456,13 +20565,17 @@ class PaintDialog(QDialog):
                 inspect_motion_binding_links(
                     getattr(self, "_painter_ui_document", {}),
                     getattr(self, "_painter_ui_motion_compositions", {}),
+                    normalize=False,
                 )
             )
         self._sync_painter_ui_quick_properties(selected)
         from app.painter_ui_motion_actor import motion_actor_rows
 
         has_motion_actors = bool(
-            motion_actor_rows(getattr(self, "_painter_ui_document", {}))
+            motion_actor_rows(
+                getattr(self, "_painter_ui_document", {}),
+                normalize=False,
+            )
         )
         animate_button = getattr(self, "_ui_design_animate_btn", None)
         if animate_button is not None:
@@ -20631,6 +20744,7 @@ class PaintDialog(QDialog):
         linked = linked_motion_composition_id(
             getattr(self, "_painter_ui_document", {}),
             target,
+            normalize=False,
         )
         if linked:
             return linked
@@ -20674,6 +20788,75 @@ class PaintDialog(QDialog):
                 "Some Motion links could not be resolved:\n"
                 + "\n".join(report["unresolved_object_ids"]),
             )
+
+    def _bake_selected_painter_ui_flipbook(self) -> dict[str, object]:
+        from PySide6.QtCore import QStandardPaths
+
+        from app.painter_ui_flipbook_workflow import (
+            PainterUIFlipbookWorkflowError,
+            bake_linked_motion_flipbook,
+            painter_ui_flipbook_output_directory,
+        )
+
+        document = getattr(self, "_painter_ui_document", {}) or {}
+        selection = document.get("selection")
+        selection = selection if isinstance(selection, dict) else {}
+        object_id = str(selection.get("object_id") or "")
+        document_id = str(document.get("document_id") or "ui-document-1")
+        self._painter_ui_production_status("Baking Motion flipbook...")
+        try:
+            output_dir = painter_ui_flipbook_output_directory(
+                QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppDataLocation
+                ),
+                document_id,
+                object_id,
+            )
+            updated, report = bake_linked_motion_flipbook(
+                document,
+                getattr(self, "_painter_ui_motion_compositions", {}),
+                output_dir,
+                object_id=object_id,
+            )
+        except PainterUIFlipbookWorkflowError as exc:
+            reasons = list(exc.block_reasons)
+            self._painter_ui_production_status(
+                "Flipbook bake blocked: " + ", ".join(reasons)
+            )
+            QMessageBox.warning(
+                self,
+                "Bake Flipbook",
+                "Flipbook bake was blocked:\n" + "\n".join(reasons),
+            )
+            return {
+                "schema": "tigerstudio.painter.motion_flipbook_workflow.v1",
+                "ok": False,
+                "changed": False,
+                "object_id": object_id,
+                "block_reasons": reasons,
+            }
+
+        if report["changed"]:
+            self._push_undo_state("Bake UI motion flipbook")
+            self._painter_ui_document = updated
+            self._painter_document_dirty = True
+            self._refresh_painter_ui_overlay()
+        blockers = list(report["block_reasons"])
+        if blockers:
+            self._painter_ui_production_status(
+                "Flipbook baked with blocker: " + ", ".join(blockers)
+            )
+            QMessageBox.warning(
+                self,
+                "Bake Flipbook",
+                "The flipbook atlas was attached, but Unreal playback remains "
+                "blocked:\n" + "\n".join(blockers),
+            )
+        else:
+            self._painter_ui_production_status(
+                "Flipbook ready: " + str(report["atlas_path"])
+            )
+        return report
 
     def _relink_painter_ui_motion_binding(
         self,
@@ -20878,7 +21061,10 @@ class PaintDialog(QDialog):
         enabled = bool(playing)
         composition = self._selected_painter_ui_motion_composition()
         has_motion_actors = bool(
-            motion_actor_rows(getattr(self, "_painter_ui_document", {}))
+            motion_actor_rows(
+                getattr(self, "_painter_ui_document", {}),
+                normalize=False,
+            )
         )
         if enabled and composition is None and not has_motion_actors:
             enabled = False
@@ -21613,12 +21799,18 @@ class PaintDialog(QDialog):
             viewport_height = min(viewport_height, window_budget)
         else:
             viewport_height = window_budget
-        compact_height = bool(viewport_height and viewport_height < 240)
+        compact_height = bool(viewport_height and viewport_height <= 280)
         panel_height = (
-            max(120, min(620, viewport_height - 2))
+            280
             if compact_height
             else max(280, min(620, viewport_height - 2 if viewport_height else 520))
         )
+        panel_height_changed = (
+            panel.minimumHeight() != panel_height
+            or panel.maximumHeight() != panel_height
+        )
+        panel.setMinimumHeight(panel_height)
+        panel.setMaximumHeight(panel_height)
         # On a short logical viewport (for example 150% scale on a 1080p
         # screen), preserve the numeric RGB/HSB controls and collapse the
         # large wheel instead of making the entire color panel unreachable.
@@ -21636,13 +21828,91 @@ class PaintDialog(QDialog):
         if wheel_frame is not None:
             wheel_frame.setMinimumHeight(frame_height)
             wheel_frame.setMaximumHeight(frame_height)
-        panel.layout().activate()
-        panel_height_changed = (
-            panel.minimumHeight() != panel_height
-            or panel.maximumHeight() != panel_height
-        )
-        panel.setMinimumHeight(panel_height)
-        panel.setMaximumHeight(panel_height)
+
+        color_page = wheel_frame.parentWidget() if wheel_frame is not None else None
+        color_page_layout = color_page.layout() if color_page is not None else None
+
+        def activate_color_geometry() -> None:
+            panel_layout = panel.layout()
+            if panel_layout is not None:
+                panel_layout.invalidate()
+                panel_layout.activate()
+            if color_page_layout is not None:
+                color_page_layout.invalidate()
+                color_page_layout.activate()
+
+        activate_color_geometry()
+
+        # The content below the disc changes with fonts, DPI, and platform
+        # style. A fixed subtraction can therefore leave the fixed-size disc
+        # frame crossing the brightness slider even though both widgets are in
+        # a layout. Fit against resolved coordinates. At medium heights, grow
+        # the scrollable panel just enough to preserve the documented minimum
+        # disc; only the deliberately compact mode hides it.
+        value_slider = getattr(self, "value_slider", None)
+        if (
+            wheel_frame is not None
+            and not wheel_frame.isHidden()
+            and color_page is not None
+            and value_slider is not None
+            and not value_slider.isHidden()
+        ):
+            wheel_bottom = wheel_frame.mapTo(
+                color_page,
+                wheel_frame.rect().bottomLeft(),
+            ).y()
+            slider_top = value_slider.mapTo(
+                color_page,
+                value_slider.rect().topLeft(),
+            ).y()
+            overlap = max(0, wheel_bottom - slider_top + 1)
+            if overlap:
+                fitted_size = int(target_size) - int(overlap)
+                if fitted_size >= PainterColorDisc.MIN_DISPLAY_SIZE:
+                    target_size = fitted_size
+                    wheel.set_display_size(target_size)
+                    frame_height = int(target_size) + 8
+                    wheel_frame.setMinimumHeight(frame_height)
+                    wheel_frame.setMaximumHeight(frame_height)
+                    activate_color_geometry()
+                    wheel_bottom = wheel_frame.mapTo(
+                        color_page,
+                        wheel_frame.rect().bottomLeft(),
+                    ).y()
+                    slider_top = value_slider.mapTo(
+                        color_page,
+                        value_slider.rect().topLeft(),
+                    ).y()
+                if fitted_size < PainterColorDisc.MIN_DISPLAY_SIZE or wheel_bottom >= slider_top:
+                    wheel.set_display_size(PainterColorDisc.MIN_DISPLAY_SIZE)
+                    frame_height = PainterColorDisc.MIN_DISPLAY_SIZE + 8
+                    wheel_frame.setMinimumHeight(frame_height)
+                    wheel_frame.setMaximumHeight(frame_height)
+                    # Increasing the panel by twice the measured collision is
+                    # a close first estimate because the tab page shares spare
+                    # height between multiple sections. Re-measure to make the
+                    # result independent of font and DPI metrics.
+                    for _attempt in range(8):
+                        activate_color_geometry()
+                        wheel_bottom = wheel_frame.mapTo(
+                            color_page,
+                            wheel_frame.rect().bottomLeft(),
+                        ).y()
+                        slider_top = value_slider.mapTo(
+                            color_page,
+                            value_slider.rect().topLeft(),
+                        ).y()
+                        overlap = max(0, wheel_bottom - slider_top + 1)
+                        if not overlap:
+                            break
+                        next_height = min(620, panel_height + max(2, overlap * 2))
+                        if next_height == panel_height:
+                            break
+                        panel_height = next_height
+                        panel.setMinimumHeight(panel_height)
+                        panel.setMaximumHeight(panel_height)
+                        panel_height_changed = True
+                    activate_color_geometry()
         if panel_height_changed:
             self._queue_painter_callback(self._sync_color_panel_layout)
 
@@ -34432,7 +34702,18 @@ class PaintDialog(QDialog):
                 ui_overlay.setGeometry(0, 0, hw, hh)
             else:
                 ui_overlay.setGeometry(bx, by, bw, bh)
-            self._refresh_painter_ui_overlay()
+            # Resizing the canvas, moving a splitter or just moving the pointer
+            # lands here, and none of that changes the document.  Re-deriving it
+            # cost seconds per event on a large imported Figma file, which is
+            # what stalled zoom and pan.  Callers that do change document state
+            # already run the full refresh themselves.
+            if (
+                self._painter_ui_refresh_inputs()
+                != getattr(self, "_painter_ui_refresh_state", None)
+            ):
+                self._refresh_painter_ui_overlay()
+            else:
+                ui_overlay.update()
         self._refresh_reference_overlay()
         self._refresh_3d_blockout_overlay()
         self.canvas.raise_()

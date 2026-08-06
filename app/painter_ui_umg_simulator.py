@@ -21,13 +21,26 @@ from app.painter_ui_umg_adapter import (
     painter_ui_to_umg_document,
     preflight_painter_umg,
 )
+from app.unreal_umg_layout import (
+    validate_umg_panel_record,
+    validate_umg_widget_visibility,
+)
 from app.unreal_umg_material import (
     umg_material_preview_style,
     validate_umg_material_record,
 )
+from app.unreal_umg_baked import (
+    SUPPORTED_TIGER_UMG_SCHEMA_VERSION,
+    validate_umg_materialized_baked_layer,
+)
+from app.unreal_umg_button import (
+    TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION,
+    umg_button_style_preview,
+    validate_umg_button_style_record,
+)
 
 
-PAINTER_UMG_SIMULATOR_SCHEMA = "tigerstudio.painter.ui.umg_simulator.v3"
+PAINTER_UMG_SIMULATOR_SCHEMA = "tigerstudio.painter.ui.umg_simulator.v5"
 
 _DISPOSITIONS = ("Native", "Material", "Baked", "Blocked")
 _COMMON_CONSUMED_PROPERTIES = (
@@ -92,6 +105,511 @@ def _payload(value: object) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return dict(decoded) if isinstance(decoded, Mapping) else {}
+
+
+def _json_object(value: object) -> dict[str, Any]:
+    """Return a copied JSON object from either its typed or wire form."""
+    if isinstance(value, Mapping):
+        return copy.deepcopy(dict(value))
+    try:
+        decoded = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return copy.deepcopy(dict(decoded)) if isinstance(decoded, Mapping) else {}
+
+
+def _safe_unreal_object_name(value: object) -> str:
+    result = "".join(
+        character
+        if character.isalnum() or character == "_"
+        else "_"
+        for character in str(value or "")
+    )
+    return result or "Document"
+
+
+def _component_instance_marker(layer: Mapping[str, Any]) -> dict[str, Any]:
+    marker = _payload(layer.get("PayloadJson")).get("component_instance")
+    return copy.deepcopy(dict(marker)) if isinstance(marker, Mapping) else {}
+
+
+def _has_valid_component_instance_payload(layer: Mapping[str, Any]) -> bool:
+    """Mirror Unreal's component-placement exemption from leaf validation.
+
+    A component placement deliberately keeps the source root ``Kind`` and an
+    empty leaf visual record while generation replaces it with a UUserWidget.
+    Only the complete marker shape earns that exemption, matching
+    ``HasValidComponentInstancePayload`` in TigerStudioUMGImportSubsystem.cpp.
+    """
+    layer_id = layer.get("Id")
+    marker = _payload(layer.get("PayloadJson")).get("component_instance")
+    if (
+        not isinstance(layer_id, str)
+        or not layer_id
+        or not isinstance(marker, Mapping)
+        or not isinstance(marker.get("id"), str)
+        or marker.get("id") != layer_id
+        or not isinstance(marker.get("component_id"), str)
+        or not marker.get("component_id")
+        or not isinstance(marker.get("property_values"), Mapping)
+        or not isinstance(marker.get("resolved_overrides"), Mapping)
+        or not isinstance(marker.get("slot_contents"), list)
+    ):
+        return False
+    for slot in marker["slot_contents"]:
+        if not isinstance(slot, Mapping):
+            return False
+        slot_name = slot.get("slot_name", slot.get("SlotName"))
+        root_layer_ids = slot.get(
+            "root_layer_ids",
+            slot.get("RootLayerIds"),
+        )
+        if (
+            not isinstance(slot_name, str)
+            or not slot_name
+            or not isinstance(root_layer_ids, list)
+            or any(
+                not isinstance(root_id, str) or not root_id
+                for root_id in root_layer_ids
+            )
+        ):
+            return False
+    return True
+
+
+def _apply_component_layer_changes(
+    layer: dict[str, Any],
+    changes: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Mirror the two static bindings handled by TigerStudioComponentWidget."""
+    result = copy.deepcopy(layer)
+    for path, value in changes.items():
+        target_path = str(path or "")
+        if target_path == "content.text" and isinstance(value, str):
+            payload = _payload(result.get("PayloadJson"))
+            payload["text"] = value
+            result["PayloadJson"] = json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        elif target_path == "visible" and isinstance(value, bool):
+            # The authored Visibility record remains valid schema-18 input.
+            # This private projection flag represents the runtime property
+            # binding's Visible/Collapsed result.
+            result["_sim_component_visible"] = bool(value)
+    return result
+
+
+def _component_projection_layers(
+    umg_document: Mapping[str, Any],
+    screen_layers: list[dict[str, Any]],
+    *,
+    schema_version: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Expand schema-18 component WBPs into a read-only visual proxy.
+
+    Unreal keeps each definition in a separate generated Widget Blueprint and
+    places that class as a child ``UUserWidget`` in the screen blueprint.  The
+    local painter cannot mount a real UUserWidget, so it retains the placement
+    layer as the class proxy and clones definition-local layers beneath it.
+    Synthetic ids are instance-scoped, which lets multiple placements share
+    one definition without colliding in Painter's flat object table.
+    """
+    component_rows = (
+        [
+            copy.deepcopy(dict(row))
+            for row in umg_document.get("Components", [])
+            if isinstance(row, Mapping)
+        ]
+        if schema_version >= 18
+        else []
+    )
+    instance_rows = (
+        [
+            copy.deepcopy(dict(row))
+            for row in umg_document.get("ComponentInstances", [])
+            if isinstance(row, Mapping)
+        ]
+        if schema_version >= 18
+        else []
+    )
+    definition_layers = [
+        copy.deepcopy(dict(layer))
+        for component in component_rows
+        for layer in component.get("Layers", [])
+        if isinstance(layer, Mapping)
+    ]
+    summary = {
+        "component_count": len(component_rows),
+        "instance_count": len(instance_rows),
+        "expanded_instance_count": 0,
+        "definition_layer_count": len(definition_layers),
+        "generated_component_classes": {
+            str(component.get("Id") or ""): (
+                "WBP_TS_C_"
+                + _safe_unreal_object_name(component.get("Id"))
+                + "_C"
+            )
+            for component in component_rows
+            if str(component.get("Id") or "")
+        },
+    }
+    if schema_version < 18 or not component_rows:
+        return copy.deepcopy(screen_layers), screen_layers, summary
+
+    component_by_id = {
+        str(component.get("Id") or ""): component
+        for component in component_rows
+        if str(component.get("Id") or "")
+    }
+    instance_by_layer_id = {
+        str(instance.get("LayerId") or instance.get("Id") or ""): instance
+        for instance in instance_rows
+        if str(instance.get("LayerId") or instance.get("Id") or "")
+    }
+
+    screen_slot_roots: dict[str, dict[str, str]] = {}
+    for instance in instance_rows:
+        instance_layer_id = str(
+            instance.get("LayerId") or instance.get("Id") or ""
+        )
+        for slot in instance.get("SlotContents", []):
+            if not isinstance(slot, Mapping):
+                continue
+            slot_name = str(slot.get("SlotName") or "")
+            for root_id in slot.get("RootLayerIds", []):
+                root_id = str(root_id or "")
+                if root_id:
+                    screen_slot_roots[root_id] = {
+                        "instance_id": instance_layer_id,
+                        "slot_name": slot_name,
+                    }
+
+    def component_instance_data(
+        *,
+        layer_id: str,
+        component_id: str,
+        property_values: Mapping[str, Any],
+        resolved_overrides: Mapping[str, Any],
+        slot_contents: list[dict[str, Any]],
+        nested: bool,
+        source_instance_id: str = "",
+    ) -> dict[str, Any]:
+        component = component_by_id.get(component_id, {})
+        return {
+            "id": layer_id,
+            "source_instance_id": str(source_instance_id or layer_id),
+            "component_id": component_id,
+            "component_name": str(component.get("Name") or component_id),
+            "generated_class": (
+                "WBP_TS_C_" + _safe_unreal_object_name(component_id) + "_C"
+            ),
+            "generated_widget_type": "UUserWidget",
+            "property_values": copy.deepcopy(dict(property_values)),
+            "resolved_overrides": copy.deepcopy(dict(resolved_overrides)),
+            "slot_contents": copy.deepcopy(slot_contents),
+            "nested": bool(nested),
+        }
+
+    def expand_component(
+        *,
+        component_id: str,
+        instance_layer_id: str,
+        source_instance_id: str,
+        property_values: Mapping[str, Any],
+        resolved_overrides: Mapping[str, Any],
+        slot_contents: list[dict[str, Any]],
+        stack: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        component = component_by_id.get(component_id)
+        if component is None or component_id in stack:
+            return []
+        local_layers = [
+            copy.deepcopy(dict(row))
+            for row in component.get("Layers", [])
+            if isinstance(row, Mapping) and str(row.get("Id") or "")
+        ]
+        local_by_id = {
+            str(row.get("Id") or ""): row for row in local_layers
+        }
+        children: dict[str, list[str]] = {}
+        for row in local_layers:
+            children.setdefault(str(row.get("ParentId") or ""), []).append(
+                str(row.get("Id") or "")
+            )
+
+        custom_slots = {
+            str(row.get("SlotName") or ""): [
+                str(root_id)
+                for root_id in row.get("RootLayerIds", [])
+                if str(root_id or "")
+            ]
+            for row in slot_contents
+            if isinstance(row, Mapping)
+        }
+        slot_by_layer_id = {
+            str(slot.get("LayerId") or ""): {
+                "name": str(slot.get("Name") or ""),
+                "layer_id": str(slot.get("LayerId") or ""),
+                "expose_on_instance_only": bool(
+                    slot.get("ExposeOnInstanceOnly", False)
+                ),
+            }
+            for slot in component.get("Slots", [])
+            if isinstance(slot, Mapping) and str(slot.get("LayerId") or "")
+        }
+        suppressed_ids: set[str] = set()
+
+        def suppress_descendants(parent_id: str) -> None:
+            for child_id in children.get(parent_id, []):
+                if child_id in suppressed_ids:
+                    continue
+                suppressed_ids.add(child_id)
+                suppress_descendants(child_id)
+
+        for slot_layer_id, slot in slot_by_layer_id.items():
+            if custom_slots.get(str(slot["name"])):
+                # SetContentForSlot replaces only the UNamedSlot's default
+                # content.  The UNamedSlot host itself remains generated.
+                suppress_descendants(slot_layer_id)
+
+        included_ids = [
+            str(row.get("Id") or "")
+            for row in local_layers
+            if str(row.get("Id") or "") not in suppressed_ids
+        ]
+        scoped_id = {
+            source_id: f"{instance_layer_id}::{source_id}"
+            for source_id in included_ids
+        }
+
+        resolved_values: dict[str, Any] = {}
+        changes_by_layer: dict[str, dict[str, Any]] = {}
+        for prop in component.get("Properties", []):
+            if not isinstance(prop, Mapping):
+                continue
+            property_name = str(prop.get("Name") or "")
+            default_value: Any = None
+            try:
+                default_value = json.loads(
+                    str(prop.get("DefaultValueJson") or "null")
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+            resolved_values[property_name] = copy.deepcopy(default_value)
+            if property_name in property_values:
+                resolved_values[property_name] = copy.deepcopy(
+                    property_values[property_name]
+                )
+            for binding in prop.get("Bindings", []):
+                if not isinstance(binding, Mapping):
+                    continue
+                target_layer_id = str(binding.get("LayerId") or "")
+                target_path = str(binding.get("TargetPath") or "")
+                if target_layer_id and target_path:
+                    changes_by_layer.setdefault(target_layer_id, {})[
+                        target_path
+                    ] = copy.deepcopy(resolved_values[property_name])
+        for target_layer_id, changes in resolved_overrides.items():
+            if isinstance(changes, Mapping):
+                changes_by_layer.setdefault(str(target_layer_id), {}).update(
+                    copy.deepcopy(dict(changes))
+                )
+
+        nested_slot_roots: dict[str, dict[str, str]] = {}
+        for row in local_layers:
+            marker = _component_instance_marker(row)
+            for slot in marker.get("slot_contents", []):
+                if not isinstance(slot, Mapping):
+                    continue
+                for root_id in slot.get("RootLayerIds", []):
+                    root_id = str(root_id or "")
+                    if root_id:
+                        nested_slot_roots[root_id] = {
+                            "instance_id": scoped_id.get(
+                                str(row.get("Id") or ""),
+                                instance_layer_id,
+                            ),
+                            "slot_name": str(slot.get("SlotName") or ""),
+                        }
+
+        result: list[dict[str, Any]] = []
+        next_stack = (*stack, component_id)
+        for source_layer in local_layers:
+            source_layer_id = str(source_layer.get("Id") or "")
+            if source_layer_id in suppressed_ids:
+                continue
+            valid_component_instance_payload = (
+                _has_valid_component_instance_payload(source_layer)
+            )
+            layer = _apply_component_layer_changes(
+                source_layer,
+                changes_by_layer.get(source_layer_id, {}),
+            )
+            layer["Id"] = scoped_id[source_layer_id]
+            source_parent_id = str(source_layer.get("ParentId") or "")
+            layer["ParentId"] = scoped_id.get(
+                source_parent_id,
+                instance_layer_id,
+            )
+            layer["_sim_component_definition_layer"] = True
+            layer["_sim_component_id"] = component_id
+            layer["_sim_component_source_layer_id"] = source_layer_id
+            layer["_sim_component_owner_instance_id"] = instance_layer_id
+            layer["_sim_valid_component_instance_payload"] = (
+                valid_component_instance_payload
+            )
+            slot = slot_by_layer_id.get(source_layer_id)
+            if slot is not None:
+                slot_name = str(slot["name"])
+                custom_roots = custom_slots.get(slot_name, [])
+                layer["_sim_component_slot"] = {
+                    **copy.deepcopy(slot),
+                    "content_mode": "custom" if custom_roots else "default",
+                    "root_layer_ids": copy.deepcopy(custom_roots),
+                }
+            slot_owner = nested_slot_roots.get(source_layer_id)
+            if slot_owner is not None:
+                layer["_sim_component_slot_content"] = copy.deepcopy(
+                    slot_owner
+                )
+
+            nested_marker = _component_instance_marker(layer)
+            if nested_marker:
+                nested_component_id = str(
+                    nested_marker.get("component_id") or ""
+                )
+                nested_property_values = (
+                    nested_marker.get("property_values")
+                    if isinstance(
+                        nested_marker.get("property_values"), Mapping
+                    )
+                    else {}
+                )
+                nested_overrides = (
+                    nested_marker.get("resolved_overrides")
+                    if isinstance(
+                        nested_marker.get("resolved_overrides"), Mapping
+                    )
+                    else {}
+                )
+                nested_slots = [
+                    copy.deepcopy(dict(row))
+                    for row in nested_marker.get("slot_contents", [])
+                    if isinstance(row, Mapping)
+                ]
+                layer["_sim_component_instance"] = component_instance_data(
+                    layer_id=str(layer["Id"]),
+                    component_id=nested_component_id,
+                    property_values=nested_property_values,
+                    resolved_overrides=nested_overrides,
+                    slot_contents=nested_slots,
+                    nested=True,
+                    source_instance_id=str(
+                        nested_marker.get("id") or source_layer_id
+                    ),
+                )
+            result.append(layer)
+            if (
+                nested_marker
+                and str(layer.get("Disposition") or "Blocked") == "Native"
+            ):
+                summary["expanded_instance_count"] += 1
+                result.extend(
+                    expand_component(
+                        component_id=str(
+                            nested_marker.get("component_id") or ""
+                        ),
+                        instance_layer_id=str(layer["Id"]),
+                        source_instance_id=str(
+                            nested_marker.get("id") or source_layer_id
+                        ),
+                        property_values=(
+                            nested_marker.get("property_values")
+                            if isinstance(
+                                nested_marker.get("property_values"), Mapping
+                            )
+                            else {}
+                        ),
+                        resolved_overrides=(
+                            nested_marker.get("resolved_overrides")
+                            if isinstance(
+                                nested_marker.get("resolved_overrides"), Mapping
+                            )
+                            else {}
+                        ),
+                        slot_contents=[
+                            copy.deepcopy(dict(row))
+                            for row in nested_marker.get("slot_contents", [])
+                            if isinstance(row, Mapping)
+                        ],
+                        stack=next_stack,
+                    )
+                )
+        return result
+
+    projected: list[dict[str, Any]] = []
+    for screen_layer in screen_layers:
+        layer = copy.deepcopy(screen_layer)
+        layer_id = str(layer.get("Id") or "")
+        layer["_sim_valid_component_instance_payload"] = (
+            _has_valid_component_instance_payload(screen_layer)
+        )
+        slot_root = screen_slot_roots.get(layer_id)
+        if slot_root is not None:
+            layer["_sim_component_slot_content"] = copy.deepcopy(slot_root)
+        instance = instance_by_layer_id.get(layer_id)
+        if instance is None:
+            projected.append(layer)
+            continue
+        payload_marker = _component_instance_marker(layer)
+        component_id = str(
+            instance.get("ComponentId")
+            or payload_marker.get("component_id")
+            or ""
+        )
+        property_values = _json_object(
+            instance.get("PropertyValuesJson")
+        ) or _json_object(payload_marker.get("property_values"))
+        resolved_overrides = _json_object(
+            instance.get("ResolvedOverridesJson")
+        ) or _json_object(payload_marker.get("resolved_overrides"))
+        slot_contents = [
+            copy.deepcopy(dict(row))
+            for row in instance.get("SlotContents", [])
+            if isinstance(row, Mapping)
+        ]
+        if not slot_contents:
+            slot_contents = [
+                copy.deepcopy(dict(row))
+                for row in payload_marker.get("slot_contents", [])
+                if isinstance(row, Mapping)
+            ]
+        layer["_sim_component_instance"] = component_instance_data(
+            layer_id=layer_id,
+            component_id=component_id,
+            property_values=property_values,
+            resolved_overrides=resolved_overrides,
+            slot_contents=slot_contents,
+            nested=False,
+        )
+        projected.append(layer)
+        if str(layer.get("Disposition") or "Blocked") != "Native":
+            continue
+        summary["expanded_instance_count"] += 1
+        projected.extend(
+            expand_component(
+                component_id=component_id,
+                instance_layer_id=layer_id,
+                source_instance_id=layer_id,
+                property_values=property_values,
+                resolved_overrides=resolved_overrides,
+                slot_contents=slot_contents,
+                stack=(),
+            )
+        )
+    return projected, [*screen_layers, *definition_layers], summary
 
 
 def _compose(left: _Matrix, right: _Matrix) -> _Matrix:
@@ -215,6 +733,90 @@ def _slot_geometry(
     }
 
 
+def _flow_slot(layer: Mapping[str, Any]) -> dict[str, Any]:
+    source = (
+        dict(layer.get("FlowSlot") or {})
+        if isinstance(layer.get("FlowSlot"), Mapping)
+        else {}
+    )
+    return {
+        "padding": _margin(source.get("Padding")),
+        "horizontal_alignment": str(
+            source.get("HorizontalAlignment") or "Fill"
+        ),
+        "vertical_alignment": str(
+            source.get("VerticalAlignment") or "Fill"
+        ),
+        "size_rule": str(source.get("SizeRule") or "Auto"),
+        "fill_coefficient": max(
+            0.0001,
+            _number(source.get("FillCoefficient"), 1.0),
+        ),
+    }
+
+
+def _overlay_slot_and_geometry(
+    layer: Mapping[str, Any],
+    *,
+    parent_width: float,
+    parent_height: float,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    flow = _flow_slot(layer)
+    left, top, right, bottom = flow["padding"]
+    desired_width, desired_height = _vector(
+        layer.get("Size"),
+        default_x=100.0,
+        default_y=100.0,
+    )
+    horizontal = flow["horizontal_alignment"].casefold()
+    vertical = flow["vertical_alignment"].casefold()
+    available_width = parent_width - left - right
+    available_height = parent_height - top - bottom
+    if horizontal == "fill":
+        x = left
+        width = available_width
+    elif horizontal == "center":
+        width = desired_width
+        x = left + (available_width - width) * 0.5
+    elif horizontal == "right":
+        width = desired_width
+        x = parent_width - right - width
+    else:
+        width = desired_width
+        x = left
+    if vertical == "fill":
+        y = top
+        height = available_height
+    elif vertical == "center":
+        height = desired_height
+        y = top + (available_height - height) * 0.5
+    elif vertical == "bottom":
+        height = desired_height
+        y = parent_height - bottom - height
+    else:
+        height = desired_height
+        y = top
+    alignment = (
+        {"left": 0.0, "center": 0.5, "right": 1.0}.get(horizontal, 0.0),
+        {"top": 0.0, "center": 0.5, "bottom": 1.0}.get(vertical, 0.0),
+    )
+    slot = {
+        "kind": "overlay",
+        "anchor_minimum": (0.0, 0.0),
+        "anchor_maximum": (0.0, 0.0),
+        "offsets": flow["padding"],
+        "alignment": alignment,
+        "auto_size": False,
+        **flow,
+    }
+    return slot, {
+        "x": float(x),
+        "y": float(y),
+        "width": max(0.001, float(width)),
+        "height": max(0.001, float(height)),
+    }
+
+
 def _render_transform_pivot(
     layer: Mapping[str, Any],
     *,
@@ -316,9 +918,14 @@ def _proxy_geometry(
     }
 
 
-def _widget_class(kind: str) -> str:
+def _widget_class(kind: str, *, panel_kind: str = "Canvas") -> str:
     if kind == "Group":
-        return "UCanvasPanel"
+        return {
+            "Horizontal": "UHorizontalBox",
+            "Vertical": "UVerticalBox",
+            "Grid": "UGridPanel",
+            "Overlay": "UOverlay",
+        }.get(panel_kind, "UCanvasPanel")
     if kind == "Text":
         return "UTextBlock"
     if kind == "Button":
@@ -334,6 +941,14 @@ def _consumed_properties(kind: str, *, schema_version: int) -> list[str]:
         result.extend(_V4_LAYOUT_CONSUMED_PROPERTIES)
     if kind == "Group":
         result.append("PayloadJson.clip_content")
+        if schema_version >= 17:
+            result.extend(
+                (
+                    "SpacingStrategy",
+                    "SpacerSizeRule",
+                    "SpacerFillCoefficient",
+                )
+            )
     elif kind == "Text":
         result.extend(
             (
@@ -345,6 +960,17 @@ def _consumed_properties(kind: str, *, schema_version: int) -> list[str]:
         )
     elif kind == "Button":
         result.extend(("Name", "AssetId", "PayloadJson.text"))
+        if schema_version >= TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION:
+            result.extend(
+                (
+                    "ButtonStyle.Schema",
+                    "ButtonStyle.Enabled",
+                    "ButtonStyle.Normal",
+                    "ButtonStyle.Hovered",
+                    "ButtonStyle.Pressed",
+                    "ButtonStyle.Disabled",
+                )
+            )
     else:
         result.extend(("AssetId", "PayloadJson.fill"))
     return result
@@ -383,6 +1009,7 @@ def _material_consumed_properties(
         return [
             *common,
             "Material.Size",
+            "Material.SizeBinding",
             "Material.FillKind",
             "Material.FillColor",
             "Material.Start",
@@ -420,6 +1047,8 @@ def _rounded_card_host_consumed_properties(*, schema_version: int) -> list[str]:
         if schema_version >= 5
         else _V4_LAYOUT_CONSUMED_PROPERTIES
     )
+    if schema_version >= 19:
+        result.append("Material.SizeBinding")
     return result
 
 
@@ -847,6 +1476,7 @@ def _projection_style_and_content(
     payload: Mapping[str, Any],
     image_binding: Mapping[str, Any] | None,
     material: Mapping[str, Any] | None = None,
+    button_style: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     if material:
         return "rectangle", umg_material_preview_style(material), {}
@@ -895,28 +1525,46 @@ def _projection_style_and_content(
             {"text": str(payload.get("text") or name)},
         )
     if kind == "Button":
-        # The generator does not consume Painter button paint/radius/text style.
-        # These neutral values approximate UE's default button and text widgets.
+        if not button_style:
+            # Schema 4-15 used Unreal's default button brush and typography.
+            return (
+                "button",
+                {
+                    "fill": "#00000000" if has_image else "#4A4A4AFF",
+                    "stroke": "#777777FF",
+                    "stroke_width": 1.0,
+                    "radius": 2.0,
+                    **corner_style,
+                    "text_color": "#FFFFFFFF",
+                    "font_size": 24.0,
+                    "font_weight": 700,
+                },
+                (
+                    _image_preview_content(
+                        image,
+                        fallback_text=str(payload.get("text") or name),
+                    )
+                    if has_image
+                    else {"text": str(payload.get("text") or name)}
+                ),
+            )
+        button_preview = umg_button_style_preview(button_style)
+        normal_style = copy.deepcopy(
+            button_preview["states"]["normal"]
+        )
+        preview_content = (
+            _image_preview_content(
+                image,
+                fallback_text=str(payload.get("text") or name),
+            )
+            if has_image
+            else {"text": str(payload.get("text") or name)}
+        )
+        preview_content["umg_button_style"] = button_preview
         return (
             "button",
-            {
-                "fill": "#00000000" if has_image else "#4A4A4AFF",
-                "stroke": "#777777FF",
-                "stroke_width": 1.0,
-                "radius": 2.0,
-                **corner_style,
-                "text_color": "#FFFFFFFF",
-                "font_size": 24.0,
-                "font_weight": 700,
-            },
-            (
-                _image_preview_content(
-                    image,
-                    fallback_text=str(payload.get("text") or name),
-                )
-                if has_image
-                else {"text": str(payload.get("text") or name)}
-            ),
+            normal_style,
+            preview_content,
         )
     source_kind = str(payload.get("source_kind") or "").casefold()
     if has_image:
@@ -994,6 +1642,8 @@ def project_tiger_umg_document(
     artboard_id: str = "umg-artboard",
     artboard_name: str = "UMG Widget",
     selection: Mapping[str, Any] | None = None,
+    document_path: str | Path | None = None,
+    base_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Project the exact currently-generated UMG subset into a Painter document.
 
@@ -1001,18 +1651,43 @@ def project_tiger_umg_document(
     Custom-HLSL UI Material layers are put in the preview ``document``.
     RoundedCard layers mirror Unreal's stable ``Layer.Id`` CanvasPanel host
     plus padded ``Layer.Id_Visual`` UImage child instead of flattening the two.
-    Baked, Blocked, and unknown Material layers remain explicit without being
-    falsely rendered.
+    Schema-13 materialized Baked layers use the same typed ImageFill projection
+    as Unreal. Source plans, legacy Baked layers, Blocked layers, and unknown
+    Material layers remain explicit without being falsely rendered.
     """
     umg_document = copy.deepcopy(dict(value))
     schema_version = int(_number(umg_document.get("SchemaVersion"), 0.0))
+    resource_base_path = (
+        Path(document_path).expanduser().resolve().parent
+        if document_path is not None
+        else Path(base_path).expanduser().resolve()
+        if base_path is not None
+        else None
+    )
     resource_by_id = _resource_map(umg_document)
-    raw_layers = [
+    raw_resources = [
+        row
+        for row in umg_document.get("Resources", [])
+        if isinstance(row, Mapping)
+    ]
+    screen_layers = [
         copy.deepcopy(dict(row))
         for row in umg_document.get("Layers", [])
         if isinstance(row, Mapping)
     ]
+    raw_layers, counted_layers, component_summary = (
+        _component_projection_layers(
+            umg_document,
+            screen_layers,
+            schema_version=schema_version,
+        )
+    )
     counts = {key: 0 for key in _DISPOSITIONS}
+    for counted_layer in counted_layers:
+        disposition = str(counted_layer.get("Disposition") or "Blocked")
+        counts[
+            disposition if disposition in _DISPOSITIONS else "Blocked"
+        ] += 1
     widgets: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     unrendered: list[dict[str, Any]] = []
@@ -1027,9 +1702,13 @@ def project_tiger_umg_document(
             reasons.append("unknown_umg_disposition")
         if disposition == "Blocked" and not reasons:
             reasons.append("unsupported_layer")
-        counts[disposition] += 1
         layer["_sim_disposition"] = disposition
         layer["_sim_reasons"] = reasons
+        panel_reasons = validate_umg_panel_record(
+            layer,
+            document_schema_version=schema_version,
+        )
+        layer["_sim_panel_reasons"] = panel_reasons
         material_reasons = (
             validate_umg_material_record(
                 layer.get("Material"),
@@ -1040,9 +1719,60 @@ def project_tiger_umg_document(
             else []
         )
         layer["_sim_material_reasons"] = material_reasons
+        baked_reasons = (
+            validate_umg_materialized_baked_layer(
+                layer,
+                document_schema_version=schema_version,
+                resources=raw_resources,
+                resource_base_path=resource_base_path,
+            )
+            if disposition == "Baked"
+            else []
+        )
+        layer["_sim_baked_reasons"] = baked_reasons
+        button_style = layer.get("ButtonStyle")
+        has_button_style = isinstance(button_style, Mapping) and bool(
+            button_style
+        )
+        button_style_reasons = validate_umg_button_style_record(
+            button_style,
+            layer_kind=str(layer.get("Kind") or "") if has_button_style else "",
+            document_schema_version=schema_version,
+            required=(
+                schema_version
+                >= TIGER_UMG_BUTTON_STYLE_DOCUMENT_SCHEMA_VERSION
+                and disposition == "Native"
+                and str(layer.get("Kind") or "") == "Button"
+                and not bool(
+                    layer.get(
+                        "_sim_valid_component_instance_payload",
+                        False,
+                    )
+                )
+            ),
+        )
+        if has_button_style and disposition != "Native":
+            button_style_reasons.append(
+                "button_style_requires_native_disposition"
+            )
+        layer["_sim_button_style_reasons"] = sorted(
+            set(button_style_reasons)
+        )
+        layer["_sim_visibility_reasons"] = validate_umg_widget_visibility(
+            layer.get("Visibility"),
+            document_schema_version=schema_version,
+        )
         if disposition == "Native" or (
             disposition == "Material" and not material_reasons
+        ) or (
+            disposition == "Baked" and not baked_reasons
         ):
+            if (
+                layer["_sim_panel_reasons"]
+                or layer["_sim_button_style_reasons"]
+                or layer["_sim_visibility_reasons"]
+            ):
+                continue
             generated_layers.append(layer)
 
     # Mirror TigerStudioUMGGeneration.cpp: native groups are inserted first and
@@ -1054,7 +1784,12 @@ def project_tiger_umg_document(
     for layer in generated_layers:
         layer_id = str(layer.get("Id") or "")
         generated_by_id[layer_id] = layer
-        if str(layer.get("Kind") or "Unsupported") != "Group":
+        if (
+            str(layer.get("Kind") or "Unsupported") != "Group"
+            and not isinstance(
+                layer.get("_sim_component_instance"), Mapping
+            )
+        ):
             continue
         requested_parent = str(layer.get("ParentId") or "")
         parent_id = requested_parent if requested_parent in parent_panels else ""
@@ -1072,11 +1807,65 @@ def project_tiger_umg_document(
         effective_parent[layer_id] = parent_id
         children.setdefault(parent_id, []).append(layer_id)
 
+    def generated_slot_context(layer_id: str) -> tuple[str, str]:
+        """Mirror the concrete UPanelSlot selected by ConfigureWidget()."""
+        layer = generated_by_id.get(str(layer_id), {})
+        if isinstance(layer.get("_sim_component_slot_content"), Mapping):
+            # SetContentForSlot grafts each custom root into a synthetic
+            # UOverlay. Its serialized ParentId still names the component
+            # instance, so this private projection marker is the only exact
+            # representation of the generated parent slot.
+            return "OverlaySlot", "Overlay"
+        parent_id = effective_parent.get(str(layer_id), "")
+        if not parent_id:
+            # TigerGeneratedRoot is always a UCanvasPanel.
+            return "CanvasPanelSlot", "Canvas"
+        parent = generated_by_id.get(parent_id, {})
+        if isinstance(parent.get("_sim_component_instance"), Mapping):
+            # A component definition lives in its own UUserWidget tree whose
+            # generated root is a UCanvasPanel.
+            return "CanvasPanelSlot", "Canvas"
+        if (
+            str(layer.get("ScrollPosition") or "Scroll") == "Fixed"
+            and str(parent.get("ScrollOverflow") or "None") != "None"
+        ):
+            # Scroll groups generate a separate fixed UCanvasPanel overlay.
+            return "CanvasPanelSlot", "Canvas"
+        panel_kind = str(parent.get("PanelKind") or "None")
+        return {
+            "Horizontal": ("HorizontalBoxSlot", "Horizontal"),
+            "Vertical": ("VerticalBoxSlot", "Vertical"),
+            "Grid": ("GridSlot", "Grid"),
+            "Overlay": ("OverlaySlot", "Overlay"),
+        }.get(panel_kind, ("CanvasPanelSlot", "Canvas"))
+
+    # ConfigureWidget gives every CanvasPanel child the stable source layer
+    # order as its ZOrder.  Groups/component hosts are constructed in an
+    # earlier pass, but that construction order must not put them below a
+    # full-canvas background authored earlier in the document.
+    layer_order_by_id = {
+        str(layer.get("Id") or ""): index
+        for index, layer in enumerate(raw_layers)
+        if str(layer.get("Id") or "")
+    }
     paint_order: list[str] = []
     seen: set[str] = set()
 
     def append_subtree(parent_id: str) -> None:
-        for layer_id in children.get(parent_id, []):
+        child_ids = list(children.get(parent_id, []))
+        # Only CanvasPanel slots consume LayerOrders as ZOrder. Overlay and
+        # flow panels retain the generator's two-pass insertion order.
+        if child_ids and all(
+            generated_slot_context(child_id)[0] == "CanvasPanelSlot"
+            for child_id in child_ids
+        ):
+            child_ids.sort(
+                key=lambda value: layer_order_by_id.get(
+                    value,
+                    len(raw_layers),
+                )
+            )
+        for layer_id in child_ids:
             if layer_id in seen:
                 continue
             seen.add(layer_id)
@@ -1126,12 +1915,20 @@ def project_tiger_umg_document(
                 1.0,
                 _number(umg_document.get("Height"), 1080.0),
             )
-        slot = _canvas_slot(layer, schema_version=schema_version)
-        geometry = _slot_geometry(
-            slot,
-            parent_width=parent_width,
-            parent_height=parent_height,
-        )
+        slot_kind, _parent_panel_kind = generated_slot_context(layer_id)
+        if slot_kind == "OverlaySlot":
+            slot, geometry = _overlay_slot_and_geometry(
+                layer,
+                parent_width=parent_width,
+                parent_height=parent_height,
+            )
+        else:
+            slot = _canvas_slot(layer, schema_version=schema_version)
+            geometry = _slot_geometry(
+                slot,
+                parent_width=parent_width,
+                parent_height=parent_height,
+            )
         canvas_slot_by_id[layer_id] = slot
         local_geometry_by_id[layer_id] = geometry
         return slot, geometry
@@ -1190,7 +1987,24 @@ def project_tiger_umg_document(
         disposition = str(layer["_sim_disposition"])
         reasons = list(layer["_sim_reasons"])
         material_reasons = list(layer["_sim_material_reasons"])
-        all_reasons = sorted(set([*reasons, *material_reasons]))
+        baked_reasons = list(layer["_sim_baked_reasons"])
+        button_style_reasons = list(
+            layer["_sim_button_style_reasons"]
+        )
+        visibility_reasons = list(layer["_sim_visibility_reasons"])
+        panel_reasons = list(layer["_sim_panel_reasons"])
+        all_reasons = sorted(
+            set(
+                [
+                    *reasons,
+                    *panel_reasons,
+                    *material_reasons,
+                    *baked_reasons,
+                    *button_style_reasons,
+                    *visibility_reasons,
+                ]
+            )
+        )
         resource_id = str(layer.get("AssetId") or "")
         resource = resource_by_id.get(resource_id)
         payload = _payload(layer.get("PayloadJson"))
@@ -1204,6 +2018,14 @@ def project_tiger_umg_document(
             resource = resource_by_id.get(resource_id)
         rendered = disposition == "Native" or (
             disposition == "Material" and not material_reasons
+        ) or (
+            disposition == "Baked" and not baked_reasons
+        )
+        rendered = (
+            rendered
+            and not panel_reasons
+            and not button_style_reasons
+            and not visibility_reasons
         )
         material_record = (
             copy.deepcopy(dict(layer.get("Material") or {}))
@@ -1215,20 +2037,113 @@ def project_tiger_umg_document(
         scroll_overflow = str(layer.get("ScrollOverflow") or "None")
         scroll_position = str(layer.get("ScrollPosition") or "Scroll")
         generated_container_classes: list[str] = []
-        if rendered and kind == "Group" and scroll_overflow != "None":
+        component_instance = (
+            copy.deepcopy(dict(layer.get("_sim_component_instance") or {}))
+            if isinstance(layer.get("_sim_component_instance"), Mapping)
+            else {}
+        )
+        component_slot = (
+            copy.deepcopy(dict(layer.get("_sim_component_slot") or {}))
+            if isinstance(layer.get("_sim_component_slot"), Mapping)
+            else {}
+        )
+        component_slot_content = (
+            copy.deepcopy(
+                dict(layer.get("_sim_component_slot_content") or {})
+            )
+            if isinstance(
+                layer.get("_sim_component_slot_content"), Mapping
+            )
+            else {}
+        )
+        component_definition_group = bool(
+            layer.get("_sim_component_definition_layer")
+            and kind == "Group"
+            and not component_instance
+        )
+        component_content_panel_class = (
+            _widget_class(
+                "Group",
+                panel_kind=str(layer.get("PanelKind") or "Canvas"),
+            )
+            if component_definition_group and not component_slot
+            else ""
+        )
+        if rendered and component_definition_group:
+            generated_container_classes = [
+                "UOverlay",
+                "UImage",
+                *(
+                    ["UNamedSlot", "UOverlay"]
+                    if component_slot
+                    else [component_content_panel_class]
+                ),
+            ]
+        if (
+            rendered
+            and kind == "Group"
+            and scroll_overflow != "None"
+            and not component_instance
+        ):
             generated_container_classes = ["UOverlay", "UScrollBox"]
             if scroll_overflow == "Both":
                 generated_container_classes.append("UScrollBox")
             generated_container_classes.append("UCanvasPanel")
+        slot_kind, parent_panel_kind = generated_slot_context(layer_id)
+        effective_parent_id = effective_parent.get(layer_id, "")
+        parent_layer = generated_by_id.get(effective_parent_id, {})
+        parent_spacing_strategy = str(
+            parent_layer.get("SpacingStrategy") or "Padding"
+        )
+        parent_spacer_size_rule = str(
+            parent_layer.get("SpacerSizeRule") or "Auto"
+        )
+        parent_spacer_fill_coefficient = max(
+            0.0001,
+            _number(parent_layer.get("SpacerFillCoefficient"), 1.0),
+        )
+        spacer_plan: list[dict[str, Any]] = []
+        if (
+            parent_spacing_strategy == "Spacer"
+            and parent_panel_kind in {"Horizontal", "Vertical"}
+        ):
+            flow = _flow_slot(layer)
+            left, top, right, bottom = flow["padding"]
+            before = left if parent_panel_kind == "Horizontal" else top
+            after = right if parent_panel_kind == "Horizontal" else bottom
+            for placement, amount in (("before", before), ("after", after)):
+                if amount <= 0.0:
+                    continue
+                spacer_plan.append(
+                    {
+                        "placement": placement,
+                        "widget_class": "USpacer",
+                        "axis": (
+                            "horizontal"
+                            if parent_panel_kind == "Horizontal"
+                            else "vertical"
+                        ),
+                        "authored_size": amount,
+                        "size_rule": parent_spacer_size_rule,
+                        "fill_coefficient": parent_spacer_fill_coefficient,
+                    }
+                )
         widget = {
             "id": layer_id,
             "name": name,
             "source_index": source_index,
             "kind": kind,
             "widget_class": (
-                "UCanvasPanel"
+                str(component_instance.get("generated_class") or "UUserWidget")
+                if component_instance
+                else "UOverlay"
+                if component_definition_group
+                else "UCanvasPanel"
                 if rounded_card
-                else _widget_class(kind)
+                else _widget_class(
+                    kind,
+                    panel_kind=str(layer.get("PanelKind") or "Canvas"),
+                )
                 if rendered
                 else ""
             ),
@@ -1237,6 +2152,8 @@ def project_tiger_umg_document(
             "reasons": all_reasons,
             "requested_parent_id": str(layer.get("ParentId") or ""),
             "effective_parent_id": effective_parent.get(layer_id, "") if rendered else "",
+            "slot_kind": slot_kind if rendered else "",
+            "parent_panel_kind": parent_panel_kind if rendered else "",
             "consumed_properties": (
                 _rounded_card_host_consumed_properties(
                     schema_version=schema_version
@@ -1247,8 +2164,16 @@ def project_tiger_umg_document(
                 else []
             ),
             "generator_action": (
-                "construct_material"
+                "construct_component_instance"
+                if rendered and component_instance
+                else "construct_component_named_slot_host"
+                if rendered and component_slot
+                else "construct_component_panel_host"
+                if rendered and component_definition_group
+                else "construct_material"
                 if rendered and disposition == "Material"
+                else "construct_baked"
+                if rendered and disposition == "Baked"
                 else "construct"
                 if rendered
                 else "skip"
@@ -1269,12 +2194,94 @@ def project_tiger_umg_document(
             # This remains separate from the Painter proxy style, which is
             # only a visual approximation of the generated material.
             "material": material_record,
+            "button_style": copy.deepcopy(
+                dict(layer.get("ButtonStyle") or {})
+                if isinstance(layer.get("ButtonStyle"), Mapping)
+                else {}
+            ),
             "panel_kind": str(layer.get("PanelKind") or "None"),
+            "spacing_strategy": str(
+                layer.get("SpacingStrategy") or "Padding"
+            ),
+            "spacer_size_rule": str(
+                layer.get("SpacerSizeRule") or "Auto"
+            ),
+            "spacer_fill_coefficient": max(
+                0.0001,
+                _number(layer.get("SpacerFillCoefficient"), 1.0),
+            ),
+            "synthetic_spacers": spacer_plan,
             "scroll_overflow": scroll_overflow,
             "scroll_position": scroll_position,
             "generated_container_classes": generated_container_classes,
+            "component_instance": component_instance,
+            "component_id": str(
+                component_instance.get("component_id")
+                or layer.get("_sim_component_id")
+                or ""
+            ),
+            "component_source_layer_id": str(
+                layer.get("_sim_component_source_layer_id") or ""
+            ),
+            "component_owner_instance_id": str(
+                layer.get("_sim_component_owner_instance_id") or ""
+            ),
+            "generated_widget_type": str(
+                component_instance.get("generated_widget_type") or ""
+            ),
+            "component_slot": component_slot,
+            "component_slot_content": component_slot_content,
+            "component_content_panel_class": component_content_panel_class,
+            "component_generated_widgets": (
+                {
+                    f"{layer_id}#background": "UImage",
+                    **(
+                        {
+                            f"{layer_id}#named_slot": "UNamedSlot",
+                            f"{layer_id}#default_slot_content": "UOverlay",
+                        }
+                        if component_slot
+                        else {
+                            f"{layer_id}#panel": component_content_panel_class,
+                        }
+                    ),
+                }
+                if component_definition_group
+                else {}
+            ),
+            "runtime_visibility": (
+                "Visible"
+                if bool(layer.get("_sim_component_visible", True))
+                else "Collapsed"
+            ),
         }
+        if rendered and component_instance:
+            for property_name in (
+                "ComponentInstances.ComponentId",
+                "ComponentInstances.PropertyValuesJson",
+                "ComponentInstances.ResolvedOverridesJson",
+                "ComponentInstances.SlotContents",
+            ):
+                if property_name not in widget["consumed_properties"]:
+                    widget["consumed_properties"].append(property_name)
+        if rendered and component_slot:
+            widget["consumed_properties"].append("Components.Slots")
         widgets.append(widget)
+        if rendered and slot_kind == "OverlaySlot":
+            widget["consumed_properties"] = [
+                property_name
+                for property_name in widget["consumed_properties"]
+                if not property_name.startswith("CanvasSlot.")
+            ]
+            for property_name in (
+                "FlowSlot.Padding",
+                "FlowSlot.HorizontalAlignment",
+                "FlowSlot.VerticalAlignment",
+            ):
+                if property_name not in widget["consumed_properties"]:
+                    widget["consumed_properties"].append(property_name)
+        if rendered and "Visibility" in layer:
+            widget["consumed_properties"].append("Visibility")
         if rendered and disposition == "Material" and not rounded_card:
             widget["consumed_properties"].extend(
                 _material_consumed_properties(layer.get("Material"))
@@ -1294,6 +2301,38 @@ def project_tiger_umg_document(
                     "object_id": layer_id,
                     "name": name,
                     "reasons": material_reasons,
+                }
+            )
+        elif disposition == "Baked" and baked_reasons:
+            blockers.append(
+                {
+                    "object_id": layer_id,
+                    "name": name,
+                    "reasons": baked_reasons,
+                }
+            )
+        elif button_style_reasons:
+            blockers.append(
+                {
+                    "object_id": layer_id,
+                    "name": name,
+                    "reasons": button_style_reasons,
+                }
+            )
+        elif panel_reasons:
+            blockers.append(
+                {
+                    "object_id": layer_id,
+                    "name": name,
+                    "reasons": panel_reasons,
+                }
+            )
+        elif visibility_reasons:
+            blockers.append(
+                {
+                    "object_id": layer_id,
+                    "name": name,
+                    "reasons": visibility_reasons,
                 }
             )
         if not rendered:
@@ -1342,7 +2381,29 @@ def project_tiger_umg_document(
                 if disposition == "Material"
                 else None
             ),
+            button_style=(
+                dict(layer.get("ButtonStyle") or {})
+                if isinstance(layer.get("ButtonStyle"), Mapping)
+                else None
+            ),
         )
+        if component_instance:
+            # The placement is a generated UUserWidget host, not the source
+            # leaf visual retained in its stable-identity record.  Its cloned
+            # component-definition subtree supplies all visible pixels.
+            proxy_kind = "frame"
+            style = {
+                "fill": "#00000000",
+                "stroke": "#00000000",
+                "stroke_width": 0.0,
+                "radius": 0.0,
+            }
+            content = {}
+        if component_definition_group:
+            # Component groups are generated as an UOverlay host with a
+            # stable-id UImage background before their real content panel.
+            # Preserve that solid paint in the local proxy as well.
+            style["fill"] = str(payload.get("fill") or "#00000000")
         if rendered and disposition == "Material":
             # Preserve the exact preview projection alongside the normalized
             # Painter object. This keeps independent corners, stroke alignment,
@@ -1384,6 +2445,22 @@ def project_tiger_umg_document(
             "alignment": {"x": alignment_x, "y": alignment_y},
             "auto_size": bool(slot["auto_size"]),
         }
+        if slot.get("kind") == "overlay":
+            widget["slot"].update(
+                {
+                    "padding": {
+                        "left": offset_left,
+                        "top": offset_top,
+                        "right": offset_right,
+                        "bottom": offset_bottom,
+                    },
+                    "horizontal_alignment": slot[
+                        "horizontal_alignment"
+                    ],
+                    "vertical_alignment": slot["vertical_alignment"],
+                    "spacing_strategy": parent_spacing_strategy,
+                }
+            )
         widget["render_transform_pivot"] = {
             "x": render_pivot_x,
             "y": render_pivot_y,
@@ -1405,7 +2482,7 @@ def project_tiger_umg_document(
             "height": geometry["height"],
             "rotation": geometry["rotation"],
             "opacity": object_opacity,
-            "visible": True,
+            "visible": bool(layer.get("_sim_component_visible", True)),
             "locked": True,
             "clip_content": (
                 bool(payload.get("clip_content", False))
@@ -1446,13 +2523,35 @@ def project_tiger_umg_document(
             padding_top = max(0.0, _number(padding.get("Top"), 0.0))
             padding_right = max(0.0, _number(padding.get("Right"), 0.0))
             padding_bottom = max(0.0, _number(padding.get("Bottom"), 0.0))
-            material_width, material_height = _vector(
+            fixed_material_width, fixed_material_height = _vector(
                 material_record.get("Size"),
                 default_x=width,
                 default_y=height,
             )
-            material_width = max(0.001, material_width)
-            material_height = max(0.001, material_height)
+            fixed_material_width = max(0.001, fixed_material_width)
+            fixed_material_height = max(0.001, fixed_material_height)
+            size_binding = str(
+                material_record.get("SizeBinding") or "FixedSize"
+            )
+            material_width = (
+                width
+                if size_binding == "WidgetGeometry"
+                else fixed_material_width
+            )
+            material_height = (
+                height
+                if size_binding == "WidgetGeometry"
+                else fixed_material_height
+            )
+            widget["size_binding"] = size_binding
+            widget["fixed_material_size"] = {
+                "x": fixed_material_width,
+                "y": fixed_material_height,
+            }
+            widget["live_material_size"] = {
+                "x": material_width,
+                "y": material_height,
+            }
             surface_width = material_width + padding_left + padding_right
             surface_height = material_height + padding_top + padding_bottom
             visual_transform = _compose(
@@ -1500,6 +2599,21 @@ def project_tiger_umg_document(
                 "resource_path": "",
                 "material": copy.deepcopy(material_record),
                 "material_preview_style": copy.deepcopy(style),
+                "size_binding": size_binding,
+                "fixed_material_size": {
+                    "x": fixed_material_width,
+                    "y": fixed_material_height,
+                },
+                "live_material_size": {
+                    "x": material_width,
+                    "y": material_height,
+                },
+                "runtime_material_parameters": {
+                    "CardSize": {
+                        "x": material_width,
+                        "y": material_height,
+                    }
+                },
                 "world_transform": {
                     key: value
                     for key, value in zip(
@@ -1508,6 +2622,8 @@ def project_tiger_umg_document(
                     )
                 },
                 "proxy_accuracy": visual_geometry["accuracy"],
+                "slot_kind": "CanvasPanelSlot",
+                "parent_panel_kind": "Canvas",
                 "slot": {
                     "anchor_minimum": {"x": 0.0, "y": 0.0},
                     "anchor_maximum": {"x": 0.0, "y": 0.0},
@@ -1584,41 +2700,72 @@ def project_tiger_umg_document(
         ],
     }
 
-    missing_resources = [
-        str(resource.get("SourcePath") or "")
-        for resource in resource_by_id.values()
-        if not Path(str(resource.get("SourcePath") or "")).expanduser().is_file()
-    ]
+    missing_resources: list[str] = []
+    for resource in resource_by_id.values():
+        source_text = str(resource.get("SourcePath") or "")
+        source_path = Path(source_text).expanduser()
+        if not source_path.is_absolute() and resource_base_path is not None:
+            source_path = resource_base_path / source_path
+        if not source_path.is_file():
+            missing_resources.append(source_text)
     for warning in resource_warnings:
         if str(warning.get("status") or "") != "missing_file":
             continue
         source_path = str(warning.get("source_path") or "")
         if source_path and source_path not in missing_resources:
             missing_resources.append(source_path)
+    painter_source = umg_document.get("PainterSource")
+    painter_source = (
+        painter_source if isinstance(painter_source, Mapping) else {}
+    )
+    artboard_background = painter_source.get("ArtboardBackground")
+    artboard_background = (
+        copy.deepcopy(dict(artboard_background))
+        if isinstance(artboard_background, Mapping)
+        else {
+            "mode": "transparent",
+            "color": "#00000000",
+            "layer_id": "",
+        }
+    )
     return {
         "schema": PAINTER_UMG_SIMULATOR_SCHEMA,
         "contract": {
             "schema_version": schema_version,
-            "supported_schema_version": TIGER_UMG_SCHEMA_VERSION,
+            "supported_schema_version": SUPPORTED_TIGER_UMG_SCHEMA_VERSION,
             "supported_schema_versions": list(
-                range(4, TIGER_UMG_SCHEMA_VERSION + 1)
+                range(4, SUPPORTED_TIGER_UMG_SCHEMA_VERSION + 1)
             ),
             "generator": "TigerStudioUMGGeneration.cpp",
             "authority": "unreal_generation_and_capture",
             "local_preview": "compatibility_proxy",
+            "artboard_background": copy.deepcopy(artboard_background),
         },
         "source": {
             "provider": str(umg_document.get("Provider") or ""),
             "document_id": str(umg_document.get("DocumentId") or ""),
             "revision": max(0, int(_number(umg_document.get("Revision"), 0.0))),
             "artboard_id": str(artboard_id or "umg-artboard"),
+            "artboard_background": copy.deepcopy(artboard_background),
         },
         "canvas": {
             "width": int(projection["artboards"][0]["width"]),
             "height": int(projection["artboards"][0]["height"]),
             "root_widget_class": "UCanvasPanel",
             "generated_root_widget_class": "UCanvasPanel",
-            "background": "transparent",
+            # UCanvasPanel itself has no paint, but an opaque Painter/Figma
+            # artboard is now preserved by the generated bottom UImage.  This
+            # field reports the visible result so the UI never tells authors
+            # that their white artboard will become transparent.
+            "background": (
+                str(artboard_background.get("color") or "#FFFFFFFF")
+                if str(artboard_background.get("mode") or "") == "included"
+                else "transparent"
+            ),
+            "root_panel_background": "transparent",
+            "background_layer_id": str(
+                artboard_background.get("layer_id") or ""
+            ),
         },
         "document": projection,
         "widgets": widgets,
@@ -1632,8 +2779,12 @@ def project_tiger_umg_document(
         "interaction_count": len(
             [row for row in umg_document.get("Interactions", []) if isinstance(row, Mapping)]
         ),
+        "component_count": int(component_summary["component_count"]),
+        "component_instance_count": int(component_summary["instance_count"]),
+        "component_summary": copy.deepcopy(component_summary),
         "ready": (
-            schema_version in range(4, TIGER_UMG_SCHEMA_VERSION + 1)
+            schema_version
+            in range(4, SUPPORTED_TIGER_UMG_SCHEMA_VERSION + 1)
             and not blockers
             and not missing_resources
             and not resource_warnings

@@ -187,6 +187,53 @@ def _crop_record(value: object) -> tuple[dict[str, Any], list[str]]:
     }, reasons
 
 
+def _figma_transform_crop_record(
+    value: object,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Convert the axis-aligned Figma REST image transform to UMG crop UVs."""
+
+    if value in (None, [], {}):
+        return None, []
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes))
+        or len(value) != 2
+    ):
+        return None, ["image_fill_transform_invalid"]
+    axes = list(value)
+    if any(
+        not isinstance(axis, Sequence)
+        or isinstance(axis, (str, bytes))
+        or len(axis) < 3
+        for axis in axes
+    ):
+        return None, ["image_fill_transform_invalid"]
+    numbers = [
+        [_number(item, math.nan) for item in list(axis)[:3]]
+        for axis in axes
+    ]
+    if not all(math.isfinite(item) for axis in numbers for item in axis):
+        return None, ["image_fill_transform_invalid"]
+    (a, c, x), (b, d, y) = numbers
+    determinant = a * d - b * c
+    if abs(determinant) <= 1.0e-9:
+        return None, ["image_fill_transform_invalid"]
+    if abs(b) > 0.000001 or abs(c) > 0.000001 or a <= 0.0 or d <= 0.0:
+        return None, ["image_fill_transform_requires_ui_material_or_bake"]
+    crop = {
+        "Enabled": True,
+        "Units": "Normalized",
+        "X": x,
+        "Y": y,
+        "Width": a,
+        "Height": d,
+    }
+    reasons: list[str] = []
+    if x < 0.0 or y < 0.0 or x + a > 1.000001 or y + d > 1.000001:
+        reasons.append("image_fill_crop_rect_out_of_bounds")
+    return crop, reasons
+
+
 def _nine_slice_record(value: Mapping[str, Any]) -> dict[str, Any]:
     margins = _mapping(value.get("nine_slice"))
     enabled = bool(value.get("nine_slice_enabled", margins.get("enabled", False)))
@@ -206,9 +253,11 @@ def _adjustment_record(value: object) -> tuple[dict[str, float], list[str]]:
         key: _number(source.get(key.casefold(), source.get(key)), 0.0)
         for key in IMAGE_ADJUSTMENT_KEYS
     }
+    shadows = _number(source.get("shadows", source.get("Shadows")), 0.0)
     reasons = (
         ["image_fill_adjustments_require_ui_material_or_bake"]
         if any(abs(number) > 0.0001 for number in result.values())
+        or abs(shadows) > 0.0001
         else []
     )
     return result, reasons
@@ -249,11 +298,22 @@ def _normalized_conversion(
     crop, crop_reasons = _crop_record(
         source.get("image_crop", source.get("crop"))
     )
+    transform_crop, transform_reasons = _figma_transform_crop_record(
+        source.get("figma_image_transform")
+    )
+    if transform_crop is not None:
+        if crop["Enabled"] and crop != transform_crop:
+            transform_reasons.append(
+                "image_fill_multiple_crop_sources_require_ui_material_or_bake"
+            )
+        crop = transform_crop
+        mode = "Crop"
     nine_slice = _nine_slice_record(source)
     adjustments, adjustment_reasons = _adjustment_record(
         source.get("adjustments", source.get("image_adjustments"))
     )
     reasons.extend(crop_reasons)
+    reasons.extend(transform_reasons)
     reasons.extend(adjustment_reasons)
     reasons.extend(str(reason) for reason in extra_reasons if str(reason))
     if mode == "Crop" and not crop["Enabled"]:
@@ -273,12 +333,13 @@ def _normalized_conversion(
         )
     if not str(source_path or "").strip():
         reasons.append("image_fill_missing_source_path")
-    if abs(_number(source.get("rotation"), 0.0)) > 0.0001:
-        reasons.append("image_fill_rotation_requires_ui_material_or_bake")
-    if source.get("figma_image_transform") not in (None, [], {}):
-        reasons.append(
-            "image_fill_transform_requires_ui_material_or_bake"
+    if abs(
+        _number(
+            source.get("image_rotation", source.get("rotation")),
+            0.0,
         )
+    ) > 0.0001:
+        reasons.append("image_fill_rotation_requires_ui_material_or_bake")
     blend_mode = str(source.get("blend_mode") or "normal").strip().casefold()
     if blend_mode != "normal":
         reasons.append("image_fill_blend_mode_requires_ui_material_or_bake")

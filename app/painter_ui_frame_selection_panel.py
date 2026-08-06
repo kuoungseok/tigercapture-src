@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.painter_ui_advanced_appearance import normalize_ui_advanced_style
 from app.painter_ui_paint_editor import PainterUIPaintStackEditor
+from app.painter_ui_umg_panel_selector import PainterUIUMGPanelSelector
 
 
 class PainterUIFrameSelectionPanel(QFrame):
@@ -35,6 +36,13 @@ class PainterUIFrameSelectionPanel(QFrame):
             QLabel#PainterUIFrameInspectorTitle { color:#F2F5F9; font-size:13px; font-weight:700; }
             QLabel#PainterUIFrameInspectorSection { color:#E1E7EF; font-size:11px; font-weight:650; padding-top:6px; }
             QLabel#PainterUIFrameInspectorHint { color:#8995A5; font-size:9px; }
+            QLabel#PainterUIUMGPanelTitle,
+            QLabel#PainterUIUMGPanelEffective { color:#DDE7F2; font-weight:650; }
+            QLabel#PainterUIUMGPanelReason { color:#8995A5; font-size:9px; }
+            QComboBox#PainterUIUMGPanelModeCombo {
+                background:#11161D; color:#EDF2F8; border:1px solid #303A47;
+                border-radius:4px; min-height:28px; padding:0 5px;
+            }
             QDoubleSpinBox#PainterUIFrameInspectorValue {
                 background:#11161D; color:#EDF2F8; border:1px solid #303A47;
                 border-radius:4px; min-height:28px; padding:0 5px;
@@ -112,6 +120,12 @@ class PainterUIFrameSelectionPanel(QFrame):
             flow_row.addWidget(button, 1)
         layout.addLayout(flow_row)
 
+        self.umg_panel_selector = PainterUIUMGPanelSelector(self)
+        self.umg_panel_selector.mode_changed.connect(
+            self._set_umg_panel_mode
+        )
+        layout.addWidget(self.umg_panel_selector)
+
         size_grid = QGridLayout()
         size_grid.setContentsMargins(0, 0, 0, 0)
         size_grid.setHorizontalSpacing(5)
@@ -178,7 +192,11 @@ class PainterUIFrameSelectionPanel(QFrame):
         spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         return spin
 
-    def set_frame(self, row: Mapping[str, Any]) -> None:
+    def set_frame(
+        self,
+        row: Mapping[str, Any],
+        document: Mapping[str, Any] | None = None,
+    ) -> None:
         self._row = dict(row)
         self._syncing = True
         try:
@@ -199,6 +217,11 @@ class PainterUIFrameSelectionPanel(QFrame):
             active = "wrap" if mode == "horizontal" and layout.get("wrap") else mode
             for key, button in self.flow_buttons.items():
                 button.setChecked(key == active)
+            self.umg_panel_selector.set_context(
+                document,
+                row,
+                editable=not bool(row.get("locked", False)),
+            )
         finally:
             self._syncing = False
 
@@ -222,6 +245,16 @@ class PainterUIFrameSelectionPanel(QFrame):
         layout["mode"] = "horizontal" if requested == "wrap" else requested
         layout["wrap"] = requested == "wrap"
         self.properties_changed.emit({"layout": layout})
+
+    def _set_umg_panel_mode(self, requested: str) -> None:
+        if self._syncing:
+            return
+        layout = dict(self._row.get("layout") or {})
+        layout["umg_panel_mode"] = str(requested or "auto")
+        self.properties_changed.emit({"layout": layout})
+
+    def umg_panel_state(self) -> dict[str, Any]:
+        return self.umg_panel_selector.state()
 
     def _emit_properties(self) -> None:
         if self._syncing:

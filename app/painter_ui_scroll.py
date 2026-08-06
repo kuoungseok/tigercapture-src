@@ -26,12 +26,25 @@ def normalize_ui_scroll(value: Mapping[str, Any] | None) -> dict[str, Any]:
 def inspect_ui_scroll(
     document: Mapping[str, Any],
     object_id: str,
+    *,
+    object_index: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    rows = {
-        str(row.get("id") or ""): row
-        for row in document.get("objects", [])
-        if isinstance(row, Mapping) and row.get("id")
-    }
+    """Inspect one object's scroll contract.
+
+    ``object_index`` lets document-wide callers reuse an index they already
+    own.  The public two-argument form deliberately keeps building its own
+    index so existing callers retain the same behavior.
+    """
+
+    rows = (
+        object_index
+        if object_index is not None
+        else {
+            str(row.get("id") or ""): row
+            for row in document.get("objects", [])
+            if isinstance(row, Mapping) and row.get("id")
+        }
+    )
     row = rows.get(str(object_id))
     if row is None:
         return {

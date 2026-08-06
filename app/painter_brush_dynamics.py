@@ -6,6 +6,7 @@ import colorsys
 import hashlib
 import json
 import math
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -310,7 +311,16 @@ def _curve(values: object, count: int, default: float) -> list[float]:
     return result
 
 
+@lru_cache(maxsize=1 << 17)
 def _noise(seed: int, index: int, channel: int) -> float:
+    """Deterministic per-dab randomness.
+
+    The live preview repaints the whole authored prefix on every input sample,
+    so the same (seed, index, channel) triples are hashed again several thousand
+    times per sample - about half the cost of a dynamic brush stroke.  The
+    result only depends on the arguments, so memoising it is byte-identical and
+    turns the repeats into dictionary hits.
+    """
     payload = b"".join(
         int(value & UINT64_MAX).to_bytes(8, "little", signed=False)
         for value in (seed, index, channel)
@@ -417,68 +427,103 @@ def dynamic_dab_workload(stroke: Any, width: int, height: int) -> dict[str, obje
     return dict(plan.get("workload") or {})
 
 
-def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float | tuple[int, int, int]]]:
-    plan = _dynamic_dab_plan(stroke, width, height)
-    if not bool(plan.get("enabled", False)):
-        return []
-    cfg = dict(plan["cfg"])
+def _walk_dab_samples(
+    plan: dict[str, object],
+    width: int,
+    height: int,
+    *,
+    first_segment: int = 0,
+    carry: float = 0.0,
+) -> tuple[list[tuple[float, float, float, float, float, float]], float]:
+    """Spacing walk over the segments, resumable from a segment and a carry.
+
+    Returns the samples emitted for those segments and the distance still owed
+    to the next dab, so a live stroke can continue the walk when the next input
+    sample arrives instead of redoing the whole path.
+    """
     points = list(plan["points"])
     pressure = list(plan["pressure"])
     tilt_x = list(plan["tilt_x"])
     tilt_y = list(plan["tilt_y"])
     rotation = list(plan["rotation"])
     barrel = list(plan["barrel"])
-    base_width = float(plan["base_width"])
-    roundness = float(plan["roundness"])
-    count = int(plan["count"])
-    segment_distances = list(plan["segment_distances"])
-    max_path_samples = int(plan["max_path_samples"])
     effective_spacing = float(plan["effective_spacing"])
-    workload_degraded = bool(dict(plan["workload"])["degraded"])
     samples: list[tuple[float, float, float, float, float, float]] = []
-    if len(points) == 1:
-        samples.append((*points[0], pressure[0], tilt_x[0], tilt_y[0], rotation[0], barrel[0]))
-    else:
-        distance_to_next = 0.0
-        for segment, (first, second) in enumerate(zip(points, points[1:])):
-            x1, y1 = first[0] * width, first[1] * height
-            x2, y2 = second[0] * width, second[1] * height
-            distance = math.hypot(x2 - x1, y2 - y1)
-            if distance <= 0.0:
-                continue
-            while distance_to_next < distance:
-                t = distance_to_next / distance
-                samples.append((
-                    (x1 + (x2 - x1) * t) / width,
-                    (y1 + (y2 - y1) * t) / height,
-                    pressure[segment] * (1.0 - t) + pressure[segment + 1] * t,
-                    tilt_x[segment] * (1.0 - t) + tilt_x[segment + 1] * t,
-                    tilt_y[segment] * (1.0 - t) + tilt_y[segment + 1] * t,
-                    rotation[segment] * (1.0 - t) + rotation[segment + 1] * t,
-                    barrel[segment] * (1.0 - t) + barrel[segment + 1] * t,
-                ))
-                distance_to_next += effective_spacing
-            distance_to_next -= distance
-        samples.append((*points[-1], pressure[-1], tilt_x[-1], tilt_y[-1], rotation[-1], barrel[-1]))
-    if len(samples) > max_path_samples:
-        if max_path_samples == 1:
-            samples = [samples[-1]]
-        else:
-            last_index = len(samples) - 1
-            sample_indices = [
-                int(round(index * last_index / float(max_path_samples - 1)))
-                for index in range(max_path_samples)
-            ]
-            samples = [samples[index] for index in sample_indices]
-        workload_degraded = True
+    distance_to_next = float(carry)
+    for segment in range(first_segment, len(points) - 1):
+        first = points[segment]
+        second = points[segment + 1]
+        x1, y1 = first[0] * width, first[1] * height
+        x2, y2 = second[0] * width, second[1] * height
+        distance = math.hypot(x2 - x1, y2 - y1)
+        if distance <= 0.0:
+            continue
+        while distance_to_next < distance:
+            t = distance_to_next / distance
+            samples.append((
+                (x1 + (x2 - x1) * t) / width,
+                (y1 + (y2 - y1) * t) / height,
+                pressure[segment] * (1.0 - t) + pressure[segment + 1] * t,
+                tilt_x[segment] * (1.0 - t) + tilt_x[segment + 1] * t,
+                tilt_y[segment] * (1.0 - t) + tilt_y[segment + 1] * t,
+                rotation[segment] * (1.0 - t) + rotation[segment + 1] * t,
+                barrel[segment] * (1.0 - t) + barrel[segment + 1] * t,
+            ))
+            distance_to_next += effective_spacing
+        distance_to_next -= distance
+    return samples, distance_to_next
+
+
+def _final_dab_sample(
+    plan: dict[str, object],
+) -> tuple[float, float, float, float, float, float]:
+    """The cap the walk always appends for the stroke's last authored point."""
+    points = list(plan["points"])
+    return (
+        *points[-1],
+        plan["pressure"][-1],
+        plan["tilt_x"][-1],
+        plan["tilt_y"][-1],
+        plan["rotation"][-1],
+        plan["barrel"][-1],
+    )
+
+
+def _dab_build_context(stroke: Any, plan: dict[str, object]) -> dict[str, Any]:
     try:
         seed = int(getattr(stroke, "brush_seed", 0) or 0) & UINT64_MAX
     except (TypeError, ValueError, OverflowError):
         seed = 0
     base_rgb = tuple(int(v) for v in getattr(stroke, "color", (255, 50, 50)))
     h, s, v = colorsys.rgb_to_hsv(*(channel / 255.0 for channel in base_rgb))
+    return {
+        "cfg": dict(plan["cfg"]),
+        "base_width": float(plan["base_width"]),
+        "roundness": float(plan["roundness"]),
+        "count": int(plan["count"]),
+        "seed": seed,
+        "hsv": (h, s, v),
+        "angle": float(getattr(stroke, "brush_angle", 0.0)),
+    }
+
+
+def _dabs_for_samples(
+    context: dict[str, Any],
+    samples: list[tuple[float, float, float, float, float, float]],
+    width: int,
+    height: int,
+    *,
+    first_sample_index: int = 0,
+) -> list[dict[str, float | tuple[int, int, int]]]:
+    cfg = context["cfg"]
+    base_width = float(context["base_width"])
+    roundness = float(context["roundness"])
+    count = int(context["count"])
+    seed = int(context["seed"])
+    h, s, v = context["hsv"]
     result = []
-    for sample_index, sample in enumerate(samples):
+    for offset, sample in enumerate(samples):
+        sample_index = first_sample_index + offset
         x, y, raw_pressure, tx, ty, rot, tangential = sample
         local_pressure = _map_pressure_normalized(max(0.0, raw_pressure), cfg)
         for copy_index in range(count):
@@ -502,7 +547,7 @@ def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float |
             sat = max(0.0, min(1.0, s + (2.0 * _noise(seed, index, 6) - 1.0) * float(cfg["saturation_jitter"]) / 100.0))
             val = max(0.0, min(1.0, v + (2.0 * _noise(seed, index, 7) - 1.0) * float(cfg["value_jitter"]) / 100.0))
             rgb = tuple(int(round(channel * 255.0)) for channel in colorsys.hsv_to_rgb(hue, sat, val))
-            angle = float(getattr(stroke, "brush_angle", 0.0))
+            angle = float(context["angle"])
             angle += math.degrees(math.atan2(ty, tx)) * float(cfg["tilt_angle"]) / 100.0 if tx != 0.0 or ty != 0.0 else 0.0
             angle += (rot - 0.5) * 360.0 * float(cfg["rotation_angle"]) / 100.0
             result.append({
@@ -526,6 +571,158 @@ def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float |
         for dab, alpha in zip(result, advanced_alpha):
             dab["alpha"] = float(alpha)
     return result
+
+
+def dynamic_dabs(
+    stroke: Any,
+    width: int,
+    height: int,
+) -> list[dict[str, float | tuple[int, int, int]]]:
+    plan = _dynamic_dab_plan(stroke, width, height)
+    if not bool(plan.get("enabled", False)):
+        return []
+    points = list(plan["points"])
+    max_path_samples = int(plan["max_path_samples"])
+    if len(points) == 1:
+        samples = [_final_dab_sample(plan)]
+    else:
+        samples, _carry = _walk_dab_samples(plan, width, height)
+        samples.append(_final_dab_sample(plan))
+    if len(samples) > max_path_samples:
+        if max_path_samples == 1:
+            samples = [samples[-1]]
+        else:
+            last_index = len(samples) - 1
+            sample_indices = [
+                int(round(index * last_index / float(max_path_samples - 1)))
+                for index in range(max_path_samples)
+            ]
+            samples = [samples[index] for index in sample_indices]
+    return _dabs_for_samples(
+        _dab_build_context(stroke, plan),
+        samples,
+        width,
+        height,
+    )
+
+
+class DynamicDabStream:
+    """Resumable dab generation for the stroke currently being drawn.
+
+    The live preview used to clear its image and repaint every dab of the stroke
+    on every input sample, which is quadratic in stroke length.  The dab
+    sequence is prefix-stable - ``stabilize_points`` is deliberately causal and
+    the spacing walk only carries a distance forward - so everything except the
+    cap dabs at the stroke's last authored point can be painted once and left
+    alone.
+
+    ``update`` returns ``(new_stable_dabs, cap_dabs)``: the first are appended to
+    the live image, the second are drawn on top of it each frame because they
+    move with the pointer.  It returns ``None`` when the stroke cannot be
+    extended this way, and the caller must fall back to a full repaint.
+    """
+
+    def __init__(self) -> None:
+        self._signature: tuple[Any, ...] | None = None
+        self._segment = 0
+        self._carry = 0.0
+        self._stable_samples = 0
+        self._context: dict[str, Any] | None = None
+
+    def reset(self) -> None:
+        self._signature = None
+        self._segment = 0
+        self._carry = 0.0
+        self._stable_samples = 0
+        self._context = None
+
+    @property
+    def stable_dab_count(self) -> int:
+        if self._context is None:
+            return 0
+        return self._stable_samples * int(self._context["count"])
+
+    def update(
+        self,
+        stroke: Any,
+        width: int,
+        height: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+        from app.painter_advanced_brush import advanced_dab_alphas_prefix_stable
+
+        plan = _dynamic_dab_plan(stroke, width, height)
+        if not bool(plan.get("enabled", False)):
+            return None
+        cfg = dict(plan["cfg"])
+        if str(cfg["mode"]) != "paint":
+            # Smudge, mixer and pickup carry colour between dabs and sample the
+            # canvas underneath, so a dab cannot be replayed out of context.
+            return None
+        if not advanced_dab_alphas_prefix_stable(cfg):
+            return None
+        if bool(dict(plan["workload"])["degraded"]):
+            # Over budget the walk is resampled against the whole path, so
+            # earlier dabs move as the stroke grows.
+            return None
+        points = list(plan["points"])
+        if len(points) < 2:
+            return None
+        for key in ("pressure", "tilt_x", "tilt_y", "rotation", "barrel"):
+            if len(plan[key]) != len(points):
+                # ``_curve`` resampled a per-point channel, so every value
+                # shifts when the point count changes.
+                return None
+        signature = (
+            id(stroke),
+            int(width),
+            int(height),
+            tuple(sorted((str(key), repr(value)) for key, value in cfg.items())),
+            float(plan["base_width"]),
+            float(plan["roundness"]),
+            int(plan["count"]),
+            float(plan["effective_spacing"]),
+            int(plan["max_path_samples"]),
+            int(getattr(stroke, "brush_seed", 0) or 0),
+            tuple(int(v) for v in getattr(stroke, "color", (255, 50, 50))),
+            float(getattr(stroke, "brush_angle", 0.0)),
+        )
+        if signature != self._signature:
+            self.reset()
+            self._signature = signature
+            self._context = _dab_build_context(stroke, plan)
+        context = self._context
+        if context is None:
+            return None
+        if self._segment > len(points) - 1:
+            return None
+        fresh_samples, carry = _walk_dab_samples(
+            plan,
+            width,
+            height,
+            first_segment=self._segment,
+            carry=self._carry,
+        )
+        self._segment = len(points) - 1
+        self._carry = carry
+        first_sample_index = self._stable_samples
+        stable = _dabs_for_samples(
+            context,
+            fresh_samples,
+            width,
+            height,
+            first_sample_index=first_sample_index,
+        )
+        self._stable_samples += len(fresh_samples)
+        cap = _dabs_for_samples(
+            context,
+            [_final_dab_sample(plan)],
+            width,
+            height,
+            first_sample_index=self._stable_samples,
+        )
+        if (self._stable_samples + 1) > int(plan["max_path_samples"]):
+            return None
+        return stable, cap
 
 
 def _sample_color(device: object, x: float, y: float, fallback: QColor) -> QColor:
@@ -642,6 +839,30 @@ def paint_dynamic_stroke(
 ) -> bool:
     cfg = normalize_brush_dynamics(getattr(stroke, "brush_dynamics", {}) or {})
     dabs = dynamic_dabs(stroke, width, height)
+    if not dabs:
+        return False
+    return paint_dynamic_dabs(
+        painter,
+        dabs,
+        cfg,
+        color,
+        sampling_image=sampling_image,
+    )
+
+
+def paint_dynamic_dabs(
+    painter: QPainter,
+    dabs: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    color: QColor,
+    *,
+    sampling_image: QImage | None = None,
+) -> bool:
+    """Paint an already-generated dab sequence.
+
+    Split out of ``paint_dynamic_stroke`` so a live stroke can paint only the
+    dabs it has not painted yet through exactly the same code.
+    """
     if not dabs:
         return False
     mode = str(cfg["mode"])
