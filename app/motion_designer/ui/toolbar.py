@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QStyle, QToolBar, QToolButton
 
-from app.icons import app_icon
+from app.icons import app_icon, unreal_engine_icon
 
 from .catalog import BEHAVIOR_ITEMS, FILTER_ITEMS, OBJECT_ITEMS
 
@@ -14,12 +14,15 @@ class MotionToolbar(QToolBar):
     behavior_requested = Signal(str)
     effect_requested = Signal(str)
     rig_requested = Signal(str)
+    component_requested = Signal(str)
     delete_requested = Signal()
     duplicate_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
     ai_toggled = Signal(bool)
     output_requested = Signal()
+    template_gallery_requested = Signal()
+    unreal_link_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__("Motion Tools", parent)
@@ -55,6 +58,32 @@ class MotionToolbar(QToolBar):
             "Rig", QStyle.SP_FileDialogDetailedView,
             (("Arm Wave...", "arm_wave"),), self.rig_requested,
         ))
+        self.addWidget(self._menu_button(
+            "Component", QStyle.SP_DialogApplyButton,
+            (("Button", "button"),), self.component_requested,
+        ))
+        self.addSeparator()
+        self.templates_button = QToolButton(self)
+        self.templates_button.setText("Templates")
+        self.templates_button.setIcon(
+            app_icon("layout-grid", size=20, color="#d9dde3")
+        )
+        self.templates_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.templates_button.setToolTip("Start from a Motion template")
+        self.templates_button.clicked.connect(self.template_gallery_requested)
+        self.addWidget(self.templates_button)
+        self.unreal_link_button = QToolButton(self)
+        self.unreal_link_button.setText("Unreal Link")
+        self.unreal_link_button.setIcon(
+            unreal_engine_icon(22, color="#f2f4f7")
+        )
+        self.unreal_link_button.setIconSize(QSize(22, 22))
+        self.unreal_link_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.unreal_link_button.setToolTip(
+            "Connect an Unreal project and generate editable UMG assets"
+        )
+        self.unreal_link_button.clicked.connect(self.unreal_link_requested)
+        self.addWidget(self.unreal_link_button)
         self.addSeparator()
         self.ai_action = QAction(
             app_icon("ai-script", size=18, color="#d9dde3"), "AI", self,

@@ -476,6 +476,44 @@ def _validate_particle_layer(layer, path: str, issues: list[ValidationIssue]) ->
         issues.append(ValidationIssue("invalid_particle_blend", "Particle blend mode must be normal, add, or screen.", f"{path}.blend_mode"))
 
 
+def _validate_button_component(layer, path: str, issues: list[ValidationIssue]) -> None:
+    raw = layer.metadata.get("interactive_component")
+    if raw is None:
+        return
+    if not isinstance(raw, Mapping) or str(raw.get("type") or "") != "button":
+        issues.append(ValidationIssue(
+            "invalid_interactive_component",
+            "Interactive component must be a button object.",
+            f"{path}.metadata.interactive_component",
+        ))
+        return
+    from .interactive_button import BUTTON_EASINGS, BUTTON_STATES
+
+    active_state = str(raw.get("active_state") or "normal")
+    if active_state not in BUTTON_STATES:
+        issues.append(ValidationIssue(
+            "invalid_button_state",
+            "Button active state is unsupported.",
+            f"{path}.metadata.interactive_component.active_state",
+        ))
+    transition = raw.get("transition")
+    if isinstance(transition, Mapping):
+        easing = str(transition.get("easing") or "ease_out")
+        if easing not in BUTTON_EASINGS:
+            issues.append(ValidationIssue(
+                "invalid_button_easing",
+                "Button transition easing is unsupported.",
+                f"{path}.metadata.interactive_component.transition.easing",
+            ))
+    states = raw.get("states")
+    if not isinstance(states, Mapping) or any(state not in states for state in BUTTON_STATES):
+        issues.append(ValidationIssue(
+            "invalid_button_states",
+            "Button component must define every standard state.",
+            f"{path}.metadata.interactive_component.states",
+        ))
+
+
 def validate_composition(composition: MotionComposition) -> ValidationReport:
     issues: list[ValidationIssue] = []
     if composition.width <= 0 or composition.height <= 0:
@@ -659,6 +697,7 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
         _validate_mmd_layer(layer, path, issues)
         _validate_vrm_layer(layer, path, issues)
         _validate_particle_layer(layer, path, issues)
+        _validate_button_component(layer, path, issues)
     from .expressions import expression_issues
 
     layer_index = {layer.id: index for index, layer in enumerate(composition.layers)}

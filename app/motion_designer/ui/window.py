@@ -20,6 +20,7 @@ from app.motion_designer.schema import (
 from app.motion_designer.vector_shapes import default_pen_path
 
 from .behavior_panel import BehaviorPanel
+from .button_panel import ButtonComponentPanel
 from .audio_panel import AudioReactivePanel
 from .audio_worker import MotionAudioAnalysisWorker
 from .ai_panel import MotionAIPanel
@@ -46,8 +47,11 @@ from .vrm_panel import VRMPanel
 from .style import MOTION_DESIGNER_QSS
 from .timeline import MotionTimeline
 from .toolbar import MotionToolbar
+from .template_gallery import MotionTemplateGalleryDialog
 from .tracking_worker import MotionTrackingWorker
 from .typography_panel import TypographyPanel
+from .umg_panel import MotionUnrealLinkDialog
+from .umg_worker import MotionUMGGenerationWorker
 from .viewer_header import ViewerHeader
 from .vector_panel import VectorPanel
 from app.motion_designer.preview_renderer import MotionPreviewWidget
@@ -223,6 +227,7 @@ class MotionDesignerWindow(QMainWindow):
         self._tracking_jobs: dict[str, tuple[QThread, MotionTrackingWorker, str]] = {}
         self._audio_analysis_job: tuple[QThread, MotionAudioAnalysisWorker] | None = None
         self._motion_export_job: tuple[QThread, MotionExportWorker] | None = None
+        self._umg_generation_job: tuple[QThread, MotionUMGGenerationWorker] | None = None
         self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
         self._ai_preview_job: tuple[QThread, MotionAICandidatePreviewWorker] | None = None
         self._ai_preview_pending: dict | None = None
@@ -246,6 +251,7 @@ class MotionDesignerWindow(QMainWindow):
         self.vector = VectorPanel(self)
         self.typography = TypographyPanel(self)
         self.behaviors = BehaviorPanel(self)
+        self.button = ButtonComponentPanel(self)
         self.effects = EffectMaskPanel("effect", self)
         self.masks = EffectMaskPanel("mask", self)
         self.inspector_tabs = QTabWidget(self)
@@ -262,6 +268,7 @@ class MotionDesignerWindow(QMainWindow):
         self.inspector_tabs.addTab(self.mmd, "MMD")
         self.inspector_tabs.addTab(self.vrm, "VRM")
         self.inspector_tabs.addTab(self.particle, "Particles")
+        self.inspector_tabs.addTab(self.button, "Button")
         self.left_tabs = QTabWidget(self)
         self.left_tabs.addTab(self.library, "Library")
         self.left_tabs.addTab(self.inspector_tabs, "Inspector")
@@ -271,6 +278,8 @@ class MotionDesignerWindow(QMainWindow):
         self.project_tabs.addTab(self.audio, "Audio")
         self.output = MotionOutputPanel(self)
         self.left_tabs.addTab(self.output, "Output")
+        self.unreal_link_dialog = MotionUnrealLinkDialog(self)
+        self.umg = self.unreal_link_dialog.panel
 
         self.canvas = MotionCanvas(self)
         self.preview = MotionPreviewWidget(self)
@@ -313,12 +322,17 @@ class MotionDesignerWindow(QMainWindow):
         self.toolbar.behavior_requested.connect(self._add_behavior)
         self.toolbar.effect_requested.connect(self._add_effect)
         self.toolbar.rig_requested.connect(self._open_rig)
+        self.toolbar.component_requested.connect(
+            lambda kind: self._create_button_component() if kind == "button" else None
+        )
         self.toolbar.delete_requested.connect(self._delete_selected)
         self.toolbar.duplicate_requested.connect(self._duplicate_selected)
         self.toolbar.undo_requested.connect(self.controller.undo)
         self.toolbar.redo_requested.connect(self.controller.redo)
         self.toolbar.ai_toggled.connect(self.ai_dock.setVisible)
         self.toolbar.output_requested.connect(lambda: self.left_tabs.setCurrentWidget(self.output))
+        self.toolbar.template_gallery_requested.connect(self._open_template_gallery)
+        self.toolbar.unreal_link_requested.connect(self._open_unreal_link)
         self.ai_dock.visibilityChanged.connect(self.toolbar.set_ai_visible)
         self.layers.layer_selected.connect(self._select_layer)
         self.layers.layer_flags_changed.connect(self._update_layer_flags)
@@ -339,6 +353,10 @@ class MotionDesignerWindow(QMainWindow):
         self.behaviors.add_requested.connect(self._add_behavior)
         self.behaviors.delete_requested.connect(self._delete_behavior)
         self.behaviors.parameter_changed.connect(self._set_behavior_param)
+        self.button.create_requested.connect(self._create_button_component)
+        self.button.remove_requested.connect(self._remove_button_component)
+        self.button.state_changed.connect(self._set_button_state)
+        self.button.settings_changed.connect(self._update_button_component)
         self.effects.add_requested.connect(self._add_effect)
         self.effects.delete_requested.connect(self._delete_effect)
         self.effects.parameter_changed.connect(self._set_effect_param)
@@ -373,7 +391,8 @@ class MotionDesignerWindow(QMainWindow):
         self.output.color_settings_changed.connect(self._set_motion_color_settings)
         self.output.export_requested.connect(self._start_motion_export)
         self.output.cancel_requested.connect(self._cancel_motion_export)
-
+        self.umg.generate_requested.connect(self._start_umg_generation)
+        self.umg.cancel_requested.connect(self._cancel_umg_generation)
         self._play_timer = QTimer(self)
         self._play_timer.setInterval(16)
         self._play_timer.timeout.connect(self._tick)
@@ -392,6 +411,7 @@ class MotionDesignerWindow(QMainWindow):
         self._update_media_panel(composition)
         self.audio.set_composition(composition)
         self.output.set_composition(composition)
+        self.umg.set_composition(composition)
         self.composition_changed.emit(composition)
         if self._selected_layer_id:
             self._select_layer(self._selected_layer_id)
@@ -404,6 +424,39 @@ class MotionDesignerWindow(QMainWindow):
         dialog = CutoutArmRigDialog(self.controller.composition, self)
         if dialog.exec() == QDialog.Accepted:
             self.controller.replace(dialog.result_composition())
+
+    def _open_unreal_link(self) -> None:
+        self.umg.set_composition(self.controller.composition)
+        self.unreal_link_dialog.show()
+        self.unreal_link_dialog.raise_()
+        self.unreal_link_dialog.activateWindow()
+
+    def _open_template_gallery(self) -> None:
+        from app.motion_designer.templates import (
+            apply_template_to_composition,
+            recommended_variant,
+        )
+
+        composition = self.controller.composition
+        dialog = MotionTemplateGalleryDialog(
+            self,
+            variant=recommended_variant(composition.width, composition.height),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        template_id = dialog.selected_template_id
+        if not template_id:
+            return
+        before = len(composition.layers)
+        candidate = apply_template_to_composition(
+            composition,
+            template_id,
+            variant=dialog.selected_variant,
+        )
+        added = candidate.layers[before:]
+        self.controller.replace(candidate)
+        if added:
+            self._select_layer(added[-1].id)
 
     def _add_layer(self, layer_type: str) -> None:
         composition = self.controller.composition
@@ -565,10 +618,58 @@ class MotionDesignerWindow(QMainWindow):
         self.mmd.set_layer(layer)
         self.vrm.set_layer(layer)
         self.particle.set_layer(layer)
+        self.button.set_layer(layer)
         self.timeline.set_selected_layer(self._selected_layer_id)
         self.canvas.set_selected_layer(self._selected_layer_id)
         if layer is not None:
             self.layers.select_layer(layer.id)
+
+    def _create_button_component(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.interactive_button import create_button_component
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        create_button_component(layer)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+        self.left_tabs.setCurrentWidget(self.inspector_tabs)
+        self.inspector_tabs.setCurrentWidget(self.button)
+
+    def _remove_button_component(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.interactive_button import remove_button_component
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        if not remove_button_component(layer):
+            return
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_button_state(self, state: str) -> None:
+        self._update_button_component({"active_state": str(state)})
+
+    def _update_button_component(self, changes: object) -> None:
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        from app.motion_designer.interactive_button import (
+            button_component,
+            set_button_component,
+            update_button_component_data,
+        )
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        component = button_component(layer)
+        if component is None:
+            return
+        update_button_component_data(component, changes)
+        set_button_component(layer, component)
+        candidate.revision += 1
+        self.controller.replace(candidate)
 
     def _set_ar_pbr_params(self, changes: object) -> None:
         if not self._selected_layer_id or not isinstance(changes, dict):
@@ -1483,6 +1584,45 @@ class MotionDesignerWindow(QMainWindow):
     def _fail_motion_export(self, message: str) -> None:
         self.output.set_busy(False, str(message))
 
+    def _start_umg_generation(
+        self,
+        project_path: str,
+        destination_root: str,
+    ) -> None:
+        if self._umg_generation_job is not None:
+            return
+        thread = QThread(self)
+        worker = MotionUMGGenerationWorker(
+            self.controller.composition,
+            project_path,
+            destination_root,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._finish_umg_generation)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_umg_generation_job)
+        self._umg_generation_job = (thread, worker)
+        self.umg.set_busy(
+            True,
+            "Installing or updating the project plugin, then generating in Unreal...",
+        )
+        thread.start()
+
+    def _finish_umg_generation(self, result: object) -> None:
+        self.umg.show_result(result if isinstance(result, dict) else {})
+
+    def _cancel_umg_generation(self) -> None:
+        if self._umg_generation_job is None:
+            return
+        self._umg_generation_job[1].cancel()
+        self.umg.set_busy(True, "Cancelling Unreal generation...")
+
+    def _clear_umg_generation_job(self) -> None:
+        self._umg_generation_job = None
+
     def _set_time(self, time_ms: int) -> None:
         self._time_ms = int(time_ms)
         self.canvas.set_time(self._time_ms)
@@ -1577,6 +1717,10 @@ class MotionDesignerWindow(QMainWindow):
             worker.cancel()
             thread.quit()
             thread.wait(5000)
+        if self._umg_generation_job is not None:
+            thread, worker = self._umg_generation_job
+            worker.cancel()
+            thread.wait(10000)
         if self._ai_generation_job is not None:
             thread, _worker = self._ai_generation_job
             thread.quit()

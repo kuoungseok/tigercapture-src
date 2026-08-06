@@ -3,8 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from math import hypot
 from pathlib import Path
+from time import monotonic
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QBrush, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItem, QGraphicsLineItem, QGraphicsPathItem,
@@ -54,6 +55,7 @@ class MotionCanvas(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.setMouseTracking(True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setBackgroundBrush(QColor("#0b0d11"))
         self._composition: MotionComposition | None = None
@@ -64,9 +66,20 @@ class MotionCanvas(QGraphicsView):
         self._fit_mode = True
         self._selected_layer_id = ""
         self._loading_scene = False
+        self._button_preview_states: dict[str, object] = {}
+        self._button_transition_targets: dict[str, tuple[str, str, float, int, str]] = {}
+        self._hover_button_layer_id = ""
+        self._button_transition_timer = QTimer(self)
+        self._button_transition_timer.setInterval(16)
+        self._button_transition_timer.timeout.connect(self._update_button_transitions)
         self._scene.selectionChanged.connect(self._selection_changed)
 
     def set_composition(self, composition: MotionComposition, time_ms: int = 0) -> None:
+        if composition is not self._composition:
+            self._button_preview_states.clear()
+            self._button_transition_targets.clear()
+            self._button_transition_timer.stop()
+            self._hover_button_layer_id = ""
         self._composition = composition
         self._time_ms = int(time_ms)
         self.refresh()
@@ -95,7 +108,14 @@ class MotionCanvas(QGraphicsView):
         margin_x, margin_y = composition.width * .05, composition.height * .05
         if self._show_safe_guides:
             self._scene.addRect(stage_rect.adjusted(margin_x, margin_y, -margin_x, -margin_y), safe_pen).setZValue(9000)
-        states = {state.id: state for state in evaluate_composition(composition, self._time_ms)}
+        states = {
+            state.id: state
+            for state in evaluate_composition(
+                composition,
+                self._time_ms,
+                interaction_states=self._button_preview_states,
+            )
+        }
         from app.motion_designer.boolean_layers import consumed_boolean_operand_ids, resolve_boolean_layer
         consumed_operand_ids = consumed_boolean_operand_ids(composition, states)
         for z_index, layer in enumerate(composition.layers):
@@ -576,6 +596,26 @@ class MotionCanvas(QGraphicsView):
                 return
         super().mouseDoubleClickEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        super().mouseMoveEvent(event)
+        layer_id = self._button_layer_at(event.position().toPoint())
+        if layer_id == self._hover_button_layer_id:
+            return
+        previous = self._hover_button_layer_id
+        self._hover_button_layer_id = layer_id
+        if previous:
+            self._set_button_preview_state(previous, "normal")
+        if layer_id:
+            self._set_button_preview_state(layer_id, "hover")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            layer_id = self._button_layer_at(event.position().toPoint())
+            if layer_id:
+                self._hover_button_layer_id = layer_id
+                self._set_button_preview_state(layer_id, "pressed")
+        super().mousePressEvent(event)
+
     def keyPressEvent(self, event) -> None:
         if event.key() in {Qt.Key_Delete, Qt.Key_Backspace}:
             handle = next((
@@ -647,6 +687,19 @@ class MotionCanvas(QGraphicsView):
             if layer_id and not item.pos().isNull():
                 self.layer_moved.emit(layer_id, item.pos().x(), item.pos().y())
                 item.setPos(0, 0)
+        if event.button() == Qt.LeftButton and self._hover_button_layer_id:
+            layer_id = self._button_layer_at(event.position().toPoint())
+            self._set_button_preview_state(
+                self._hover_button_layer_id,
+                "hover" if layer_id == self._hover_button_layer_id else "normal",
+            )
+
+    def leaveEvent(self, event) -> None:
+        previous = self._hover_button_layer_id
+        self._hover_button_layer_id = ""
+        if previous:
+            self._set_button_preview_state(previous, "normal")
+        super().leaveEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -659,3 +712,88 @@ class MotionCanvas(QGraphicsView):
             return
         items = self._scene.selectedItems()
         self.layer_selected.emit(str(items[0].data(0) or "") if items else "")
+
+    def _button_layer_at(self, viewport_position) -> str:
+        composition = self._composition
+        if composition is None:
+            return ""
+        item = self.itemAt(viewport_position)
+        while item is not None:
+            layer_id = str(item.data(0) or "")
+            if layer_id:
+                from app.motion_designer.interactive_button import button_component
+
+                by_id = {candidate.id: candidate for candidate in composition.layers}
+                layer = by_id.get(layer_id)
+                while layer is not None:
+                    component = button_component(layer)
+                    if component is not None and component.active_state != "disabled":
+                        return layer.id
+                    layer = by_id.get(layer.parent_id)
+            item = item.parentItem()
+        return ""
+
+    def _set_button_preview_state(self, layer_id: str, state: str) -> None:
+        if not layer_id:
+            return
+        composition = self._composition
+        layer = next(
+            (item for item in composition.layers if item.id == layer_id),
+            None,
+        ) if composition is not None else None
+        from app.motion_designer.interactive_button import button_component
+
+        component = button_component(layer) if layer is not None else None
+        if component is None:
+            return
+        current = self._button_preview_states.get(layer_id)
+        current_state = (
+            str(current.get("state") or component.active_state)
+            if isinstance(current, dict)
+            else str(current or component.active_state)
+        )
+        if current_state == state and layer_id not in self._button_transition_targets:
+            return
+        duration = int(component.transition_duration_ms)
+        if duration <= 0:
+            self._button_preview_states[layer_id] = str(state)
+            self._button_transition_targets.pop(layer_id, None)
+            self.refresh(preserve_view=True)
+            return
+        self._button_transition_targets[layer_id] = (
+            current_state,
+            str(state),
+            monotonic(),
+            duration,
+            component.easing,
+        )
+        self._button_preview_states[layer_id] = {
+            "from_state": current_state,
+            "state": str(state),
+            "progress": 0.0,
+            "easing": component.easing,
+        }
+        self._button_transition_timer.start()
+        self.refresh(preserve_view=True)
+
+    def _update_button_transitions(self) -> None:
+        now = monotonic()
+        finished: list[str] = []
+        for layer_id, (from_state, state, started, duration, easing) in list(
+            self._button_transition_targets.items()
+        ):
+            progress = max(0.0, min(1.0, (now - started) * 1000.0 / max(1, duration)))
+            self._button_preview_states[layer_id] = {
+                "from_state": from_state,
+                "state": state,
+                "progress": progress,
+                "easing": easing,
+            }
+            if progress >= 1.0:
+                self._button_preview_states[layer_id] = state
+                finished.append(layer_id)
+        for layer_id in finished:
+            self._button_transition_targets.pop(layer_id, None)
+        if not self._button_transition_targets:
+            self._button_transition_timer.stop()
+        self.refresh(preserve_view=True)

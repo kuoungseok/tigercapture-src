@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Mapping
 
 from .audio_reactive import evaluate_layer_transform
 from .advanced_motion import project_layer_matrix
 from .constraints import apply_look_at, point_on_path
+from .interactive_button import apply_button_state
 from .schema import MotionComposition, MotionLayer
 
 
@@ -63,13 +64,22 @@ def multiply_affine(parent, child):
             pa * ctx + pc * cty + ptx, pb * ctx + pd * cty + pty)
 
 
-def evaluate_composition(composition: MotionComposition, time_ms: float) -> list[EvaluatedLayer]:
+def evaluate_composition(
+    composition: MotionComposition,
+    time_ms: float,
+    *,
+    interaction_states: Mapping[str, str | Mapping[str, Any]] | None = None,
+) -> list[EvaluatedLayer]:
     solo_ids = {layer.id for layer in composition.layers if layer.solo}
     values_by_id: dict[str, dict[str, Any]] = {}
     layers_by_id = {layer.id: layer for layer in composition.layers}
     for layer in composition.layers:
         values = evaluate_layer_transform(layer, time_ms)
-        values_by_id[layer.id] = values
+        values_by_id[layer.id] = apply_button_state(
+            layer,
+            values,
+            (interaction_states or {}).get(layer.id),
+        )
     from .expressions import apply_composition_expressions
 
     apply_composition_expressions(composition, time_ms, values_by_id)
