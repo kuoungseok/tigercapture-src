@@ -56,6 +56,13 @@ logs/
 *.log
 _test_*.py
 outputs/
+output/
+
+# QA corpora and scratch artifacts (scripts under tmp/ stay tracked)
+qa_corpus/
+tmp/**
+!tmp/**/
+!tmp/**/*.py
 
 # Debug captures / scratch zips (not part of the project)
 debugCapture/
