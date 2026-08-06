@@ -6,17 +6,21 @@ import hashlib
 import json
 import os
 import operator
+import shutil
 import tempfile
 import zipfile
+from collections import Counter
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
 
 
-PAINTER_DOCUMENT_SCHEMA = "tigerstudio.painter.document.v3"
-PAINTER_DOCUMENT_VERSION = 3
+PAINTER_DOCUMENT_SCHEMA = "tigerstudio.painter.document.v5"
+PAINTER_DOCUMENT_VERSION = 5
 _LEGACY_DOCUMENT_SCHEMAS = {
     "tigerstudio.painter.document.v1": 1,
     "tigerstudio.painter.document.v2": 2,
+    "tigerstudio.painter.document.v3": 3,
+    "tigerstudio.painter.document.v4": 4,
 }
 PAINTER_DOCUMENT_EXTENSION = ".tspaint"
 _DOCUMENT_ENTRY = "document.json"
@@ -118,12 +122,22 @@ def save_painter_document(
     layer_raster_pngs: Mapping[str, bytes] | None = None,
     layer_mask_pngs: Mapping[str, bytes] | None = None,
     selection_mask_png: bytes | None = None,
+    saved_selection_channel_pngs: Mapping[str, bytes] | None = None,
 ) -> dict[str, Any]:
     output = normalize_painter_document_path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = copy.deepcopy(dict(document))
     payload["schema"] = PAINTER_DOCUMENT_SCHEMA
     payload["format_version"] = PAINTER_DOCUMENT_VERSION
+    channels = payload.setdefault("channels", {})
+    if not isinstance(channels, dict):
+        raise PainterDocumentError("Painter document channels must be an object")
+    saved_channel_rows = channels.setdefault("saved_selection_channels", [])
+    if not isinstance(saved_channel_rows, list):
+        raise PainterDocumentError(
+            "Painter saved selection channels must be a list"
+        )
+    channels.setdefault("saved_selection_channel_serial", 0)
     raster_payload = {
         str(layer_id): bytes(data)
         for layer_id, data in dict(layer_raster_pngs or {}).items()
@@ -150,6 +164,22 @@ def save_painter_document(
         payload.setdefault("selection", {})["mask_asset"] = _asset_uri(
             "assets/selection/mask.png"
         )
+    saved_channel_payload = {
+        str(channel_id): bytes(data)
+        for channel_id, data in dict(saved_selection_channel_pngs or {}).items()
+        if data
+    }
+    for index, row in enumerate(saved_channel_rows):
+        if not isinstance(row, dict):
+            continue
+        channel_id = str(row.get("channel_id") or "")
+        data = saved_channel_payload.get(channel_id)
+        if not data:
+            continue
+        digest = hashlib.blake2b(channel_id.encode("utf-8"), digest_size=6).hexdigest()
+        entry = f"assets/selection-channels/{index:03d}_{digest}.png"
+        assets[entry] = data
+        row["mask_asset"] = _asset_uri(entry)
     for index, row in enumerate(payload.get("layers") or []):
         if not isinstance(row, dict):
             continue
@@ -255,7 +285,7 @@ def _resolve_asset_uris(value: Any, mapping: Mapping[str, str]) -> Any:
 
 
 def _migrate_document(document: dict[str, Any]) -> dict[str, Any]:
-    """Upgrade legacy documents to the v3 raster-layer-mask contract."""
+    """Upgrade legacy documents to the v5 saved-channel-options contract."""
     migrated = copy.deepcopy(document)
     schema = str(migrated.get("schema") or "")
     version = int(migrated.get("format_version", 0) or 0)
@@ -265,12 +295,22 @@ def _migrate_document(document: dict[str, Any]) -> dict[str, Any]:
                 row.setdefault("raster_asset", "")
                 row.setdefault("mask_asset", "")
         migrated.setdefault("asset_manifest", [])
+        channels = migrated.setdefault("channels", {})
+        if isinstance(channels, dict):
+            channels.setdefault("saved_selection_channels", [])
+            channels.setdefault("saved_selection_channel_serial", 0)
+            for row in channels.get("saved_selection_channels") or []:
+                if not isinstance(row, dict):
+                    continue
+                row.setdefault("display_mode", "masked_areas")
+                row.setdefault("overlay_color", "#ff0000")
+                row.setdefault("overlay_opacity_percent", 50)
         migrated["schema"] = PAINTER_DOCUMENT_SCHEMA
         migrated["format_version"] = PAINTER_DOCUMENT_VERSION
     return migrated
 
 
-def load_painter_document(
+def _load_painter_document_impl(
     path: str | Path,
     *,
     asset_root: str | Path | None = None,
@@ -278,12 +318,15 @@ def load_painter_document(
     source = Path(path)
     if not source.is_file():
         raise PainterDocumentError(f"Painter document does not exist: {source}")
-    extraction_root = Path(
-        asset_root
-        or tempfile.mkdtemp(prefix=f"tigerstudio_painter_{source.stem}_")
-    )
-    extraction_root.mkdir(parents=True, exist_ok=True)
+    extraction_root: Path | None = Path(asset_root) if asset_root is not None else None
+    asset_payloads: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(source, "r") as archive:
+        archive_infos = archive.infolist()
+        archive_entry_counts = Counter(info.filename for info in archive_infos)
+        if archive_entry_counts[_DOCUMENT_ENTRY] != 1:
+            raise PainterDocumentError(
+                "Painter archive must contain exactly one document.json entry"
+            )
         try:
             info = archive.getinfo(_DOCUMENT_ENTRY)
         except KeyError as exc:
@@ -297,7 +340,15 @@ def load_painter_document(
         if not isinstance(document, dict):
             raise PainterDocumentError("Painter document root must be an object")
         source_schema = str(document.get("schema") or "")
-        source_version = int(document.get("format_version", 0) or 0)
+        raw_source_version = document.get("format_version")
+        if isinstance(raw_source_version, bool):
+            raise PainterDocumentError("Painter document format_version is invalid")
+        try:
+            source_version = operator.index(raw_source_version)
+        except TypeError as exc:
+            raise PainterDocumentError(
+                "Painter document format_version is invalid"
+            ) from exc
         if source_schema != PAINTER_DOCUMENT_SCHEMA and source_schema not in _LEGACY_DOCUMENT_SCHEMAS:
             raise PainterDocumentError("Unsupported Painter document schema")
         expected_version = (
@@ -309,7 +360,7 @@ def load_painter_document(
             raise PainterDocumentError(
                 f"Unsupported Painter document version: {source_version}"
             )
-        if source_schema == PAINTER_DOCUMENT_SCHEMA:
+        if source_version >= 4:
             state = document.get("document")
             state = state if isinstance(state, dict) else {}
             try:
@@ -327,20 +378,95 @@ def load_painter_document(
                 raise PainterDocumentError(
                     "Painter document canvas dimensions are missing or invalid"
                 )
+        if source_version >= 5:
+            channels = document.get("channels")
+            if not isinstance(channels, dict):
+                raise PainterDocumentError(
+                    "Painter document channels must be an object"
+                )
+            if not isinstance(channels.get("saved_selection_channels"), list):
+                raise PainterDocumentError(
+                    "Painter saved selection channels must be a list"
+                )
+            if "saved_selection_channel_serial" not in channels:
+                raise PainterDocumentError(
+                    "Painter saved selection channel serial is missing"
+                )
+            raw_serial = channels["saved_selection_channel_serial"]
+            if isinstance(raw_serial, bool):
+                raise PainterDocumentError(
+                    "Painter saved selection channel serial is invalid"
+                )
+            try:
+                serial = operator.index(raw_serial)
+            except TypeError as exc:
+                raise PainterDocumentError(
+                    "Painter saved selection channel serial is invalid"
+                ) from exc
+            if serial < 0:
+                raise PainterDocumentError(
+                    "Painter saved selection channel serial is invalid"
+                )
+            if not isinstance(document.get("asset_manifest"), list):
+                raise PainterDocumentError(
+                    "Painter document asset_manifest must be a list"
+                )
         total = 0
-        mapping: dict[str, str] = {}
-        for row in document.get("asset_manifest") or []:
+        seen_entries: set[str] = set()
+        manifest_rows = document.get("asset_manifest") or []
+        for row in manifest_rows:
             if not isinstance(row, dict):
+                if source_version >= 5:
+                    raise PainterDocumentError(
+                        "Painter document asset manifest rows must be objects"
+                    )
                 continue
-            entry = _safe_archive_entry(str(row.get("entry") or ""))
+            raw_entry = row.get("entry")
+            if source_version >= 5 and not isinstance(raw_entry, str):
+                raise PainterDocumentError(
+                    "Painter asset manifest entry must be a string"
+                )
+            entry = _safe_archive_entry(str(raw_entry or ""))
             if not entry:
                 continue
+            if entry in seen_entries:
+                raise PainterDocumentError(
+                    f"Painter asset manifest entry is duplicated: {entry}"
+                )
+            seen_entries.add(entry)
             try:
                 asset_info = archive.getinfo(entry)
             except KeyError as exc:
                 raise PainterDocumentError(
                     f"Painter asset is missing: {entry}"
                 ) from exc
+            if archive_entry_counts[entry] != 1:
+                raise PainterDocumentError(
+                    f"Painter archive asset entry is duplicated: {entry}"
+                )
+            if source_version >= 5:
+                declared_size = row.get("size")
+                if isinstance(declared_size, bool):
+                    raise PainterDocumentError(
+                        f"Painter asset size is invalid: {entry}"
+                    )
+                try:
+                    declared_size = operator.index(declared_size)
+                except TypeError as exc:
+                    raise PainterDocumentError(
+                        f"Painter asset size is invalid: {entry}"
+                    ) from exc
+                if declared_size < 0 or declared_size != int(asset_info.file_size):
+                    raise PainterDocumentError(
+                        f"Painter asset size mismatch: {entry}"
+                    )
+                expected = str(row.get("sha256") or "")
+                if len(expected) != 64 or any(
+                    character not in "0123456789abcdef" for character in expected
+                ):
+                    raise PainterDocumentError(
+                        f"Painter asset SHA-256 is invalid: {entry}"
+                    )
             total += int(asset_info.file_size)
             if total > _MAX_ASSET_BYTES:
                 raise PainterDocumentError("Painter document assets are too large")
@@ -348,6 +474,17 @@ def load_painter_document(
             expected = str(row.get("sha256") or "")
             if expected and hashlib.sha256(data).hexdigest() != expected:
                 raise PainterDocumentError(f"Painter asset checksum failed: {entry}")
+            asset_payloads.append((entry, data))
+
+    auto_created_root = extraction_root is None
+    if extraction_root is None:
+        extraction_root = Path(
+            tempfile.mkdtemp(prefix=f"tigerstudio_painter_{source.stem}_")
+        )
+    extraction_root.mkdir(parents=True, exist_ok=True)
+    mapping: dict[str, str] = {}
+    try:
+        for entry, data in asset_payloads:
             target = extraction_root.joinpath(*PurePosixPath(entry).parts)
             resolved_root = extraction_root.resolve()
             resolved_target = target.resolve()
@@ -356,7 +493,17 @@ def load_painter_document(
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             mapping[entry] = str(target.resolve())
-    resolved = _resolve_asset_uris(_migrate_document(document), mapping)
+        resolved = _resolve_asset_uris(_migrate_document(document), mapping)
+    except Exception as exc:
+        if auto_created_root:
+            try:
+                shutil.rmtree(extraction_root)
+            except OSError as cleanup_exc:
+                exc.add_note(
+                    "Painter temporary asset cleanup failed: "
+                    f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+                )
+        raise
     return resolved, {
         "schema": "tigerstudio.painter.document.load_report.v1",
         "path": str(source.resolve()),
@@ -369,6 +516,23 @@ def load_painter_document(
         "asset_root": str(extraction_root.resolve()),
         "security_policy": dict(PAINTER_DOCUMENT_SECURITY_POLICY),
     }
+
+
+def load_painter_document(
+    path: str | Path,
+    *,
+    asset_root: str | Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load one Painter archive through a stable product-level error boundary."""
+
+    try:
+        return _load_painter_document_impl(path, asset_root=asset_root)
+    except PainterDocumentError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise PainterDocumentError(
+            f"Painter document archive could not be read: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 __all__ = [

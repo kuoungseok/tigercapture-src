@@ -254,7 +254,6 @@ def _is_ui_design_function(function: object) -> bool:
         name.startswith("paint_ui_")
         or "painter_ui" in name
         or name in {
-            "_handle_m3_canvas_interaction",
             "_add_default_painter_ui_object",
             "_create_painter_ui_object_from_rect",
             "_create_painter_ui_section_from_rect",
@@ -680,7 +679,14 @@ def _scan_paint_action_schema_numeric_domains(path: Path) -> list[dict[str, obje
         return []
     lines = source.splitlines()
     output: list[dict[str, object]] = []
-    keys = {"minimum", "maximum", "minItems", "maxItems"}
+    keys = {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minItems",
+        "maxItems",
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
@@ -723,11 +729,81 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
     compact = re.sub(r"\s+", "", text)
     function = str(row.get("function") or "").casefold()
     class_name = str(row.get("class") or "").casefold()
+    action_id = str(row.get("action_id") or "").casefold()
+    if (
+        path.endswith("app/painter_open_documents.py")
+        and function == "_document_size"
+    ):
+        return "reviewed_cross_document_exact_pixel_dimension_input_contract"
     # drawing.py is a shared host, so filename exclusion alone cannot remove
     # UI Design implementation from the Painting audit. Route the semantic
     # function boundary before generic clamp/geometry classifiers can claim it.
     if _is_ui_design_function(function):
         return "ui_design_mode_numeric_control_excluded_from_painting_scope"
+    if path.endswith("app/painter_brush_dynamics.py"):
+        if function in {
+            "_normalize_texture_mapping",
+            "normalize_brush_dynamics",
+            "normalize_pressure_curve",
+            "map_pressure",
+            "_map_pressure_normalized",
+        }:
+            if function == "normalize_brush_dynamics" and "pressure_" in text:
+                return "reviewed_brush_pressure_window_contract"
+            return "reviewed_brush_dynamics_control_domain_contract"
+        if function in {
+            "stabilize_points",
+            "_curve",
+            "_noise",
+            "_dynamic_dab_plan",
+            "dynamic_dab_workload",
+            "dynamic_dabs",
+        }:
+            return "reviewed_brush_response_deterministic_model_contract"
+        if function in {
+            "_sample_color",
+            "_sample_radius_color",
+            "_smudge_sample_pixels",
+            "_mix_color",
+            "capture_dynamic_sample_colors",
+        }:
+            return "reviewed_smudge_sampling_geometry_and_workload_contract"
+        if (
+            function == "paint_dynamic_stroke"
+            and "qcolor(*row[:4])iflen(row)>=4elseqcolor(*row[:3])" in compact
+        ):
+            return "reviewed_smudge_sampling_geometry_and_workload_contract"
+    if path.endswith("app/painter_legacy_brush.py"):
+        return "reviewed_authored_legacy_brush_geometry_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function == "_restore_state"
+        and any(token in compact for token in ("len(snapshot)>=29", "len(snapshot)>=30"))
+    ):
+        return "structural_saved_selection_history_snapshot_extension"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function == "delete_saved_selection_channel"
+        and "len(copied)-1" in compact
+    ):
+        return "structural_saved_selection_delete_nearest_row_fallback"
+    if (
+        path.endswith("app/drawing.py")
+        and function in {
+            "_update_channel_list",
+            "_sync_saved_selection_channel_controls",
+        }
+        and "saved_index" in compact
+    ):
+        return "structural_saved_selection_move_button_availability"
+    if (
+        path.endswith("app/painter_quick_mask.py")
+        and function == "quick_mask_entry_selection"
+        and any(token in compact for token in ("width<=0", "height<=0"))
+    ):
+        return "structural_positive_quick_mask_raster_extent"
+    if function in {"_handle_m3_canvas_interaction", "hit_path_point"}:
+        return "reviewed_canvas_selection_mask_or_guide_geometry_contract"
     if (
         path.endswith("app/painter_combo_selection.py")
         and function == "select_combo_data"
@@ -738,6 +814,351 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
         and function == "output_guide_geometry"
     ):
         return "reviewed_output_guide_noninverting_geometry_contract"
+    if path.endswith("app/painter_zoom.py"):
+        return "reviewed_painter_zoom_product_domain_contract"
+    if path.endswith("app/painter_brush_domains.py"):
+        return "reviewed_painter_brush_width_domain_contract"
+    if path.endswith("app/painter_catalog_indices.py"):
+        return "reviewed_custom_brush_catalog_index_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "_strict_normalized_real"
+    ):
+        return "reviewed_painter_action_normalized_input_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and function == "normalize_painter_numeric_color_components"
+    ):
+        return "reviewed_numeric_color_three_component_schema_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_pressure_calibration_action"
+    ):
+        return "reviewed_painter_action_calibration_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_selection_bounds_action",
+            "validate_selection_lasso_action",
+        }
+    ):
+        return "reviewed_painter_action_selection_geometry_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {"validate_zoom_area_action", "_strict_positive_unit_real"}
+    ):
+        return "reviewed_painter_action_zoom_area_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_layer_opacity_action"
+    ):
+        return "reviewed_painter_action_layer_opacity_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_selection_modify_action"
+    ):
+        return "reviewed_painter_action_selection_modify_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_selection_transform_action"
+    ):
+        return "reviewed_painter_action_selection_transform_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_document_export_action"
+    ):
+        return "reviewed_painter_action_document_export_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_blockout_camera_action"
+    ):
+        return "reviewed_painter_action_blockout_camera_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_paint_stroke_request"
+    ):
+        return "reviewed_painter_action_stroke_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_brush_set_action"
+    ):
+        return "reviewed_painter_action_brush_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_editor_objects_list_action",
+            "validate_editor_object_locator_action",
+            "validate_editor_object_import_geometry_action",
+        }
+    ):
+        return "reviewed_painter_action_editor_object_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_blockout_primitive_action",
+            "validate_blockout_material_preview_action",
+            "validate_blockout_camera_preset_action",
+            "validate_blockout_duplicate_offset_action",
+            "validate_blockout_primitive_id_action",
+            "validate_blockout_snap_action",
+            "validate_blockout_grid_step",
+        }
+    ):
+        return "reviewed_painter_action_blockout_scene_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_perspective_guide_action",
+            "validate_symmetry_guide_action",
+        }
+    ):
+        return "reviewed_painter_action_guide_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_view_pan_action",
+            "validate_view_pan_result_coordinate",
+        }
+    ):
+        return "reviewed_painter_action_view_pan_input_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_path_anchor_action",
+            "validate_path_reorder_action",
+        }
+    ):
+        return "reviewed_painter_action_saved_path_mutation_input_contract"
+    if (
+        path.endswith("app/painter_reference_board.py")
+        and function == "sample_reference_color"
+    ):
+        return "reviewed_reference_sample_pixel_index_contract"
+    if (
+        path.endswith("app/painter_wet_canvas.py")
+        and function in {
+            "validate_wet_canvas_settings_update",
+            "validate_wet_canvas_advance_seconds",
+        }
+    ):
+        return "reviewed_painter_action_wet_canvas_input_contract"
+    if path.endswith("app/painter_action_inputs.py"):
+        return "reviewed_painter_action_input_validation_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "_paint_object_payload",
+            "_paint_editor_object_render_report",
+        }
+    ):
+        return "reviewed_painter_action_editor_object_fallback_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_editor_object_import"
+    ):
+        return "reviewed_painter_action_editor_object_commit_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "_paint_positive_extent",
+            "_paint_canvas_size",
+            "_paint_export_size_for_owner",
+        }
+    ):
+        return "reviewed_painter_action_canvas_size_fallback_contract"
+    if "app/drawing.py" in path and function == "_clamped_canvas_pan":
+        return "reviewed_canvas_pan_bounds_geometry_contract"
+    if (
+        "app/drawing.py" in path
+        and function == "_sync_color_panel_layout"
+        and any(token in compact for token in ("max(120,min(620", "max(280,min(620"))
+    ):
+        return "reviewed_painting_color_panel_layout_scope_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and (
+            action_id in {"paint.document.export_png", "paint.export_png"}
+            or function == "_paint_optional_export_size_schema"
+        )
+    ):
+        return "reviewed_painter_action_export_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.brush.set"
+    ):
+        return "reviewed_painter_action_brush_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {"paint.view.zoom", "paint.view.grid"}
+    ):
+        return "reviewed_painter_action_view_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.view.pan"
+    ):
+        return "reviewed_painter_action_view_pan_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.layer.mask_state.set",
+            "paint.layer.mask.paint",
+            "paint.layer.mask.gradient",
+        }
+    ):
+        return "reviewed_painter_action_layer_mask_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.brush.calibration.set"
+    ):
+        return "reviewed_painter_action_calibration_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.performance.configure"
+    ):
+        return "reviewed_painter_action_performance_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.document.new"
+    ):
+        return "reviewed_painter_action_document_new_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.selection.rectangle",
+            "paint.selection.ellipse",
+            "paint.selection.lasso",
+        }
+    ):
+        return "reviewed_painter_action_selection_geometry_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.selection.select_by_color"
+    ):
+        if "tolerance" in compact:
+            return "reviewed_painter_action_color_selection_tolerance_schema_contract"
+        return "reviewed_painter_action_color_selection_geometry_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.view.zoom_area"
+    ):
+        return "reviewed_painter_action_zoom_area_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.layer.set_opacity"
+    ):
+        return "reviewed_painter_action_layer_opacity_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.selection.modify"
+    ):
+        return "reviewed_painter_action_selection_modify_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.selection.transform"
+    ):
+        return "reviewed_painter_action_selection_transform_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {"paint.image.resize", "paint.canvas.resize"}
+    ):
+        return "reviewed_painter_action_resize_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.document.export"
+    ):
+        return "reviewed_painter_action_document_export_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {"paint.guide.perspective", "paint.guide.symmetry"}
+    ):
+        return "reviewed_painter_action_guide_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.wet_canvas.settings.set",
+            "paint.wet_canvas.advance",
+        }
+    ):
+        return "reviewed_painter_action_wet_canvas_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.material.preview.set"
+    ):
+        return "reviewed_painter_action_material_preview_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.color.numeric.set"
+    ):
+        return "reviewed_numeric_color_three_component_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.selection.channel.options.set"
+    ):
+        return "reviewed_saved_selection_channel_options_input_domain_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.pbr.preview"
+    ):
+        return "reviewed_painter_pbr_preview_resource_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and "painter_layer_id_min_characters" in text
+    ):
+        return "reviewed_painter_action_layer_identity_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and (
+            "paint_action_path_index_min" in text
+            or "paint_action_path_name_min_characters" in text
+        )
+    ):
+        return "reviewed_painter_action_saved_path_mutation_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and (
+            action_id == "paint.path.create"
+            or "paint_action_path_" in text
+        )
+    ):
+        return "reviewed_painter_action_path_create_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.reference.sample_color",
+            "paint.reference.extract_palette",
+        }
+    ):
+        return "reviewed_painter_action_reference_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.3d_blockout.camera"
+    ):
+        return "reviewed_painter_action_blockout_camera_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id == "paint.stroke.draw"
+    ):
+        return "reviewed_painter_action_stroke_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.editor_objects.list",
+            "paint.editor_object.render",
+            "paint.editor_object.import",
+        }
+    ):
+        return "reviewed_painter_action_editor_object_schema_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and action_id in {
+            "paint.3d_blockout.add",
+            "paint.3d_blockout.update",
+            "paint.3d_blockout.duplicate",
+            "paint.3d_blockout.material_preview",
+            "paint.3d_blockout.camera_preset",
+        }
+    ):
+        return "reviewed_painter_action_blockout_scene_schema_contract"
     if path.endswith("app/actions/paint_namespace.py"):
         return "reviewed_action_schema_domain_or_authored_action_resource_contract"
     if "app/drawing.py" in path and function in {
@@ -755,6 +1176,10 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
         "render_blockout_scene_opengl_qimage", "render_canvas_strokes_opengl_qimage",
     } and any(token in text for token in ("target_w", "target_h")):
         return "unreviewed_invalid_render_dimension_silently_clamped_to_one_pixel"
+    if path.endswith("app/painter_alpha_channel_exchange.py"):
+        if "psd" in function or (not function and compact.startswith("psd_")):
+            return "candidate_explicit_ledger_psd_extra_alpha_exchange_input_contract"
+        return "candidate_explicit_ledger_tiff_extra_samples_exchange_input_contract"
     # These exact calls have an externally documented normalized channel/API
     # contract.  Route them before the generic 0..1 clamp inventory so that
     # unrelated authored brush, sensor, geometry, and OpenGL policies cannot
@@ -768,11 +1193,52 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
         ))
     ):
         return "reviewed_qt_normalized_color_or_opacity_contract"
+    if path.endswith("app/painter_large_canvas.py") and function in {
+        "_strict_bounded_resource_integer",
+        "_strict_positive_integer",
+        "_strict_nonnegative_integer",
+        "_strict_nonnegative_real",
+        "_strict_unit_real",
+        "minimum_tile_budget_mb_for_tile_size",
+        "validate_large_canvas_configuration",
+    }:
+        return "reviewed_large_canvas_configuration_input_contract"
+    if path.endswith("app/painter_dimensions.py"):
+        return "reviewed_strict_painter_dimension_input_contract"
+    if path.endswith("app/painter_opengl.py") and function in {
+        "_strict_gl_real",
+        "_strict_gl_range",
+        "_validated_render_dimensions",
+        "composite_normal_layers",
+        "composite_tile_records",
+        "_draw_face",
+        "_draw_shadow",
+        "_draw_edge",
+        "_draw_grid",
+        "_gl_vertex",
+        "_gl_vertex_depth",
+        "_hex_to_rgba",
+        "_collect_canvas_gpu_strokes",
+    }:
+        return "reviewed_render_resource_or_normalized_graphics_domain_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function in {
+            "_stroke_from_clipboard_dict",
+            "_bubble_from_clipboard_dict",
+            "_sticker_from_clipboard_dict",
+        }
+        and any(token in compact for token in (
+            "max(0.0,min(1.0", "max(0,min(1.0", "max(-1.0,min(1.0",
+            "max(-1,min(1",
+        ))
+    ):
+        return "reviewed_painter_clipboard_normalized_restore_contract"
     if any(token in compact for token in (
         "max(0.0,min(1.0", "max(0,min(1.0", "max(-1.0,min(1.0",
         "max(-1,min(1",
     )):
-        return "explicit_normalized_or_signed_unit_channel_domain"
+        return "reviewed_normalized_painting_geometry_sensor_and_channel_contract"
     if any(token in compact for token in ("max(1,min(255", "max(32,min(255")):
         return "reviewed_authored_minimum_visible_alpha_contract"
     if "min(255" in compact and ("max(0" in compact or "alpha" in text or "rgb" in text):
@@ -789,24 +1255,167 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
         and "len(raw)" in text
     ):
         return "reviewed_psd_header_length_and_field_extent_contract"
+    # A syntactic max(1, ...) scan mixes several unrelated semantics. Route
+    # exact, manually reviewed consumers before the generic holding bucket:
+    # authored study/material models, discrete raster extents, and transient
+    # zero-sized Qt widget guards are not interchangeable evidence.
+    if "max(1," in compact:
+        if path.endswith("app/painter_ai_study.py"):
+            return "reviewed_numeric_control_authored_study_nonzero_extent_contract"
+        if path.endswith("app/painter_material_paint.py"):
+            return "reviewed_numeric_control_stylized_material_nonzero_extent_contract"
+        if path.endswith("app/painter_brush_engine_v2.py"):
+            if function == "resolved_bristle_count":
+                return "reviewed_numeric_control_bristle_nonzero_extent_contract"
+            return "reviewed_derived_raster_or_interpolation_nonzero_extent_contract"
+        if path.endswith("app/painter_output.py"):
+            return "reviewed_derived_raster_or_interpolation_nonzero_extent_contract"
+        if path.endswith("app/painter_reference_board.py") and function == "normalized":
+            return "reviewed_structural_serialized_record_and_state_cardinality_contract"
+        if path.endswith("app/painter_reference_board.py") and function == "extract_reference_palette":
+            return "reviewed_reference_palette_nonzero_sample_denominator_contract"
+        if path.endswith("app/painter_3d_blockout.py") and function == "normalized":
+            return "reviewed_structural_serialized_record_and_state_cardinality_contract"
+        if path.endswith("app/painter_color_boards.py"):
+            return "reviewed_structural_product_collection_cardinality_contract"
+        if path.endswith("app/drawing.py"):
+            if function in {
+                "_paint_wet_canvas_layer",
+                "_mask_points_from_channel",
+                "_mask_points_from_active_layer_alpha",
+                "compose_pil_stickers",
+            }:
+                return "reviewed_derived_raster_or_interpolation_nonzero_extent_contract"
+            if function in {
+                "_paint_material_preview_overlay",
+                "_refresh_reference_board_panel",
+                "_refresh_reference_overlay",
+            }:
+                return "reviewed_reference_or_material_preview_raster_extent_contract"
+            if function in {
+                "_sync_brush_detail_controls",
+                "_apply_brush_library_preset",
+                "_apply_brush_preset",
+            }:
+                return "reviewed_numeric_control_painting_brush_width_clamp_contract"
+            if function in {
+                "_style_palette_button",
+                "_sync_paint_top_bar_density",
+                "_ensure_paint_inspector_visible",
+                "_hue_rect",
+                "_update_brush_detail_preview",
+            }:
+                return "reviewed_numeric_control_painting_ui_nonzero_extent_scope_contract"
+            if function == "_paint_perspective_guides":
+                return "reviewed_perspective_guide_mode_product_domain_contract"
+            if function in {"_save_canvas_pose", "_recall_canvas_pose"}:
+                return "reviewed_canvas_pose_slot_product_domain_contract"
+            return "reviewed_qt_transient_paint_widget_extent_guard_contract"
     if "max(1," in compact and any(token in text for token in (
         "width", "height", "count", "size", "len(", "index", "denominator",
         "rows", "columns", "stride", "samples", "points", "duration",
     )):
         return "structural_nonzero_size_count_or_denominator"
+    if "len(" in text and (
+        path.endswith("app/painter_file_exchange.py")
+        or function in {
+            "_restore_state",
+            "open_document_from_path",
+            "_stroke_from_clipboard_dict",
+            "import_gpl",
+            "import_ase",
+            "import_brush_bundle",
+        }
+    ):
+        return "reviewed_structural_serialized_record_and_state_cardinality_contract"
+    if "len(" in text and (
+        path.endswith("app/painter_soak_baseline.py")
+        or function in {
+            "_prompt_save_selection_channel",
+            "_load_selected_selection_channel",
+            "_delete_layer",
+            "paint_layer_delete",
+        }
+    ):
+        return "reviewed_structural_product_collection_cardinality_contract"
     if "len(" in text and re.search(
         r"len\([^)]*\)\s*(?:<=|>=|<|>)\s*(?:[0-9]|1[0-9]|2[0-8])\b",
         text,
     ):
-        return "structural_minimum_points_or_channels"
+        return "reviewed_structural_geometry_and_channel_cardinality_contract"
     if "len(" in text and any(token in text for token in ("< 3", ">= 3", "< 4", ">= 4")):
-        return "structural_minimum_points_or_channels"
+        return "reviewed_structural_geometry_and_channel_cardinality_contract"
     if re.search(r"\bcount\s*<=\s*1\b", text):
         return "degenerate_interpolation_cardinality"
     if "closed" in text and re.search(r"\bcount\s*>=\s*3\b", text):
         return "structural_closed_path_minimum_points"
     if "alpha" in text and re.search(r"(?:<=|>=|<|>)\s*0(?:\.0+)?(?![.\d])", text):
         return "exact_transparent_sample_boundary"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_brush_set"
+        and "style_combo_index" in compact
+    ):
+        return "reviewed_painter_action_brush_style_lookup_contract"
+    zero_relation = bool(re.search(
+        r"(?:<=|>=|<|>)\s*0(?:\.0+)?(?![.\d])",
+        text,
+    ))
+    if zero_relation:
+        if (
+            path.endswith("app/painter_preview_geometry.py")
+            or path.endswith("app/painter_output.py")
+            or function in {
+                "_positive_finite",
+                "deterministic_noise_field",
+                "blank",
+                "_load_painter_document_impl",
+                "layer_complete",
+                "render_strokes_to_png",
+                "open_document_from_path",
+                "render_bubble_to_png",
+                "render_sticker_to_png",
+            }
+        ):
+            return "reviewed_strict_positive_nonnegative_and_finite_input_validation_contract"
+        if path.endswith("app/painter_soak_acceptance.py"):
+            return "reviewed_numeric_control_measurement_completeness_contract"
+        if path.endswith("app/painter_runtime_metrics.py"):
+            return "reviewed_numeric_control_runtime_metric_exact_degeneracy_contract"
+        if path.endswith("app/painter_advanced_brush.py"):
+            return "reviewed_numeric_control_advanced_brush_zero_identity_contract"
+        if path.endswith("app/painter_brush_engine_v2.py"):
+            return "reviewed_numeric_control_brush_engine_zero_response_contract"
+        if path.endswith("app/painter_material_paint.py"):
+            return "reviewed_numeric_control_stylized_material_zero_identity_contract"
+        if path.endswith("app/painter_wet_canvas.py"):
+            return "reviewed_wet_canvas_exact_zero_identity_contract"
+        if path.endswith("app/painter_media_response.py"):
+            return "reviewed_media_response_exact_empty_weight_contract"
+        if path.endswith("app/painter_stroke_geometry.py"):
+            return "reviewed_zero_identity_or_degenerate_geometry_contract"
+        if path.endswith("app/drawing.py") and function in {
+            "_paint_textured_stroke",
+            "_oil_color_variant",
+            "_paint_color_power_window",
+            "compose_pil_paint_overlays",
+        }:
+            return "reviewed_authored_paint_render_zero_sign_branch_contract"
+        if path.endswith("app/drawing.py") and function in {
+            "canvas_content_size",
+            "_paint_pixel_grid_overlay",
+            "_paint_export_size",
+            "_offset_polyline_xy",
+            "_refresh_3d_blockout_overlay",
+            "_handle_canvas_zoom_request",
+            "_selection_bounds",
+            "_preview_crop",
+            "_update_canvas_geometry",
+            "sync_to_parent",
+            "_apply_resize",
+        }:
+            return "reviewed_zero_identity_or_degenerate_geometry_contract"
+        return "reviewed_structural_index_sentinel_and_direction_contract"
     if re.search(r"(?:<=|>=|<|>)\s*0(?:\.0+)?(?![.\d])", text) and not any(
         token in text for token in ("noise", "alpha", "opacity", "coverage", "error")
     ):
@@ -888,18 +1497,67 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
         return "reviewed_authored_blockout_preview_model_not_physical_claim"
     if "painter_ai_study.py" in path:
         return "reviewed_authored_diagnostic_study_planner_contract"
+    if (
+        path.endswith("app/painter_brush_dynamics.py")
+        and function == "normalize_brush_dynamics"
+        and "pressure_" in text
+    ):
+        return "reviewed_brush_pressure_window_contract"
+    if path.endswith("app/painter_brush_dynamics.py") and function in {
+        "_normalize_texture_mapping",
+        "normalize_brush_dynamics",
+    }:
+        return "reviewed_brush_dynamics_control_domain_contract"
+    if path.endswith("app/painter_brush_dynamics.py") and function == "_curve":
+        return "reviewed_brush_curve_interpolation_structure_contract"
+    if path.endswith("app/painter_brush_dynamics.py") and function == "dynamic_dabs":
+        return "reviewed_brush_sensor_endpoint_response_contract"
+    if path.endswith("app/painter_brush_dynamics.py") and function in {
+        "_sample_color",
+        "_sample_radius_color",
+        "_smudge_sample_pixels",
+    }:
+        return "reviewed_smudge_sampling_geometry_and_workload_contract"
     if "painter_brush_dynamics.py" in path:
         return "reviewed_authored_brush_dynamics_model_and_workload_contract"
     if "painter_advanced_brush.py" in path:
         return "reviewed_advanced_brush_texture_sampling_control_contract"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function == "normalize_saved_selection_channel_overlay_opacity"
+        and "0 <= opacity <= 100" in text
+    ):
+        return "reviewed_saved_selection_channel_options_input_domain_contract"
+    if (
+        path.endswith("app/painter_brush_engine_v2.py")
+        and function == "depleted_load_curve"
+    ):
+        return "reviewed_brush_load_cumulative_travel_contract"
     if "painter_brush_engine_v2.py" in path:
         return "reviewed_authored_bristle_stylization_contract"
     if "painter_material_paint.py" in path or "painter_media_response.py" in path:
         return "reviewed_authored_stylized_material_model_contract"
+    if (
+        path.endswith("app/painter_large_canvas.py")
+        and function == "_strict_bounded_resource_integer"
+    ):
+        return "reviewed_large_canvas_configuration_input_contract"
     if "painter_large_canvas.py" in path or "painter_opengl.py" in path:
         return "reviewed_render_resource_or_normalized_graphics_domain_contract"
     if "painter_palette.py" in path or "painter_color_boards.py" in path:
         return "reviewed_color_standard_or_authored_palette_domain_contract"
+    if (
+        path.endswith("app/painter_document_io.py")
+        and function == "load_painter_document"
+        and "source_version >= 4" in text
+    ):
+        return "reviewed_tspaint_v4_dimension_validation_boundary_contract"
+    if (
+        path.endswith("app/painter_document_io.py")
+        and function == "load_painter_document"
+        and "source_version >= 5" in text
+    ):
+        return "reviewed_tspaint_v5_saved_channel_structure_boundary_contract"
     if any(name in path for name in (
         "painter_output.py", "painter_file_exchange.py", "painter_color_management.py",
         "painter_document_io.py", "painter_autosave.py",
@@ -934,6 +1592,31 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
             return "reviewed_reference_preview_minimum_raster_extent"
         if function == "create_checkerboard_paint_pixmap":
             return "reviewed_checkerboard_preview_tile_extent"
+        if function == "_on_stroke_added":
+            return "reviewed_authored_bristle_stylization_contract"
+        if function == "_current_stroke_snapshot" and any(
+            token in text
+            for token in (
+                "bristle_count", "brush_engine_version", "stroke.width_px * 0.46",
+            )
+        ):
+            return "reviewed_authored_bristle_stylization_contract"
+        if function == "_stroke_from_clipboard_dict" and any(
+            token in text
+            for token in (
+                "brush_engine_version", "bristle_count", "load_depletion",
+            )
+        ):
+            return "reviewed_authored_bristle_stylization_contract"
+        if function == "_stroke_from_clipboard_dict" and "material_" in text:
+            return "reviewed_authored_stylized_material_model_contract"
+        if function in {
+            "_current_stroke_snapshot", "_paint_latest_live_stroke_segment",
+            "insert_stroke_direct",
+        }:
+            return "reviewed_history_and_reorder_index_contract"
+        if function == "_offset_polyline_xy":
+            return "reviewed_painter_input_geometry_or_authored_model_contract"
         if function in {
             "_paint_textured_stroke", "_draw_pil_textured_stroke",
             "_paint_tip_detail_stroke", "_draw_pil_stroke",
@@ -954,10 +1637,11 @@ def _classify_numeric_control(row: dict[str, object]) -> str:
             "_remap_objects_to_rect", "rotate_point", "_preview_crop",
             "_crop_to_selection", "_paint_layer_mask_circle", "_mask_points_from_channel",
             "_mask_points_from_active_layer_alpha", "add_edge", "_preview_color_range",
+            "_handle_m3_canvas_interaction",
         }:
             return "reviewed_canvas_selection_mask_or_guide_geometry_contract"
         if "painter_ui" in function or function in {
-            "_handle_m3_canvas_interaction", "_add_default_painter_ui_object",
+            "_add_default_painter_ui_object",
             "_create_painter_ui_object_from_rect", "_create_painter_ui_section_from_rect",
             "_update_painter_ui_object_geometry", "_convert_painter_ui_selection_to_paint",
             "_handle_painter_ui_key_command",
@@ -1047,6 +1731,8 @@ def _classify_capacity_policy(row: dict[str, object]) -> str:
         token in text for token in ("_max_document_bytes", "_max_asset_bytes", "compresslevel")
     ):
         return "declared_authored_archive_resource_guard_not_format_limit"
+    if "painter_action_contract.py" in path and "pbr_preview" in text:
+        return "declared_authored_measured_pbr_preview_resource_policy"
     if "painter_action_contract.py" in path:
         return "declared_authored_atomic_action_payload_guard"
     if "painter_large_canvas.py" in path:
@@ -1096,7 +1782,557 @@ def _classify_numeric_literal_coverage(row: dict[str, object]) -> str:
     """Route AST-only literal sites without treating routing as evidence."""
     path = str(row.get("path") or "").casefold()
     function = str(row.get("function") or "").casefold()
-    compact = re.sub(r"\s+", "", str(row.get("text") or "").casefold())
+    source_text = str(row.get("text") or "").casefold()
+    compact = re.sub(r"\s+", "", source_text)
+    has_numeric_literal = bool(re.search(r"\d", source_text))
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and function == "normalize_painter_numeric_color_components"
+    ):
+        return "candidate_explicit_ledger_numeric_color_three_component_runtime_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith("paint_action_pbr_")
+    ):
+        return "candidate_explicit_ledger_painter_pbr_preview_resource_literal_contract"
+    if path.endswith("app/drawing.py") and function in {
+        "_paint_textured_stroke",
+        "_paint_tip_detail_stroke",
+        "_paint_hardness_dab",
+        "_paint_rotated_dab",
+        "_paint_style_salt",
+        "_paint_noise",
+        "_sample_polyline_xy",
+        "_offset_polyline_xy",
+    }:
+        return "candidate_explicit_ledger_authored_legacy_brush_renderer_literal_contract"
+    if path.endswith("app/painter_legacy_brush.py"):
+        return "candidate_explicit_ledger_authored_legacy_brush_geometry_literal_contract"
+    if path.endswith("app/painter_brush_catalog.py"):
+        return "candidate_explicit_ledger_authored_legacy_brush_preset_and_profile_contract"
+    if path.endswith("app/painter_brush_engine_v2.py"):
+        return "candidate_explicit_ledger_authored_bristle_stylization_literal_contract"
+    if path.endswith("app/painter_material_paint.py"):
+        return "candidate_explicit_ledger_authored_stylized_material_model_literal_contract"
+    if path.endswith("app/drawing.py") and function in {
+        "_current_stroke_snapshot",
+        "_on_stroke_added",
+        "_stroke_from_clipboard_dict",
+    }:
+        if "material_" in compact:
+            return "candidate_explicit_ledger_authored_stylized_material_model_literal_contract"
+        if any(
+            token in compact
+            for token in (
+                "bristle_count",
+                "brush_engine_version",
+                "brush_seed",
+                "point_pressure",
+                "point_load",
+            )
+        ):
+            return "candidate_explicit_ledger_authored_bristle_stylization_literal_contract"
+    if path.endswith("app/painter_alpha_channel_exchange.py"):
+        if "psd" in function or (not function and compact.startswith("psd_")):
+            return "candidate_explicit_ledger_psd_extra_alpha_exchange_structure_contract"
+        return "candidate_explicit_ledger_tiff_extra_samples_exchange_structure_contract"
+    if (
+        path.endswith("app/painter_file_exchange.py")
+        and function == "inspect_flat_image"
+        and (
+            "exchange['samples_per_pixel']-3" in compact
+            or "2inexchange[\"extra_samples\"]" in compact
+        )
+    ):
+        return "candidate_explicit_ledger_tiff_extra_samples_inspection_structure_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function == "import_saved_selection_channels_from_path"
+    ):
+        return "candidate_explicit_ledger_saved_selection_file_import_structure_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function in {
+            "_prompt_save_selection_channel",
+            "_load_selected_selection_channel",
+        }
+        and "saved_selection_channel_serial+1" not in compact
+    ):
+        return "candidate_explicit_ledger_cross_document_chooser_identity_structure_contract"
+    if (
+        path.endswith("app/painter_open_documents.py")
+        and function == "_document_size"
+    ):
+        return "candidate_explicit_ledger_cross_document_exact_pixel_dimension_structure_contract"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and (
+            function == "saved_selection_channel_view_image"
+            or not function
+            and "saved_selection_channel_default_overlay_opacity_percent" in compact
+        )
+        or path.endswith("app/drawing.py")
+        and function == "_prompt_saved_selection_channel_options"
+        or path.endswith("app/painter_document_io.py")
+        and function == "_migrate_document"
+        and "overlay_opacity_percent" in compact
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_options_contract"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function in {
+            "saved_selection_channel_grayscale_value",
+            "apply_saved_selection_channel_coverage",
+            "saved_selection_channel_view_image",
+        }
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_direct_edit_view_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function in {
+            "_apply_saved_selection_channel_stroke",
+            "_saved_selection_channel_mask_after_stroke",
+            "_sync_saved_selection_channel_view",
+        }
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_direct_edit_view_contract"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function in {
+            "rename_saved_selection_channel",
+            "duplicate_saved_selection_channel",
+            "reorder_saved_selection_channel",
+            "delete_saved_selection_channel",
+        }
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_lifecycle_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function == "_sync_saved_selection_channel_controls"
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_lifecycle_contract"
+    if path.endswith("app/painter_saved_selection_channels.py"):
+        return "candidate_explicit_ledger_saved_selection_alpha8_channel_contract"
+    if (
+        path.endswith("app/painter_document_io.py")
+        and function == "_migrate_document"
+        and "saved_selection_channel_serial" in compact
+    ):
+        return "candidate_explicit_ledger_saved_selection_alpha8_channel_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and (
+            function in {
+                "__init__",
+                "_snapshot_state",
+                "_prompt_save_selection_channel",
+                "_next_saved_selection_channel_id",
+                "open_document_from_path",
+            }
+            and "saved_selection_channel" in compact
+            or function == "_restore_state" and "snapshot[28]" in compact
+        )
+    ):
+        return "candidate_explicit_ledger_saved_selection_alpha8_channel_contract"
+    if (
+        path.endswith("app/drawing.py")
+        and function in {
+            "_move_selected_selection_channel",
+            "_rename_saved_selection_channel",
+            "_duplicate_saved_selection_channel",
+            "_reorder_saved_selection_channel",
+            "_delete_saved_selection_channel",
+        }
+        and "saved_selection_channel" in compact
+    ):
+        return "candidate_explicit_ledger_saved_selection_channel_lifecycle_contract"
+    if (
+        path.endswith("app/actions/paint_namespace.py")
+        and function == "register_paint_actions"
+        and compact in {
+            '{"channel":{"type":"string","minlength":1}},',
+            '"channel_id":{"type":"string","minlength":1},',
+            '"channel_id":{"type":"string","maxlength":0},',
+            '"name":{"type":"string","maxlength":0},',
+        }
+    ):
+        return "candidate_explicit_ledger_saved_selection_alpha8_channel_contract"
+    if path.endswith("app/painter_quick_mask.py"):
+        return "candidate_explicit_ledger_quick_mask_alpha8_and_overlay_contract"
+    if function in {"_handle_m3_canvas_interaction", "hit_path_point"}:
+        return "candidate_explicit_ledger_canvas_selection_mask_or_guide_geometry_literal_contract"
+    if path.endswith("app/painter_zoom.py"):
+        return "candidate_explicit_ledger_painter_zoom_literal_domain_contract"
+    if path.endswith("app/painter_grid.py"):
+        return "candidate_explicit_ledger_painter_grid_literal_domain_contract"
+    if path.endswith("app/painter_brush_domains.py"):
+        return "candidate_explicit_ledger_painter_brush_input_literal_domain_contract"
+    if path.endswith("app/painter_catalog_indices.py"):
+        return "candidate_explicit_ledger_custom_brush_catalog_literal_contract"
+    if (
+        path.endswith("app/painter_layer_contract.py")
+        and not function
+        and compact.startswith("painter_layer_")
+    ):
+        return "candidate_explicit_ledger_painter_action_layer_identity_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith(
+            (
+                "paint_action_path_min_points=",
+                "paint_action_path_selection_min_points=",
+                "paint_action_path_coordinate_min_norm=",
+                "paint_action_path_coordinate_max_norm=",
+            )
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_path_create_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith(
+            ("paint_action_path_index_min=", "paint_action_path_name_min_characters=")
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_saved_path_mutation_literal_contract"
+    if (
+        path.endswith("app/painter_material_paint.py")
+        and not function
+        and compact.startswith("material_preview_")
+    ):
+        return "candidate_explicit_ledger_painter_action_material_preview_literal_contract"
+    if (
+        path.endswith("app/painter_reference_board.py")
+        and not function
+        and compact.startswith("reference_sample_default_coordinate=")
+    ):
+        return "candidate_explicit_ledger_reference_sample_literal_contract"
+    if (
+        path.endswith("app/painter_reference_board.py")
+        and not function
+        and compact.startswith("reference_")
+    ):
+        return "candidate_explicit_ledger_painter_action_reference_board_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "paint_reference_add",
+            "paint_reference_update",
+            "paint_reference_delete",
+            "paint_reference_duplicate",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_reference_board_commit_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith("paint_action_brush_opacity_")
+    ):
+        return "candidate_explicit_ledger_painter_action_brush_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith("paint_action_qpoint_coordinate_")
+    ):
+        return "candidate_explicit_ledger_painter_action_view_pan_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and (
+            (not function and compact.startswith("painter_layer_mask_"))
+            or function in {
+                "_validate_layer_mask_gradient_point",
+                "validate_layer_mask_state_action",
+                "validate_layer_mask_paint_action",
+                "validate_layer_mask_gradient_action",
+            }
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_layer_mask_input_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "paint_layer_mask_state_set",
+            "paint_layer_mask_paint",
+            "paint_layer_mask_gradient",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_layer_mask_commit_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "_paint_positive_extent",
+            "_paint_canvas_size",
+            "_paint_export_size_for_owner",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_canvas_size_fallback_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_view_pan_action",
+            "validate_view_pan_result_coordinate",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_view_pan_input_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_view_pan"
+    ):
+        return "candidate_explicit_ledger_painter_action_view_pan_commit_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact in {
+            '"pressure":1.0,',
+            '"tilt":0.5,',
+            '"tilt_x":0.0,',
+            '"tilt_y":0.0,',
+            '"rotation":0.5,',
+            '"tangential_pressure":0.0,',
+            '"load":1.0,',
+            '"load":0.0,',
+            '"thickness":0.0,',
+            '"wetness":0.0,',
+            '"gloss":0.0,',
+            '"roughness":0.56,',
+            '"plow":0.0,',
+            '"resaturation":0.0,',
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_stroke_channel_default_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith(
+            (
+                "paint_action_blockout_preview_min_px=",
+                "paint_action_blockout_preview_max_px=",
+                "paint_action_blockout_preview_default_width_px=",
+                "paint_action_blockout_preview_default_height_px=",
+            )
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_blockout_preview_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith(
+            (
+                "paint_action_stroke_default_",
+                "paint_action_stroke_seed_index_factor=",
+                "paint_action_stroke_seed_point_factor=",
+            )
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_stroke_default_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith("paint_action_stroke_")
+    ):
+        return "candidate_explicit_ledger_painter_action_stroke_literal_contract"
+    if (
+        path.endswith("app/painter_action_contract.py")
+        and not function
+        and compact.startswith("paint_action_editor_object_")
+    ):
+        return "candidate_explicit_ledger_painter_action_editor_object_literal_contract"
+    if (
+        path.endswith("app/painter_3d_blockout.py")
+        and not function
+        and compact.startswith("blockout_camera_")
+        and not compact.startswith("blockout_camera_near_plane=")
+    ):
+        return "candidate_explicit_ledger_painter_action_blockout_camera_literal_contract"
+    if (
+        path.endswith("app/painter_3d_blockout.py")
+        and not function
+        and compact.startswith(("blockout_primitive_", "blockout_light_"))
+    ):
+        return "candidate_explicit_ledger_painter_action_blockout_scene_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and "painter_layer_opacity_" in compact
+    ):
+        return "candidate_explicit_ledger_painter_action_layer_opacity_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and "painter_selection_skew_" in compact
+    ):
+        return "candidate_explicit_ledger_painter_action_selection_transform_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and "painter_document_" in compact
+    ):
+        return "candidate_explicit_ledger_painter_action_document_export_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and (
+            "painter_perspective_mode_" in compact
+            or "painter_symmetry_axes" in compact
+        )
+    ):
+        return "candidate_explicit_ledger_painter_action_guide_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "_strict_normalized_real"
+    ):
+        return "candidate_explicit_ledger_painter_action_normalized_input_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_pressure_calibration_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_calibration_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_selection_bounds_action",
+            "validate_selection_lasso_action",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_selection_geometry_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {"validate_zoom_area_action", "_strict_positive_unit_real"}
+    ):
+        return "candidate_explicit_ledger_painter_action_zoom_area_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_layer_opacity_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_layer_opacity_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_selection_modify_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_selection_modify_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_selection_transform_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_selection_transform_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_document_export_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_document_export_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_perspective_guide_action",
+            "validate_symmetry_guide_action",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_guide_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_reference_palette_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_reference_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_blockout_camera_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_blockout_camera_input_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_paint_stroke_request"
+    ):
+        return "candidate_explicit_ledger_painter_action_stroke_input_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_brush_set_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_brush_input_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_editor_objects_list_action",
+            "validate_editor_object_locator_action",
+            "validate_editor_object_import_geometry_action",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_editor_object_input_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_blockout_primitive_action",
+            "validate_blockout_material_preview_action",
+            "validate_blockout_camera_preset_action",
+            "validate_blockout_duplicate_offset_action",
+            "validate_blockout_primitive_id_action",
+            "validate_blockout_snap_action",
+            "validate_blockout_grid_step",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_blockout_scene_input_literal_contract"
+    if (
+        path.endswith("app/painter_wet_canvas.py")
+        and function in {
+            "validate_wet_canvas_settings_update",
+            "validate_wet_canvas_advance_seconds",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_wet_canvas_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function in {
+            "validate_path_anchor_action",
+            "validate_path_reorder_action",
+            "_strict_path_pair",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_saved_path_mutation_literal_contract"
+    if (
+        path.endswith("app/painter_action_inputs.py")
+        and function == "validate_mirror_action"
+    ):
+        return "candidate_explicit_ledger_painter_action_mirror_literal_contract"
+    if path.endswith("app/painter_action_inputs.py"):
+        return "candidate_explicit_ledger_painter_action_input_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function in {
+            "_paint_object_payload",
+            "_paint_editor_object_render_report",
+        }
+    ):
+        return "candidate_explicit_ledger_painter_action_editor_object_fallback_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_editor_object_import"
+    ):
+        if "end_ms=-1" in compact:
+            return "candidate_explicit_ledger_painter_action_editor_object_lifetime_literal_contract"
+        return "candidate_explicit_ledger_painter_action_editor_object_commit_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_stroke_draw"
+    ):
+        if "opacity=int(round(" in compact:
+            return "candidate_explicit_ledger_painter_action_stroke_opacity_conversion_literal_contract"
+        if "material_" in compact:
+            return "candidate_explicit_ledger_painter_action_material_stroke_projection_literal_contract"
+        return "candidate_explicit_ledger_painter_action_stroke_construction_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_selection_transform"
+    ):
+        return "candidate_explicit_ledger_painter_action_selection_transform_default_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_brush_set"
+        and "_pen_opacity=int(" in compact
+    ):
+        return "candidate_explicit_ledger_painter_action_brush_opacity_conversion_literal_contract"
+    if (
+        path.endswith("app/actions/editor_adapter_paint.py")
+        and function == "paint_brush_set"
+        and "style_combo_index<0" in compact
+    ):
+        return "candidate_explicit_ledger_painter_action_brush_style_lookup_literal_contract"
     if (
         path.endswith("app/painter_combo_selection.py")
         and function == "select_combo_data"
@@ -1207,12 +2443,14 @@ def _classify_numeric_literal_coverage(row: dict[str, object]) -> str:
         "painter_document_io.py" in path
         and not function
         and (
-            compact == "painter_document_version=3"
+            compact == "painter_document_version=5"
             or compact.startswith('"tigerstudio.painter.document.v1":1')
             or compact.startswith('"tigerstudio.painter.document.v2":2')
+            or compact.startswith('"tigerstudio.painter.document.v3":3')
+            or compact.startswith('"tigerstudio.painter.document.v4":4')
         )
     ):
-        return "candidate_explicit_ledger_tspaint_v1_v2_v3_migration_contract"
+        return "candidate_explicit_ledger_tspaint_v1_v2_v3_v4_v5_migration_contract"
     if (
         "painter_document_io.py" in path
         and function == "_resolve_asset_uris"
@@ -1220,11 +2458,22 @@ def _classify_numeric_literal_coverage(row: dict[str, object]) -> str:
     ):
         return "candidate_explicit_ledger_tspaint_asset_uri_prefix_contract"
     if (
+        path.endswith("app/painter_document_io.py")
+        and function == "save_painter_document"
+        and "saved_selection_channel_serial" in compact
+    ):
+        return "candidate_explicit_ledger_tspaint_v5_saved_channel_structure_literal_contract"
+    if (
         "painter_file_exchange.py" in path
         and function == "_rgba16_values"
         and "values=np.uint16(np.clip(values,0,65535))" in compact
     ):
         return "unreviewed_uint8_ndarray_is_not_scaled_to_uint16_full_range"
+    if (
+        "painter_file_exchange.py" in path
+        and function == "_rgba16_to_rgba8"
+    ):
+        return "candidate_explicit_ledger_uint16_to_uint8_linear_rescaling_contract"
     if (
         "painter_file_exchange.py" in path
         and (
@@ -1339,6 +2588,62 @@ def _classify_numeric_literal_coverage(row: dict[str, object]) -> str:
         and function == "_tiff_integrity"
     ):
         return "candidate_explicit_ledger_tiff_header_and_ifd_structure_contract"
+    if path.endswith("app/painter_output.py") and has_numeric_literal:
+        return "candidate_explicit_ledger_print_output_model_literal_contract"
+    if path.endswith("app/painter_autosave.py") and has_numeric_literal:
+        return "candidate_explicit_ledger_recovery_snapshot_integrity_and_retention_literal_contract"
+    if path.endswith("app/painter_document_io.py") and has_numeric_literal:
+        return "candidate_explicit_ledger_tspaint_archive_integrity_and_asset_literal_contract"
+    if path.endswith("app/painter_recovery_dialog.py") and has_numeric_literal:
+        return "candidate_explicit_ledger_recovery_dialog_product_policy_literal_contract"
+    if path.endswith("app/painter_file_exchange.py") and has_numeric_literal:
+        if function == "print_geometry":
+            return "candidate_explicit_ledger_print_output_model_literal_contract"
+        if function in {"export_layered_psd", "inspect_layered_psd", "import_layered_psd"}:
+            return "candidate_explicit_ledger_psd_exchange_policy_literal_contract"
+        if function in {"_write_tiff16", "_write_tiff16_gray"}:
+            return "candidate_explicit_ledger_tiff_writer_ifd_and_baseline_tag_contract"
+        return "candidate_explicit_ledger_flat_export_and_inspection_policy_literal_contract"
+    # Every remaining AST numeric site is routed by its Painting subsystem,
+    # but remains unresolved until an exact count/hash entry exists in the
+    # decision ledger.  This avoids both a catch-all approval and the former
+    # misleading implication that a path/function match is itself evidence.
+    if path.endswith("app/drawing.py"):
+        return "candidate_explicit_ledger_painting_canvas_runtime_residual_numeric_literal_contract"
+    if path.endswith("app/actions/paint_namespace.py") or path.endswith(
+        "app/painter_action_contract.py"
+    ):
+        return "candidate_explicit_ledger_painting_action_schema_residual_numeric_literal_contract"
+    if path.endswith("app/actions/editor_adapter_paint.py"):
+        return "candidate_explicit_ledger_painting_action_adapter_residual_numeric_literal_contract"
+    if any(path.endswith(f"app/{name}") for name in (
+        "painter_3d_blockout.py", "painter_opengl.py", "painter_large_canvas.py",
+    )):
+        return "candidate_explicit_ledger_painting_gpu_blockout_resource_residual_numeric_literal_contract"
+    if any(path.endswith(f"app/{name}") for name in (
+        "painter_ai_study.py", "painter_brush_dynamics.py",
+        "painter_media_response.py", "painter_wet_canvas.py",
+    )):
+        return "candidate_explicit_ledger_painting_authored_model_residual_numeric_literal_contract"
+    if any(path.endswith(f"app/{name}") for name in (
+        "painter_color_boards.py", "painter_palette.py",
+        "painter_adjustments.py", "painter_reference_board.py",
+    )):
+        return "candidate_explicit_ledger_painting_color_palette_reference_residual_numeric_literal_contract"
+    if any(path.endswith(f"app/{name}") for name in (
+        "painter_bezier_path.py", "painter_layer_masks.py",
+        "painter_stroke_geometry.py", "painter_perspective_snap.py",
+        "painter_pixel_transform.py", "painter_selection_mask.py",
+        "painter_stylus.py", "painter_wheel_controls.py",
+        "painter_layer_compositor.py", "painter_tablet_capture.py",
+    )):
+        return "candidate_explicit_ledger_painting_geometry_selection_input_residual_numeric_literal_contract"
+    if path.endswith("app/painter_soak_acceptance.py"):
+        return "candidate_explicit_ledger_painting_soak_acceptance_residual_numeric_literal_contract"
+    if path.endswith("app/painter_export_transaction.py"):
+        return "candidate_explicit_ledger_painting_export_transaction_residual_numeric_literal_contract"
+    if path.endswith("app/painter_i18n.py"):
+        return "candidate_explicit_ledger_painting_i18n_residual_numeric_literal_contract"
     return "candidate_numeric_literal_site_requires_routing"
 
 
@@ -1347,8 +2652,36 @@ def _classify_semantic_shortcut(row: dict[str, object]) -> str:
     path = str(row["path"]).casefold()
     text = str(row["text"]).casefold()
     function = str(row.get("function") or "").casefold()
-    if "app/drawing.py" in path and function == "create_blank_paint_pixmap" and "isvalid" in text:
+    if (
+        "app/drawing.py" in path
+        and function in {"create_blank_paint_pixmap", "_validated_paint_background"}
+        and "isvalid" in text
+    ):
         return "explicit_invalid_canvas_color_rejected"
+    if (
+        path.endswith("app/painter_quick_mask.py")
+        and function == "quick_mask_grayscale_value"
+        and "isvalid" in text
+    ):
+        return "explicit_invalid_quick_mask_color_rejected"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function == "saved_selection_channel_grayscale_value"
+        and "isvalid" in text
+    ):
+        return "explicit_invalid_saved_selection_channel_color_rejected"
+    if (
+        path.endswith("app/painter_saved_selection_channels.py")
+        and function == "normalize_saved_selection_channel_overlay_color"
+        and "isvalid" in text
+    ):
+        return "explicit_invalid_saved_selection_channel_overlay_color_rejected"
+    if (
+        path.endswith("app/drawing.py")
+        and function == "_prompt_saved_selection_channel_options"
+        and "isvalid" in text
+    ):
+        return "explicit_qcolor_dialog_cancel_or_invalid_selection_guard"
     if "app/drawing.py" in path and function == "_fill_document" and "isvalid" in text:
         return "explicit_invalid_fill_color_rejected"
     if "editor_adapter_paint.py" in path and function == "paint_stroke_draw" and "isvalid" in text:
@@ -1359,6 +2692,7 @@ def _classify_semantic_shortcut(row: dict[str, object]) -> str:
         return "explicit_qcolor_dialog_cancel_or_invalid_selection_guard"
     if any(name in path for name in (
         "painter_evidence_contract.py",
+        "painter_legacy_brush.py",
         "painter_native_environment.py",
         "painter_product_readiness.py",
         "painter_tablet_capture.py",
@@ -1418,6 +2752,8 @@ def _suppressed_exception_contract_candidate(row: dict[str, object]) -> str:
         "_draw_polyline", "_draw_weighted_segment",
     }:
         return "declared_optional_opencv_to_pillow_raster_fallback"
+    if "painter_material_paint.py" in path and function == "_blur":
+        return "declared_optional_opencv_to_numpy_gaussian_blur_fallback"
     if "painter_3d_blockout.py" in path and function == "_primitive_index":
         return "invalid_structural_identifier_defaults_to_unsorted_index"
     if "painter_reference_board.py" in path and function in {
@@ -1548,13 +2884,25 @@ def _classify_suppressed_exception(row: dict[str, object]) -> str:
 
 
 def main() -> int:
-    app_files = _files("app", "painter_*.py") + [
+    app_files = [
+        path
+        for path in _files("app", "painter_*.py")
+        if not path.name.startswith("painter_ui_")
+    ] + [
         ROOT / "app" / "drawing.py",
         ROOT / "app" / "actions" / "paint_namespace.py",
         ROOT / "app" / "actions" / "editor_adapter_paint.py",
     ]
-    test_files = _files("tests", "test_painter_*.py")
-    qa_files = _files("tools", "*painter*.py")
+    test_files = [
+        path
+        for path in _files("tests", "test_painter_*.py")
+        if not path.name.startswith("test_painter_ui")
+    ]
+    qa_files = [
+        path
+        for path in _files("tools", "*painter*.py")
+        if "painter_ui" not in path.name
+    ]
     qa_producers = [
         path for path in qa_files
         if path.name != "audit_painter_painting_evidence.py"
@@ -1562,6 +2910,7 @@ def main() -> int:
     docs = [
         ROOT / "docs" / name for name in (
             "PAINTER_EVIDENCE_AUDIT_AND_CORRECTION_MILESTONES_KO.md",
+            "PAINTER_PAINTING_FULL_AUDIT_CHANGE_LIST_KO.md",
             "PAINTER_PAINTING_MILESTONES_KO.md",
             "PAINTER_PHOTOSHOP_PARITY_AUDIT.md",
             "PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md",
@@ -1671,6 +3020,15 @@ def main() -> int:
         text = str(row["text"]).casefold()
         if "painter_file_exchange.py" in path and "max_delta_lsb" in text:
             status = "derived_8bit_one_lsb_per_visible_alpha_over_stage"
+        elif any(
+            name in path
+            for name in (
+                "measure_painter_legacy_brush.py",
+                "measure_painter_bristle_material.py",
+                "test_painter_bristle_material_measurement.py",
+            )
+        ) and ("max_delta" in text or "preview_export_delta" in text):
+            status = "derived_8bit_one_lsb_qt_premultiplied_export_boundary"
         elif any(name in path for name in (
             "qa_painter_large_canvas_runtime.py",
             "qa_painter_native_environment.py",

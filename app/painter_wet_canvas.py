@@ -4,12 +4,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import numbers
 import operator
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter
+
+from app.painter_dimensions import finite_real, positive_integer
 
 
 WET_CANVAS_SCHEMA = "tigerstudio.painter.wet_canvas.v1"
@@ -26,6 +29,67 @@ WET_CANVAS_DEFAULTS: dict[str, Any] = {
     "drying_seconds": 900.0,
     "elapsed_seconds": 0.0,
 }
+WET_CANVAS_UPDATE_FIELDS = frozenset(WET_CANVAS_DEFAULTS)
+
+
+def validate_wet_canvas_settings_update(
+    value: Mapping[str, Any],
+    *,
+    require_authored_field: bool = False,
+    allow_none: bool = True,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError("Wet Canvas settings update must be an object")
+    unknown = set(value) - WET_CANVAS_UPDATE_FIELDS
+    if unknown:
+        raise ValueError(f"Unsupported Wet Canvas setting: {next(iter(sorted(unknown)))}")
+    resolved: dict[str, Any] = {}
+    for key, raw in value.items():
+        if raw is None:
+            if not allow_none:
+                raise TypeError(f"Wet Canvas {key} must not be null")
+            resolved[key] = None
+            continue
+        if key == "enabled":
+            if not isinstance(raw, bool):
+                raise TypeError("Wet Canvas enabled must be a boolean")
+            resolved[key] = raw
+            continue
+        if isinstance(raw, bool) or not isinstance(raw, numbers.Real):
+            raise TypeError(f"Wet Canvas {key} must be a real number, not bool")
+        number = float(raw)
+        if not math.isfinite(number):
+            raise ValueError(f"Wet Canvas {key} must be finite")
+        if key in {"mixing", "diffusion", "pickup"}:
+            if not 0.0 <= number <= 1.0:
+                raise ValueError(f"Wet Canvas {key} must be between 0 and 1")
+        elif key == "drying_seconds":
+            if not WET_CANVAS_DRYING_MIN_SECONDS <= number <= WET_CANVAS_DRYING_MAX_SECONDS:
+                raise ValueError("Wet Canvas drying_seconds is outside the saved domain")
+        elif key == "elapsed_seconds":
+            if not 0.0 <= number <= WET_CANVAS_DRYING_MAX_SECONDS:
+                raise ValueError("Wet Canvas elapsed_seconds is outside the saved domain")
+        resolved[key] = number
+    if require_authored_field and not any(
+        resolved.get(key) is not None
+        for key in ("enabled", "mixing", "diffusion", "pickup", "drying_seconds")
+    ):
+        raise ValueError("Wet Canvas settings update must include a setting")
+    return resolved
+
+
+def validate_wet_canvas_advance_seconds(value: object, *, allow_zero: bool) -> float:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError("Wet Canvas advance seconds must be a real number, not bool")
+    seconds = float(value)
+    if not math.isfinite(seconds):
+        raise ValueError("Wet Canvas advance seconds must be finite")
+    if seconds < 0.0 or (not allow_zero and seconds == 0.0):
+        requirement = "nonnegative" if allow_zero else "positive"
+        raise ValueError(f"Wet Canvas advance seconds must be {requirement}")
+    if seconds > WET_CANVAS_DRYING_MAX_SECONDS:
+        raise ValueError("Wet Canvas advance seconds exceeds the saved domain")
+    return seconds
 
 
 def _value(row: Any, name: str, default: Any = None) -> Any:
@@ -120,10 +184,11 @@ def advance_wet_canvas(
     value: Mapping[str, Any] | None,
     seconds: float,
 ) -> dict[str, Any]:
+    resolved_seconds = validate_wet_canvas_advance_seconds(seconds, allow_zero=True)
     settings = normalize_wet_canvas_settings(value)
     settings["elapsed_seconds"] = min(
         settings["drying_seconds"],
-        settings["elapsed_seconds"] + max(0.0, float(seconds)),
+        settings["elapsed_seconds"] + resolved_seconds,
     )
     return settings
 
@@ -143,6 +208,11 @@ def wet_canvas_signature(
     time_ms: int,
     opacity_scale: float = 1.0,
 ) -> str:
+    target_w = positive_integer(width, field="wet canvas width")
+    target_h = positive_integer(height, field="wet canvas height")
+    resolved_opacity_scale = finite_real(opacity_scale, field="wet canvas opacity_scale")
+    if not 0.0 <= resolved_opacity_scale <= 1.0:
+        raise ValueError("Painter wet canvas opacity_scale must be between 0 and 1")
     rows = []
     for stroke in strokes:
         rows.append(
@@ -162,9 +232,9 @@ def wet_canvas_signature(
         )
     payload = {
         "schema": WET_CANVAS_SCHEMA,
-        "size": [max(1, int(width)), max(1, int(height))],
+        "size": [target_w, target_h],
         "time_ms": int(time_ms),
-        "opacity_scale": round(float(opacity_scale), 5),
+        "opacity_scale": round(resolved_opacity_scale, 5),
         "settings": normalize_wet_canvas_settings(settings),
         "strokes": rows,
     }
@@ -210,8 +280,11 @@ def render_wet_layer_qimage(
     a Navier-Stokes fluid solver. Editable strokes remain the source of truth.
     """
 
-    target_w = max(1, int(width))
-    target_h = max(1, int(height))
+    target_w = positive_integer(width, field="wet canvas width")
+    target_h = positive_integer(height, field="wet canvas height")
+    resolved_opacity_scale = finite_real(opacity_scale, field="wet canvas opacity_scale")
+    if not 0.0 <= resolved_opacity_scale <= 1.0:
+        raise ValueError("Painter wet canvas opacity_scale must be between 0 and 1")
     state = normalize_wet_canvas_settings(settings)
     remaining = wet_canvas_remaining(state)
     canvas_rgb = np.zeros((target_h, target_w, 3), dtype=np.float32)
@@ -236,7 +309,7 @@ def render_wet_layer_qimage(
                 stroke,
                 target_w,
                 target_h,
-                max(0.0, min(1.0, float(opacity_scale))),
+                resolved_opacity_scale,
             )
         finally:
             painter.end()
@@ -349,6 +422,8 @@ __all__ = [
     "drying_ui_minutes_to_seconds",
     "dry_wet_canvas",
     "normalize_wet_canvas_settings",
+    "validate_wet_canvas_advance_seconds",
+    "validate_wet_canvas_settings_update",
     "render_wet_layer_qimage",
     "wet_canvas_remaining",
     "wet_canvas_signature",

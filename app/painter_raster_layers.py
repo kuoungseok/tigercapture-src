@@ -8,11 +8,15 @@ import numpy as np
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QSize, Qt
 from PySide6.QtGui import QImage, QPainter
 
+from app.painter_dimensions import positive_integer
+
 
 def transparent_raster(width: int, height: int) -> QImage:
+    target_width = positive_integer(width, field="raster width")
+    target_height = positive_integer(height, field="raster height")
     image = QImage(
-        max(1, int(width)),
-        max(1, int(height)),
+        target_width,
+        target_height,
         QImage.Format.Format_ARGB32_Premultiplied,
     )
     image.fill(Qt.GlobalColor.transparent)
@@ -20,7 +24,10 @@ def transparent_raster(width: int, height: int) -> QImage:
 
 
 def normalized_raster(image: QImage | None, width: int, height: int) -> QImage:
-    target = QSize(max(1, int(width)), max(1, int(height)))
+    target = QSize(
+        positive_integer(width, field="raster width"),
+        positive_integer(height, field="raster height"),
+    )
     if image is None or image.isNull():
         return transparent_raster(target.width(), target.height())
     converted = image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)

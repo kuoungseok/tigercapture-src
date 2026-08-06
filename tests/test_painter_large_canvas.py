@@ -287,6 +287,59 @@ def test_tile_lru_and_async_material_queue_are_bounded() -> None:
     assert len(rows) == 3 and queue.telemetry()["queued"] == 2
 
 
+def test_large_canvas_resource_inputs_fail_instead_of_silent_coercion() -> None:
+    import pytest
+    from PySide6.QtCore import QRect
+
+    from app.painter_large_canvas import (
+        DirtyMaterialTileQueue,
+        LargeCanvasRuntime,
+        MaterialTileExecutor,
+        RetainedTileCache,
+        UndoMemoryBudget,
+        minimum_tile_budget_mb_for_tile_size,
+        tile_coordinates,
+    )
+
+    assert minimum_tile_budget_mb_for_tile_size(256) == 3
+    assert minimum_tile_budget_mb_for_tile_size(1024) == 40
+    with pytest.raises(ValueError, match="minimum is 40 MiB"):
+        LargeCanvasRuntime(tile_size=1024, tile_budget_mb=1)
+    with pytest.raises(TypeError, match="not bool"):
+        LargeCanvasRuntime(tile_size=True)
+    with pytest.raises(ValueError, match="at least one RGBA8 tile"):
+        RetainedTileCache(tile_size=64, budget_bytes=64)
+    with pytest.raises(ValueError, match="max_tasks must be positive"):
+        DirtyMaterialTileQueue(max_tasks=0)
+    with pytest.raises(TypeError, match="drain limit must be an integer"):
+        DirtyMaterialTileQueue().drain(lambda *_args: None, limit=1.5)
+    with pytest.raises(ValueError, match="max_workers must be positive"):
+        MaterialTileExecutor(max_workers=0)
+    with pytest.raises(TypeError, match="max_results must be an integer"):
+        MaterialTileExecutor(max_results=2.5)
+    executor = MaterialTileExecutor()
+    with pytest.raises(ValueError, match="timeout must be nonnegative"):
+        executor.wait(-0.1)
+    executor.close()
+    with pytest.raises(ValueError, match="at least one MiB"):
+        UndoMemoryBudget(1024)
+
+    runtime = LargeCanvasRuntime(tile_size=256, tile_budget_mb=7)
+    budget = runtime.telemetry()["resource_budget"]
+    assert budget["allocation_exact"] is True
+    assert budget["allocated_tile_budget_bytes"] == 7 * 1024 * 1024
+    assert sum(budget["cache_budget_bytes"].values()) == budget[
+        "configured_tile_budget_bytes"
+    ]
+    with pytest.raises(ValueError, match="raster width must be positive"):
+        tile_coordinates(QRect(), 0, 64)
+    with pytest.raises(ValueError, match="budget plan layer_count must be nonnegative"):
+        runtime.budget_plan(64, 64, -1)
+    with pytest.raises(ValueError, match="layer 0 opacity must be between 0 and 1"):
+        runtime.composite_normal_layers([(_image(8, 8), 1.01)], 8, 8)
+    runtime.close()
+
+
 def test_undo_memory_budget_prunes_old_full_snapshots() -> None:
     from app.painter_large_canvas import UndoMemoryBudget
 

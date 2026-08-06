@@ -94,8 +94,14 @@ def main() -> int:
         painter_opengl._make_offscreen_context = original_make_context
     after = windows_process_resources()
     elapsed = time.perf_counter() - started
+    atlas = getattr(dialog.canvas, "_painter_canvas_stroke_atlas", None)
+    atlas_session = (
+        atlas.telemetry()
+        if atlas is not None and hasattr(atlas, "telemetry")
+        else {"available": False}
+    )
     report = {
-        "schema": "tigerstudio.painter.gl-context-churn-diagnostic.v1",
+        "schema": "tigerstudio.painter.gl-context-churn-diagnostic.v2",
         "classification": "diagnostic_measurement_not_acceptance",
         "native_environment": is_native_qt_environment(
             app.platformName(), environment_overrides()
@@ -115,9 +121,18 @@ def main() -> int:
             for key in ("working_set_bytes", "private_usage_bytes")
             if before.get(key) is not None and after.get(key) is not None
         },
+        "atlas_session": atlas_session,
         "errors": errors,
         "claims": {
-            "context_churn_observed": bool(context_creations),
+            "single_context_retained_for_all_operations": bool(
+                operation_count > 1
+                and context_creations == 1
+                and int(atlas_session.get("context_creations", 0)) == 1
+                and bool(atlas_session.get("context_retained", False))
+            ),
+            "context_loss_count_observed": int(
+                atlas_session.get("context_activation_failures", 0)
+            ),
             "root_cause_proven": False,
             "leak_free": False,
         },

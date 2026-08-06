@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+import pytest
 
 
 def _app():
@@ -47,7 +50,7 @@ def test_recovery_snapshot_round_trip_skip_and_discard(tmp_path) -> None:
     assert len(rows) == 1
     loaded, report = load_recovery_snapshot(rows[0]["recovery_path"])
     assert loaded["ui_document"]["revision"] == 1
-    assert report["format_version"] == 3
+    assert report["format_version"] == 5
     assert discard_recovery_snapshot("session-a", root=tmp_path) is True
     assert list_recovery_snapshots(root=tmp_path) == []
 
@@ -84,6 +87,179 @@ def test_truncated_recovery_archive_is_not_offered_for_restore(tmp_path) -> None
     integrity = inspect_recovery_archive(recovery_path)
     assert integrity["valid"] is False
     assert list_recovery_snapshots(root=tmp_path) == []
+
+
+def test_valid_but_tampered_recovery_archive_is_rewritten_not_skipped(tmp_path) -> None:
+    import zipfile
+
+    from app.painter_autosave import (
+        inspect_recovery_archive,
+        list_recovery_snapshots,
+        save_recovery_snapshot,
+    )
+
+    first = save_recovery_snapshot("tampered", _payload(), root=tmp_path)
+    archive_path = first["recovery_path"]
+    with zipfile.ZipFile(archive_path, "a") as archive:
+        archive.writestr("tamper-marker.txt", b"changed but structurally valid")
+
+    integrity = inspect_recovery_archive(
+        archive_path,
+        expected_sha256=first["archive_sha256"],
+    )
+    assert integrity["valid"] is False
+    assert integrity["reason"] == "archive_hash_mismatch"
+    assert list_recovery_snapshots(root=tmp_path) == []
+
+    repaired = save_recovery_snapshot("tampered", _payload(), root=tmp_path)
+    assert repaired["skipped"] is False
+    assert inspect_recovery_archive(
+        archive_path,
+        expected_sha256=repaired["archive_sha256"],
+    )["valid"] is True
+    assert len(list_recovery_snapshots(root=tmp_path)) == 1
+
+
+def test_recovery_source_path_change_updates_manifest_and_keep_is_strict(tmp_path) -> None:
+    import pytest
+
+    from app.painter_autosave import save_recovery_snapshot
+
+    first = save_recovery_snapshot(
+        "source-change", _payload(), source_path="first.tspaint", root=tmp_path
+    )
+    second = save_recovery_snapshot(
+        "source-change", _payload(), source_path="second.tspaint", root=tmp_path
+    )
+    assert first["skipped"] is False
+    assert second["skipped"] is False
+    assert second["source_path"] == "second.tspaint"
+    with pytest.raises((TypeError, ValueError)):
+        save_recovery_snapshot("bad-keep", _payload(), root=tmp_path, keep=-1)
+    with pytest.raises((TypeError, ValueError)):
+        save_recovery_snapshot("bad-keep", _payload(), root=tmp_path, keep=True)
+
+
+def test_recovery_manifest_cannot_redirect_restore_outside_its_pair(tmp_path) -> None:
+    import json
+
+    from app.painter_autosave import list_recovery_snapshots, save_recovery_snapshot
+
+    saved = save_recovery_snapshot("redirect", _payload(), root=tmp_path)
+    manifest_path = saved["manifest_path"]
+    manifest = json.loads(open(manifest_path, encoding="utf-8").read())
+    manifest["recovery_path"] = str(tmp_path.parent / "outside.tspaint")
+    open(manifest_path, "w", encoding="utf-8").write(json.dumps(manifest))
+
+    assert list_recovery_snapshots(root=tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "root_list",
+        "saved_at_string",
+        "saved_at_nan",
+        "recovery_path_integer",
+        "session_id_mismatch",
+        "valid_source_path_mutation",
+        "archive_sha_uppercase",
+        "negative_bytes",
+        "boolean_revision",
+    ),
+)
+def test_corrupt_manifest_is_skipped_and_same_content_save_repairs_it(
+    tmp_path,
+    mutation: str,
+) -> None:
+    import json
+
+    from app.painter_autosave import list_recovery_snapshots, save_recovery_snapshot
+
+    healthy = save_recovery_snapshot("healthy", _payload(), root=tmp_path)
+    damaged = save_recovery_snapshot("damaged", _payload(), root=tmp_path)
+    manifest_path = Path(damaged["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if mutation == "root_list":
+        changed: object = []
+    else:
+        if mutation == "saved_at_string":
+            manifest["saved_at"] = "not-a-time"
+        elif mutation == "saved_at_nan":
+            manifest["saved_at"] = float("nan")
+        elif mutation == "recovery_path_integer":
+            manifest["recovery_path"] = 7
+        elif mutation == "session_id_mismatch":
+            manifest["session_id"] = "redirected-session"
+        elif mutation == "valid_source_path_mutation":
+            manifest["source_path"] = "plausible-but-not-saved.tspaint"
+        elif mutation == "archive_sha_uppercase":
+            manifest["archive_sha256"] = manifest["archive_sha256"].upper()
+        elif mutation == "negative_bytes":
+            manifest["bytes"] = -1
+        elif mutation == "boolean_revision":
+            manifest["document_revision"] = True
+        changed = manifest
+    manifest_path.write_text(json.dumps(changed), encoding="utf-8")
+
+    rows = list_recovery_snapshots(root=tmp_path)
+    assert [row["session_id"] for row in rows] == [healthy["session_id"]]
+
+    repaired = save_recovery_snapshot("damaged", _payload(), root=tmp_path)
+    assert repaired["skipped"] is False
+    assert {
+        row["session_id"] for row in list_recovery_snapshots(root=tmp_path)
+    } == {"healthy", "damaged"}
+
+
+def test_legacy_v1_manifest_remains_visible_and_next_save_upgrades_to_v2(
+    tmp_path,
+) -> None:
+    import json
+
+    from app.painter_autosave import (
+        LEGACY_SCHEMA_V1,
+        SCHEMA,
+        list_recovery_snapshots,
+        load_recovery_snapshot,
+        save_recovery_snapshot,
+    )
+
+    saved = save_recovery_snapshot(
+        "legacy-visible",
+        _payload(),
+        source_path="trusted-before-v1.tspaint",
+        root=tmp_path,
+    )
+    manifest_path = Path(saved["manifest_path"])
+    legacy = json.loads(manifest_path.read_text(encoding="utf-8"))
+    legacy["schema"] = LEGACY_SCHEMA_V1
+    legacy.pop("archive_sha256")
+    legacy.pop("manifest_sha256")
+    legacy.pop("retention_contract")
+    manifest_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    rows = list_recovery_snapshots(root=tmp_path)
+    assert len(rows) == 1
+    assert rows[0]["legacy_manifest"] is True
+    assert rows[0]["legacy_unverified_source_path"] is True
+    assert rows[0]["source_path"] == ""
+    restored, report = load_recovery_snapshot(rows[0]["recovery_path"])
+    assert restored["document"] == _payload()["document"]
+    assert report["format_version"] == 5
+
+    upgraded = save_recovery_snapshot(
+        "legacy-visible",
+        _payload(),
+        root=tmp_path,
+    )
+    assert upgraded["skipped"] is False
+    assert upgraded["schema"] == SCHEMA
+    upgraded_on_disk = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert upgraded_on_disk["schema"] == SCHEMA
+    assert len(upgraded_on_disk["archive_sha256"]) == 64
+    assert len(upgraded_on_disk["manifest_sha256"]) == 64
+    assert list_recovery_snapshots(root=tmp_path)[0]["legacy_manifest"] is False
 
 
 def test_painter_schedules_and_restores_recovery_snapshot(

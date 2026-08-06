@@ -1119,6 +1119,8 @@ def test_painter_pro_oil_brushes_render_distinct_textures() -> None:
 
 
 def test_painter_designer_brush_catalog_renders_all_profiles() -> None:
+    import hashlib
+
     _app()
     from PySide6.QtGui import QImage, QPainter
 
@@ -1145,7 +1147,7 @@ def test_painter_designer_brush_catalog_renders_all_profiles() -> None:
         "pixel_square",
     } <= DESIGNER_BRUSH_STYLE_IDS
 
-    signatures: set[tuple[int, int]] = set()
+    signatures: set[str] = set()
     for style in DESIGNER_BRUSH_STYLE_IDS:
         image = QImage(240, 84, QImage.Format.Format_ARGB32)
         image.fill(0)
@@ -1165,17 +1167,17 @@ def test_painter_designer_brush_catalog_renders_all_profiles() -> None:
             )
         finally:
             painter.end()
+        rgba = bytearray()
         alpha_count = 0
-        alpha_sum = 0
-        for y in range(0, image.height(), 2):
-            for x in range(0, image.width(), 2):
-                pixel_alpha = image.pixelColor(x, y).alpha()
-                if pixel_alpha > 0:
-                    alpha_count += 1
-                    alpha_sum += pixel_alpha
+        for y in range(image.height()):
+            for x in range(image.width()):
+                pixel = image.pixelColor(x, y)
+                pixel_alpha = pixel.alpha()
+                rgba.extend((pixel.red(), pixel.green(), pixel.blue(), pixel_alpha))
+                alpha_count += int(pixel_alpha > 0)
         assert alpha_count > 8, style
-        signatures.add((alpha_count, alpha_sum // max(1, alpha_count)))
-    assert len(signatures) >= len(DESIGNER_BRUSH_STYLE_IDS) - 2
+        signatures.add(hashlib.sha256(rgba).hexdigest())
+    assert len(signatures) == len(DESIGNER_BRUSH_STYLE_IDS)
 
 
 def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeypatch, tmp_path) -> None:
@@ -1221,6 +1223,8 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert dialog.magic_tolerance_slider.isEnabled()
     dialog._set_quick_mask_enabled(True)
     assert dialog.quick_mask_btn.isChecked()
+    assert dialog._set_quick_mask_enabled(False)
+    assert not dialog.quick_mask_btn.isChecked()
     dialog._set_grid_options(visible=True, snap=True, size_px=32)
     assert dialog.grid_view_btn.isChecked()
     assert dialog.snap_grid_btn.isChecked()

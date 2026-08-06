@@ -3,30 +3,177 @@ from __future__ import annotations
 
 import copy
 import math
+import operator
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
 
+from app.painter_channel_contract import PAINTER_CHANNEL_IDS
+
 from app.actions.editor_adapter_object_helpers import _int
+
+
+def _validate_component_or_saved_channel(
+    value: object,
+    *,
+    allow_empty: bool,
+) -> str:
+    if not isinstance(value, str):
+        raise TypeError("Painter channel must be a string")
+    if value != value.strip():
+        raise ValueError("Painter channel must not contain surrounding whitespace")
+    if not value:
+        if allow_empty:
+            return ""
+        raise ValueError("Painter channel must not be blank")
+    if value in PAINTER_CHANNEL_IDS:
+        return value
+    from app.painter_saved_selection_channels import (
+        normalize_saved_selection_channel_id,
+    )
+
+    return normalize_saved_selection_channel_id(value)
+
+
+def _validate_saved_selection_channel_id(value: object) -> str:
+    if not isinstance(value, str):
+        raise TypeError("Saved selection channel id must be a string")
+    if value != value.strip():
+        raise ValueError(
+            "Saved selection channel id must not contain surrounding whitespace"
+        )
+    from app.painter_saved_selection_channels import normalize_saved_selection_channel_id
+
+    return normalize_saved_selection_channel_id(value)
 from app.painter_action_contract import (
+    PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
+    PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
     PAINT_ACTION_DEFAULT_REFERENCE_COLORS,
     PAINT_ACTION_DEFAULT_STUDY_REGIONS,
     PAINT_ACTION_DEFAULT_STUDY_STROKES,
     PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
-    PAINT_ACTION_MAX_POINTS_PER_STROKE,
-    PAINT_ACTION_MAX_STROKES_PER_REQUEST,
+    PAINT_ACTION_PBR_PREVIEW_DEFAULT_PX,
     PAINT_ACTION_REQUEST_RESOURCE_CONTRACT,
+    PAINT_ACTION_STROKE_DEFAULT_LOAD_DEPLETION,
+    PAINT_ACTION_STROKE_DEFAULT_MATERIAL_CHANNELS,
+    PAINT_ACTION_STROKE_DEFAULT_POINT_CHANNELS,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MAX,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MIN,
+    PAINT_ACTION_STROKE_OPACITY_MAX_PERCENT,
+    PAINT_ACTION_STROKE_OPACITY_MIN_PERCENT,
+    PAINT_ACTION_STROKE_SEED_INDEX_FACTOR,
+    PAINT_ACTION_STROKE_SEED_POINT_FACTOR,
+    PAINT_ACTION_EDITOR_OBJECT_DEFAULT_LIMIT,
+    PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+    normalize_painter_numeric_color_components,
+    normalize_painter_pbr_preview_width,
 )
 from app.painter_large_canvas import (
     DEFAULT_TILE_BUDGET_MB,
     DEFAULT_TILE_SIZE,
     DEFAULT_UNDO_BUDGET_MB,
+    validate_large_canvas_configuration,
+)
+from app.painter_action_inputs import (
+    PAINTER_ACTION_INPUT_UNSET,
+    REFERENCE_DEFAULT_HEIGHT_NORM,
+    REFERENCE_DEFAULT_OPACITY,
+    REFERENCE_DEFAULT_ROTATION_DEGREES,
+    REFERENCE_DEFAULT_WIDTH_NORM,
+    REFERENCE_DEFAULT_X_NORM,
+    REFERENCE_DEFAULT_Y_NORM,
+    REFERENCE_DUPLICATE_OFFSET_NORM,
+    normalize_paint_time_ms,
+    optional_paint_export_size,
+    validate_action_integer_domain,
+    validate_blockout_preview_action,
+    validate_blockout_camera_action,
+    validate_blockout_camera_preset_action,
+    validate_blockout_duplicate_offset_action,
+    validate_blockout_material_preview_action,
+    validate_blockout_primitive_id_action,
+    validate_blockout_snap_action,
+    validate_blockout_primitive_action,
+    validate_brush_set_action,
+    validate_layer_opacity_action,
+    validate_layer_blend_mode_action,
+    validate_layer_boolean_action,
+    validate_layer_color_label_action,
+    validate_layer_ids_action,
+    validate_layer_locks_action,
+    validate_layer_name_action,
+    validate_layer_type_action,
+    validate_painter_channel_action,
+    validate_layer_mask_gradient_action,
+    validate_layer_mask_paint_action,
+    validate_layer_mask_state_action,
+    validate_material_preview_action,
+    validate_optional_action_boolean,
+    validate_optional_layer_id_action,
+    validate_required_layer_id_action,
+    validate_path_create_action,
+    validate_path_anchor_action,
+    validate_path_id_action,
+    validate_path_name_action,
+    validate_path_reorder_action,
+    validate_optional_path_color_action,
+    validate_path_stroke_action,
+    validate_pressure_calibration_action,
+    validate_reference_palette_action,
+    validate_reference_add_action,
+    validate_reference_duplicate_action,
+    validate_reference_id_action,
+    validate_reference_sample_action,
+    validate_reference_update_action,
+    validate_perspective_guide_action,
+    validate_paint_stroke_request,
+    validate_editor_object_import_geometry_action,
+    validate_editor_object_locator_action,
+    validate_editor_objects_list_action,
+    validate_canvas_flip_action,
+    validate_color_selection_action,
+    validate_crop_preview_action,
+    validate_document_export_action,
+    validate_selection_bounds_action,
+    validate_selection_aspect_action,
+    validate_selection_lasso_action,
+    validate_selection_mode_action,
+    validate_selection_modify_action,
+    validate_selection_transform_action,
+    validate_fill_color_action,
+    validate_fill_color_pair_action,
+    validate_mirror_action,
+    validate_layer_mask_source_action,
+    validate_symmetry_guide_action,
+    validate_view_pan_action,
+    validate_view_pan_result_coordinate,
+    validate_zoom_area_action,
+)
+from app.painter_grid import PAINTER_GRID_SIZE_MAX_PX, PAINTER_GRID_SIZE_MIN_PX
+from app.painter_zoom import PAINTER_ZOOM_MAX_PERCENT, PAINTER_ZOOM_MIN_PERCENT
+from app.painter_wet_canvas import (
+    validate_wet_canvas_advance_seconds,
+    validate_wet_canvas_settings_update,
 )
 from app.actions.editor_adapter_paint_ui_advanced import (
     PaintUIAdvancedAdapterMixin,
 )
 from app.actions.editor_adapter_paint_ui_figma import PaintUIFigmaAdapterMixin
+
+
+_PAINTER_ACTION_UNSET = object()
+
+
+def _paint_positive_extent(value: object) -> int | None:
+    """Return a positive integral Qt/raster extent without coercing state."""
+    if isinstance(value, bool):
+        return None
+    try:
+        integer = operator.index(value)
+    except TypeError:
+        return None
+    return integer if integer > 0 else None
 
 
 class PaintAdapterMixin(
@@ -66,9 +213,17 @@ class PaintAdapterMixin(
         tile_budget_mb: int = DEFAULT_TILE_BUDGET_MB,
         undo_budget_mb: int = DEFAULT_UNDO_BUDGET_MB,
     ) -> dict[str, Any]:
+        resolved_tile_size, resolved_tile_budget_mb, resolved_undo_budget_mb = (
+            validate_large_canvas_configuration(
+                tile_size=tile_size,
+                tile_budget_mb=tile_budget_mb,
+                undo_budget_mb=undo_budget_mb,
+            )
+        )
         return self._paint_dialog_owner().configure_painter_large_canvas(
-            tile_size=tile_size, tile_budget_mb=tile_budget_mb,
-            undo_budget_mb=undo_budget_mb,
+            tile_size=resolved_tile_size,
+            tile_budget_mb=resolved_tile_budget_mb,
+            undo_budget_mb=resolved_undo_budget_mb,
         )
 
     def paint_document_new(
@@ -78,8 +233,25 @@ class PaintAdapterMixin(
         height: int = 1080,
         background: str = "#FFFFFF",
     ) -> dict[str, Any]:
+        from app.drawing import (
+            _validated_paint_background,
+            _validated_paint_dimensions,
+        )
+        from app.painter_output import PAINTER_NEW_CANVAS_MIN_DIMENSION_PX
+
+        resolved_width, resolved_height = _validated_paint_dimensions(
+            width,
+            height,
+            minimum=PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+            context="New canvas",
+        )
+        resolved_background = _validated_paint_background(background)
         dialog = self._paint_dialog_owner()
-        dialog._replace_canvas_document(int(width), int(height), str(background))
+        dialog._replace_canvas_document(
+            resolved_width,
+            resolved_height,
+            resolved_background,
+        )
         return dialog.painter_action_state()
 
     def paint_document_save(self, *, path: str = "") -> dict[str, Any]:
@@ -4765,6 +4937,7 @@ class PaintAdapterMixin(
         width: int = 0,
         height: int = 0,
     ) -> dict[str, Any]:
+        export_size = optional_paint_export_size(width, height)
         if not path:
             from datetime import datetime
 
@@ -4777,8 +4950,8 @@ class PaintAdapterMixin(
         return dialog.export_png_to_path(
             path,
             include_background=bool(include_background),
-            width=int(width or 0),
-            height=int(height or 0),
+            width=export_size[0] if export_size is not None else 0,
+            height=export_size[1] if export_size is not None else 0,
         )
 
     def paint_document_exchange_preflight(
@@ -4799,7 +4972,7 @@ class PaintAdapterMixin(
         self,
         *,
         path: str,
-        format: str = "",
+        format: str,
         include_background: bool = True,
         bit_depth: int = 8,
         bake_unsupported: bool = False,
@@ -4808,21 +4981,33 @@ class PaintAdapterMixin(
         output_icc: str = "",
         rendering_intent: int = 1,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        return dialog.export_document_to_path(
-            path, format_name=format, include_background=include_background,
-            bit_depth=bit_depth, bake_unsupported=bake_unsupported, quality=quality,
-            source_icc=source_icc or None, output_icc=output_icc or None,
+        resolved = validate_document_export_action(
+            path=path,
+            format_name=format,
+            include_background=include_background,
+            bit_depth=bit_depth,
+            bake_unsupported=bake_unsupported,
+            quality=quality,
+            source_icc=source_icc,
+            output_icc=output_icc,
             rendering_intent=rendering_intent,
         )
+        dialog = self._paint_dialog_owner()
+        return dialog.export_document_to_path(**resolved)
 
     def paint_document_import_psd(self, *, path: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         return dialog.import_psd_document_from_path(path)
 
     def paint_view_zoom(self, *, percent: int = 100) -> dict[str, Any]:
+        resolved_percent = validate_action_integer_domain(
+            percent,
+            field="percent",
+            minimum=PAINTER_ZOOM_MIN_PERCENT,
+            maximum=PAINTER_ZOOM_MAX_PERCENT,
+        )
         dialog = self._paint_dialog_owner()
-        dialog._set_zoom_percent(int(percent or 100))
+        dialog._set_zoom_percent(resolved_percent)
         return dialog.painter_action_state()
 
     def paint_view_zoom_area(
@@ -4833,39 +5018,60 @@ class PaintAdapterMixin(
         width: float,
         height: float,
     ) -> dict[str, Any]:
+        x, y, width, height = validate_zoom_area_action(
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+        )
         dialog = self._paint_dialog_owner()
         dialog._handle_canvas_zoom_request(
             "zoom_area",
-            float(x),
-            float(y),
-            float(width),
-            float(height),
+            x,
+            y,
+            width,
+            height,
         )
         return dialog.painter_action_state()
 
     def paint_view_pan(
         self,
         *,
-        x: int | None = None,
-        y: int | None = None,
-        dx: int = 0,
-        dy: int = 0,
-        reset: bool = False,
+        x: object = PAINTER_ACTION_INPUT_UNSET,
+        y: object = PAINTER_ACTION_INPUT_UNSET,
+        dx: object = PAINTER_ACTION_INPUT_UNSET,
+        dy: object = PAINTER_ACTION_INPUT_UNSET,
+        reset: object = PAINTER_ACTION_INPUT_UNSET,
     ) -> dict[str, Any]:
+        mode, horizontal, vertical = validate_view_pan_action(
+            x=x, y=y, dx=dx, dy=dy, reset=reset
+        )
         dialog = self._paint_dialog_owner()
-        if reset:
+        if mode == "reset":
             dialog._reset_canvas_pan()
-        elif x is not None or y is not None:
+        elif mode == "absolute":
             current = getattr(dialog, "_canvas_pan", None)
             current_x = int(current.x()) if current is not None else 0
             current_y = int(current.y()) if current is not None else 0
             from PySide6.QtCore import QPoint
 
-            dialog._set_canvas_pan(QPoint(current_x if x is None else int(x), current_y if y is None else int(y)))
+            dialog._set_canvas_pan(QPoint(
+                current_x if horizontal is None else horizontal,
+                current_y if vertical is None else vertical,
+            ))
         else:
             from PySide6.QtCore import QPoint
 
-            dialog._pan_canvas_by(QPoint(int(dx or 0), int(dy or 0)))
+            current = getattr(dialog, "_canvas_pan", None)
+            current_x = int(current.x()) if current is not None else 0
+            current_y = int(current.y()) if current is not None else 0
+            target_x = validate_view_pan_result_coordinate(
+                current_x + (horizontal or 0), field="result x"
+            )
+            target_y = validate_view_pan_result_coordinate(
+                current_y + (vertical or 0), field="result y"
+            )
+            dialog._set_canvas_pan(QPoint(target_x, target_y))
         return dialog.painter_action_state()
 
     def paint_view_grid(
@@ -4875,8 +5081,24 @@ class PaintAdapterMixin(
         snap: bool | None = None,
         size_px: int | None = None,
     ) -> dict[str, Any]:
+        resolved_visible = validate_optional_action_boolean(visible, field="visible")
+        resolved_snap = validate_optional_action_boolean(snap, field="snap")
+        resolved_size_px = (
+            None
+            if size_px is None
+            else validate_action_integer_domain(
+                size_px,
+                field="size_px",
+                minimum=PAINTER_GRID_SIZE_MIN_PX,
+                maximum=PAINTER_GRID_SIZE_MAX_PX,
+            )
+        )
         dialog = self._paint_dialog_owner()
-        dialog._set_grid_options(visible=visible, snap=snap, size_px=size_px)
+        dialog._set_grid_options(
+            visible=resolved_visible,
+            snap=resolved_snap,
+            size_px=resolved_size_px,
+        )
         return dialog.painter_action_state()
 
     def paint_guide_perspective(
@@ -4895,8 +5117,7 @@ class PaintAdapterMixin(
         mode: int | None = None,
         snap: bool | None = None,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        dialog._set_perspective_guide_options(
+        resolved = validate_perspective_guide_action(
             enabled=enabled,
             horizon=horizon,
             left_x=left_x,
@@ -4910,6 +5131,8 @@ class PaintAdapterMixin(
             mode=mode,
             snap=snap,
         )
+        dialog = self._paint_dialog_owner()
+        dialog._set_perspective_guide_options(**resolved)
         return dialog.painter_action_state()
 
     def paint_guide_symmetry(
@@ -4919,13 +5142,25 @@ class PaintAdapterMixin(
         axis: str | None = None,
         position: float | None = None,
     ) -> dict[str, Any]:
+        resolved_enabled, resolved_axis, resolved_position = validate_symmetry_guide_action(
+            enabled=enabled,
+            axis=axis,
+            position=position,
+        )
         dialog = self._paint_dialog_owner()
-        dialog._set_symmetry_guide_options(enabled=enabled, axis=axis, position=position)
+        dialog._set_symmetry_guide_options(
+            enabled=resolved_enabled,
+            axis=resolved_axis,
+            position=resolved_position,
+        )
         return dialog.painter_action_state()
 
     def paint_quick_mask_set(self, *, enabled: bool = True) -> dict[str, Any]:
+        enabled = validate_layer_boolean_action(enabled, field="enabled")
         dialog = self._paint_dialog_owner()
-        dialog._set_quick_mask_enabled(bool(enabled))
+        if bool(getattr(dialog, "_quick_mask_enabled", False)) == enabled:
+            raise ValueError("Painter Quick Mask state did not change")
+        dialog._set_quick_mask_enabled(enabled)
         return dialog.painter_action_state()
 
     def paint_layer_add(
@@ -4934,10 +5169,12 @@ class PaintAdapterMixin(
         name: str = "",
         layer_type: str = "standard",
     ) -> dict[str, Any]:
+        name = validate_layer_name_action(name, allow_empty=True)
+        layer_type = validate_layer_type_action(layer_type)
         dialog = self._paint_dialog_owner()
         dialog._new_paint_layer(
-            str(name or "") or None,
-            layer_type=str(layer_type or "standard"),
+            name or None,
+            layer_type=layer_type,
         )
         return dialog.painter_action_state()
 
@@ -4947,10 +5184,16 @@ class PaintAdapterMixin(
         path: str,
         name: str = "",
     ) -> dict[str, Any]:
+        if not isinstance(path, str):
+            raise TypeError("Painter layer import path must be a string")
+        path = path.strip()
+        if not path:
+            raise ValueError("Painter layer import path must not be empty")
+        name = validate_layer_name_action(name, allow_empty=True)
         dialog = self._paint_dialog_owner()
         report = dialog.import_image_as_paint_layer(
-            str(path or ""),
-            name=str(name or "") or None,
+            path,
+            name=name or None,
         )
         return {**dialog.painter_action_state(), "import": report}
 
@@ -4960,23 +5203,41 @@ class PaintAdapterMixin(
         name: str = "",
         layer_ids: list[str] | None = None,
     ) -> dict[str, Any]:
+        name = validate_layer_name_action(name, allow_empty=True)
+        layer_ids = validate_layer_ids_action(layer_ids)
         dialog = self._paint_dialog_owner()
-        dialog._new_paint_layer_group(name or None, layer_ids=list(layer_ids or []))
+        missing_ids = [
+            layer_id
+            for layer_id in layer_ids
+            if dialog._paint_layer_by_id(layer_id) is None
+        ]
+        if missing_ids:
+            raise ValueError("Painter layer group contains an unknown layer_id")
+        if any(
+            bool(dialog._paint_layer_by_id(layer_id).lock_position)
+            for layer_id in layer_ids
+        ):
+            raise ValueError("Painter layer group cannot reparent a position-locked layer")
+        dialog._new_paint_layer_group(name or None, layer_ids=layer_ids)
         return dialog.painter_action_state()
 
     def paint_layer_set_clipping(
         self, *, layer_id: str = "", clipping: bool = False
     ) -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        clipping = validate_layer_boolean_action(clipping, field="clipping")
         dialog = self._paint_dialog_owner()
-        if not dialog._set_layer_clipping(layer_id or None, bool(clipping)):
+        if not dialog._set_layer_clipping(layer_id or None, clipping):
             raise ValueError("Painter clipping state did not change")
         return dialog.painter_action_state()
 
     def paint_layer_group_set_expanded(
         self, *, layer_id: str, expanded: bool
     ) -> dict[str, Any]:
+        layer_id = validate_required_layer_id_action(layer_id)
+        expanded = validate_layer_boolean_action(expanded, field="expanded")
         dialog = self._paint_dialog_owner()
-        if not dialog._set_layer_group_expanded(layer_id, bool(expanded)):
+        if not dialog._set_layer_group_expanded(layer_id, expanded):
             raise ValueError("Painter group disclosure did not change")
         return dialog.painter_action_state()
 
@@ -4984,35 +5245,40 @@ class PaintAdapterMixin(
         self,
         *,
         layer_id: str = "",
-        pixels: bool | None = None,
-        transparency: bool | None = None,
-        position: bool | None = None,
-        all_locked: bool | None = None,
+        pixels: object = PAINTER_ACTION_INPUT_UNSET,
+        transparency: object = PAINTER_ACTION_INPUT_UNSET,
+        position: object = PAINTER_ACTION_INPUT_UNSET,
+        all_locked: object = PAINTER_ACTION_INPUT_UNSET,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        if not dialog._set_layer_lock_channels(
-            layer_id or None,
+        layer_id = validate_optional_layer_id_action(layer_id)
+        changes = validate_layer_locks_action(
             pixels=pixels,
             transparency=transparency,
             position=position,
             all_locked=all_locked,
+        )
+        dialog = self._paint_dialog_owner()
+        if not dialog._set_layer_lock_channels(
+            layer_id or None,
+            **changes,
         ):
             raise ValueError("Painter layer lock state did not change")
         return dialog.painter_action_state()
 
     def paint_layer_merge_down(self, *, layer_id: str = "") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
         if dialog._merge_down(layer_id or None) is None:
             raise ValueError("Painter layer has no mergeable sibling below")
         return dialog.painter_action_state()
 
-    def paint_layer_merge_visible(self, *, layer_id: str = "") -> dict[str, Any]:
+    def paint_layer_merge_visible(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if dialog._merge_visible() is None:
             raise ValueError("Painter document has no visible layers")
         return dialog.painter_action_state()
 
-    def paint_layer_flatten(self, *, layer_id: str = "") -> dict[str, Any]:
+    def paint_layer_flatten(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if dialog._flatten_paint_layers() is None:
             raise ValueError("Painter document has no layers to flatten")
@@ -5024,8 +5290,10 @@ class PaintAdapterMixin(
         layer_id: str = "",
         layer_type: str = "standard",
     ) -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        layer_type = validate_layer_type_action(layer_type)
         dialog = self._paint_dialog_owner()
-        if not dialog._set_paint_layer_type(layer_id or None, str(layer_type or "standard")):
+        if not dialog._set_paint_layer_type(layer_id or None, layer_type):
             raise ValueError("Painter layer type did not change")
         return dialog.painter_action_state()
 
@@ -5060,15 +5328,30 @@ class PaintAdapterMixin(
     def paint_material_preview_set(
         self,
         *,
-        enabled: bool | None = None,
-        azimuth_deg: float | None = None,
-        elevation_deg: float | None = None,
+        enabled: object = _PAINTER_ACTION_UNSET,
+        azimuth_deg: object = _PAINTER_ACTION_UNSET,
+        elevation_deg: object = _PAINTER_ACTION_UNSET,
     ) -> dict[str, Any]:
+        supplied = {
+            key: value
+            for key, value in {
+                "enabled": enabled,
+                "azimuth_deg": azimuth_deg,
+                "elevation_deg": elevation_deg,
+            }.items()
+            if value is not _PAINTER_ACTION_UNSET
+        }
+        if any(value is None for value in supplied.values()):
+            raise TypeError("Material preview Action fields must not be null")
+        values = validate_material_preview_action(
+            enabled=supplied.get("enabled"),
+            azimuth_deg=supplied.get("azimuth_deg"),
+            elevation_deg=supplied.get("elevation_deg"),
+            require_authored_field=True,
+        )
         dialog = self._paint_dialog_owner()
         dialog._set_material_preview(
-            enabled=enabled,
-            azimuth_deg=azimuth_deg,
-            elevation_deg=elevation_deg,
+            **{key: value for key, value in values.items() if value is not None}
         )
         return dialog.painter_action_state()
 
@@ -5076,21 +5359,34 @@ class PaintAdapterMixin(
         self,
         *,
         layer_id: str = "",
-        enabled: bool | None = None,
-        mixing: float | None = None,
-        diffusion: float | None = None,
-        pickup: float | None = None,
-        drying_seconds: float | None = None,
+        enabled: object = _PAINTER_ACTION_UNSET,
+        mixing: object = _PAINTER_ACTION_UNSET,
+        diffusion: object = _PAINTER_ACTION_UNSET,
+        pickup: object = _PAINTER_ACTION_UNSET,
+        drying_seconds: object = _PAINTER_ACTION_UNSET,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        values = {
-            "enabled": enabled,
-            "mixing": mixing,
-            "diffusion": diffusion,
-            "pickup": pickup,
-            "drying_seconds": drying_seconds,
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
+        supplied = {
+            key: value
+            for key, value in {
+                "enabled": enabled,
+                "mixing": mixing,
+                "diffusion": diffusion,
+                "pickup": pickup,
+                "drying_seconds": drying_seconds,
+            }.items()
+            if value is not _PAINTER_ACTION_UNSET
         }
-        if not dialog._set_wet_canvas_settings(values, layer_id=layer_id or None):
+        values = validate_wet_canvas_settings_update(
+            supplied,
+            require_authored_field=True,
+            allow_none=False,
+        )
+        dialog = self._paint_dialog_owner()
+        if not dialog._set_wet_canvas_settings(
+            values,
+            layer_id=resolved_layer_id or None,
+        ):
             raise ValueError(
                 "Wet Canvas settings require a material layer and a changed value"
             )
@@ -5102,103 +5398,479 @@ class PaintAdapterMixin(
         seconds: float = 0.0,
         layer_id: str = "",
     ) -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
+        resolved_seconds = validate_wet_canvas_advance_seconds(
+            seconds,
+            allow_zero=False,
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._advance_wet_canvas(
-            max(0.0, float(seconds)),
-            layer_id=layer_id or None,
+            resolved_seconds,
+            layer_id=resolved_layer_id or None,
         ):
             raise ValueError("Wet Canvas did not advance")
         return dialog.painter_action_state()
 
     def paint_wet_canvas_dry(self, *, layer_id: str = "") -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        if layer_id:
-            dialog._select_paint_layer_by_id(layer_id)
-        if not dialog._dry_active_wet_canvas():
+        if not dialog._dry_active_wet_canvas(
+            layer_id=resolved_layer_id or None,
+        ):
             raise ValueError("Wet Canvas requires an active material layer")
         return dialog.painter_action_state()
 
     def paint_layer_select(self, *, layer_id: str = "") -> dict[str, Any]:
+        layer_id = validate_required_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        if not dialog._select_paint_layer_by_id(layer_id or None):
+        if not dialog._select_paint_layer_by_id(layer_id):
             raise ValueError("paint layer not found")
         return dialog.painter_action_state()
 
     def paint_layer_rename(self, *, layer_id: str = "", name: str = "") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        name = validate_layer_name_action(name, allow_empty=False)
         dialog = self._paint_dialog_owner()
-        if not dialog._rename_layer_to(layer_id or None, str(name or "")):
+        if not dialog._rename_layer_to(layer_id or None, name):
             raise ValueError("layer rename did not change a paint layer")
         return dialog.painter_action_state()
 
     def paint_layer_duplicate(self, *, layer_id: str = "") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        if layer_id:
-            dialog._select_paint_layer_by_id(layer_id)
+        target = layer_id or str(dialog._current_layer_id() or "")
+        target_layer = dialog._paint_layer_by_id(target)
+        if target_layer is None:
+            raise ValueError("paint layer not found")
+        if dialog._text_editor_has_focus():
+            raise ValueError("Painter layer cannot be duplicated while text editing is active")
+        if dialog._payload_for_layer(target) is None:
+            raise ValueError("Painter layer has no duplicate payload")
+        if not dialog._select_paint_layer_by_id(target):
+            raise ValueError("paint layer not found")
+        before_count = len(dialog._paint_layers)
         dialog._duplicate_selected_layer()
+        if len(dialog._paint_layers) == before_count:
+            raise ValueError("Painter layer could not be duplicated")
         return dialog.painter_action_state()
 
     def paint_layer_delete(self, *, layer_id: str = "") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        dialog._delete_layer(layer_id or dialog._current_layer_id())
+        target = layer_id or str(dialog._current_layer_id() or "")
+        target_layer = dialog._paint_layer_by_id(target)
+        if target_layer is None:
+            raise ValueError("paint layer not found")
+        if len(dialog._paint_layers) <= 1:
+            raise ValueError("Painter document must retain at least one paint layer")
+        if target_layer.locked:
+            raise ValueError("Painter locked layer cannot be deleted")
+        before_count = len(dialog._paint_layers)
+        dialog._delete_layer(target)
+        if len(dialog._paint_layers) == before_count:
+            raise ValueError("Painter layer could not be deleted")
         return dialog.painter_action_state()
 
     def paint_layer_set_visible(self, *, layer_id: str = "", visible: bool = True) -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        visible = validate_layer_boolean_action(visible, field="visible")
         dialog = self._paint_dialog_owner()
-        dialog._set_layer_visible(layer_id or None, bool(visible))
+        if not dialog._set_layer_visible(layer_id or None, visible):
+            raise ValueError("Painter layer visibility did not change")
         return dialog.painter_action_state()
 
     def paint_layer_set_locked(self, *, layer_id: str = "", locked: bool = True) -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        locked = validate_layer_boolean_action(locked, field="locked")
         dialog = self._paint_dialog_owner()
-        dialog._set_layer_locked(layer_id or None, bool(locked))
+        if not dialog._set_layer_locked(layer_id or None, locked):
+            raise ValueError("Painter layer lock state did not change")
         return dialog.painter_action_state()
 
     def paint_layer_set_opacity(self, *, layer_id: str = "", opacity: int = 100) -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
+        resolved_opacity = validate_layer_opacity_action(opacity)
         dialog = self._paint_dialog_owner()
-        dialog._set_layer_opacity_value(layer_id or None, int(opacity or 0))
+        if not dialog._set_layer_opacity_value(resolved_layer_id or None, resolved_opacity):
+            raise ValueError("Painter layer opacity did not change")
         return dialog.painter_action_state()
 
     def paint_layer_set_blend_mode(self, *, layer_id: str = "", blend_mode: str = "normal") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        blend_mode = validate_layer_blend_mode_action(blend_mode)
         dialog = self._paint_dialog_owner()
-        dialog._set_layer_blend_mode(layer_id or None, str(blend_mode or "normal"))
+        if not dialog._set_layer_blend_mode(layer_id or None, blend_mode):
+            raise ValueError("Painter layer blend mode did not change")
         return dialog.painter_action_state()
 
     def paint_layer_set_color(self, *, layer_id: str = "", color_label: str = "none") -> dict[str, Any]:
+        layer_id = validate_optional_layer_id_action(layer_id)
+        color_label = validate_layer_color_label_action(color_label)
         dialog = self._paint_dialog_owner()
-        dialog._set_layer_color_label(layer_id or None, str(color_label or "none"))
+        if not dialog._set_layer_color_label(layer_id or None, color_label):
+            raise ValueError("Painter layer color label did not change")
         return dialog.painter_action_state()
 
-    def paint_channel_set_visible(self, *, channel: str = "RGB", visible: bool = True) -> dict[str, Any]:
+    def paint_channel_set_visible(self, *, channel: str, visible: bool) -> dict[str, Any]:
+        channel = _validate_component_or_saved_channel(channel, allow_empty=False)
+        visible = validate_layer_boolean_action(visible, field="visible")
         dialog = self._paint_dialog_owner()
-        dialog._set_channel_visibility(str(channel or "RGB"), bool(visible))
+        if not dialog._set_channel_visibility(channel, visible):
+            raise ValueError("Painter channel visibility did not change")
         return dialog.painter_action_state()
 
-    def paint_channel_select(self, *, channel: str = "RGB") -> dict[str, Any]:
+    def paint_channel_select(self, *, channel: str) -> dict[str, Any]:
+        channel = _validate_component_or_saved_channel(channel, allow_empty=False)
         dialog = self._paint_dialog_owner()
-        dialog._set_selected_channel(str(channel or "RGB"))
+        selected = dialog._set_selected_channel(channel)
+        if selected != channel:
+            raise ValueError("Painter channel does not exist")
         return dialog.painter_action_state()
 
     def paint_channel_copy_image(self, *, channel: str = "") -> dict[str, Any]:
+        channel = _validate_component_or_saved_channel(channel, allow_empty=True)
         dialog = self._paint_dialog_owner()
-        if not dialog._copy_channel_image(str(channel or getattr(dialog, "_selected_channel", "RGB"))):
+        target = channel.strip() or str(getattr(dialog, "_selected_channel", "RGB"))
+        if not dialog._copy_channel_image(target):
             raise ValueError("no Painter channel image available to copy")
         state = dialog.painter_action_state()
         state["channel_clipboard"] = "copied"
         return state
 
     def paint_channel_paste_image(self, *, channel: str = "") -> dict[str, Any]:
+        channel = _validate_component_or_saved_channel(channel, allow_empty=True)
         dialog = self._paint_dialog_owner()
-        if not dialog._paste_channel_image(str(channel or getattr(dialog, "_selected_channel", "RGB"))):
+        target = channel.strip() or str(getattr(dialog, "_selected_channel", "RGB"))
+        from PySide6.QtWidgets import QApplication
+
+        clipboard = QApplication.clipboard()
+        image = clipboard.image() if clipboard is not None else None
+        if image is None or image.isNull():
             raise ValueError("system clipboard does not contain an image")
+        if not dialog._paste_channel_image(target):
+            raise ValueError("system clipboard does not contain an image")
+        return dialog.painter_action_state()
+
+    def paint_selection_save_channel(
+        self,
+        *,
+        name: str = "",
+        channel_id: str = "",
+        operation: str = "new",
+    ) -> dict[str, Any]:
+        if not isinstance(name, str) or not isinstance(channel_id, str):
+            raise TypeError("Saved selection channel name and id must be strings")
+        from app.painter_saved_selection_channels import (
+            normalize_saved_selection_channel_id,
+            normalize_saved_selection_name,
+            normalize_saved_selection_operation,
+        )
+
+        operation = normalize_saved_selection_operation(operation, loading=False)
+        if operation == "new":
+            if channel_id != "":
+                raise ValueError("New saved selection must not specify channel_id")
+            name = normalize_saved_selection_name(name)
+        else:
+            if name != "":
+                raise ValueError("Existing saved selection update must not specify name")
+            if channel_id != channel_id.strip():
+                raise ValueError(
+                    "Saved selection channel id must not contain surrounding whitespace"
+                )
+            channel_id = normalize_saved_selection_channel_id(channel_id)
+        dialog = self._paint_dialog_owner()
+        saved_id = dialog._save_selection_channel(
+            name=name,
+            channel_id=channel_id,
+            operation=operation,
+        )
+        state = dialog.painter_action_state()
+        state["saved_selection_channel_id"] = saved_id
+        return state
+
+    def paint_selection_load_channel(
+        self,
+        *,
+        channel_id: str,
+        operation: str = "new",
+        invert: bool = False,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        invert = validate_layer_boolean_action(invert, field="invert")
+        from app.painter_saved_selection_channels import (
+            normalize_saved_selection_operation,
+        )
+
+        operation = normalize_saved_selection_operation(operation, loading=True)
+        dialog = self._paint_dialog_owner()
+        if not dialog._load_selection_channel(
+            channel_id,
+            operation=operation,
+            invert=invert,
+        ):
+            raise ValueError("Loaded selection would not change")
+        return dialog.painter_action_state()
+
+    def paint_documents_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_open_documents import (
+            inspect_open_painter_documents,
+            require_open_painter_document_instance,
+        )
+
+        require_open_painter_document_instance(dialog)
+        report = inspect_open_painter_documents()
+        report["active_document_id"] = str(
+            getattr(dialog, "_painter_runtime_document_id", "") or ""
+        )
+        return report
+
+    def paint_selection_save_channel_to_document(
+        self,
+        *,
+        destination_document_id: str,
+        name: str = "",
+        channel_id: str = "",
+        operation: str = "new",
+    ) -> dict[str, Any]:
+        from app.painter_open_documents import (
+            normalize_painter_runtime_document_id,
+        )
+
+        destination_document_id = normalize_painter_runtime_document_id(
+            destination_document_id
+        )
+        if not isinstance(name, str) or not isinstance(channel_id, str):
+            raise TypeError("Saved selection channel name and id must be strings")
+        from app.painter_saved_selection_channels import (
+            normalize_saved_selection_channel_id,
+            normalize_saved_selection_name,
+            normalize_saved_selection_operation,
+        )
+
+        operation = normalize_saved_selection_operation(operation, loading=False)
+        if operation == "new":
+            if channel_id != "":
+                raise ValueError("New saved selection must not specify channel_id")
+            name = normalize_saved_selection_name(name)
+        else:
+            if name != "":
+                raise ValueError(
+                    "Existing saved selection update must not specify name"
+                )
+            if channel_id != channel_id.strip():
+                raise ValueError(
+                    "Saved selection channel id must not contain surrounding whitespace"
+                )
+            channel_id = normalize_saved_selection_channel_id(channel_id)
+        source = self._paint_dialog_owner()
+        from app.painter_open_documents import (
+            painter_open_document_descriptor,
+            resolve_open_painter_document,
+            save_selection_to_open_painter_document,
+        )
+
+        destination = resolve_open_painter_document(
+            destination_document_id,
+            exclude=source,
+        )
+        saved_id = save_selection_to_open_painter_document(
+            source,
+            destination,
+            name=name,
+            channel_id=channel_id,
+            operation=operation,
+        )
+        return {
+            "schema": "tigerstudio.paint.cross-document-save.v1",
+            "source": painter_open_document_descriptor(source),
+            "destination": painter_open_document_descriptor(destination),
+            "saved_selection_channel_id": saved_id,
+            "destination_state": destination.painter_action_state(),
+        }
+
+    def paint_selection_load_channel_from_document(
+        self,
+        *,
+        source_document_id: str,
+        channel_id: str,
+        operation: str = "new",
+        invert: bool = False,
+    ) -> dict[str, Any]:
+        from app.painter_open_documents import (
+            normalize_painter_runtime_document_id,
+        )
+
+        source_document_id = normalize_painter_runtime_document_id(
+            source_document_id
+        )
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        invert = validate_layer_boolean_action(invert, field="invert")
+        from app.painter_saved_selection_channels import (
+            normalize_saved_selection_operation,
+        )
+
+        operation = normalize_saved_selection_operation(operation, loading=True)
+        destination = self._paint_dialog_owner()
+        from app.painter_open_documents import (
+            load_selection_from_open_painter_document,
+            painter_open_document_descriptor,
+            resolve_open_painter_document,
+        )
+
+        source = resolve_open_painter_document(
+            source_document_id,
+            exclude=destination,
+        )
+        if not load_selection_from_open_painter_document(
+            destination,
+            source,
+            channel_id=channel_id,
+            operation=operation,
+            invert=invert,
+        ):
+            raise ValueError("Loaded selection would not change")
+        state = destination.painter_action_state()
+        state["cross_document_source"] = painter_open_document_descriptor(source)
+        return state
+
+    def paint_selection_channels_import_file(
+        self,
+        *,
+        path: str,
+    ) -> dict[str, Any]:
+        if not isinstance(path, str):
+            raise TypeError("Alpha channel import path must be a string")
+        if path != path.strip() or not path:
+            raise ValueError(
+                "Alpha channel import path must be nonblank without surrounding whitespace"
+            )
+        source = Path(path)
+        if source.suffix.casefold() not in {".psd", ".tif", ".tiff"}:
+            raise ValueError("Alpha channel import path must use PSD or TIFF")
+        if not source.is_file():
+            raise ValueError("Alpha channel import source file does not exist")
+        dialog = self._paint_dialog_owner()
+        report = dialog.import_saved_selection_channels_from_path(source)
+        report["state"] = dialog.painter_action_state()
+        return report
+
+    def paint_selection_channel_rename(
+        self,
+        *,
+        channel_id: str,
+        name: str,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        if not isinstance(name, str):
+            raise TypeError("Saved selection channel name must be a string")
+        from app.painter_saved_selection_channels import normalize_saved_selection_name
+
+        name = normalize_saved_selection_name(name)
+        dialog = self._paint_dialog_owner()
+        dialog._rename_saved_selection_channel(channel_id, name)
+        return dialog.painter_action_state()
+
+    def paint_selection_channel_options_set(
+        self,
+        *,
+        channel_id: str,
+        display_mode: str,
+        overlay_color: str,
+        overlay_opacity_percent: int,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        from app.painter_saved_selection_channels import (
+            normalize_saved_selection_channel_display_mode,
+            normalize_saved_selection_channel_overlay_color,
+            normalize_saved_selection_channel_overlay_opacity,
+        )
+
+        display_mode = normalize_saved_selection_channel_display_mode(display_mode)
+        overlay_color = normalize_saved_selection_channel_overlay_color(
+            overlay_color
+        )
+        overlay_opacity_percent = normalize_saved_selection_channel_overlay_opacity(
+            overlay_opacity_percent
+        )
+        dialog = self._paint_dialog_owner()
+        dialog._set_saved_selection_channel_options(
+            channel_id,
+            display_mode=display_mode,
+            overlay_color=overlay_color,
+            overlay_opacity_percent=overlay_opacity_percent,
+        )
+        return dialog.painter_action_state()
+
+    def paint_selection_channel_duplicate(
+        self,
+        *,
+        channel_id: str,
+        name: str,
+        invert: bool = False,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        if not isinstance(name, str):
+            raise TypeError("Saved selection channel name must be a string")
+        from app.painter_saved_selection_channels import normalize_saved_selection_name
+
+        name = normalize_saved_selection_name(name)
+        invert = validate_layer_boolean_action(invert, field="invert")
+        dialog = self._paint_dialog_owner()
+        duplicate_id = dialog._duplicate_saved_selection_channel(
+            channel_id,
+            name=name,
+            invert=invert,
+        )
+        state = dialog.painter_action_state()
+        state["saved_selection_channel_id"] = duplicate_id
+        return state
+
+    def paint_selection_channel_reorder(
+        self,
+        *,
+        channel_id: str,
+        target_channel_id: str,
+        placement: str,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        target_channel_id = _validate_saved_selection_channel_id(target_channel_id)
+        if not isinstance(placement, str):
+            raise TypeError("Saved selection channel placement must be a string")
+        placement = placement.strip().casefold()
+        if placement not in {"before", "after"}:
+            raise ValueError("Saved selection channel placement is unsupported")
+        if channel_id == target_channel_id:
+            raise ValueError("Saved selection channel reorder requires two channels")
+        dialog = self._paint_dialog_owner()
+        dialog._reorder_saved_selection_channel(
+            channel_id,
+            target_channel_id,
+            placement=placement,
+        )
+        return dialog.painter_action_state()
+
+    def paint_selection_channel_delete(
+        self,
+        *,
+        channel_id: str,
+    ) -> dict[str, Any]:
+        channel_id = _validate_saved_selection_channel_id(channel_id)
+        dialog = self._paint_dialog_owner()
+        dialog._delete_saved_selection_channel(channel_id)
         return dialog.painter_action_state()
 
     def paint_selection_select_all(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._select_all()
+        if not dialog._select_all():
+            raise ValueError("Painter selection already covers the full canvas")
         return dialog.painter_action_state()
 
     def paint_selection_deselect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._deselect()
+        if not dialog._deselect():
+            raise ValueError("Painter deselect requires an active selection")
         return dialog.painter_action_state()
 
     def paint_selection_invert(self) -> dict[str, Any]:
@@ -5208,7 +5880,8 @@ class PaintAdapterMixin(
 
     def paint_selection_to_path(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._selection_to_path()
+        if not dialog._selection_to_path():
+            raise ValueError("selection-to-path requires an active selection")
         return dialog.painter_action_state()
 
     def paint_selection_rectangle(
@@ -5221,11 +5894,14 @@ class PaintAdapterMixin(
         aspect: str = "free",
         mode: str = "new",
     ) -> dict[str, Any]:
+        x1, y1, x2, y2, aspect, mode = validate_selection_bounds_action(
+            x1=x1, y1=y1, x2=x2, y2=y2, aspect=aspect, mode=mode,
+        )
         dialog = self._paint_dialog_owner()
         dialog._push_undo_state("Rectangular selection")
-        dialog._set_selection_aspect_mode(str(aspect or "free"))
-        dialog._set_selection_combine_mode(str(mode or "new"))
-        dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="rect", aspect=str(aspect or "free"))
+        dialog._set_selection_aspect_mode(aspect)
+        dialog._set_selection_combine_mode(mode)
+        dialog.canvas.select_rectangle(x1, y1, x2, y2, shape="rect", aspect=aspect)
         dialog._sync_pixel_selection_from_canvas(ellipse=False)
         dialog._selected_path_item_id = "selection"
         dialog._update_path_list()
@@ -5242,11 +5918,14 @@ class PaintAdapterMixin(
         aspect: str = "free",
         mode: str = "new",
     ) -> dict[str, Any]:
+        x1, y1, x2, y2, aspect, mode = validate_selection_bounds_action(
+            x1=x1, y1=y1, x2=x2, y2=y2, aspect=aspect, mode=mode,
+        )
         dialog = self._paint_dialog_owner()
         dialog._push_undo_state("Elliptical selection")
-        dialog._set_selection_aspect_mode(str(aspect or "free"))
-        dialog._set_selection_combine_mode(str(mode or "new"))
-        dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="ellipse", aspect=str(aspect or "free"))
+        dialog._set_selection_aspect_mode(aspect)
+        dialog._set_selection_combine_mode(mode)
+        dialog.canvas.select_rectangle(x1, y1, x2, y2, shape="ellipse", aspect=aspect)
         dialog._sync_pixel_selection_from_canvas(ellipse=True)
         dialog._selected_path_item_id = "selection"
         dialog._update_path_list()
@@ -5260,9 +5939,18 @@ class PaintAdapterMixin(
         mode: str = "new",
         polygonal: bool = False,
     ) -> dict[str, Any]:
+        resolved_points, resolved_mode, resolved_polygonal = (
+            validate_selection_lasso_action(
+                points=points,
+                mode=mode,
+                polygonal=polygonal,
+            )
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._select_lasso_points(
-            list(points or []), mode=str(mode or "new"), polygonal=bool(polygonal)
+            resolved_points,
+            mode=resolved_mode,
+            polygonal=resolved_polygonal,
         ):
             raise ValueError("lasso selection requires at least three points")
         return dialog.painter_action_state()
@@ -5271,21 +5959,31 @@ class PaintAdapterMixin(
         self,
         *,
         operation: str = "expand",
-        radius_px: float = 1.0,
+        radius_px: float = 1,
     ) -> dict[str, Any]:
+        resolved_operation, resolved_radius = validate_selection_modify_action(
+            operation=operation,
+            radius_px=radius_px,
+        )
         dialog = self._paint_dialog_owner()
-        if not dialog._modify_selection(str(operation), float(radius_px)):
+        if not dialog._modify_selection(resolved_operation, resolved_radius):
             raise ValueError("selection modification requires an active selection")
         return dialog.painter_action_state()
 
-    def paint_selection_set_aspect(self, *, aspect: str = "free") -> dict[str, Any]:
+    def paint_selection_set_aspect(self, *, aspect: str) -> dict[str, Any]:
+        aspect = validate_selection_aspect_action(aspect)
         dialog = self._paint_dialog_owner()
-        dialog._set_selection_aspect_mode(str(aspect or "free"))
+        if getattr(dialog, "_selection_aspect_mode", "free") == aspect:
+            raise ValueError("Painter selection aspect did not change")
+        dialog._set_selection_aspect_mode(aspect)
         return dialog.painter_action_state()
 
-    def paint_selection_set_mode(self, *, mode: str = "new") -> dict[str, Any]:
+    def paint_selection_set_mode(self, *, mode: str) -> dict[str, Any]:
+        mode = validate_selection_mode_action(mode)
         dialog = self._paint_dialog_owner()
-        dialog._set_selection_combine_mode(str(mode or "new"))
+        if getattr(dialog, "_selection_combine_mode", "new") == mode:
+            raise ValueError("Painter selection combination mode did not change")
+        dialog._set_selection_combine_mode(mode)
         return dialog.painter_action_state()
 
     def paint_selection_select_by_color(
@@ -5297,19 +5995,25 @@ class PaintAdapterMixin(
         contiguous: bool = True,
         phase: str = "commit",
     ) -> dict[str, Any]:
+        x, y, tolerance, contiguous, value = validate_color_selection_action(
+            x=x,
+            y=y,
+            tolerance=tolerance,
+            contiguous=contiguous,
+            phase=phase,
+        )
         dialog = self._paint_dialog_owner()
-        value = str(phase or "commit").strip().casefold()
         if value == "cancel":
             ok = dialog._cancel_color_range_preview()
         elif value == "preview":
             ok = dialog._preview_color_range(
-                float(x), float(y), tolerance=tolerance, contiguous=bool(contiguous)
+                x, y, tolerance=tolerance, contiguous=contiguous
             )
         else:
             ok = dialog._commit_color_range_preview()
             if not ok:
                 ok = dialog._select_by_color_at(
-                    float(x), float(y), tolerance=tolerance, contiguous=bool(contiguous)
+                    x, y, tolerance=tolerance, contiguous=contiguous
                 )
         if not ok:
             raise ValueError("Magic Select could not create a color selection")
@@ -5322,17 +6026,21 @@ class PaintAdapterMixin(
         return dialog.painter_action_state()
 
     def paint_crop_preview(
-        self, *, x1: float | None = None, y1: float | None = None,
-        x2: float | None = None, y2: float | None = None,
-        straighten_degrees: float = 0.0,
+        self, *, x1: object = PAINTER_ACTION_INPUT_UNSET,
+        y1: object = PAINTER_ACTION_INPUT_UNSET,
+        x2: object = PAINTER_ACTION_INPUT_UNSET,
+        y2: object = PAINTER_ACTION_INPUT_UNSET,
+        straighten_degrees: object = 0.0,
     ) -> dict[str, Any]:
+        bounds, angle = validate_crop_preview_action(
+            x1=x1,
+            y1=y1,
+            x2=x2,
+            y2=y2,
+            straighten_degrees=straighten_degrees,
+        )
         dialog = self._paint_dialog_owner()
-        bounds = None
-        if all(value is not None for value in (x1, y1, x2, y2)):
-            bounds = (float(x1), float(y1), float(x2), float(y2))
-        if not dialog._preview_crop(
-            bounds, straighten_degrees=float(straighten_degrees)
-        ):
+        if not dialog._preview_crop(bounds, straighten_degrees=angle):
             raise ValueError("crop preview requires an active Painter selection")
         return dialog.painter_action_state()
 
@@ -5365,20 +6073,26 @@ class PaintAdapterMixin(
         phase: str = "commit",
         target: str = "selected_pixels",
     ) -> dict[str, Any]:
+        settings, value, resolved_target = validate_selection_transform_action(
+            translate_x=translate_x,
+            translate_y=translate_y,
+            scale_x=scale_x,
+            scale_y=scale_y,
+            rotation_degrees=rotation_degrees,
+            skew_x_degrees=skew_x_degrees,
+            skew_y_degrees=skew_y_degrees,
+            pivot_x=pivot_x,
+            pivot_y=pivot_y,
+            flip_x=flip_x,
+            flip_y=flip_y,
+            phase=phase,
+            target=target,
+        )
         dialog = self._paint_dialog_owner()
-        value = str(phase or "commit").strip().casefold()
         if value == "cancel":
             ok = dialog._cancel_selection_transform()
         else:
-            settings = {
-                "translate_x": float(translate_x), "translate_y": float(translate_y),
-                "scale_x": float(scale_x), "scale_y": float(scale_y),
-                "rotation_degrees": float(rotation_degrees),
-                "skew_x_degrees": float(skew_x_degrees), "skew_y_degrees": float(skew_y_degrees),
-                "pivot_x": float(pivot_x), "pivot_y": float(pivot_y),
-                "flip_x": bool(flip_x), "flip_y": bool(flip_y),
-            }
-            ok = dialog._preview_selection_transform(target=str(target), **settings)
+            ok = dialog._preview_selection_transform(target=resolved_target, **settings)
             if ok and value == "commit":
                 ok = dialog._commit_selection_transform()
         if not ok:
@@ -5386,8 +6100,17 @@ class PaintAdapterMixin(
         return dialog.painter_action_state()
 
     def paint_image_resize(self, *, width: int, height: int) -> dict[str, Any]:
+        from app.drawing import _validated_paint_dimensions
+        from app.painter_output import PAINTER_NEW_CANVAS_MIN_DIMENSION_PX
+
+        resolved_width, resolved_height = _validated_paint_dimensions(
+            width,
+            height,
+            minimum=PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+            context="Image resize",
+        )
         dialog = self._paint_dialog_owner()
-        dialog._resize_image_document(int(width), int(height))
+        dialog._resize_image_document(resolved_width, resolved_height)
         return dialog.painter_action_state()
 
     def paint_canvas_resize(
@@ -5397,70 +6120,128 @@ class PaintAdapterMixin(
         height: int,
         background: str = "transparent",
     ) -> dict[str, Any]:
+        from app.drawing import _validated_paint_background, _validated_paint_dimensions
+        from app.painter_output import PAINTER_NEW_CANVAS_MIN_DIMENSION_PX
+
+        resolved_width, resolved_height = _validated_paint_dimensions(
+            width,
+            height,
+            minimum=PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+            context="Canvas resize",
+        )
+        resolved_background = _validated_paint_background(background)
         dialog = self._paint_dialog_owner()
-        dialog._resize_canvas_document(int(width), int(height), background=str(background))
+        dialog._resize_canvas_document(
+            resolved_width,
+            resolved_height,
+            background=resolved_background,
+        )
         return dialog.painter_action_state()
 
-    def paint_canvas_flip(self, *, axis: str = "horizontal") -> dict[str, Any]:
+    def paint_canvas_flip(self, *, axis: object) -> dict[str, Any]:
+        value = validate_canvas_flip_action(axis)
         dialog = self._paint_dialog_owner()
-        value = str(axis or "horizontal").strip().casefold()
-        dialog._flip_canvas(horizontal=value in {"horizontal", "x"})
+        if not dialog._flip_canvas(horizontal=value == "horizontal"):
+            raise ValueError("Painter canvas flip did not change the document")
         return dialog.painter_action_state()
 
-    def paint_fill_solid(self, *, color: str = "") -> dict[str, Any]:
+    def paint_fill_solid(self, *, color: object) -> dict[str, Any]:
+        resolved_color = validate_fill_color_action(color, field="color")
         dialog = self._paint_dialog_owner()
-        dialog._fill_document("solid", color1=str(color or "") or None)
+        if not dialog._fill_document("solid", color1=resolved_color):
+            raise ValueError("Painter solid fill could not modify the active raster layer")
         return dialog.painter_action_state()
 
-    def paint_fill_gradient(self, *, color1: str = "", color2: str = "") -> dict[str, Any]:
+    def paint_fill_gradient(self, *, color1: object, color2: object) -> dict[str, Any]:
+        resolved_color1, resolved_color2 = validate_fill_color_pair_action(
+            color1=color1,
+            color2=color2,
+        )
         dialog = self._paint_dialog_owner()
-        dialog._fill_document(
+        if not dialog._fill_document(
             "gradient",
-            color1=str(color1 or "") or None,
-            color2=str(color2 or "") or None,
-        )
+            color1=resolved_color1,
+            color2=resolved_color2,
+        ):
+            raise ValueError("Painter gradient fill could not modify the active raster layer")
         return dialog.painter_action_state()
 
-    def paint_fill_pattern(self, *, color1: str = "", color2: str = "") -> dict[str, Any]:
+    def paint_fill_pattern(self, *, color1: object, color2: object) -> dict[str, Any]:
+        resolved_color1, resolved_color2 = validate_fill_color_pair_action(
+            color1=color1,
+            color2=color2,
+        )
         dialog = self._paint_dialog_owner()
-        dialog._fill_document(
+        if not dialog._fill_document(
             "pattern",
-            color1=str(color1 or "") or None,
-            color2=str(color2 or "") or None,
+            color1=resolved_color1,
+            color2=resolved_color2,
+        ):
+            raise ValueError("Painter pattern fill could not modify the active raster layer")
+        return dialog.painter_action_state()
+
+    def paint_mirror_set(
+        self,
+        *,
+        x: object = PAINTER_ACTION_INPUT_UNSET,
+        y: object = PAINTER_ACTION_INPUT_UNSET,
+    ) -> dict[str, Any]:
+        resolved_x, resolved_y = validate_mirror_action(x=x, y=y)
+        dialog = self._paint_dialog_owner()
+        before = (
+            bool(getattr(dialog, "_mirror_x_enabled", False)),
+            bool(getattr(dialog, "_mirror_y_enabled", False)),
         )
+        dialog._set_mirror_enabled(x=resolved_x, y=resolved_y)
+        after = (
+            bool(getattr(dialog, "_mirror_x_enabled", False)),
+            bool(getattr(dialog, "_mirror_y_enabled", False)),
+        )
+        if after == before:
+            raise ValueError("Painter mirror action did not change either axis")
         return dialog.painter_action_state()
 
-    def paint_mirror_set(self, *, x: bool | None = None, y: bool | None = None) -> dict[str, Any]:
+    def paint_layer_mask_from_selection(self, *, layer_id: object = "") -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        dialog._set_mirror_enabled(x=x, y=y)
-        return dialog.painter_action_state()
-
-    def paint_layer_mask_from_selection(self, *, layer_id: str = "") -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        if layer_id and not dialog._select_paint_layer_by_id(layer_id):
-            raise ValueError("paint layer not found")
-        if not dialog._mask_selected_layer_from_selection():
+        if not dialog._create_layer_mask("selection", resolved_layer_id or None):
             raise ValueError("layer mask from selection requires an active selection")
         return dialog.painter_action_state()
 
-    def paint_layer_mask_from_path(self, *, layer_id: str = "", path_id: str = "") -> dict[str, Any]:
+    def paint_layer_mask_from_path(
+        self,
+        *,
+        layer_id: object = "",
+        path_id: object,
+    ) -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
+        resolved_path_id = validate_path_id_action(path_id)
+        if not resolved_path_id:
+            raise ValueError("Painter layer mask from path requires path_id")
         dialog = self._paint_dialog_owner()
-        if layer_id and not dialog._select_paint_layer_by_id(layer_id):
-            raise ValueError("paint layer not found")
-        if path_id:
-            dialog._selected_path_item_id = str(path_id)
-        if not dialog._mask_selected_layer_from_path():
+        if not dialog._create_layer_mask(
+            "path",
+            resolved_layer_id or None,
+            path_id=resolved_path_id,
+        ):
             raise ValueError("layer mask from path requires a path with at least 3 points")
         return dialog.painter_action_state()
 
     def paint_layer_mask_create(
         self,
         *,
-        layer_id: str = "",
-        mask_type: str = "selection",
+        layer_id: object = "",
+        mask_type: object,
     ) -> dict[str, Any]:
+        resolved_layer_id, resolved_mask_type = validate_layer_mask_source_action(
+            layer_id=layer_id,
+            mask_type=mask_type,
+        )
         dialog = self._paint_dialog_owner()
-        if not dialog._create_layer_mask(str(mask_type or "selection"), layer_id or None):
+        if not dialog._create_layer_mask(
+            resolved_mask_type,
+            resolved_layer_id or None,
+        ):
             raise ValueError("layer mask creation requires valid mask source pixels or points")
         return dialog.painter_action_state()
 
@@ -5468,16 +6249,22 @@ class PaintAdapterMixin(
         self,
         *,
         layer_id: str = "",
-        enabled: bool | None = None,
-        linked: bool | None = None,
-        delete: bool = False,
+        enabled: object = PAINTER_ACTION_INPUT_UNSET,
+        linked: object = PAINTER_ACTION_INPUT_UNSET,
+        delete: object = PAINTER_ACTION_INPUT_UNSET,
     ) -> dict[str, Any]:
+        layer_id, enabled, linked, delete = validate_layer_mask_state_action(
+            layer_id=layer_id,
+            enabled=enabled,
+            linked=linked,
+            delete=delete,
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._set_layer_mask_state(
             layer_id or None,
             enabled=enabled,
             linked=linked,
-            delete=bool(delete),
+            delete=delete,
         ):
             raise ValueError("Painter layer mask state did not change")
         return dialog.painter_action_state()
@@ -5491,13 +6278,20 @@ class PaintAdapterMixin(
         radius_px: float,
         value: int,
     ) -> dict[str, Any]:
+        layer_id, x, y, radius_px, value = validate_layer_mask_paint_action(
+            layer_id=layer_id,
+            x=x,
+            y=y,
+            radius_px=radius_px,
+            value=value,
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._paint_layer_mask_circle(
             layer_id or None,
-            x_norm=float(x),
-            y_norm=float(y),
-            radius_px=float(radius_px),
-            value=int(value),
+            x_norm=x,
+            y_norm=y,
+            radius_px=radius_px,
+            value=value,
         ):
             raise ValueError("Painter layer mask paint requires an unlocked paint layer")
         return dialog.painter_action_state()
@@ -5511,32 +6305,36 @@ class PaintAdapterMixin(
         start_value: int = 0,
         end_value: int = 255,
     ) -> dict[str, Any]:
-        start = list(start or [])
-        end = list(end or [])
-        if len(start) < 2 or len(end) < 2:
-            raise ValueError("Painter layer mask gradient needs start/end x,y pairs")
+        layer_id, start, end, start_value, end_value = validate_layer_mask_gradient_action(
+            layer_id=layer_id,
+            start=start,
+            end=end,
+            start_value=start_value,
+            end_value=end_value,
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._set_layer_mask_gradient(
             layer_id or None,
-            start=(float(start[0]), float(start[1])),
-            end=(float(end[0]), float(end[1])),
-            start_value=int(start_value),
-            end_value=int(end_value),
+            start=start,
+            end=end,
+            start_value=start_value,
+            end_value=end_value,
         ):
             raise ValueError("Painter layer mask gradient requires an unlocked layer")
         return dialog.painter_action_state()
 
-    def paint_layer_mask_apply(self, *, layer_id: str = "") -> dict[str, Any]:
+    def paint_layer_mask_apply(self, *, layer_id: object = "") -> dict[str, Any]:
+        resolved_layer_id = validate_optional_layer_id_action(layer_id)
         dialog = self._paint_dialog_owner()
-        if not dialog._apply_selected_layer_mask(layer_id or None):
+        if not dialog._apply_selected_layer_mask(resolved_layer_id or None):
             raise ValueError("Painter layer mask apply requires an enabled raster mask")
         return dialog.painter_action_state()
 
     def paint_path_to_selection(self, *, path_id: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
         dialog = self._paint_dialog_owner()
-        if path_id:
-            dialog._selected_path_item_id = str(path_id)
-        dialog._make_selection_from_selected_path()
+        if not dialog._make_selection_from_selected_path(path_id or None):
+            raise ValueError("Painter path to selection requires at least three path points")
         return dialog.painter_action_state()
 
     def paint_path_create(
@@ -5546,12 +6344,18 @@ class PaintAdapterMixin(
         closed: bool = True,
         make_selection: bool = False,
     ) -> dict[str, Any]:
+        points, closed, make_selection = validate_path_create_action(
+            points=points,
+            closed=closed,
+            make_selection=make_selection,
+        )
         dialog = self._paint_dialog_owner()
-        if not dialog._create_path_from_points(points or [], closed=bool(closed), make_selection=bool(make_selection)):
+        if not dialog._create_path_from_points(points, closed=closed, make_selection=make_selection):
             raise ValueError("path requires at least two valid normalized points")
         return dialog.painter_action_state()
 
     def paint_path_delete(self, *, path_id: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
         dialog = self._paint_dialog_owner()
         if not dialog._delete_path_by_id(path_id or None):
             raise ValueError("paint path not found")
@@ -5562,33 +6366,50 @@ class PaintAdapterMixin(
         point: list | None = None, in_handle: list | None = None,
         out_handle: list | None = None,
     ) -> dict[str, Any]:
+        path_id, index, operation, point, in_handle, out_handle = (
+            validate_path_anchor_action(
+                path_id=path_id,
+                index=index,
+                operation=operation,
+                point=point,
+                in_handle=in_handle,
+                out_handle=out_handle,
+            )
+        )
         dialog = self._paint_dialog_owner()
         if not dialog._edit_path_anchor(
-            path_id or None, int(index), str(operation), point=point,
+            path_id or None, index, operation, point=point,
             in_handle=in_handle, out_handle=out_handle,
         ):
             raise ValueError("Painter path anchor could not be edited")
         return dialog.painter_action_state()
 
     def paint_path_duplicate(self, *, path_id: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
         dialog = self._paint_dialog_owner()
         if not dialog._duplicate_path(path_id or None):
             raise ValueError("Painter path not found")
         return dialog.painter_action_state()
 
     def paint_path_rename(self, *, name: str = "", path_id: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
+        name = validate_path_name_action(name)
         dialog = self._paint_dialog_owner()
-        if not dialog._rename_path(str(name), path_id or None):
+        if not dialog._rename_path(name, path_id or None):
             raise ValueError("Painter path could not be renamed")
         return dialog.painter_action_state()
 
     def paint_path_reorder(self, *, index: int = 0, path_id: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
+        index = validate_path_reorder_action(index)
         dialog = self._paint_dialog_owner()
-        if not dialog._reorder_path(path_id or None, int(index)):
+        if not dialog._reorder_path(path_id or None, index):
             raise ValueError("Painter path order did not change")
         return dialog.painter_action_state()
 
     def paint_path_fill(self, *, path_id: str = "", color: str = "") -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
+        color = validate_optional_path_color_action(color)
         dialog = self._paint_dialog_owner()
         if not dialog._fill_saved_path(path_id or None, color or None):
             raise ValueError("closed Painter path could not be filled")
@@ -5597,6 +6418,8 @@ class PaintAdapterMixin(
     def paint_path_stroke(
         self, *, path_id: str = "", color: str = "", width_px: float | None = None
     ) -> dict[str, Any]:
+        path_id = validate_path_id_action(path_id)
+        color, width_px = validate_path_stroke_action(color=color, width_px=width_px)
         dialog = self._paint_dialog_owner()
         if not dialog._stroke_saved_path(path_id or None, color or None, width_px):
             raise ValueError("Painter path could not be stroked")
@@ -5608,23 +6431,28 @@ class PaintAdapterMixin(
         return dialog.painter_action_state()
 
     def paint_path_commit(self, *, closed: bool = False) -> dict[str, Any]:
+        if not isinstance(closed, bool):
+            raise TypeError("Painter path closed must be a boolean")
         dialog = self._paint_dialog_owner()
-        dialog._commit_path(bool(closed))
+        dialog._commit_path(closed)
         return dialog.painter_action_state()
 
     def paint_clipboard_copy(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._copy_selected_layer()
+        if not dialog._copy_selected_layer():
+            raise ValueError("Painter clipboard copy requires selected paint content")
         return dialog.painter_action_state()
 
     def paint_clipboard_cut(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._cut_selected_layer()
+        if not dialog._cut_selected_layer():
+            raise ValueError("Painter clipboard cut requires editable selected paint content")
         return dialog.painter_action_state()
 
     def paint_clipboard_paste(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._paste_layer_clipboard()
+        if not dialog._paste_layer_clipboard():
+            raise ValueError("Painter clipboard paste found no supported clipboard content")
         return dialog.painter_action_state()
 
     def paint_tool_set(self, *, tool: str = "select") -> dict[str, Any]:
@@ -5672,31 +6500,52 @@ class PaintAdapterMixin(
         flip_y: bool | None = None,
         dynamics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        from app.drawing import BRUSH_LIBRARY_PRESETS, _normalize_paint_brush_style
+        validated = validate_brush_set_action(
+            preset=preset,
+            style=style,
+            width=width,
+            opacity=opacity,
+            hardness=hardness,
+            spacing=spacing,
+            angle=angle,
+            roundness=roundness,
+            flip_x=flip_x,
+            flip_y=flip_y,
+            dynamics=dynamics,
+        )
+        from app.drawing import BRUSH_LIBRARY_PRESETS
 
-        preset_key = str(preset or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        preset_key = str(validated["preset"]).casefold().replace("-", "_").replace(" ", "_")
+        preset_row = None
         if preset_key:
             for row in BRUSH_LIBRARY_PRESETS:
                 name_key = str(row.get("name") or "").strip().casefold().replace("-", "_").replace(" ", "_")
                 style_key = str(row.get("style") or "").strip().casefold().replace("-", "_").replace(" ", "_")
                 if preset_key in {name_key, style_key}:
-                    dialog._apply_brush_library_preset(row)
+                    preset_row = row
                     break
-            else:
+            if preset_row is None:
                 raise ValueError("Painter brush preset not found")
 
-        if style:
-            style_id = _normalize_paint_brush_style(str(style))
+        dialog = self._paint_dialog_owner()
+        style_combo = getattr(dialog, "brush_style_combo", None)
+        style_combo_index = None
+        if str(validated["style"]) and style_combo is not None:
+            style_combo_index = style_combo.findData(str(validated["style"]))
+            if style_combo_index < 0:
+                raise ValueError("Painter brush style is missing from the active style control")
+        if preset_row is not None:
+            dialog._apply_brush_library_preset(preset_row)
+
+        style_id = str(validated["style"])
+        if style_id:
             dialog._pen_style = style_id
             if hasattr(dialog, "canvas"):
                 dialog.canvas.set_pen_style(style_id)
-            if hasattr(dialog, "brush_style_combo"):
-                index = dialog.brush_style_combo.findData(style_id)
-                if index >= 0:
-                    dialog.brush_style_combo.setCurrentIndex(index)
-        if width is not None:
-            value = max(1, min(PAINT_ACTION_MAX_BRUSH_WIDTH_PX, int(width or 1)))
+            if style_combo_index is not None:
+                style_combo.setCurrentIndex(style_combo_index)
+        if validated["width"] is not None:
+            value = validated["width"]
             dialog._pen_width = float(value)
             if hasattr(dialog, "canvas"):
                 dialog.canvas.set_pen_width(dialog._pen_width)
@@ -5704,8 +6553,8 @@ class PaintAdapterMixin(
                 dialog.width_slider.setValue(value)
             if hasattr(dialog, "_width_value_label"):
                 dialog._width_value_label.setText(f"{value} px")
-        if opacity is not None:
-            value = max(10, min(100, int(opacity or 100)))
+        if validated["opacity"] is not None:
+            value = validated["opacity"]
             if hasattr(dialog, "opacity_slider"):
                 dialog.opacity_slider.setValue(value)
             else:
@@ -5713,19 +6562,19 @@ class PaintAdapterMixin(
                 if hasattr(dialog, "canvas"):
                     dialog.canvas.set_pen_opacity(dialog._pen_opacity)
         for key, value in (
-            ("hardness", hardness),
-            ("spacing", spacing),
-            ("angle", angle),
-            ("roundness", roundness),
+            ("hardness", validated["hardness"]),
+            ("spacing", validated["spacing"]),
+            ("angle", validated["angle"]),
+            ("roundness", validated["roundness"]),
         ):
             if value is not None:
-                dialog._set_brush_detail_value(key, int(value))
-        if flip_x is not None:
-            dialog._set_brush_detail_toggle("flip_x", bool(flip_x))
-        if flip_y is not None:
-            dialog._set_brush_detail_toggle("flip_y", bool(flip_y))
-        if dynamics is not None:
-            dialog._set_brush_dynamics(dict(dynamics))
+                dialog._set_brush_detail_value(key, validated[key])
+        if validated["flip_x"] is not None:
+            dialog._set_brush_detail_toggle("flip_x", bool(validated["flip_x"]))
+        if validated["flip_y"] is not None:
+            dialog._set_brush_detail_toggle("flip_y", bool(validated["flip_y"]))
+        if validated["dynamics"] is not None:
+            dialog._set_brush_dynamics(dict(validated["dynamics"]))
         dialog._set_tool("pen")
         return dialog.painter_action_state()
 
@@ -5737,12 +6586,20 @@ class PaintAdapterMixin(
         maximum: float = 1.0,
         curve: list[list[float]] | None = None,
     ) -> dict[str, Any]:
+        resolved_device_id, resolved_minimum, resolved_maximum, resolved_curve = (
+            validate_pressure_calibration_action(
+                device_id=device_id,
+                minimum=minimum,
+                maximum=maximum,
+                curve=curve,
+            )
+        )
         dialog = self._paint_dialog_owner()
         profile = dialog._set_brush_pressure_calibration(
-            device_id,
-            minimum=minimum,
-            maximum=maximum,
-            curve=curve,
+            resolved_device_id,
+            minimum=resolved_minimum,
+            maximum=resolved_maximum,
+            curve=resolved_curve,
         )
         return {"profile": profile, "state": dialog.painter_action_state()}
 
@@ -5779,9 +6636,10 @@ class PaintAdapterMixin(
         values: list[float],
         target: str = "foreground",
     ) -> dict[str, Any]:
+        components = list(normalize_painter_numeric_color_components(values))
         dialog = self._paint_dialog_owner()
         return {
-            "color": dialog._set_painter_numeric_color(space, values, target=target),
+            "color": dialog._set_painter_numeric_color(space, components, target=target),
             "state": dialog.painter_action_state(),
         }
 
@@ -5932,15 +6790,10 @@ class PaintAdapterMixin(
         strokes: list[dict[str, Any]] | None = None,
         undo_label: str = "",
     ) -> dict[str, Any]:
+        rows = validate_paint_stroke_request(strokes)
+        if not isinstance(undo_label, str):
+            raise TypeError("Painter stroke undo_label must be a string")
         dialog = self._paint_dialog_owner()
-        rows = list(strokes or [])
-        if not rows:
-            raise ValueError("strokes must contain at least one stroke")
-        if len(rows) > PAINT_ACTION_MAX_STROKES_PER_REQUEST:
-            raise ValueError(
-                "strokes cannot contain more than "
-                f"{PAINT_ACTION_MAX_STROKES_PER_REQUEST} entries"
-            )
 
         from PySide6.QtGui import QColor
 
@@ -5955,21 +6808,10 @@ class PaintAdapterMixin(
         point_count = 0
         rendered_point_count = 0
         for index, row in enumerate(rows):
-            if not isinstance(row, dict):
-                raise ValueError(f"stroke {index} must be an object")
-            raw_points = list(row.get("points") or [])
-            if len(raw_points) < 2:
-                raise ValueError(f"stroke {index} requires at least two points")
-            if len(raw_points) > PAINT_ACTION_MAX_POINTS_PER_STROKE:
-                raise ValueError(
-                    f"stroke {index} exceeds the "
-                    f"{PAINT_ACTION_MAX_POINTS_PER_STROKE} point request limit"
-                )
+            raw_points = list(row["points"])
             point_count += len(raw_points)
-            path_mode = str(row.get("path_mode") or "smooth").strip().casefold()
-            if path_mode not in {"smooth", "polyline"}:
-                raise ValueError(f"stroke {index} has invalid path_mode: {path_mode}")
-            if path_mode == "smooth" and len(raw_points) >= 3:
+            path_mode = str(row["path_mode"])
+            if path_mode == "smooth":
                 from app.painter_stroke_geometry import smooth_action_points
 
                 raw_points = smooth_action_points(raw_points)
@@ -5996,25 +6838,20 @@ class PaintAdapterMixin(
                     )
                 points.append((x, y))
                 channels = {
-                    "pressure": float(point.get("pressure", 1.0)),
-                    "tilt": float(point.get("tilt", 0.5)),
-                    "tilt_x": float(point.get("tilt_x", 0.0)),
-                    "tilt_y": float(point.get("tilt_y", 0.0)),
-                    "rotation": float(point.get("rotation", 0.5)),
-                    "tangential_pressure": float(point.get("tangential_pressure", 0.0)),
-                    "load": float(point.get("load", 1.0)),
+                    field: float(point[field])
+                    for field in PAINT_ACTION_STROKE_DEFAULT_POINT_CHANNELS
                 }
                 if not all(math.isfinite(value) for value in channels.values()):
                     raise ValueError(
                         f"stroke {index} point {point_index} channels must be finite"
                     )
-                pressure.append(max(0.0, min(1.0, channels["pressure"])))
-                tilt.append(max(0.0, min(1.0, channels["tilt"])))
-                tilt_x.append(max(-1.0, min(1.0, channels["tilt_x"])))
-                tilt_y.append(max(-1.0, min(1.0, channels["tilt_y"])))
-                rotation.append(max(0.0, min(1.0, channels["rotation"])))
-                tangential_pressure.append(max(-1.0, min(1.0, channels["tangential_pressure"])))
-                paint_load.append(max(0.0, min(1.0, channels["load"])))
+                pressure.append(channels["pressure"])
+                tilt.append(channels["tilt"])
+                tilt_x.append(channels["tilt_x"])
+                tilt_y.append(channels["tilt_y"])
+                rotation.append(channels["rotation"])
+                tangential_pressure.append(channels["tangential_pressure"])
+                paint_load.append(channels["load"])
 
             layer_id = str(row.get("layer_id") or active_layer_id)
             layer = paint_layers.get(layer_id)
@@ -6023,17 +6860,21 @@ class PaintAdapterMixin(
             if bool(getattr(layer, "locked", False)):
                 raise ValueError(f"stroke {index} targets locked layer_id: {layer_id}")
 
-            color_value = str(row.get("color") or "#EEF2F7")
+            color_value = str(row["color"])
             color = QColor(color_value)
             if not color.isValid():
                 raise ValueError(f"stroke {index} has invalid color: {color_value}")
-            opacity_percent = max(1, min(100, int(row.get("opacity", 100) or 100)))
+            opacity_percent = int(row["opacity"])
             is_material = str(getattr(layer, "layer_type", "standard") or "standard") == "material"
-            engine_version = max(
-                1,
-                min(2, int(row.get("engine_version", 2 if is_material else 1) or 1)),
+            engine_version = int(
+                row.get(
+                    "engine_version",
+                    PAINT_ACTION_STROKE_ENGINE_VERSION_MAX
+                    if is_material
+                    else PAINT_ACTION_STROKE_ENGINE_VERSION_MIN,
+                )
             )
-            material = {}
+            material = dict(PAINT_ACTION_STROKE_DEFAULT_MATERIAL_CHANNELS)
             if is_material:
                 from app.painter_material_paint import normalize_material_settings
 
@@ -6045,19 +6886,13 @@ class PaintAdapterMixin(
                     points=points,
                     color=(color.red(), color.green(), color.blue()),
                     opacity=int(round(opacity_percent * 255 / 100)),
-                    width_px=max(
-                        0.25,
-                        min(
-                            PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
-                            float(row.get("width", 4.0) or 4.0),
-                        ),
-                    ),
-                    brush_style=str(row.get("style") or "round"),
-                    brush_hardness=max(1, min(100, int(row.get("hardness", 100) or 100))),
-                    brush_spacing=max(1, min(200, int(row.get("spacing", 25) or 25))),
-                    brush_angle=max(-180, min(180, int(row.get("angle", 0) or 0))),
-                    brush_roundness=max(10, min(100, int(row.get("roundness", 100) or 100))),
-                    closed_path=bool(row.get("closed", False)),
+                    width_px=float(row["width"]),
+                    brush_style=str(row["style"]),
+                    brush_hardness=int(row["hardness"]),
+                    brush_spacing=int(row["spacing"]),
+                    brush_angle=int(row["angle"]),
+                    brush_roundness=int(row["roundness"]),
+                    closed_path=bool(row["closed"]),
                     layer_id=layer_id,
                     source_tool="ai_paint",
                     brush_engine_version=engine_version,
@@ -6068,32 +6903,52 @@ class PaintAdapterMixin(
                     point_rotation=rotation,
                     point_tangential_pressure=tangential_pressure,
                     point_load=paint_load,
-                    bristle_count=max(
-                        0, min(64, int(row.get("bristle_count", 0) or 0))
+                    bristle_count=int(row["bristle_count"]),
+                    brush_seed=int(
+                        row.get(
+                            "seed",
+                            index * PAINT_ACTION_STROKE_SEED_INDEX_FACTOR
+                            + len(points) * PAINT_ACTION_STROKE_SEED_POINT_FACTOR,
+                        )
                     ),
-                    brush_seed=int(row.get("seed", index * 7919 + len(points) * 131) or 0),
-                    load_depletion=max(
-                        0.0,
-                        min(1.0, float(row.get("load_depletion", 0.28) or 0.0)),
+                    load_depletion=float(
+                        row.get(
+                            "load_depletion",
+                            PAINT_ACTION_STROKE_DEFAULT_LOAD_DEPLETION,
+                        )
                     ),
                     material_enabled=is_material,
-                    material_load=float(material.get("load", 0.0)),
-                    material_thickness=float(material.get("thickness", 0.0)),
-                    material_wetness=float(material.get("wetness", 0.0)),
-                    material_gloss=float(material.get("gloss", 0.0)),
-                    material_roughness=float(material.get("roughness", 0.56)),
-                    material_plow=float(material.get("plow", 0.0)),
-                    material_resaturation=float(material.get("resaturation", 0.0)),
-                    material_negative_depth=bool(material.get("negative_depth", False)),
-                    start_ms=int(getattr(dialog, "_time_ms", 0) or 0),
+                    material_load=float(material["load"]),
+                    material_thickness=float(material["thickness"]),
+                    material_wetness=float(material["wetness"]),
+                    material_gloss=float(material["gloss"]),
+                    material_roughness=float(material["roughness"]),
+                    material_plow=float(material["plow"]),
+                    material_resaturation=float(material["resaturation"]),
+                    material_negative_depth=bool(material["negative_depth"]),
+                    start_ms=self._paint_action_time_ms(None),
                 )
             )
             rendered_point_count += len(points)
 
-        dialog._push_undo_state(str(undo_label or "AI paint strokes"))
-        existing = dialog.canvas.embedded_strokes()
-        dialog.canvas.set_strokes_snapshot([*existing, *prepared])
-        dialog._update_inspector_counts()
+        selected_channel = str(getattr(dialog, "_selected_channel", "") or "")
+        saved_channel = dialog._saved_selection_channel_by_id(selected_channel)
+        if saved_channel is not None:
+            if not dialog._apply_saved_selection_channel_strokes(
+                prepared,
+                undo_label=str(undo_label or "AI paint saved alpha channel"),
+            ):
+                raise ValueError("Painter saved alpha channel would not change")
+            stroke_target = {
+                "kind": "saved_selection_channel",
+                "channel_id": selected_channel,
+            }
+        else:
+            dialog._push_undo_state(str(undo_label or "AI paint strokes"))
+            existing = dialog.canvas.embedded_strokes()
+            dialog.canvas.set_strokes_snapshot([*existing, *prepared])
+            dialog._update_inspector_counts()
+            stroke_target = {"kind": "paint_layer", "layer_id": active_layer_id}
         state = dialog.painter_action_state()
         state["stroke_draw"] = {
             "stroke_count": len(prepared),
@@ -6101,6 +6956,7 @@ class PaintAdapterMixin(
             "rendered_point_count": rendered_point_count,
             "undo_label": str(undo_label or "AI paint strokes"),
             "coordinate_space": "normalized_canvas",
+            "target": stroke_target,
             "request_resource_contract": dict(PAINT_ACTION_REQUEST_RESOURCE_CONTRACT),
             "engine_versions": sorted(
                 {int(stroke.brush_engine_version) for stroke in prepared}
@@ -6152,20 +7008,21 @@ class PaintAdapterMixin(
         path: str = "",
         preview_mode: str = "material",
         preview_shape: str = "plane",
-        width: int = 512,
+        width: int = PAINT_ACTION_PBR_PREVIEW_DEFAULT_PX,
         settings: dict[str, Any] | None = None,
         allow_cpu: bool | None = None,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
+        preview_width = normalize_painter_pbr_preview_width(width)
         if not path:
             import tempfile
 
             path = str(Path(tempfile.gettempdir()) / "tiger_painter_pbr" / f"painter_pbr_{preview_mode or 'material'}.png")
+        dialog = self._paint_dialog_owner()
         return dialog.preview_pbr_map_to_path(
             path,
             preview_mode=str(preview_mode or "material"),
             preview_shape=str(preview_shape or "plane"),
-            width=int(width or 512),
+            width=preview_width,
             settings=dict(settings or {}),
             allow_cpu=allow_cpu,
         )
@@ -6225,8 +7082,11 @@ class PaintAdapterMixin(
         *,
         time_ms: int | None = None,
         include_inactive: bool = True,
-        limit: int = 100,
+        limit: int = PAINT_ACTION_EDITOR_OBJECT_DEFAULT_LIMIT,
     ) -> dict[str, Any]:
+        time_ms, include_inactive, limit = validate_editor_objects_list_action(
+            time_ms=time_ms, include_inactive=include_inactive, limit=limit
+        )
         owner = self._require_owner()
         target_ms = self._paint_action_time_ms(time_ms)
         from app.drawing_editor_object_import import collect_editor_paint_objects
@@ -6234,10 +7094,9 @@ class PaintAdapterMixin(
         rows = collect_editor_paint_objects(
             owner,
             time_ms=target_ms,
-            include_inactive=bool(include_inactive),
+            include_inactive=include_inactive,
         )
-        max_rows = max(0, _int(limit, 100))
-        objects = [self._paint_object_payload(row) for row in rows[:max_rows]]
+        objects = [self._paint_object_payload(row) for row in rows[:limit]]
         return {
             "schema": "tigerstudio.actions.paint.editor_objects.list.v1",
             "time_ms": target_ms,
@@ -6256,23 +7115,35 @@ class PaintAdapterMixin(
         output_dir: str = "",
         force: bool = False,
     ) -> dict[str, Any]:
-        obj = self._paint_find_import_object(
+        validated = validate_editor_object_locator_action(
             object_id=object_id,
             kind=kind,
             time_ms=time_ms,
             include_inactive=include_inactive,
+            output_dir=output_dir,
+            force=force,
         )
+        obj = self._paint_find_import_object(
+            object_id=str(validated["object_id"]),
+            kind=str(validated["kind"]),
+            time_ms=validated["time_ms"],
+            include_inactive=bool(validated["include_inactive"]),
+        )
+        object_payload = self._paint_object_payload(obj)
         from app.drawing_editor_object_import import render_paint_import_object
 
-        report = render_paint_import_object(
+        report = _paint_editor_object_render_report(
+            render_paint_import_object(
+                obj,
+                canvas_size=self._paint_canvas_size(),
+                output_dir=str(validated["output_dir"]) or None,
+                force=bool(validated["force"]),
+            ),
             obj,
-            canvas_size=self._paint_canvas_size(),
-            output_dir=output_dir or None,
-            force=bool(force),
         )
         return {
             "schema": "tigerstudio.actions.paint.editor_object.render.v1",
-            "object": self._paint_object_payload(obj),
+            "object": object_payload,
             "render": report,
         }
 
@@ -6290,32 +7161,77 @@ class PaintAdapterMixin(
         output_dir: str = "",
         force: bool = False,
     ) -> dict[str, Any]:
-        owner = self._require_owner()
-        obj = self._paint_find_import_object(
+        validated = validate_editor_object_locator_action(
             object_id=object_id,
             kind=kind,
             time_ms=time_ms,
             include_inactive=include_inactive,
+            output_dir=output_dir,
+            force=force,
         )
+        geometry = validate_editor_object_import_geometry_action(
+            x_norm=x_norm,
+            y_norm=y_norm,
+            width_norm=width_norm,
+            height_norm=height_norm,
+        )
+        owner = self._require_owner()
+        obj = self._paint_find_import_object(
+            object_id=str(validated["object_id"]),
+            kind=str(validated["kind"]),
+            time_ms=validated["time_ms"],
+            include_inactive=bool(validated["include_inactive"]),
+        )
+        object_payload = self._paint_object_payload(obj)
         from app.drawing import Sticker
         from app.drawing_editor_object_import import render_paint_import_object
 
-        report = render_paint_import_object(
+        report = _paint_editor_object_render_report(
+            render_paint_import_object(
+                obj,
+                canvas_size=self._paint_canvas_size(),
+                output_dir=str(validated["output_dir"]) or None,
+                force=bool(validated["force"]),
+            ),
             obj,
-            canvas_size=self._paint_canvas_size(),
-            output_dir=output_dir or None,
-            force=bool(force),
         )
-        rect = dict(report.get("rect_norm") or {})
-        w = _clamp_norm(width_norm if width_norm is not None else rect.get("w", obj.width_norm), 0.04, 1.0)
-        h = _clamp_norm(height_norm if height_norm is not None else rect.get("h", obj.height_norm), 0.04, 1.0)
-        x = _clamp_norm(x_norm if x_norm is not None else rect.get("x", obj.x_norm), 0.0, 1.0 - w)
-        y = _clamp_norm(y_norm if y_norm is not None else rect.get("y", obj.y_norm), 0.0, 1.0 - h)
+        raw_rect = report.get("rect_norm")
+        rect = dict(raw_rect) if isinstance(raw_rect, dict) else {}
+        w = (
+            float(geometry["width_norm"])
+            if geometry["width_norm"] is not None
+            else _clamp_norm(
+                rect.get("w", obj.width_norm),
+                PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+                1.0,
+            )
+        )
+        h = (
+            float(geometry["height_norm"])
+            if geometry["height_norm"] is not None
+            else _clamp_norm(
+                rect.get("h", obj.height_norm),
+                PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+                1.0,
+            )
+        )
+        x = (
+            float(geometry["x_norm"])
+            if geometry["x_norm"] is not None
+            else _clamp_norm(rect.get("x", obj.x_norm), 0.0, 1.0 - w)
+        )
+        y = (
+            float(geometry["y_norm"])
+            if geometry["y_norm"] is not None
+            else _clamp_norm(rect.get("y", obj.y_norm), 0.0, 1.0 - h)
+        )
+        if x + w > 1.0 or y + h > 1.0:
+            raise ValueError("Painter editor object authored geometry must fit the canvas")
         stickers = getattr(owner, "_stickers", None)
         if stickers is None:
             stickers = []
             setattr(owner, "_stickers", stickers)
-        start_ms = self._paint_action_time_ms(time_ms)
+        start_ms = self._paint_action_time_ms(validated["time_ms"])
         sticker = Sticker(
             png_path=str(report.get("png_path") or ""),
             x_norm=x,
@@ -6349,7 +7265,7 @@ class PaintAdapterMixin(
         self._register_change("Import editor object into paint")
         return {
             "schema": "tigerstudio.actions.paint.editor_object.import.v1",
-            "object": self._paint_object_payload(obj),
+            "object": object_payload,
             "sticker": {
                 "png_path": str(Path(sticker.png_path)),
                 "x_norm": sticker.x_norm,
@@ -6368,9 +7284,12 @@ class PaintAdapterMixin(
     def paint_3d_blockout_state(
         self,
         *,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
         dialog = self._paint_dialog_owner()
         scene = self._paint_3d_blockout_scene(dialog)
         return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
@@ -6378,10 +7297,16 @@ class PaintAdapterMixin(
     def paint_3d_blockout_add(
         self,
         *,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
         **params: Any,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        params = validate_blockout_primitive_action(
+            params, require_authored_field=False
+        )
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import add_blockout_primitive
 
@@ -6394,10 +7319,17 @@ class PaintAdapterMixin(
         self,
         *,
         primitive_id: str = "",
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
         **params: Any,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        params = validate_blockout_primitive_action(
+            params, require_authored_field=True
+        )
+        primitive_id = validate_blockout_primitive_id_action(primitive_id)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import update_blockout_primitive
 
@@ -6414,9 +7346,13 @@ class PaintAdapterMixin(
         self,
         *,
         primitive_id: str = "",
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        primitive_id = validate_blockout_primitive_id_action(primitive_id)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import delete_blockout_primitive
 
@@ -6432,16 +7368,23 @@ class PaintAdapterMixin(
         offset_x: float = 0.65,
         offset_y: float = 0.0,
         offset_z: float = 0.25,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        offset = validate_blockout_duplicate_offset_action(
+            offset_x, offset_y, offset_z
+        )
+        primitive_id = validate_blockout_primitive_id_action(primitive_id)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import duplicate_blockout_primitive
 
         scene = duplicate_blockout_primitive(
             self._paint_3d_blockout_scene(dialog),
             str(primitive_id or ""),
-            offset=(float(offset_x), float(offset_y), float(offset_z)),
+            offset=offset,
         )
         rows = scene.to_dict().get("primitives", [])
         if rows:
@@ -6454,9 +7397,13 @@ class PaintAdapterMixin(
         self,
         *,
         primitive_id: str = "",
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        primitive_id = validate_blockout_primitive_id_action(primitive_id)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import align_blockout_primitive_to_ground
 
@@ -6470,17 +7417,23 @@ class PaintAdapterMixin(
         *,
         enabled: bool | None = None,
         primitive_id: str = "",
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        enabled, primitive_id = validate_blockout_snap_action(
+            enabled=enabled, primitive_id=primitive_id
+        )
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import set_blockout_snap, snap_blockout_primitive_to_grid
 
         scene = self._paint_3d_blockout_scene(dialog)
         if enabled is not None:
-            scene = set_blockout_snap(scene, bool(enabled))
-        if str(primitive_id or "").strip():
-            scene = snap_blockout_primitive_to_grid(scene, str(primitive_id or ""))
+            scene = set_blockout_snap(scene, enabled)
+        if primitive_id:
+            scene = snap_blockout_primitive_to_grid(scene, primitive_id)
         self._store_paint_3d_blockout_scene(dialog, scene)
         self._register_change("Set Painter 3D blockout snap")
         return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
@@ -6488,14 +7441,20 @@ class PaintAdapterMixin(
     def paint_3d_blockout_camera(
         self,
         *,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
         **params: Any,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        resolved_params = validate_blockout_camera_action(params)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import update_blockout_camera
 
-        scene = update_blockout_camera(self._paint_3d_blockout_scene(dialog), **dict(params))
+        scene = update_blockout_camera(
+            self._paint_3d_blockout_scene(dialog), **resolved_params
+        )
         self._store_paint_3d_blockout_scene(dialog, scene)
         self._register_change("Adjust Painter 3D blockout camera")
         return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
@@ -6510,28 +7469,31 @@ class PaintAdapterMixin(
         show_depth: bool | None = None,
         light_yaw_degrees: float | None = None,
         light_pitch_degrees: float | None = None,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        changes = validate_blockout_material_preview_action(
+            {
+                key: value
+                for key, value in {
+                    "material_lit": material_lit,
+                    "show_floor": show_floor,
+                    "show_shadows": show_shadows,
+                    "show_fog": show_fog,
+                    "show_depth": show_depth,
+                    "light_yaw_degrees": light_yaw_degrees,
+                    "light_pitch_degrees": light_pitch_degrees,
+                }.items()
+                if value is not None
+            }
+        )
         from dataclasses import replace
 
         dialog = self._paint_dialog_owner()
         scene = self._paint_3d_blockout_scene(dialog)
-        changes: dict[str, Any] = {}
-        if material_lit is not None:
-            changes["material_lit"] = bool(material_lit)
-        if show_floor is not None:
-            changes["show_floor"] = bool(show_floor)
-        if show_shadows is not None:
-            changes["show_shadows"] = bool(show_shadows)
-        if show_fog is not None:
-            changes["show_fog"] = bool(show_fog)
-        if show_depth is not None:
-            changes["show_depth"] = bool(show_depth)
-        if light_yaw_degrees is not None:
-            changes["light_yaw_degrees"] = float(light_yaw_degrees)
-        if light_pitch_degrees is not None:
-            changes["light_pitch_degrees"] = float(light_pitch_degrees)
         scene = replace(scene, **changes).normalized()
         self._store_paint_3d_blockout_scene(dialog, scene)
         self._register_change("Adjust Painter 3D blockout material preview")
@@ -6545,13 +7507,17 @@ class PaintAdapterMixin(
         self,
         *,
         preset: str = "perspective",
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        preset = validate_blockout_camera_preset_action(preset)
         dialog = self._paint_dialog_owner()
         from app.painter_3d_blockout import apply_blockout_camera_preset
 
-        scene = apply_blockout_camera_preset(self._paint_3d_blockout_scene(dialog), str(preset or "perspective"))
+        scene = apply_blockout_camera_preset(self._paint_3d_blockout_scene(dialog), preset)
         self._store_paint_3d_blockout_scene(dialog, scene)
         self._register_change("Apply Painter 3D blockout camera preset")
         return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
@@ -6559,9 +7525,12 @@ class PaintAdapterMixin(
     def paint_3d_blockout_bake(
         self,
         *,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
         dialog = self._paint_dialog_owner()
         bake = getattr(dialog, "_bake_3d_blockout_to_layer", None)
         if not callable(bake):
@@ -6584,6 +7553,7 @@ class PaintAdapterMixin(
         width: int = 0,
         height: int = 0,
     ) -> dict[str, Any]:
+        frame_size = optional_paint_export_size(width, height)
         owner = self._require_owner()
         target_ms = self._paint_action_time_ms(time_ms)
         mode_text = str(mode or "composited").strip().casefold().replace("-", "_")
@@ -6597,13 +7567,10 @@ class PaintAdapterMixin(
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = str(default_save_dir() / f"paint_{suffix}_{stamp}.png")
         background = getattr(owner, "_preview_pixmap", None) if include_background else None
-        frame_size = None
-        if int(width or 0) > 0 and int(height or 0) > 0:
-            frame_size = (int(width), int(height))
-        else:
+        if frame_size is None:
             frame_size = self._paint_export_size_for_owner(background)
         canvas_w, _canvas_h = self._paint_canvas_size()
-        stroke_width_scale = max(0.001, float(frame_size[0]) / max(1, float(canvas_w)))
+        stroke_width_scale = float(frame_size[0]) / float(canvas_w)
         from app.drawing import export_paint_png
 
         report = export_paint_png(
@@ -6657,13 +7624,16 @@ class PaintAdapterMixin(
         self,
         scene: Any,
         *,
-        preview_width: int = 640,
-        preview_height: int = 360,
+        preview_width: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_WIDTH_PX,
+        preview_height: int = PAINT_ACTION_BLOCKOUT_PREVIEW_DEFAULT_HEIGHT_PX,
     ) -> dict[str, Any]:
         from app.painter_3d_blockout import project_blockout_scene
         from app.painter_opengl import PAINTER_OPENGL_RENDERER_ID
 
-        projection = project_blockout_scene(scene, int(preview_width or 640), int(preview_height or 360))
+        preview_width, preview_height = validate_blockout_preview_action(
+            preview_width, preview_height
+        )
+        projection = project_blockout_scene(scene, preview_width, preview_height)
         dialog = self._paint_dialog_owner()
         try:
             renderer_status = dict(getattr(dialog, "_painter_3d_blockout_renderer_status", {}) or {})
@@ -6756,43 +7726,44 @@ class PaintAdapterMixin(
 
     def _paint_action_time_ms(self, time_ms: int | None) -> int:
         if time_ms is not None:
-            return max(0, _int(time_ms, 0))
+            return normalize_paint_time_ms(time_ms)
         owner = self._require_owner()
         if hasattr(owner, "_time_ms"):
-            return max(0, int(owner._time_ms))
+            return normalize_paint_time_ms(owner._time_ms)
         player = getattr(owner, "_player", None)
         position = getattr(player, "position", None)
         if callable(position):
-            return max(0, _int(position(), 0))
+            return normalize_paint_time_ms(position())
         return 0
 
     def _paint_canvas_size(self) -> tuple[int, int]:
         owner = self._require_owner()
         document_size = getattr(owner, "_canvas_document_size", None)
-        if isinstance(document_size, (list, tuple)) and len(document_size) >= 2:
-            width, height = int(document_size[0]), int(document_size[1])
-            if width > 0 and height > 0:
+        if isinstance(document_size, (list, tuple)) and len(document_size) == 2:
+            width = _paint_positive_extent(document_size[0])
+            height = _paint_positive_extent(document_size[1])
+            if width is not None and height is not None:
                 return width, height
         for name in ("_drawing_canvas", "_preview_label", "_preview_widget"):
             widget = getattr(owner, name, None)
             if widget is not None:
-                width = int(widget.width())
-                height = int(widget.height())
-                if width > 0 and height > 0:
+                width = _paint_positive_extent(widget.width())
+                height = _paint_positive_extent(widget.height())
+                if width is not None and height is not None:
                     return (width, height)
         pixmap = getattr(owner, "_preview_pixmap", None)
         if pixmap is not None:
-            width = int(pixmap.width())
-            height = int(pixmap.height())
-            if width > 0 and height > 0:
+            width = _paint_positive_extent(pixmap.width())
+            height = _paint_positive_extent(pixmap.height())
+            if width is not None and height is not None:
                 return (width, height)
         raise ValueError("Painter canvas dimensions are unavailable")
 
     def _paint_export_size_for_owner(self, background: Any) -> tuple[int, int]:
         if background is not None:
-            width = int(background.width())
-            height = int(background.height())
-            if width > 0 and height > 0:
+            width = _paint_positive_extent(background.width())
+            height = _paint_positive_extent(background.height())
+            if width is not None and height is not None:
                 return (width, height)
         return self._paint_canvas_size()
 
@@ -6804,6 +7775,16 @@ class PaintAdapterMixin(
         time_ms: int | None = None,
         include_inactive: bool = True,
     ):
+        validated = validate_editor_object_locator_action(
+            object_id=object_id,
+            kind=kind,
+            time_ms=time_ms,
+            include_inactive=include_inactive,
+        )
+        object_id = str(validated["object_id"])
+        kind = str(validated["kind"])
+        time_ms = validated["time_ms"]
+        include_inactive = bool(validated["include_inactive"])
         owner = self._require_owner()
         target_ms = self._paint_action_time_ms(time_ms)
         from app.drawing_editor_object_import import collect_editor_paint_objects
@@ -6811,10 +7792,10 @@ class PaintAdapterMixin(
         rows = collect_editor_paint_objects(
             owner,
             time_ms=target_ms,
-            include_inactive=bool(include_inactive),
+            include_inactive=include_inactive,
         )
-        wanted_id = str(object_id or "").strip()
-        wanted_kind = str(kind or "").strip()
+        wanted_id = object_id
+        wanted_kind = kind
         if wanted_id:
             for row in rows:
                 if row.id == wanted_id:
@@ -6831,25 +7812,73 @@ class PaintAdapterMixin(
 
     @staticmethod
     def _paint_object_payload(obj: Any) -> dict[str, Any]:
+        width = _clamp_norm(
+            getattr(obj, "width_norm", PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM),
+            PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+            1.0,
+        )
+        height = _clamp_norm(
+            getattr(obj, "height_norm", PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM),
+            PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+            1.0,
+        )
         return {
             "id": str(getattr(obj, "id", "")),
             "kind": str(getattr(obj, "kind", "")),
             "label": str(getattr(obj, "label", "")),
             "source_path": str(getattr(obj, "source_path", "")),
             "active": bool(getattr(obj, "active", False)),
-            "start_ms": int(getattr(obj, "start_ms", 0) or 0),
-            "end_ms": int(getattr(obj, "end_ms", -1) or -1),
-            "x_norm": float(getattr(obj, "x_norm", 0.0) or 0.0),
-            "y_norm": float(getattr(obj, "y_norm", 0.0) or 0.0),
-            "width_norm": float(getattr(obj, "width_norm", 0.0) or 0.0),
-            "height_norm": float(getattr(obj, "height_norm", 0.0) or 0.0),
-            "payload": dict(getattr(obj, "payload", {}) or {}),
+            "start_ms": _paint_fallback_integer(getattr(obj, "start_ms", 0), 0),
+            "end_ms": _paint_fallback_integer(getattr(obj, "end_ms", -1), -1),
+            "x_norm": _clamp_norm(getattr(obj, "x_norm", 0.0), 0.0, 1.0 - width),
+            "y_norm": _clamp_norm(getattr(obj, "y_norm", 0.0), 0.0, 1.0 - height),
+            "width_norm": width,
+            "height_norm": height,
+            "payload": _paint_json_safe_copy(
+                dict(getattr(obj, "payload", {}) or {}),
+                field="Painter editor object payload",
+            ),
         }
 
     def _paint_reference_board(self, dialog: Any):
         from app.painter_reference_board import reference_board_from_dict
 
         return reference_board_from_dict(getattr(dialog, "_painter_reference_board", None))
+
+    def _apply_paint_reference_color_atomic(
+        self,
+        dialog: Any,
+        color: Any,
+        *,
+        remember: bool,
+    ) -> None:
+        from PySide6.QtGui import QColor
+
+        previous = {
+            "pen": QColor(getattr(dialog, "_pen_color", QColor())),
+            "previous_pen": QColor(getattr(dialog, "_previous_pen_color", QColor())),
+            "recent": list(getattr(dialog, "_recent_colors", []) or []),
+            "document": list(getattr(dialog, "_document_palette_colors", []) or []),
+            "dirty": bool(getattr(dialog, "_painter_document_dirty", False)),
+        }
+        try:
+            dialog._apply_pen_color(QColor(color), remember=remember)
+        except Exception:
+            dialog._pen_color = previous["pen"]
+            dialog._previous_pen_color = previous["previous_pen"]
+            dialog._recent_colors = previous["recent"]
+            dialog._document_palette_colors = previous["document"]
+            dialog._painter_document_dirty = previous["dirty"]
+            canvas = getattr(dialog, "canvas", None)
+            if canvas is not None:
+                try:
+                    canvas.set_pen_color(previous["pen"])
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        "Painter reference color rollback failed: "
+                        f"{type(rollback_exc).__name__}: {rollback_exc}"
+                    ) from rollback_exc
+            raise
 
     def _store_paint_reference_board(self, dialog: Any, board: Any) -> dict[str, Any]:
         setattr(dialog, "_painter_reference_board", board.to_dict())
@@ -6902,58 +7931,17 @@ class PaintAdapterMixin(
         *,
         path: str = "",
         name: str = "",
-        x_norm: float = 0.04,
-        y_norm: float = 0.04,
-        width_norm: float = 0.34,
-        height_norm: float = 0.34,
-        opacity: float = 0.58,
-        rotation_deg: float = 0.0,
+        x_norm: float = REFERENCE_DEFAULT_X_NORM,
+        y_norm: float = REFERENCE_DEFAULT_Y_NORM,
+        width_norm: float = REFERENCE_DEFAULT_WIDTH_NORM,
+        height_norm: float = REFERENCE_DEFAULT_HEIGHT_NORM,
+        opacity: float = REFERENCE_DEFAULT_OPACITY,
+        rotation_deg: float = REFERENCE_DEFAULT_ROTATION_DEGREES,
         visible: bool = True,
         locked: bool = False,
     ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        from app.painter_reference_board import add_reference_image
-
-        board = add_reference_image(
-            self._paint_reference_board(dialog),
-            path=str(path or ""),
-            name=str(name or ""),
-            x_norm=float(x_norm),
-            y_norm=float(y_norm),
-            width_norm=float(width_norm),
-            height_norm=float(height_norm),
-            opacity=float(opacity),
-            rotation_deg=float(rotation_deg),
-            visible=bool(visible),
-            locked=bool(locked),
-        )
-        rows = board.to_dict().get("references", [])
-        if rows:
-            setattr(dialog, "_painter_reference_selected_id", str(rows[-1].get("id") or ""))
-        self._store_paint_reference_board(dialog, board)
-        return self._paint_reference_payload(dialog)
-
-    def paint_reference_update(
-        self,
-        *,
-        reference_id: str = "",
-        name: str | None = None,
-        x_norm: float | None = None,
-        y_norm: float | None = None,
-        width_norm: float | None = None,
-        height_norm: float | None = None,
-        opacity: float | None = None,
-        rotation_deg: float | None = None,
-        visible: bool | None = None,
-        locked: bool | None = None,
-    ) -> dict[str, Any]:
-        dialog = self._paint_dialog_owner()
-        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
-        from app.painter_reference_board import update_reference_image
-
-        board = update_reference_image(
-            self._paint_reference_board(dialog),
-            target,
+        validated = validate_reference_add_action(
+            path=path,
             name=name,
             x_norm=x_norm,
             y_norm=y_norm,
@@ -6964,13 +7952,66 @@ class PaintAdapterMixin(
             visible=visible,
             locked=locked,
         )
+        dialog = self._paint_dialog_owner()
+        from app.painter_reference_board import add_reference_image
+
+        board = add_reference_image(
+            self._paint_reference_board(dialog),
+            **validated,
+        )
+        rows = board.to_dict().get("references", [])
+        if rows:
+            setattr(dialog, "_painter_reference_selected_id", str(rows[-1].get("id") or ""))
+        self._store_paint_reference_board(dialog, board)
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_update(
+        self,
+        *,
+        reference_id: object = PAINTER_ACTION_INPUT_UNSET,
+        name: object = PAINTER_ACTION_INPUT_UNSET,
+        x_norm: object = PAINTER_ACTION_INPUT_UNSET,
+        y_norm: object = PAINTER_ACTION_INPUT_UNSET,
+        width_norm: object = PAINTER_ACTION_INPUT_UNSET,
+        height_norm: object = PAINTER_ACTION_INPUT_UNSET,
+        opacity: object = PAINTER_ACTION_INPUT_UNSET,
+        rotation_deg: object = PAINTER_ACTION_INPUT_UNSET,
+        visible: object = PAINTER_ACTION_INPUT_UNSET,
+        locked: object = PAINTER_ACTION_INPUT_UNSET,
+    ) -> dict[str, Any]:
+        reference_id, changes = validate_reference_update_action(
+            reference_id=reference_id,
+            name=name,
+            x_norm=x_norm,
+            y_norm=y_norm,
+            width_norm=width_norm,
+            height_norm=height_norm,
+            opacity=opacity,
+            rotation_deg=rotation_deg,
+            visible=visible,
+            locked=locked,
+        )
+        dialog = self._paint_dialog_owner()
+        target = reference_id
+        from app.painter_reference_board import update_reference_image
+
+        board = update_reference_image(
+            self._paint_reference_board(dialog),
+            target,
+            **changes,
+        )
         setattr(dialog, "_painter_reference_selected_id", target)
         self._store_paint_reference_board(dialog, board)
         return self._paint_reference_payload(dialog)
 
-    def paint_reference_delete(self, *, reference_id: str = "") -> dict[str, Any]:
+    def paint_reference_delete(
+        self,
+        *,
+        reference_id: object = PAINTER_ACTION_INPUT_UNSET,
+    ) -> dict[str, Any]:
+        reference_id = validate_reference_id_action(reference_id, allow_empty=False)
         dialog = self._paint_dialog_owner()
-        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        target = reference_id
         from app.painter_reference_board import delete_reference_image
 
         board = delete_reference_image(self._paint_reference_board(dialog), target)
@@ -6982,19 +8023,24 @@ class PaintAdapterMixin(
     def paint_reference_duplicate(
         self,
         *,
-        reference_id: str = "",
-        offset_x: float = 0.04,
-        offset_y: float = 0.04,
+        reference_id: object = PAINTER_ACTION_INPUT_UNSET,
+        offset_x: float = REFERENCE_DUPLICATE_OFFSET_NORM,
+        offset_y: float = REFERENCE_DUPLICATE_OFFSET_NORM,
     ) -> dict[str, Any]:
+        reference_id, offset_x, offset_y = validate_reference_duplicate_action(
+            reference_id=reference_id,
+            offset_x=offset_x,
+            offset_y=offset_y,
+        )
         dialog = self._paint_dialog_owner()
-        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        target = reference_id
         from app.painter_reference_board import duplicate_reference_image
 
         board = duplicate_reference_image(
             self._paint_reference_board(dialog),
             target,
-            offset_x=float(offset_x),
-            offset_y=float(offset_y),
+            offset_x=offset_x,
+            offset_y=offset_y,
         )
         rows = board.to_dict().get("references", [])
         if rows:
@@ -7003,6 +8049,7 @@ class PaintAdapterMixin(
         return self._paint_reference_payload(dialog)
 
     def paint_reference_bake(self, *, reference_id: str = "") -> dict[str, Any]:
+        reference_id = validate_reference_id_action(reference_id)
         dialog = self._paint_dialog_owner()
         if reference_id:
             setattr(dialog, "_painter_reference_selected_id", str(reference_id))
@@ -7020,24 +8067,49 @@ class PaintAdapterMixin(
         y_norm: float = 0.5,
         apply: bool = True,
     ) -> dict[str, Any]:
+        (
+            resolved_reference_id,
+            resolved_x_norm,
+            resolved_y_norm,
+            resolved_apply,
+        ) = validate_reference_sample_action(
+            reference_id=reference_id,
+            x_norm=x_norm,
+            y_norm=y_norm,
+            apply=apply,
+        )
         dialog = self._paint_dialog_owner()
-        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
-        if target:
-            setattr(dialog, "_painter_reference_selected_id", target)
-        reference = dialog._selected_reference_payload()
+        target = resolved_reference_id or str(
+            getattr(dialog, "_painter_reference_selected_id", "") or ""
+        )
+        rows = self._paint_reference_board(dialog).to_dict().get("references", [])
+        reference = next(
+            (row for row in rows if str(row.get("id") or "") == target),
+            None,
+        )
         if not reference:
             raise ValueError("Painter reference not found")
         from app.painter_reference_board import sample_reference_color
         from PySide6.QtGui import QColor
 
-        sample = sample_reference_color(str(reference.get("path") or ""), x_norm=float(x_norm), y_norm=float(y_norm))
-        if bool(apply):
+        sample = sample_reference_color(
+            str(reference.get("path") or ""),
+            x_norm=resolved_x_norm,
+            y_norm=resolved_y_norm,
+        )
+        if resolved_apply:
             rgb = sample.get("rgb", [255, 255, 255])
-            dialog._apply_pen_color(QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])), remember=True)
+            self._apply_paint_reference_color_atomic(
+                dialog,
+                QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])),
+                remember=True,
+            )
+        if resolved_reference_id:
+            setattr(dialog, "_painter_reference_selected_id", resolved_reference_id)
         return {
             **self._paint_reference_payload(dialog),
             "sample": sample,
-            "applied_to_foreground": bool(apply),
+            "applied_to_foreground": resolved_apply,
         }
 
     def paint_reference_extract_palette(
@@ -7047,11 +8119,22 @@ class PaintAdapterMixin(
         max_colors: int = PAINT_ACTION_DEFAULT_REFERENCE_COLORS,
         apply: bool = True,
     ) -> dict[str, Any]:
+        resolved_reference_id, resolved_max_colors, resolved_apply = (
+            validate_reference_palette_action(
+                reference_id=reference_id,
+                max_colors=max_colors,
+                apply=apply,
+            )
+        )
         dialog = self._paint_dialog_owner()
-        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
-        if target:
-            setattr(dialog, "_painter_reference_selected_id", target)
-        reference = dialog._selected_reference_payload()
+        target = resolved_reference_id or str(
+            getattr(dialog, "_painter_reference_selected_id", "") or ""
+        )
+        rows = self._paint_reference_board(dialog).to_dict().get("references", [])
+        reference = next(
+            (row for row in rows if str(row.get("id") or "") == target),
+            None,
+        )
         if not reference:
             raise ValueError("Painter reference not found")
         from app.painter_reference_board import extract_reference_palette
@@ -7059,22 +8142,28 @@ class PaintAdapterMixin(
 
         palette = extract_reference_palette(
             str(reference.get("path") or ""),
-            max_colors=int(max_colors or PAINT_ACTION_DEFAULT_REFERENCE_COLORS),
+            max_colors=resolved_max_colors,
         )
         applied_colors: list[tuple[int, int, int]] = []
-        if bool(apply):
+        if resolved_apply:
             for row in palette.get("colors", []) or []:
                 rgb = row.get("rgb")
                 if isinstance(rgb, list) and len(rgb) >= 3:
                     applied_colors.append((int(rgb[0]), int(rgb[1]), int(rgb[2])))
             if applied_colors:
                 limit = len(getattr(dialog, "_recent_colors", []) or []) or 5
+                self._apply_paint_reference_color_atomic(
+                    dialog,
+                    QColor(*applied_colors[0]),
+                    remember=False,
+                )
                 dialog._recent_colors = applied_colors[:limit]
-                dialog._apply_pen_color(QColor(*applied_colors[0]), remember=False)
+        if resolved_reference_id:
+            setattr(dialog, "_painter_reference_selected_id", resolved_reference_id)
         return {
             **self._paint_reference_payload(dialog),
             "palette": palette,
-            "applied_to_recent_colors": bool(apply),
+            "applied_to_recent_colors": bool(resolved_apply and applied_colors),
         }
 
     def _paint_study_runtime(self, dialog: Any) -> dict[str, Any]:
@@ -7336,7 +8425,65 @@ def _clamp_norm(value: Any, lo: float, hi: float) -> float:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
         number = lo
+    if not math.isfinite(number):
+        number = lo
     return max(lo, min(hi, number))
+
+
+def _paint_fallback_integer(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+
+
+def _paint_json_safe_copy(value: Any, *, field: str) -> Any:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{field} must not contain NaN or infinity")
+        return value
+    if isinstance(value, dict):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{field} keys must be strings")
+            result[key] = _paint_json_safe_copy(item, field=f"{field}.{key}")
+        return result
+    if isinstance(value, (list, tuple)):
+        return [
+            _paint_json_safe_copy(item, field=f"{field}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    raise TypeError(f"{field} contains a non-JSON value")
+
+
+def _paint_editor_object_render_report(report: Any, obj: Any) -> dict[str, Any]:
+    if not isinstance(report, dict):
+        raise TypeError("Painter editor object render report must be an object")
+    normalized = copy.deepcopy(report)
+    raw_rect = normalized.get("rect_norm")
+    rect = raw_rect if isinstance(raw_rect, dict) else {}
+    width = _clamp_norm(
+        rect.get("w", getattr(obj, "width_norm", PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM)),
+        PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+        1.0,
+    )
+    height = _clamp_norm(
+        rect.get("h", getattr(obj, "height_norm", PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM)),
+        PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+        1.0,
+    )
+    normalized["rect_norm"] = {
+        "x": _clamp_norm(rect.get("x", getattr(obj, "x_norm", 0.0)), 0.0, 1.0 - width),
+        "y": _clamp_norm(rect.get("y", getattr(obj, "y_norm", 0.0)), 0.0, 1.0 - height),
+        "w": width,
+        "h": height,
+    }
+    return _paint_json_safe_copy(normalized, field="Painter editor object render report")
 
 
 def _paint_ui_refresh_error(operation: str, exc: BaseException) -> dict[str, str]:

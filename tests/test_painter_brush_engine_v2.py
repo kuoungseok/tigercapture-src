@@ -119,6 +119,95 @@ def test_bristle_load_depletion_depends_on_travel_not_tablet_sample_count() -> N
     )
 
 
+def test_load_depletion_uses_exact_document_pixel_travel() -> None:
+    import pytest
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import depleted_load_curve
+
+    stroke = Stroke(
+        points=[(0.10, 0.50), (0.60, 0.50)],
+        point_load=[1.0, 1.0],
+        load_depletion=0.8,
+        load_dryout_px=200.0,
+        material_resaturation=0.0,
+    )
+
+    # The path moves 100 document pixels: 50% of the 200 px dryout distance.
+    assert depleted_load_curve(stroke, width=200, height=100) == pytest.approx(
+        [1.0, 0.6]
+    )
+
+
+def test_segmented_load_depletion_preserves_full_stroke_travel() -> None:
+    import pytest
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import (
+        depleted_load_curve,
+        incremental_stroke_segments,
+    )
+
+    stroke = Stroke(
+        points=[(0.10, 0.50), (0.40, 0.50), (0.60, 0.50)],
+        brush_style="bristle_oil",
+        brush_engine_version=2,
+        point_load=[1.0, 1.0, 1.0],
+        load_depletion=0.8,
+        load_dryout_px=200.0,
+    )
+    full = depleted_load_curve(stroke, width=200, height=100)
+    segments = incremental_stroke_segments(stroke, width=200, height=100)
+    segmented = [
+        depleted_load_curve(segment, width=200, height=100)
+        for segment in segments
+    ]
+
+    assert segmented[0] == pytest.approx(full[:2])
+    assert segmented[1] == pytest.approx(full[1:])
+
+
+def test_sparse_sensor_curves_are_normalized_before_live_segment_split() -> None:
+    import pytest
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import (
+        depleted_load_curve,
+        incremental_stroke_segments,
+        normalize_curve,
+        normalize_signed_curve,
+    )
+
+    stroke = Stroke(
+        points=[(0.10, 0.50), (0.30, 0.50), (0.60, 0.50), (0.90, 0.50)],
+        brush_style="bristle_oil",
+        brush_engine_version=2,
+        point_pressure=[0.2, 0.9],
+        point_tilt_x=[-0.5, 0.75],
+        point_rotation=[0.1, 0.8],
+        point_load=[1.0, 0.2],
+        load_depletion=0.8,
+        load_dryout_px=200.0,
+    )
+    segments = incremental_stroke_segments(stroke, width=200, height=100)
+    full_load = depleted_load_curve(stroke, width=200, height=100)
+    full_pressure = normalize_curve(stroke.point_pressure, len(stroke.points), 1.0)
+    full_tilt_x = normalize_signed_curve(stroke.point_tilt_x, len(stroke.points))
+    full_rotation = normalize_curve(stroke.point_rotation, len(stroke.points), 0.5)
+
+    for index, segment in enumerate(segments):
+        assert depleted_load_curve(segment, width=200, height=100) == pytest.approx(
+            full_load[index : index + 2]
+        )
+        assert segment.point_pressure == pytest.approx(
+            full_pressure[index : index + 2]
+        )
+        assert segment.point_tilt_x == pytest.approx(full_tilt_x[index : index + 2])
+        assert segment.point_rotation == pytest.approx(
+            full_rotation[index : index + 2]
+        )
+
+
 def test_incremental_bristle_segments_preserve_cumulative_document_travel() -> None:
     import pytest
 
@@ -259,6 +348,48 @@ def test_zero_alpha_artwork_remains_fully_transparent_for_tip_and_bristle_paths(
     )
 
 
+def test_zero_pressure_or_load_leaves_no_color_deposit_for_every_v2_style() -> None:
+    _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import BRISTLE_V2_STYLES, paint_bristle_v2
+
+    for style in sorted(BRISTLE_V2_STYLES):
+        for pressure, load in (([0.0, 0.0], [1.0, 1.0]), ([1.0, 1.0], [0.0, 0.0])):
+            stroke = Stroke(
+                points=[(0.1, 0.5), (0.9, 0.5)],
+                color=(220, 80, 40),
+                opacity=255,
+                width_px=24,
+                brush_style=style,
+                brush_engine_version=2,
+                bristle_count=12,
+                point_pressure=pressure,
+                point_load=load,
+            )
+            image = QImage(160, 80, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(image)
+            try:
+                assert paint_bristle_v2(
+                    painter,
+                    stroke,
+                    image.width(),
+                    image.height(),
+                    QColor(220, 80, 40, 255),
+                )
+            finally:
+                painter.end()
+
+            assert all(
+                image.pixelColor(x, y).alpha() == 0
+                for y in range(image.height())
+                for x in range(image.width())
+            ), (style, pressure, load)
+
+
 def test_panel_icon_may_visualize_zero_alpha_stroke_without_mutating_artwork() -> None:
     app = _app()
     from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
@@ -293,14 +424,18 @@ def test_panel_icon_may_visualize_zero_alpha_stroke_without_mutating_artwork() -
     app.processEvents()
 
 
-def test_material_stipple_is_opaque_compact_and_uses_matching_relief_dabs() -> None:
+def test_material_stipple_is_opaque_distinct_and_uses_matching_relief_dabs() -> None:
     _app()
     import numpy as np
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QColor, QImage, QPainter
 
     from app.drawing import PaintLayer, Stroke
-    from app.painter_brush_engine_v2 import paint_bristle_v2, stipple_dabs
+    from app.painter_brush_engine_v2 import (
+        AUTO_BRISTLE_DENSITY_PER_PIXEL,
+        paint_bristle_v2,
+        stipple_dabs,
+    )
     from app.painter_material_paint import rasterize_material_channels
 
     layer = PaintLayer("stipple", "Stipple", layer_type="material")
@@ -325,7 +460,7 @@ def test_material_stipple_is_opaque_compact_and_uses_matching_relief_dabs() -> N
         painter.end()
 
     dabs = stipple_dabs(stroke, width=180, height=120)
-    assert 3 <= len(dabs) <= 7
+    assert len(dabs) == round(stroke.width_px * AUTO_BRISTLE_DENSITY_PER_PIXEL)
     opaque_pixels = sum(
         image.pixelColor(x, y).alpha() >= 245
         for y in range(image.height())
@@ -336,9 +471,28 @@ def test_material_stipple_is_opaque_compact_and_uses_matching_relief_dabs() -> N
         for y in range(image.height())
         for x in range(image.width())
     )
-    assert opaque_pixels > 20
-    assert painted_pixels < 500
+    continuous = QImage(180, 120, QImage.Format.Format_ARGB32_Premultiplied)
+    continuous.fill(Qt.GlobalColor.transparent)
+    continuous_painter = QPainter(continuous)
+    continuous_stroke = Stroke(**{**stroke.__dict__, "brush_style": "bristle_oil"})
+    try:
+        assert paint_bristle_v2(
+            continuous_painter,
+            continuous_stroke,
+            180,
+            120,
+            QColor(174, 36, 28, 255),
+        )
+    finally:
+        continuous_painter.end()
+    assert opaque_pixels > 0
+    assert painted_pixels > 0
+    assert image != continuous
 
     channels = rasterize_material_channels([stroke], [layer], width=180, height=120)
+    continuous_channels = rasterize_material_channels(
+        [continuous_stroke], [layer], width=180, height=120
+    )
     relief_pixels = int(np.count_nonzero(channels["height"] > 0.01))
-    assert 20 < relief_pixels < 700
+    assert relief_pixels > 0
+    assert not np.array_equal(channels["height"], continuous_channels["height"])

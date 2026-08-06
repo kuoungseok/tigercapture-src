@@ -432,3 +432,23 @@ $files = Get-ChildItem -LiteralPath tests -Filter 'test_painter_*.py' |
 마일스톤별 QA 스크립트는 구현과 함께 `tools/qa_painter_painting_m*.py`
 형식으로 추가하고, 결과는 `debugCapture/painter/painting_m*` 아래에
 재생성 가능하게 저장한다.
+
+## 6. 2026-08-06 M55 전수검사 완료 갱신
+
+- 범위는 계속 Painting 전용이며 UI Design 모드는 제외한다.
+- 공식 문서·수학/포맷 불변식·명시적 Tiger 정책·실제 실패/측정 계약으로
+  숫자·품질·capacity·예외·fallback 근거를 재분류했다.
+- Painting app 63개, test 68개, QA 45개와 AST 숫자 사이트 6,415개를
+  조사했다. 미검토, 근거 미해결, stale, pending, defect, 미참조 모듈은 0이다.
+- UI Design을 제외한 Painting 전체 회귀 639/639와
+  architecture/debugCapture/evidence guard 36/36이 통과했다.
+- 수정된 harness로 7,200초 장기 실행을 세 번 완료했고 workload error는
+  모두 0이었다. 독립 M55 QA는 stored v3 판정을 deep-equal로 재계산하고
+  P0/P1/P2 `0/0/0`, focused 33/33, raw 재실행 불필요로 판정했다.
+- Windows Working Set은 resident shared/private memory 관찰값이고,
+  PrivateUsage는 private Commit Charge이므로 반복 soak의 차단 retention 신호는
+  PrivateUsage로 한정한다. 보편적인 leak-free 주장은 하지 않는다.
+- 실제 고배율 모니터, 물리 태블릿, 사람의 시각 검토, 모든 외부 환경 조합은
+  미검증 한계로 남긴다. 자동화 통과로 이 한계를 대체하지 않는다.
+- 발견·수정 항목과 증거 링크의 전체 목록은
+  `docs/PAINTER_PAINTING_FULL_AUDIT_CHANGE_LIST_KO.md`가 소유한다.

@@ -710,7 +710,7 @@ Start here when changing a feature:
   Image-to-material work is covered by the AR/PBR Texture Lab: core generation
   lives in `app.ar_pbr.texture_map_lab`, the Qt plane-preview/sliders live in
   `app.ar_pbr.texture_map_lab_window`, and automation is exposed through
-  `ar_pbr.texture_lab.open/preview/backend_status/export/substrate_plan`. It turns a source
+  `ar_pbr.texture_lab.open/preview/backend_status/iid_status/export/substrate_plan`. It turns a source
   image into previewable PBR maps, exports separate BaseColor/Normal/AO/
   Roughness/Metallic/Height/Cavity/Curvature maps, and writes
   `unreal_orm`/`orm`/`arm` packed masks with R=AO, G=Roughness, B=Metallic
@@ -725,20 +725,33 @@ Start here when changing a feature:
   Slab and AO remains a material/root occlusion input. Advanced Substrate maps
   such as second roughness, anisotropy/tangent, fuzz, and glint remain future
   optional generators rather than guessed from a single image.
-  Texture Lab schema v3 treats photographic de-lighting honestly: the existing
+  Texture Lab schema v4 treats photographic de-lighting honestly: the existing
   multiscale lighting cleanup is a heuristic `base_color_estimate`, not a
   measured albedo. Input Base Color remains the default export, applying the
   estimate requires a second explicit opt-in, and Height/Normal/AO/Roughness/
   Metallic inference never consumes the estimate. Preview/action/export
   payloads report provenance, no physical confidence score, and the
   `not_photometrically_validated` status.
-  The v3 research audit confirms this is not NASA Multiscale Retinex and not a
+  The fast-mode research audit confirms this is not NASA Multiscale Retinex and not a
   trained intrinsic-decomposition model. Its two-scale luminance division now
   runs in IEC 61966-2-1 linear-light sRGB, and CPU/OpenCV and CUDA use matching
   3-sigma Gaussian kernels, replicate borders, and median normalization. The
-  official Marigold IID/IntrinsicDiffusion class of learned decomposers remains
-  a separate optional-model integration because its checkpoints, license, and
-  runtime footprint must not be silently bundled.
+  Schema v4 adds `AI High Quality · Marigold IID` as a separate optional
+  learned path using the official Diffusers `MarigoldIntrinsicsPipeline` and
+  `prs-eth/marigold-iid-lighting-v1-1`. It exports model-predicted Albedo,
+  diffuse Shading, and non-diffuse Residual under the checkpoint equation
+  `I = A*S+R`. Conversion must call the official
+  `visualize_intrinsics(prediction, target_properties)` API so checkpoint color
+  space/target metadata is honored. Default inference is 4 denoise steps,
+  ensemble 1, processing resolution 768, deterministic seed 0. This prediction
+  is learned IID, not measured reflectance, and still needs explicit
+  `Apply Estimate to Base Color`; geometric/surface inference remains tied to
+  adjusted input RGB. Dependencies and the OpenRAIL++ model are never silently
+  downloaded. `Install AI IID` is an explicit user action and downloads only
+  fp16 safetensors (approximately 2.6 GB) to
+  `external/models/marigold-iid-lighting-v1-1`, excluding duplicate fp32 and
+  pickle `.bin` weights. `ar_pbr.texture_lab.iid_status` exposes readiness and
+  the executable install plan without importing Diffusers at editor startup.
   Texture Lab preview must avoid full-resolution PNG round trips where an
   in-memory source is available, cache generated maps by source/settings
   fingerprint, and re-shade preview-only light changes without regenerating
@@ -7994,6 +8007,73 @@ AI Script Edit MVP integration:
   error, caused only by the one-minute UI minimum, while the live menu test proves
   1,440 minutes is visible and 721 minutes commits as 43,260 seconds. These are
   Tiger document controls, not a physical-paint drying claim.
+- Wet Canvas automation uses the same saved-state domains without permissive
+  coercion. `paint.wet_canvas.settings.set` requires at least one authored
+  setting; enabled is an actual boolean, mixing/diffusion/pickup are finite
+  reals in `[0,1]`, and drying time is a finite real in `1..86,400` seconds.
+  `paint.wet_canvas.advance` requires a finite positive duration through the
+  same 86,400-second ceiling because zero cannot produce an Action mutation.
+  The pure deterministic state helper separately permits exactly zero for
+  internal composition. Bool, text, NaN/infinity, unknown fields, invalid
+  layer-id types, and out-of-domain values fail before owner/layer lookup and
+  Undo. These are Tiger serialized-state and failure-order contracts, not a
+  model of physical pigment or real drying time.
+- Material Preview automation retains its declared Tiger inspection-light
+  domain through one shared contract: azimuth `[-180,180]` degrees and
+  elevation `[5,85]` degrees. Both are finite reals; enabled is an actual
+  boolean, and at least one field must be authored. Empty, explicit-null,
+  bool-as-number, non-finite, and out-of-range requests fail before owner
+  resolution or direct preview/cache mutation. These endpoints describe the
+  current product control and are not evidence of calibrated physical light.
+- Reference color sampling accepts finite normalized x/y coordinates in the
+  closed `[0,1]` interval and maps them to `0..width-1` / `0..height-1` QImage
+  pixel indices. The omitted-coordinate default is the exact normalized center
+  `0.5`; returned coordinates are no longer rounded to an arbitrary five
+  decimals. Palette count is a strict integer `1..12`, reusing the declared
+  atomic Action resource limit. Reference IDs are strings and apply flags are
+  actual booleans. Validation precedes owner/image access, and a missing target
+  or failed sample/palette extraction cannot change the selected reference,
+  foreground color, recent colors, document palette, or dirty state. A color
+  application exception rolls those states back; a fully transparent image
+  returns an empty palette and reports `applied_to_recent_colors=false` even
+  when `apply=true`. Endpoint-pixel and Action-return regressions prove exact
+  coordinate mapping and reporting. This contract does
+  not approve the separate palette downsample or quantization quality policy.
+  QImage geometry basis: https://doc.qt.io/qt-6/qimage.html
+- Every `paint.3d_blockout.*` Action uses one named serialized-projection viewport
+  contract: strict integer dimensions from 64 through 8192 pixels, defaulting to
+  640x360. Validation occurs before owner resolution, scene mutation, or baking;
+  booleans, fractions, strings, nulls, and out-of-range dimensions are rejected
+  rather than coerced or replaced. This viewport changes projection coordinates
+  but not mesh/floor complexity and does not allocate the corresponding raster.
+  A 25-run six-primitive measurement preserved exactly 145 faces, 515 edges, and
+  685 floor tiles at 64x64, 640x360, and 8192x8192. The fail-closed reproducible
+  producer is `tools/qa_painter_blockout_projection_viewport.py`; it records raw
+  samples, nearest-rank p95, timestamp, Python/platform/processor metadata, and
+  the scene digest in
+  `debugCapture/painter/blockout_projection_viewport/report.json`. These endpoints
+  are a Tiger single-Action response policy,
+  not a raster-memory guarantee, visual-quality threshold, physical-camera
+  claim, or external 3D-product parity claim. Camera, primitive, light, and
+  blockout-renderer numeric policies remain separate audit units.
+- `paint.3d_blockout.camera` requires at least one actual camera field. Its
+  mutation boundary accepts only real, finite, non-boolean values. It shares
+  the existing Painter camera controls: yaw -180..180 degrees, pitch -85..85
+  degrees, distance 0.25..30, target pan -5..5 on every axis, and FOV 15..90
+  degrees. Schema, restoration, Action mutation, QSpinBox controls, wheel zoom,
+  WASD nudge, and projection consume these same named endpoints. Empty,
+  preview-only, unknown,
+  explicit-null, coerced, non-finite, under-distance, out-of-FOV, and ambiguous
+  canonical-plus-alias updates fail before owner resolution or scene mutation.
+  Saved-scene restoration is deliberately forgiving: malformed camera scalars
+  become the named finite Tiger defaults (yaw 35, pitch -18, distance 8.5,
+  target `[0,0,0.8]`, FOV 42), while finite restored overflow clamps to the
+  matching named endpoint. Valid zero coordinates/angles and exact endpoints
+  are preserved. Endpoint Action and pure projection, malformed restores, and
+  formerly overflowing `1e308` values pass or fail as specified under strict
+  JSON serialization with `allow_nan=false`; UI nudge/zoom remain bounded at
+  endpoints. These are inspection-
+  camera controls, not a physical lens or external-product parity contract.
 - Painting combo-box state is selected by semantic item data, never by assuming
   visual row zero is the default. The shared selector follows Qt's documented
   `findData()` sentinel contract: a missing requested value searches only the
@@ -8018,10 +8098,170 @@ AI Script Edit MVP integration:
   bleed/safe coordinates, trim-only A4 ~300 PPI, oversized-safe, and screen-mode
   absence are directly tested. This is a guide-consistency contract, not a
   printer-acceptance or print-quality claim.
+- Painter zoom has one shared Tiger product contract: 25..800 percent, 100
+  percent default, and mechanically derived 0.25..8.0 factors. Integer-percent
+  entry rejects booleans and fractional/text values; persisted factors reject
+  booleans, text, `None`, NaN, and infinities. Finite out-of-range values clamp
+  to the declared bounds, so an explicit zero becomes 25 percent rather than
+  being replaced by the default. Canvas display, both zoom controls, stable
+  retained-render sizing, Canvas Pose recall, and `.tspaint` restoration use
+  the same normalizers. A malformed saved zoom is validated before document
+  restoration and therefore cannot partially replace the open document. The
+  25..800 range is Tiger policy, not an industry-standard or competitor-parity
+  claim.
+- Canvas pan bounds and Painting color-panel height are no longer grouped with
+  zoom/document truth. Pan is frozen separately as symmetric half-excess
+  viewport geometry with zero extent when the canvas fits. The two color-panel
+  height rows are explicitly Painting-window layout only and cannot write
+  document state, committed pixels, or export pixels. The former mixed
+  `canvas_view_or_document_product_domain` ledger entry is removed.
+- The 14 former fixed `computational_degeneracy_epsilon` sites are removed
+  rather than approved by convention. Exact zero now identifies degenerate
+  vectors, transform scales, ray/clip denominators, triangle area, segment
+  length, tilt direction, and rotation identity; exact equality alone merges
+  pressure controls or smoothed action points. Tests prove that 1e-12 vectors
+  and transform scales, 1e-10-separated pressure controls, a 1e-8 near-plane
+  crossing, a 1e-3 segment, and a 1e-9-degree rotation remain valid. The old
+  thresholds could discard those inputs without a measured or format-defined
+  basis, so the pending epsilon ledger bucket is deleted instead of promoted.
+- Pressure-curve evaluation also uses the exact positive spacing between
+  deduplicated controls; it no longer expands a 1e-10 interval to 1e-9. A
+  midpoint and endpoint regression proves that two nearby authored controls
+  evaluate to 0.5 and 0.8 respectively. Canvas geometry treats every nonzero
+  normalized rotation as rotated, so background and stroke transforms cannot
+  diverge for a tiny valid angle.
+- Painting grid size has one shared Tiger view contract in `app/painter_grid.py`:
+  4..512 px with an explicit 64 px default. An explicit zero clamps to 4 rather
+  than becoming the default; bool, fractional, text, and `None` inputs fail.
+  Display, snapping, Canvas/Dialog setters, persistence, and restore consume the
+  shared normalizer. Invalid saved grid size is validated before document state
+  restoration. Brush-style preset synchronization now uses semantic combo data
+  with the named `round` fallback instead of sending `findData()` failure to row
+  zero. Neither grid range nor default is claimed as an external optimum.
+- Brush input bounds are centralized in `app/painter_brush_domains.py`.
+  Hardness, spacing, angle, roundness, and pressure response require strict
+  integer controls, flip fields require actual booleans, and persisted brush
+  width requires a finite real value in the
+  shared 1..5000 px domain. Explicit zero width becomes 1 px rather than the
+  6 px missing-value default, and malformed width fails before document state
+  restoration. Canvas assignment, dialog commits, canvas payload construction,
+  and document restoration share the same detail normalizer. These are Tiger
+  compatibility ranges, not aesthetic optima.
+- PBR preview scaling no longer fabricates a one-pixel source dimension or a
+  0.25 px stroke floor. Source report dimensions must be positive integers;
+  valid preview stroke width is the exact positive width×scale product, and
+  any nonidentity scale uses the scaling path. Invalid dimensions fail rather
+  than producing a misleading material preview.
+- Custom-brush deletion and movement use strict catalog-index helpers. Delete
+  selects the bounded predecessor in the remaining nonempty catalog; move
+  accepts exactly one step (`-1` or `+1`) and clamps only at list boundaries.
+  This is declared list behavior with direct boundary tests, not a usability
+  optimum inferred from convention. The former mixed
+  `shared_brush_material_or_grid_contract` is removed.
+- Painting PNG Action inputs use a paired export-size contract. `(0,0)` alone
+  means “use the current document/output size”; otherwise width and height must
+  both be positive strict integers within the current canvas capacity. A single
+  zero or invalid partner fails instead of silently discarding the requested
+  dimension. Explicit `time_ms` and owner/player fallback time use one strict
+  nonnegative-integer helper, so malformed time cannot become frame zero.
+  Both `paint.document.export_png` and `paint.export_png` schemas expose the
+  same upper capacity and a top-level `oneOf` that permits omission, `(0,0)`,
+  or a positive pair. Runtime validation occurs before owner lookup and before
+  default output-path creation, so an invalid empty-path request cannot create
+  or rename an output directory. Their adapter entry paths are directly tested.
+- `paint.brush.set` validates its complete payload before resolving or mutating
+  the Painter dialog. Width, opacity, hardness, spacing, angle, roundness,
+  booleans, dynamics object, preset text, and the canonical published style
+  enum are strict; aliases and malformed later fields cannot leave an earlier
+  partial mutation. These are Tiger Action compatibility domains, not inferred
+  aesthetic recommendations.
+- Painter view Actions reuse the shared product domains: zoom is a strict
+  integer from 25 through 800 percent, and grid size is a strict integer from 4
+  through 512 px. Zero no longer becomes the zoom default, direct adapter calls
+  cannot pass floats or booleans as integers, and grid visibility/snap accept
+  only actual booleans or omission. Validation precedes dialog resolution.
+- `paint.brush.calibration.set` accepts only a nonempty device identity,
+  finite real minimum/maximum values in the normalized unit interval with
+  `minimum < maximum`, and an optional array of exact two-number curve points.
+  Curve x coordinates must be strictly increasing and every x/y coordinate is
+  in `[0,1]`; malformed, duplicate, reversed, non-finite, or implicitly
+  coercible values fail before dialog resolution instead of being clamped,
+  sorted, skipped, or overwritten. This is a piecewise-linear graph invariant,
+  not a preferred pressure response or tablet-product parity claim.
+- `paint.performance.configure` reuses the declared large-canvas resource
+  policy for tile size, tile memory, and Undo memory. Both the Action adapter
+  and `PaintDialog.configure_painter_large_canvas` perform strict integer/range
+  validation before owner lookup or closing the previous runtime. Invalid
+  requests cannot destroy the active cache and then succeed with constructor-
+  clamped substitutes. The bounds remain Tiger configuration policy with
+  runtime telemetry, not universal memory-safety or latency guarantees.
+- `paint.document.new` uses one declared new-canvas domain on both axes: a
+  Tiger-authored 64 px control minimum through the current 16,384 px runtime
+  capacity. The Action schema, adapter, document replacement default, and
+  Painting dimension controls share these constants. Dimensions and the
+  background are validated before owner lookup; background accepts only the
+  declared transparent tokens or a valid QColor string. Bool, float, text, or
+  out-of-range dimensions and invalid/nonstring colors are not coerced. The
+  document replacement method validates again before creating an Undo state,
+  so color failure cannot leave partial document state. The minimum is not
+  presented as a file-format or artwork-quality limit.
+- Rectangle, ellipse, and lasso Selection Actions use one strict normalized
+  geometry boundary. Every coordinate is a finite real in `[0,1]`; bools and
+  coercible text are rejected. Lasso input is an array of at least three exact
+  two-number arrays, while aspect, combination mode, and `polygonal` use their
+  canonical schema types and enums. The complete payload is validated before
+  owner lookup, so the dialog path normalizer cannot silently skip, clamp, or
+  replace malformed Action points and no partial Undo/selection state remains.
+  These are 2D geometry/cardinality invariants, not preferred selection shapes.
+- `paint.selection.select_by_color` validates normalized sample coordinates,
+  a strict integer tolerance, an actual `contiguous` boolean, and the canonical
+  preview/commit/cancel phase before owner lookup. Tolerance uses one shared
+  `0..255` domain across schema, Action validation, Painting control, preview,
+  and raster mask, matching Adobe's documented Magic Wand input scale. Tiger's
+  max-channel RGBA comparison remains explicitly local and does not claim
+  Adobe pixel-selection algorithm parity.
+- `paint.view.zoom_area` accepts a finite normalized origin and any strictly
+  positive finite width/height contained in the unit canvas. The unsupported
+  `0.001` minimum is removed; `1e-12` and `1e-320` widths remain valid, and
+  magnification saturates algebraically at the existing 800 percent maximum
+  without first evaluating an overflowing reciprocal. Zero, bool,
+  non-finite, over-unit, and right/bottom-overflowing areas fail before owner
+  lookup. The Action audit inventories exclusive schema bounds explicitly.
+- `paint.layer.set_opacity` uses the Painting layer model's exact integer
+  `0..100` percent representation. Direct Action calls and the dialog mutation
+  path reject bool, fractional, text, and out-of-range values before owner or
+  layer selection; they are never truncated or silently clamped.
+- `paint.selection.modify` no longer shares an invented `0.1..4096` radius.
+  Feather accepts a finite positive real radius, while expand, contract, and
+  border require exact integer pixels. Both use the existing 16384 px current
+  canvas capacity as an operational ceiling. Schema, adapter, dialog, and the
+  direct Pillow mask function enforce the same contract.
+- `paint.selection.transform` validates the complete request before owner lookup
+  or cancellation of an existing preview. Every numeric field is finite and
+  non-boolean, scale is nonzero, pivots are normalized, flips are real booleans,
+  and phase/target tokens are exact. Skew uses the nonsingular principal
+  `(-90,90)` degree interval required by its `tan(angle)` mapping; translation
+  and rotation have no invented magnitude ceiling.
+- `paint.image.resize` and `paint.canvas.resize` share the existing Painting
+  `64..16384` px strict-integer control/capacity contract instead of applying
+  `int()` truncation. Canvas background is validated as a transparent token or
+  valid QColor string before owner lookup and before direct-path Undo.
+- `paint.document.export` validates its entire request before resolving the
+  Painter owner or entering transactional destination handling. Path, format,
+  booleans, 8/16-bit choice, quality `1..100`, ICC path strings, and rendering
+  intent `0..3` are strict; aliases, truncation, truthiness coercion, and blank
+  output paths are rejected. Format is mandatory, and schema/runtime both limit
+  16-bit output to PNG/TIFF before owner or destination handling. A nonblank
+  path is preserved byte-for-byte.
+- Perspective and symmetry guide Actions no longer impose an unsupported
+  `0.02..0.98` canvas-edge margin. Horizon and symmetry position use the exact
+  normalized `[0,1]` domain; perspective vanishing points may remain finite and
+  outside the frame. Optional booleans, 1/2/3-point mode, axis tokens, Action,
+  dialog, and direct-canvas paths share strict validation.
 - The Painting evidence audit includes the Paint Actions namespace/adapter and
   inventories numeric `min`/`max` clamps with class/function context; a
   path-wide catch-all classification is invalid. The corrected scan covers 49
-  Painting app modules and currently 380 test functions. It exposed and removed a hidden
+  Painting app modules and currently 394 test functions. It exposed and removed a hidden
   256-dab per-segment cap: dynamic dabs are now placed by whole-polyline arc
   length, so collinear paths with 2 and 33 input controls produce the same dab
   count. `.tspaint` archive entries reject POSIX traversal, Windows backslash
@@ -8030,6 +8270,11 @@ AI Script Edit MVP integration:
   limits of 512 strokes and 2,048 input points per stroke are explicitly scoped
   to one atomic Action/Undo request, not document capacity; its brush width
   domain matches the persisted 5,000-pixel brush domain.
+- After the zoom, exact-degeneracy, grid, and semantic-fallback corrections, the
+  Painting-only automated regression passes 468 tests. UI Design and long-soak
+  suites are intentionally excluded from that count; architecture/debug-capture
+  boundary guards pass 5 tests. The only warning is the deliberately corrupt
+  TIFF fixture being reported by Pillow during corruption validation.
 - Audit v2 records a decision basis for every classified row. A 2026-08-04
   audit-of-the-auditor found that broad path/function patterns had promoted
   hundreds of numeric literals to `reviewed_*` without an explicit source or
@@ -8042,10 +8287,10 @@ AI Script Edit MVP integration:
   it missed numeric defaults, assignments, tuple/schema values, and expressions
   with the literal on the left side of a comparison. The corrected AST coverage
   inventory finds 6,603 unique Painting numeric-literal source lines. Existing
-  routed scanners currently leave 5,024 explicit
+  routed scanners currently leave 5,025 explicit
   scanner-gap rows. Two PSD signature/version rows are now routed and approved
   against Adobe's official header specification; after all currently approved
-  exact contracts, 4,813 AST literal sites remain unresolved. Seven additional
+  exact contracts, 4,814 AST literal sites remain unresolved. Seven additional
   PSD header field-extent guards are approved separately
   against the same Adobe File Header table. Ten PNG signature/chunk/CRC/IHDR/IEND
   parser sites are approved against W3C PNG 3. Four TIFF header/IFD sites are
@@ -8088,13 +8333,18 @@ AI Script Edit MVP integration:
   bounded Tiger I/O policy. Four readiness-matrix rows mirror only Tiger's
   tested flat-export scope. The ARGB32 alpha-byte row is approved only for the
   supported little-endian Windows runtime. Eight reapproval aggregation rows
-  are approved only as fail-closed operational structure, leaving 4,813 AST literal
+  are approved only as fail-closed operational structure, leaving 4,814 AST literal
   sites unresolved. The audit currently contains 6,975 classified rows;
   5,934 remain unresolved and therefore block product reapproval. All 5,934 are
   candidates requiring exact-row tests plus an explicit source, invariant,
   Tiger-policy, or operational-failure ledger link. Suppressed-exception sites
   are now routed into concrete contracts;
   routing is not approval.
+  The latest UI-Design- and soak-excluded functional regression selects 48
+  `test_painter_*.py` files explicitly and passes 427 tests; the only warning is
+  the intentional truncated-TIFF corruption fixture from Pillow. Architecture
+  and debug-capture boundary guards pass 5/5. A broader filename run that included
+  `test_painter_ui_*` was discarded rather than reported as Painting evidence.
   The previously separated pressure/rotation, dimension/color fabrication,
   one-pixel substitution, Action brush truncation, paint depletion, bristle
   capacity, TIFF ICC field type, uint8-to-uint16 expansion, decoder diagnostics,
@@ -8960,8 +9210,8 @@ AI Script Edit MVP integration:
   pipeline.
 - Painter fill/mask automation must stay exposed through `paint.fill.solid`,
   `paint.fill.gradient`, `paint.fill.pattern`, and `paint.layer.mask_create`.
-  Current fill operations target the document background raster or active
-  selection clip; true independent raster-layer fill, Clone/Heal, and
+  Current fill operations target the active raster layer, clipped by the active
+  selection when present; true fill-layer creation, Clone/Heal, and
   content-aware operations are later pixel-engine work, not current claims.
 - Painter owns the PBR texture-map automation workflow through
   `paint.pbr.preview`, `paint.pbr.backend_status`, `paint.pbr.export`, and
@@ -9677,3 +9927,1210 @@ AI Script Edit MVP integration:
 - The bounded FP3 slice is Complete. FP4 remains Active for component/instance, styles,
   variables, auto layout, boolean/vector breadth, font/image loading, exportAsync, and
   broader dynamic-page semantics; this is not complete Figma Plugin API compatibility.
+
+## Painter Painting 3D Blockout authored-control contract (UI Design excluded)
+
+- The 3D Blockout guide uses the actual Painting product controls as its serialized and
+  Action mutation domain: primitive position `-5..5`, rotation `-180..180` degrees, scale
+  `0.1..8`, opacity `0.05..1`, directional-light yaw `-180..180` degrees, and light pitch
+  `5..85` degrees. These values are Tiger-authored inspection controls, not physical world
+  units, calibrated lighting, composition-quality thresholds, or another 3D product's limits.
+- Painting QSpinBox construction, Action schemas, strict public/direct mutation, snapping,
+  saved-scene normalization, and projection share named constants for those endpoints.
+  Primitive color is exactly `#RRGGBB`; kinds are the six displayed Painting primitives;
+  camera presets are exactly the four displayed `front`, `side`, `top`, and `perspective`
+  controls. Unknown fields/kinds/presets, bool-as-number, malformed types, NaN/Inf, and
+  out-of-control-range requests fail before owner lookup, Undo, or scene mutation.
+- Saved documents are a separate forgiving boundary. Malformed or non-finite primitive,
+  grid, light, and index state returns to finite defaults; finite overflow clamps to the same
+  Painting endpoints. Scene and projected Action results must serialize with
+  `json.dumps(..., allow_nan=False)`. A duplicate offset must be finite and its resulting
+  position must remain inside the displayed transform domain.
+
+## Painter Painting atomic stroke Action contract (UI Design excluded)
+
+- `paint.stroke.draw` validates the complete nested batch before resolving the Painter
+  owner. The public schema and direct adapter accept the same types and domains; direct
+  calls may not silently clamp or coerce a request that the published schema rejects.
+- A request contains 1..512 strokes and each stroke contains 2..2048 points. Coordinates,
+  pressure/tilt/rotation/load, brush width/opacity/detail, engine version, bristle count,
+  seed, color, style, path mode, closed state, and layer-id type are validated atomically.
+  Bool is never accepted as a number or integer, all real values must be finite, normalized
+  channels remain in `0..1`, signed tablet channels remain in `-1..1`, and seed is the
+  explicit uint64 replay domain `0..2^64-1`. Larger JSON integers are rejected before they
+  can enter v2 floating brush math.
+- Invalid requests fail before owner lookup, Undo, layer mutation, or canvas stroke changes.
+  The request limits are atomic Action/Undo resource policy and not document capacity,
+  artwork quality, latency, physical-media fidelity, or external painter parity claims.
+- The strict validator materializes omitted point channels and existing Action defaults
+  before owner lookup. Stroke construction consumes that canonical payload directly and
+  must not re-clamp or reinterpret it. The retained defaults are Tiger replay compatibility:
+  4 px width, 0.28 load depletion, normalized point-channel defaults matching the Stroke
+  model, standard material-disabled channel defaults, and the existing deterministic seed
+  formula `stroke_index*7919 + rendered_point_count*131`. They are not quality or physical
+  paint constants.
+- Action opacity percent converts to Stroke's 8-bit alpha with
+  `round(percent*255/100)`. Omitted `layer_id` selects the active layer; an explicitly
+  authored blank/whitespace layer ID is invalid rather than silently selecting another layer.
+
+## Painter Painting editor-object Action contract (UI Design excluded)
+
+- `paint.editor_objects.list`, `paint.editor_object.render`, and
+  `paint.editor_object.import` validate their complete request before resolving the editor
+  owner. Direct adapter calls and the published Action schema use the same string, actual
+  boolean, strict nonnegative integer/time, and finite-real rules; bool-as-integer and
+  silent type coercion are prohibited.
+- `object_id` and `kind` are alternative locators. Supplying both is ambiguous and fails;
+  supplying neither retains the existing first-available-object behavior. The list limit
+  has no invented maximum and retains the existing default of 100.
+- Explicit import width and height use the existing Painter editor-object/sticker domain
+  `0.04..1`; explicit x and y use `0..0.96`, where `0.96` is mechanically `1-0.04`.
+  Authored x+width and y+height must fit the normalized canvas. Invalid explicit geometry
+  fails before sticker creation and may not be silently clamped. Missing or malformed
+  renderer fallback geometry is a separate recovery boundary and is finite-clamped to the
+  same product domain.
+- The 4 percent floor is an existing Tiger import/sticker compatibility policy, not a
+  universal visibility optimum, ergonomic measurement, or external painter parity claim.
+- A successful import is assigned one z-index above the current maximum and uses the
+  existing Sticker `end_ms=-1` sentinel (visible until the project end). Final containment
+  and z-order are resolved before the Sticker is appended.
+
+## Painter Painting brush-set Action contract (UI Design excluded)
+
+- `paint.brush.set` requires at least one authored field. An empty request may not report
+  success or switch the tool to Pen. Preset/style text, every numeric field, optional flips,
+  and the dynamics object type are validated as a complete payload before resolving or
+  mutating the Painter owner.
+- Width/detail domains come from the shared Painting brush controls. Brush opacity uses the
+  actual displayed 10..100 percent control. Public schema and direct calls share these named
+  domains and the canonical brush style enum; aliases, whitespace-only names, missing presets,
+  bool-as-integer, and out-of-range values fail.
+- A requested style must exist in the active brush style control before preset/model/canvas
+  mutation. The optional dynamics object remains governed by the separate Brush Dynamics
+  normalization/model milestone; this contract approves only its object boundary and does
+  not approve internal dynamics coefficients or silent normalization behavior.
+
+## Painter Painting canvas-pan Action contract (UI Design excluded)
+
+- `paint.view.pan` accepts exactly one operation per request: `reset=true`, an absolute
+  `x` and/or `y`, or a relative `dx` and/or `dy` with at least one nonzero component.
+  Empty requests, `reset=false`, mixed modes, and zero relative vectors fail before Painter
+  owner lookup. Direct calls do not coerce booleans, fractions, or text to integers.
+- Pan coordinates use the exact signed 32-bit range accepted by the bundled PySide6
+  `QPoint`: -2147483648 through 2147483647. Qt documents QPoint as integer-precision
+  geometry with an `int, int` constructor, and local endpoint probes confirm immediate
+  `OverflowError` outside that range. Schema and runtime use the same named endpoints.
+- Relative addition is computed and range-checked before `_set_canvas_pan`; overflowing
+  the current coordinate may not wrap through QPoint arithmetic or mutate the view.
+  Omitted absolute axes preserve their current coordinate. These are platform geometry and
+  operation-identity contracts, not inferred panning feel or competitor parity.
+- Omission is represented by an internal sentinel. An explicitly supplied JSON/direct-call
+  `null` is not omission and fails the integer/boolean field contract before owner lookup,
+  including when it appears only as a forbidden opposite-mode property.
+
+## Painter Painting layer-mask Action contract (UI Design excluded)
+
+- `paint.layer.mask_state.set`, `paint.layer.mask.paint`, and
+  `paint.layer.mask.gradient` validate their complete payload before Painter owner lookup.
+  Explicit layer IDs are strings and may be omitted/empty to target the active layer, but
+  whitespace-only IDs fail instead of silently becoming the active layer.
+- Mask state requires at least one real change request. `delete=true` is exclusive;
+  `delete=false` alone and delete mixed with enabled/linked fail. Enabled and linked are
+  actual booleans and may be updated together in one atomic state operation.
+- Mask paint uses finite normalized x/y in `[0,1]`, the retained raster floor of 0.5 px for
+  radius, and integer Alpha8 values in `[0,255]`. No clamp or type coercion occurs at the
+  Action boundary. Qt documents `QImage::Format_Alpha8` as an 8-bit alpha-only format.
+- A mask gradient requires exact two-coordinate normalized start/end arrays, distinct
+  endpoints, and Alpha8 endpoint integers. Extra coordinates, coincident endpoints,
+  bool-as-number, NaN/Inf, and values outside the format domain fail before mutation.
+  The 0.5 px floor is existing Tiger rasterization policy, not an ergonomic optimum.
+
+## Painter Painting canvas-size fallback contract (UI Design excluded)
+
+- Action render/export helpers accept a canvas extent only when width and height are
+  positive integral values; bool, float, text, zero, and negative state are not coerced.
+- `_canvas_document_size` must be an exact two-axis list/tuple. Invalid document state
+  falls through in order to the drawing/preview widgets and then the preview pixmap.
+  If no source supplies two valid extents, the operation reports dimensions unavailable.
+- Export background dimensions use the same strict extent helper before falling back to
+  the canvas sequence. This is operational recovery and raster geometry, not a default
+  resolution, artwork-quality target, or external product convention.
+
+## Painter Painting Reference Board mutation Action contract (UI Design excluded)
+
+- Reference add/update/delete/duplicate/bake validate their complete external payload before
+  Painter owner lookup. Paths and IDs are actual strings; required paths and explicit IDs
+  may not be whitespace-only. Names are capped at the existing serialized 80-character
+  model boundary instead of being silently truncated by an Action request.
+- Update, delete, and duplicate require an explicitly supplied nonblank reference ID; they
+  never fall back to the currently selected reference. Bake alone may intentionally use the
+  current selection when its optional ID is omitted. This keeps target-changing operations
+  aligned with their published required-property schemas and prevents an omitted target from
+  mutating a different selected reference.
+- Add/update numeric fields are finite real values in the Reference Board model domains:
+  position `[0,1]`, size `[0.02,1]`, opacity `[0.05,1]`, and rotation
+  `[-180,180]` degrees. Visible/locked accept only actual booleans. Update requires at
+  least one authored change, and its omission sentinel distinguishes absent properties
+  from schema-invalid explicit `null`.
+- Duplicate offsets are finite real deltas without an invented Action magnitude limit.
+  The model retains its existing duplicate placement policy: default `0.04`, with maximum
+  start position derived as `1.0 - 0.02`. Valid zero add/restored positions remain zero and
+  are not replaced by the `0.04` default.
+- These ranges/defaults are the existing Tiger Reference Board serialization and placement
+  policy. They are not measured composition optima, image-quality thresholds, or external
+  painter parity.
+
+## Painter Painting saved-path creation Action contract (UI Design excluded)
+
+- `paint.path.create` validates the complete request before Painter owner lookup. Points must
+  be a JSON array containing 2..2048 exact coordinate pairs, expressed either as two-value
+  arrays, `{x,y}`, or `{x_norm,y_norm}` objects. Every coordinate must be a finite real value
+  in the serialized normalized canvas domain `[0,1]`; bools, missing/mixed keys, extra tuple
+  values, invalid rows, and out-of-domain values are rejected rather than skipped or clamped.
+- Two points are the structural minimum for a line path. When `make_selection=true`, three
+  points are required because a selection needs a polygon boundary. `closed` and
+  `make_selection` accept actual booleans only. The 2048 maximum is the existing single-Stroke
+  Action resource limit because saved paths serialize their coordinates in `Stroke.points`;
+  it is not an artwork complexity recommendation.
+- Optional active-path IDs for path-to-selection and delete must still be actual strings;
+  whitespace-only values are invalid. `paint.path.commit.closed` is not coerced from integers.
+- Platform geometry semantics are taken from Qt `QPainterPath` documentation:
+  https://doc.qt.io/qt-6/qpainterpath.html. The normalized serialization and Action resource
+  boundary remain explicit Tiger contracts, not external-product parity claims.
+
+## Painter Painting saved-path mutation Action contract (UI Design excluded)
+
+- Anchor edit validates its full payload before owner lookup. Index is a strict nonnegative
+  integer and operation is exactly one of add/delete/move/corner/smooth. Add and move require
+  a normalized point. Delete rejects point/handles; add rejects handles; corner rejects handles
+  because the underlying operation resets them. Point coordinates are finite `[0,1]`; Bezier
+  handles are finite but intentionally may extend outside the canvas domain.
+- Duplicate, rename, reorder, fill, and stroke validate optional path IDs as actual strings and
+  reject whitespace-only IDs. Rename requires a nonblank actual string. Reorder rejects bool,
+  fraction, text, and negative indices before owner lookup; its upper bound is checked against
+  the actual document path count.
+- Optional empty fill/stroke color means current pen color. Explicit colors must be strings and
+  must pass Qt `QColor.isValid()`, whose accepted syntax is authoritative:
+  https://doc.qt.io/qtforpython-6/PySide6/QtGui/QColor.html. Stroke width is finite and reuses
+  the named Painter Action brush-width domain `0.25..5000` px. The previous unexplained
+  `0.1..4096` schema pair is removed.
+
+## Painter Painting layer mutation Action contract (UI Design excluded)
+
+- Layer add/import/group/rename validate names before owner lookup against the canonical
+  serialized 80-character PaintLayer capacity. Over-capacity values fail instead of being
+  silently truncated. Layer types are exactly `standard|material`; color labels and blend
+  modes must match their canonical enumerations and are never normalized to
+  `standard`, `none`, or `normal` after an invalid Action request.
+- Optional active-layer IDs permit exact empty text only; explicit IDs must be actual,
+  non-whitespace strings. Layer select and group disclosure require an explicit nonblank ID.
+  Boolean fields accept actual booleans only. Multi-channel lock updates require at least one
+  authored field and distinguish omission from invalid explicit `null`.
+- Group creation preflights every requested ID and position lock before creating the group.
+  Unknown, duplicate, blank, or position-locked targets fail the complete request; the Action
+  never reports success after partially parenting only some requested layers.
+- Duplicate and delete resolve only PaintLayer targets. A missing explicit target cannot fall
+  back to the previously selected layer. Duplicate reports text-focus/payload failure; delete
+  reports missing, locked, and last-layer retention failures. Invalid/failing requests preserve
+  the layer list and prior selection.
+- Merge-visible and flatten accept no ignored `layer_id` property. Layer state setters report
+  a no-change/missing-target result instead of claiming a mutation. Blend implementations are
+  bound to Qt `QPainter::CompositionMode` semantics documented at
+  https://doc.qt.io/qt-6/qpainter.html; the exposed subset remains the explicit Tiger layer
+  model and does not claim Photoshop parity.
+
+## Painter Painting channel and Quick Mask Action contract (UI Design excluded)
+
+- The Action channel identity set is exactly `RGB`, `Red`, `Green`, `Blue`, and
+  `Alpha`. Payloads are validated before Painter owner lookup; casing aliases,
+  whitespace-only values, non-strings, and numeric boolean coercion are rejected.
+  Adobe documents the composite RGB channel followed by its component channels,
+  and distinguishes alpha channels as grayscale selection/mask storage:
+  https://helpx.adobe.com/photoshop/using/channel-basics.html. Tiger's single
+  `Alpha` target is the current background-source alpha component; this contract
+  does not claim Photoshop's arbitrary multi-alpha-channel capacity.
+- RGB visibility updates the three component visibility flags atomically. A
+  no-change request fails without changing the selected channel. Channel select is
+  an explicit target operation. Copying a specified channel is a read operation and
+  does not silently change the selected channel; component copies are measured as
+  8-bit grayscale RGB clipboard images. Paste requires a non-null clipboard image
+  before any target selection or document mutation. Qt `QClipboard.image()` defines
+  the no-image result as a null image and `setImage()` as the image clipboard path:
+  https://doc.qt.io/qt-6/qclipboard.html.
+- `paint.quick_mask.set` accepts an actual boolean and reports no change instead of
+  claiming a mutation. Adobe defines Quick Mask as a temporary editable selection
+  mask, with a protected-area color overlay and conversion back to a selection on
+  exit: https://helpx.adobe.com/photoshop/using/create-temporary-quick-mask.html.
+  The present Tiger implementation only toggles the existing selection overlay; it
+  does not yet provide Quick Mask painting/filter editing or exit-time mask-to-
+  selection conversion. Those capabilities remain an explicit Painting gap and are
+  not counted as completed parity.
+
+## Painter Painting selection-state Action contract (UI Design excluded)
+
+- `paint.selection.set_aspect` and `paint.selection.set_mode` accept only their
+  canonical exact tokens before Painter owner lookup. Invalid casing, aliases,
+  non-strings, and empty values are rejected rather than normalized to `free` or
+  `new`. The schema and runtime share `free|square|16:9|4:3` and
+  `new|add|subtract|intersect`. Adobe documents Normal/Fixed Ratio marquee styles
+  and New/Add/Subtract/Intersect options:
+  https://helpx.adobe.com/photoshop/using/selecting-marquee-tools.html. Tiger's
+  four named aspect presets are its explicit product subset, not full Photoshop
+  Fixed Ratio/Fixed Size parity.
+- Select All, Deselect, and Selection To Path report success only when document
+  state changes. Repeating Select All over an all-255 selection mask, deselecting
+  with no active selection, or converting without a three-point selection does
+  not append Undo or claim mutation. Adobe's basic selection command semantics are
+  documented at https://helpx.adobe.com/photoshop/using/making-selections.html;
+  Adobe's selection-to-work-path prerequisite is documented at
+  https://helpx.adobe.com/sg/photoshop/using/converting-paths-selection-borders.html.
+- Full-selection detection uses the exact extrema of the existing 8-bit selection
+  mask. The `255` endpoint is the already approved Qt Alpha8 channel boundary, not
+  a guessed coverage threshold. Selection Invert keeps the mathematical empty-to-
+  full behavior and is not treated as a missing-selection failure.
+
+## Painter Painting crop-preview Action contract (UI Design excluded)
+
+- `paint.crop.preview` accepts either no authored bounds, meaning the active
+  selection bounds, or all four normalized coordinates together. Partial bounds,
+  explicit nulls, bools, non-real/non-finite coordinates, out-of-canvas values,
+  and non-positive rectangles fail before Painter owner lookup. The schema uses
+  two exclusive shapes so omitted bounds cannot silently discard a partially
+  authored rectangle.
+- `straighten_degrees` is a finite real angle. The previous `[-45,45]` schema and
+  core clamp are removed because neither the backend nor Adobe's Crop/Straighten
+  documentation establishes that boundary. Adobe documents rotating outside a
+  crop corner and using the Straighten tool, without that numeric limit:
+  https://helpx.adobe.com/photoshop/desktop/crop-resize-transform/crop-straighten/crop-photos.html
+  and https://helpx.adobe.com/photoshop/desktop/crop-resize-transform/crop-straighten/straighten-tilted-photos.html.
+  This is removal of an unsupported Action restriction, not a Photoshop angle-
+  interaction parity claim.
+- Preview stores the validated rectangle and authored angle without clamp. An
+  identical active preview reports no change. Cancel and commit require an active
+  preview, and invalid/partial preview requests preserve preview and document
+  dimensions. A measured 16x12 fixture cropped at normalized 0.25..0.75 produces
+  the exact 8x6 document extent.
+- The same finite-angle rule applies to direct canvas interaction, not only the
+  Action adapter and core preview setter. A measured rotate-handle drag stores
+  180 degrees exactly. `_handle_m3_canvas_interaction` is Painting behavior and
+  must remain inside the evidence audit even though its historical name contains
+  `m3`; it must not be classified as UI Design.
+- Crop/selection/path interaction uses exact positive normalized extents and Qt's
+  `QApplication.startDragDistance()` platform metric for hit tolerance. The former
+  authored `0.01` resize floor, `0.001` denominator floor, fixed 11 px pivot radius,
+  and +/-45 degree angle clamp have no accepted product contract and are removed.
+- Evidence scanning freezes conditional geometry and uncovered structural
+  literals as separate exact inventories (57 rows and 11 rows respectively), so
+  one scanner cannot approve the other's rows through a shared broad contract ID.
+
+## Painter Painting flip, fill, and mirror Action contract (UI Design excluded)
+
+- `paint.canvas.flip` requires the exact canonical axis `horizontal` or `vertical`;
+  omitted values, aliases, case/whitespace normalization, and non-strings fail
+  before owner lookup. Qt `QImage::flipped`/`mirrored` defines the raster operation,
+  while Adobe documents whole-canvas horizontal and vertical flip as explicit
+  commands. A measured asymmetric 8x8 raster proves exact endpoint exchange:
+  https://doc.qt.io/qt-6/qimage.html and
+  https://helpx.adobe.com/photoshop/using/adjusting-crop-rotation-canvas.html.
+- Fill Actions require every declared color and validate it with `QColor.isValid`
+  before owner lookup. Solid uses the authored color. Gradient is one explicit
+  diagonal `QLinearGradient` from `color1` at stop 0 to `color2` at stop 1; the
+  former guessed 0.52 middle stop and lighter/darker factors are removed. Pattern
+  lays Qt's documented `Dense4Pattern` in `color2` over a `color1` base; the former
+  guessed document-size-derived spacing and line-width thresholds are removed.
+  This is a deterministic Tiger pattern contract, not Photoshop preset parity:
+  https://doc.qt.io/qt-6/qcolor.html,
+  https://doc.qt.io/qt-6/qlineargradient.html, and
+  https://doc.qt.io/qt-6/qbrush.html.
+- Adobe documents that a selection clips gradient/fill application and that solid,
+  gradient, and pattern are distinct fill forms. Tiger applies them to the active
+  raster layer, clipped by the active selection when present; it does not claim to
+  create an Adobe fill layer or reproduce Adobe pattern presets:
+  https://helpx.adobe.com/photoshop/desktop/adjust-color/color-effects-techniques/apply-gradient-fill.html
+  and https://helpx.adobe.com/sg/photoshop/desktop/apply-painting-techniques/fill-objects-selections-layers/fill-selection-layer-color.html.
+- Locked/group/non-pixel-editable layer refusal is an Action failure and preserves
+  pixels; an identical raster result is also a no-op failure. Adapters must not
+  report success after `_fill_document` returns false.
+  `paint.mirror.set` requires at least one real boolean axis and reports unchanged
+  state as a no-op failure. Mirror controls future stroke duplication and is not
+  canvas-flip raster mutation.
+
+## Painter Painting layer-mask source and apply Action contract (UI Design excluded)
+
+- `paint.layer.mask_from_selection`, `paint.layer.mask_from_path`,
+  `paint.layer.mask_create`, and `paint.layer.mask.apply` validate optional
+  `layer_id`, required explicit source type, and required nonblank `path_id` where
+  applicable before Painter owner lookup. Source IDs are exact and case-sensitive;
+  whitespace/case/legacy strings are not silently normalized. The retained
+  `alpha|layer_alpha` and `white|reveal_all` pairs are frozen public Action aliases,
+  not inferred inputs.
+- The path-specific Action passes its authored `path_id` directly to mask creation.
+  It must not mutate `_selected_path_item_id`, and a visible UI path-list selection
+  must not override the Action request. Generic `mask_create(path)` intentionally
+  uses the active Painter path because that Action has no `path_id` field.
+- Selection and closed-path masks become exact `QImage.Format_Alpha8` rasters.
+  Adobe defines layer masks as nondestructive hide/reveal data, supports Reveal
+  Selection and Current Path workflows, and Qt defines Alpha8 plus multiplication
+  of an existing alpha channel by a mask through DestinationIn-equivalent behavior:
+  https://helpx.adobe.com/photoshop/desktop/create-masks/layer-masks/add-layer-masks.html,
+  https://helpx.adobe.com/photoshop/using/converting-paths-selection-borders.html,
+  https://helpx.adobe.com/photoshop/using/masking-layers-vector-masks.html, and
+  https://doc.qt.io/qt-6/qimage.html.
+- Mask creation supports paint, group, and adjustment nodes because Tiger's layer
+  compositor applies Alpha8 masks to group output and adjustment effect masks;
+  Adobe likewise documents masks on layers or groups. Apply remains deliberately
+  narrower: it requires an unlocked paint layer with an enabled raster mask. It bakes the
+  mask into layer pixels and removes the editable mask. A measured four-pixel red
+  raster with mask alpha `[255,128,0,255]` produces the same exact output alpha
+  sequence and no remaining mask. This is Tiger raster-mask apply behavior, not a
+  claim of Photoshop Smart Object or vector-mask parity. A measured masked group
+  preserves an inside red pixel at alpha 255 and hides an outside pixel at alpha 0;
+  attempting to Apply that group mask fails and preserves it. Adobe's apply/delete
+  distinction is the external semantic boundary:
+  https://helpx.adobe.com/photoshop/desktop/create-masks/layer-masks/apply-or-delete-layer-masks.html.
+- Recreating an identical enabled Alpha8 mask is a no-op failure before Undo or
+  replacement. Invalid layers, missing selections, missing/short paths, disabled
+  masks, and locked/non-paint Apply targets fail without changing the prior mask,
+  active layer, selected path, or raster. An explicitly targeted layer becomes
+  active only after source/apply preflight succeeds.
+
+## Painter Painting path-to-selection Action contract (UI Design excluded)
+
+- `paint.path.to_selection` accepts an optional exact `path_id`. A nonblank
+  authored ID is authoritative and must not be replaced by the visible Paths
+  list's current item. Omission intentionally uses the active Painter path for
+  interactive compatibility. Invalid types and whitespace-only IDs fail before
+  owner lookup.
+- A path needs at least three points before any Undo, selection, selected-path,
+  tool, or pixel-mask mutation. Missing IDs and one/two-point paths are Action
+  failures and preserve the prior selection and selected path. The adapter must
+  not report unconditional success after a void core call.
+- Successful conversion uses the exact path points; saved Bezier paths also use
+  their authored handles to build the pixel selection mask. Adobe documents that
+  a selected closed path can become a precise selection border and exposes
+  antialias/feather/combination options. Tiger currently performs New Selection
+  with its existing rasterization and makes no Photoshop feather or operation-
+  option parity claim:
+  https://helpx.adobe.com/photoshop/using/converting-paths-selection-borders.html.
+- A measured explicit three-point `work-path` converts to the same ordered three
+  selection points even when `_selected_path_item_id` names another item.
+  Repeating that conversion from the resulting Selection state is a no-op failure.
+  `path:999` and an explicit two-point work path return failure with identical
+  selection, selected-path ID, pixel mask, tool, and Undo depth.
+
+## Painter Painting clipboard Action contract (UI Design excluded)
+
+- `paint.clipboard.copy`, `.cut`, and `.paste` return success only when the
+  Painting operation actually has supported content and completes. Text-editor
+  focus, UI Design workspace routing, locked pixel/transparency state, an empty
+  paste source, malformed internal payload, or a non-mutating last-empty-layer
+  Cut are failures without Undo or document mutation.
+- Copy and Cut write one `QMimeData` object to the global `QClipboard` containing
+  Tiger's custom paint MIME document plus a standard QImage preview when the
+  payload is rasterizable. Qt defines `setMimeData`, `hasImage`, `hasUrls`, and
+  `hasText` as the interoperable clipboard boundary:
+  https://doc.qt.io/qt-6/qclipboard.html and
+  https://doc.qt.io/qt-6/qmimedata.html. A clipboard write failure is an Action
+  failure; Cut must complete that write before deleting any pixel or layer data.
+- With an active selection, Copy/Cut operate only on visible selected raster
+  pixels. An empty selected raster does not fall back to the whole layer. Without
+  a selection, Tiger copies its editable layer payload; this preserves Tiger
+  layer/stroke/mask metadata and is not Photoshop layer-object format parity.
+  Adobe defines the user semantic baseline: Copy/Cut use selected pixels, no
+  selection means the whole active layer, Cut places content on the clipboard and
+  removes it, and Paste creates a new layer while retaining pixel dimensions:
+  https://helpx.adobe.com/photoshop/desktop/make-selections/refine-modify-selections/copy-and-paste-selections.html
+  and https://helpx.adobe.com/photoshop/desktop/make-selections/refine-modify-selections/delete-or-cut-selected-pixels.html.
+- Tiger must retain one paint-layer shell. Cutting the only nonempty paint layer
+  clears its raster, strokes, and mask after clipboard commit instead of falsely
+  claiming a deleted layer; cutting an already empty shell fails. A target paint
+  layer is removed only when another paint node exists; group or adjustment nodes
+  do not satisfy the paint-shell invariant. Paste accepts valid Tiger MIME first, then supported
+  system image/URL/path payloads, then the process-local Tiger fallback; unsupported
+  or empty sources fail.
+- Current Tiger MIME requires a nonblank serialized layer identity plus typed
+  strokes/raster/mask fields and at least one visible raster, stroke, or editable
+  mask. Invalid base64/PNG, malformed process-local objects, and structurally valid
+  but empty layer payloads fail before Undo. When custom Tiger MIME is present but
+  invalid, Paste does not fall through to its standard-image preview or stale local
+  fallback. The declared v1 reader alone retains its older optional mask field.
+- A measured 4x2 red selection round trip proves the custom MIME and standard image
+  are both present, pasted raster dimensions remain 4x2, selected-half pixels stay
+  red, outside pixels stay alpha 0, and Cut clears only the selected half. A forced
+  clipboard-write failure preserves the original raster exactly; locked Cut and
+  empty Paste also preserve pixels and Undo depth.
+
+## Painter Painting editable Quick Mask contract (M40, UI Design excluded)
+
+- Adobe defines Quick Mask as a temporary editable mask channel: protected areas
+  receive the overlay, white painting adds selection, black painting subtracts
+  selection, gray retains partial selection, and leaving the mode converts the
+  unprotected result back to a selection. The 50% transition controls the visible
+  selection boundary but does not discard lower partial weights:
+  https://helpx.adobe.com/photoshop/using/create-temporary-quick-mask.html
+- Tiger stores the editable result as the same document-sized 8-bit selectedness
+  mask used by weighted Painting selection operations: white is selected, black is
+  protected, and intermediate bytes remain partial selection. Qt `Format_Alpha8`
+  is the storage basis and QPainter is the stroke raster backend:
+  https://doc.qt.io/qt-6/qimage.html and https://doc.qt.io/qt-6/qpainter.html
+- M40 routes pen/eraser mask-edit strokes to this temporary selection mask,
+  never into the active paint layer. Entering with no selection starts with a
+  fully protected mask; entering with a selection preserves its exact Alpha8
+  weights. Exiting retains the edited mask, updates only its boundary chrome, and
+  leaves paint-layer raster/strokes unchanged. Each effective edit has one Undo;
+  identical/no-content edits and repeated mode state are failures without Undo.
+- Entry automatically changes the foreground/background swatches to black/white
+  and exit restores the previous pair. Pen uses Qt `qGray` for partial selectedness;
+  eraser maps to white/add-selection as an explicit Tiger interaction policy, not
+  a claim about Photoshop eraser behavior. A document saved while the mode is
+  active stores the exact selection Alpha8 mask and previous swatches, but reopens
+  with the temporary mode off.
+- Exact 8-bit measurements cover source `[0,64,128,255]`, white-add
+  `[255,255,192,255]`, black-subtract `[0,0,64,255]`, gray partial
+  `[128,128,128,255]`, boundary `[0,0,255,255]`, and default red-overlay alpha
+  `[128,64,63,0]`. Dialog tests also prove mode-exit conversion,
+  layer-pixel/stroke preservation, inverted-selection entry, save/open behavior,
+  and one Undo/Redo command per effective edit. Actual mouse Eraser input is routed
+  to one `source_tool=eraser` mask stroke instead of the normal paint-stroke delete
+  signal; the tablet eraser path uses the same mask-stroke lifecycle. The focused
+  M40 regression set is 96 passed, and the expanded input regression set is 173
+  passed. The fresh source audit records unresolved `5542`, numeric-literal gap
+  `4674`, stale ledgers `0/0/0/0`, defect `0`, and test functions `461`.
+  Independent QA reports P0/P1/P2 `0/0/0`, reproduces all four Quick Mask tests,
+  the 96-test focused set, the 30-test evidence/architecture set, the 173-test
+  expanded set, the fresh audit, and `git diff --check` without editing sources.
+  Custom overlay color/opacity options and conversion to a permanent alpha channel
+  remain explicit gaps; M40 does not claim those Photoshop options.
+
+## Painter Painting saved-selection alpha-channel contract (M41, UI Design excluded)
+
+- Adobe distinguishes the composite image alpha/transparency from extra grayscale
+  alpha channels that permanently store selections. Save Selection may create a
+  named channel or replace/add/subtract/intersect an existing channel; Load
+  Selection supports new/add/subtract/intersect and optional inversion:
+  https://helpx.adobe.com/ca/photoshop/using/saving-selections-alpha-channel-masks.html
+- Adobe also states that a temporary Quick Mask becomes a permanent alpha channel
+  only after returning to standard mode and saving the selection. Quick Mask
+  display color and 0-100% opacity affect appearance only, never protection data:
+  https://helpx.adobe.com/photoshop/using/create-temporary-quick-mask.html
+- Tiger keeps fixed `RGB/Red/Green/Blue/Alpha` component/transparency views
+  separate from persistent saved-selection rows. `paint.channel.paste_image`
+  retains its component/background-transparency behavior, while named saved
+  selections use exact document-sized `QImage::Format_Alpha8` assets with stable
+  `saved-selection-N` identities and nonblank case-insensitively unique names.
+- M41 implements new/replace/add/subtract/intersect save and
+  new/add/subtract/intersect plus invert load through the same exact mask algebra
+  used by live selections. The fixed input arrays `[0,64,128,255]` and
+  `[255,128,64,0]` produce replace `[255,128,64,0]`, add
+  `[255,128,128,255]`, subtract `[0,0,64,255]`, intersect `[0,64,64,0]`, and
+  inverted load `[255,191,127,0]`. Save, update, load, channel paste, and selection
+  restoration participate in Undo/Redo without changing the active paint layer.
+- `.tspaint` v4 embeds each channel as a checksum-covered Alpha8 PNG and migrates
+  v1/v2/v3 with an empty saved-channel collection. Reopen validates exact canvas
+  dimensions, unique IDs/names, mask presence, and an ID serial at least as high
+  as the greatest persisted suffix before mutating the open dialog. Actions
+  `paint.selection.save_channel/load_channel` validate types, operations, IDs,
+  and invert flags before owner lookup; invalid and no-op requests do not create
+  partial state or Undo entries. No undocumented channel-name length ceiling is
+  imposed.
+- Cross-document save targets, filter editing of alpha channels, spot channels,
+  PSD/TIFF extra-channel interoperability, and application-persistent Quick Mask
+  display preferences remain explicit gaps until independently implemented and
+  measured. No milestone may infer those capabilities from a generic `Alpha` row.
+- Independent M41 QA is PASS with P0/P1/P2 `0/0/0`. It reproduced 111 focused
+  tests, while the local expanded selection/document/Action/stylus/tablet set is
+  123 passed. QA found and drove correction of three P1 defects: conditional save
+  Action validation occurred after owner lookup, invalid v4 serials could change
+  output settings before failure, and checksum-valid wrong-sized channel masks
+  were silently scaled. All three now fail atomically and were independently
+  rechecked. The fresh audit records unresolved `5549`, numeric-literal gap
+  `4681`, four stale-ledger counts `0/0/0/0`, defect `0`, and test functions `464`;
+  the M41 numeric contract is accepted with no pending row.
+
+## Painter Painting saved alpha-channel lifecycle contract (M42, UI Design excluded)
+
+- Adobe Channel Basics documents alpha-channel rename by editing the channel name,
+  drag reorder, and deletion without flattening the image. Adobe's duplicate
+  channel workflow creates an independent copy with an authored name:
+  https://helpx.adobe.com/ca/photoshop/using/channel-basics.html
+  https://helpx.adobe.com/sg/photoshop/using/duplicate-split-merge-channels.html
+- M42 implements stable-ID rename, exact independent duplicate with optional
+  inversion, before/after reorder limited to the saved-channel list, and delete
+  through Channels-panel controls and Actions
+  `paint.selection.channel.rename/duplicate/reorder/delete`. Double-click renames;
+  duplicate, up/down, and delete controls use the same core. Every mutation is one
+  Undo step and `.tspaint` v4 preserves order, names, identities, and Alpha8 bytes.
+- Delete does not alter raster layers, background alpha, the active selection, or
+  fixed component channels. If the deleted row was selected, Tiger selects the
+  survivor now occupying the same saved-row index, otherwise the preceding survivor,
+  and finally `RGB` when none remain. Duplicate appends to the saved-channel tail.
+  These two deterministic placement rules are Tiger policy, not measured Photoshop
+  row-position parity. Duplicate QImages detach on write; mutating the duplicate
+  cannot alter the source. Invalid IDs, blank/duplicate names, bool coercion,
+  same-target reorder, unsupported placement, and no-op rename/reorder fail before
+  owner mutation or Undo.
+- M42 is complete with independent QA PASS and P0/P1/P2 `0/0/0`. QA found one
+  Channels-panel state defect: rebuilding the list let the current RGB component
+  override the selected saved-channel model and disable lifecycle controls. The
+  selected-channel model is now authoritative, and QA rechecked UI signals, one
+  Undo step per mutation, deterministic delete fallbacks, no-op atomicity, v4
+  round-trip, and channel invariants. The designated QA set passed `112` tests and
+  the saved-channel/Action focused QA set passed `40` tests. The final local
+  Painting regression set passes `126` tests. The fresh source audit records
+  unresolved `5559`, numeric-literal gap `4690`, stale ledgers `0/0/0/0`, defect
+  `0`, and test functions `467`; the lifecycle numeric contract is accepted with
+  no pending row.
+  Direct painting/filtering on an alpha channel, per-channel display options,
+  cross-document duplication, spot channels, and PSD/TIFF extra-channel exchange
+  are separate gaps and cannot be claimed from lifecycle CRUD alone.
+
+## Painter Painting saved alpha-channel direct edit and view contract (M43, UI Design excluded)
+
+- Adobe Channel Basics defines selected-channel painting semantics: white adds the
+  channel at full intensity, gray adds a lower intensity, and black removes channel
+  intensity. It also separates active/editable state from eye-column visibility and
+  permits an alpha channel to be viewed with the composite. Adobe Save Selections
+  explicitly describes the composite-plus-alpha color overlay. Qt defines
+  `QImage::Format_Alpha8` as an 8-bit alpha-only raster:
+  https://helpx.adobe.com/ca/photoshop/using/channel-basics.html
+  https://helpx.adobe.com/ca/photoshop/using/saving-selections-alpha-channel-masks.html
+  https://doc.qt.io/qt-6/qimage.html
+- Selecting a persistent saved channel now redirects mouse, tablet, and Action
+  strokes to its document-sized Alpha8 mask. White, gray, and black use Qt `qGray`
+  intensity; eraser is the documented zero/black removal endpoint. Each effective
+  edit creates exactly one Undo step. Zero-coverage edits create none. Raster layers,
+  active selection, background, and the ordinary stroke list remain unchanged.
+- Saved rows now have independent eye visibility. With an RGB component visible the
+  saved mask is drawn as the already-approved red 50% protected-area overlay; with
+  no RGB component visible it is drawn as an opaque grayscale channel. Visibility is
+  preserved in `.tspaint` v4, and open rejects unknown channel IDs, non-boolean values,
+  or inconsistent RGB aggregate visibility before dialog mutation. Newly saved and
+  duplicated channels start hidden as an explicit Tiger workflow policy.
+- Saved-channel clipboard replacement no longer silently stretches a mismatched image
+  to document dimensions. Exact-size grayscale replacement remains supported; a
+  different size is rejected atomically until a separately specified placement or
+  transform workflow exists.
+- Focused M43 tests prove exact view endpoints, white/gray/black/eraser edits, real
+  mouse eraser routing, Undo/Redo and no-op behavior, invariant document state,
+  visibility Action/schema behavior, malformed-document atomicity, and v4 round trip.
+  The expanded local Painting regression passes `128` tests. The fresh source audit
+  records unresolved `5553`, numeric-literal gap `4684`, stale ledgers `0/0/0/0`,
+  defect `0`, and test functions `469`; the M43 direct-edit/view literal contract is
+  accepted with no pending row. Independent QA passed with P0/P1/P2 `0/0/0`,
+  `116` designated tests, an additional real `QTabletEvent` eraser probe, and the
+  `128`-test expanded local regression.
+- Independent QA reproduced four P1 defects before final PASS: Action strokes bypassed
+  the saved-channel core and appended ordinary strokes; falsy malformed v4 visibility
+  values (`[]`, empty string, zero, and null) escaped object validation; wrong-size
+  saved-channel paste changed the selected channel before failing; and that atomicity
+  fix temporarily stopped successful fixed Red/Alpha paste from selecting its target.
+  The final implementation routes Action batches through one channel Undo, validates
+  every present visibility value without truthiness coercion, delays selection mutation
+  until successful paste, and preserves fixed-channel success behavior.
+  Per-channel custom overlay color/opacity, multiple-visible-channel color
+  differentiation, filters, cross-document duplication, spot channels, and PSD/TIFF
+  extra-channel exchange remain unclaimed gaps.
+
+## Painter Painting saved-channel follow-up milestones (M44-M46 implemented)
+
+- **M44 Channel Options (implemented; independent QA PASS):** every persistent
+  saved-selection channel stores `display_mode` (`masked_areas` or `selected_areas`),
+  exact `#RRGGBB` overlay color, and integer `0..100` overlay opacity. `Masked Areas`
+  displays stored Alpha8 selectedness directly as white-selected/black-masked and
+  overlays its inverse; `Selected Areas` inverts the grayscale display and overlays
+  stored selectedness. Painting is inverted only at the input/display boundary so the
+  stored mask always remains canonical selectedness. Color and opacity change view
+  pixels only, never the saved Alpha8 content or protection semantics. Tiger eraser
+  removes selectedness in either mode; this is an explicit Tiger policy, not an Adobe
+  eraser-parity claim.
+- `.tspaint` current format is v5. v5 requires all three option fields for every saved
+  channel and rejects malformed values atomically; v4 and earlier migrate to
+  `masked_areas`, red, 50 percent. UI and `paint.selection.channel.options.set` share
+  the same strict core and create exactly one Undo only for an effective change.
+  Rename and duplicate preserve all option metadata.
+- Exact tests prove selected-area grayscale `[255,191,127,0]`, green 25 percent
+  overlay endpoint alpha `64`, unchanged source mask bytes, black/white edit inversion,
+  Undo/Redo and no-op behavior, option-button eligibility, v5 round trip, corrupt-v5
+  rejection, and deterministic v4 migration. The focused M44 set currently passes
+  `64` tests. The M44 numeric-literal contract freezes 12 exact rows; M43 view rows
+  were rehomed into it, leaving the direct-edit eraser contract as one exact row.
+  Independent QA passed with current P0/P1/P2 `0/0/0`; the UI Design-excluded
+  Painter, architecture, and debug-boundary regression passes `531` tests with one
+  expected corrupt-EXIF Pillow warning. Adversarial measurements prove opacity 0/100,
+  lowercase color normalization, selected-area paint inversion and eraser policy,
+  sequential red-100 plus green-50 overlays `(127,128,0,255)`, grayscale-alone
+  last-visible-channel order, and source Alpha8 immutability through update/paste.
+- QA found and closed two P1 defects before PASS: accepting an unchanged Channel
+  Options UI dialog leaked the core no-op `ValueError`, and falsy/non-list v5
+  `saved_selection_channels` values silently collapsed to an empty list. UI no-op now
+  returns false with zero Undo. Current v5 now requires a channels object, a saved
+  channel list, and a present serial before asset extraction or dialog mutation;
+  `{}`, empty string, zero, null, and missing serial all reject atomically, while v4
+  migration still synthesizes defaults. The two additional structure contracts freeze
+  numeric boundary `f6134e2b...` and writer literal `95da8cb5...`; fresh audit records
+  unresolved `5555`, numeric-literal gap `4684`, stale ledgers `0/0/0/0`, defect `0`,
+  and no pending M44 contract.
+- **M45 Cross-document selection channels (implemented; independent QA PASS):**
+  every visible open standalone Painter document has an opaque runtime identity.
+  `paint.documents.inspect` enumerates those documents through Qt's top-level-widget
+  registry and reports the active identity; `paint.state` reports the same identity.
+  Saving preserves the identity, while a successful document open assigns a new one,
+  so stale automation references cannot silently address replacement content.
+- UI Document/Source choosers and Actions
+  `paint.selection.save_channel_to_document` and
+  `paint.selection.load_channel_from_document` copy canonical Alpha8 selectedness only
+  between *other* open Painter documents with exactly identical pixel dimensions.
+  There is no resize or resampling. Save creates one Undo only in the destination
+  document; load creates one Undo only in the active destination document; the source
+  selection/channel bytes, source Undo stack, destination selected channel on load,
+  layer/background/stroke state, and per-channel display metadata remain unchanged.
+  Mismatch, closed/stale/same-document identity, absent channel, invalid conditional
+  Action input, and no-op update fail before mutation or Undo.
+- Adobe also permits saving a selection into a newly created image. M45 does **not**
+  claim that workflow: Tiger currently targets already-open Painter documents only.
+  Exact focused tests cover Action discovery, identity save/open lifetime, closed-window
+  exclusion, UI chooser routing, cross-document new/replace/load, source/destination
+  Undo ownership, no-op atomicity, exact mask bytes, mismatch rejection, and Undo/Redo.
+  The audit freezes one positive-raster input row at `7240a9a9...`, five strict
+  two-axis structure rows at `428d4cb3...`, and ten chooser identity/tuple rows at
+  `62fab36b...`. The fresh audit records unresolved `5557`, numeric-literal gap
+  `4684`, defect `0`, stale ledgers `0/0/0/0`, and no M45-specific pending contract.
+  Official sources:
+  https://helpx.adobe.com/ca/photoshop/using/saving-selections-alpha-channel-masks.html
+  and https://doc.qt.io/qt-6/qapplication.html#topLevelWidgets.
+- Independent QA first failed M45 with four P1 and three P2 defects: embedded/non-
+  standalone dialogs were enumerated; a closed active Action owner could still mutate
+  a destination; UI chooser objects were not re-resolved after a document closed; a
+  corrupt wrong-size active mask was silently smooth-resampled; the external Load
+  button stayed enabled after its last source closed; float/string dimensions were
+  coerced to integers; and tests/ledger prose overstated those missing boundaries.
+  The final implementation filters standalone visible documents, revalidates both
+  endpoints at transfer time, stores chooser identities rather than objects, rejects
+  mask-size mismatch byte-preservingly, refreshes peers on show/hide, and accepts only
+  strict integer extents. Re-QA passed P0/P1/P2 `0/0/0`, focused `63`, cross-only `7`,
+  architecture/debug `5`, and audit/diff checks. The final UI Design-excluded Painting,
+  architecture, and debug-boundary regression passes `538` tests with one expected
+  corrupt-EXIF Pillow warning.
+- **M46 Alpha-channel file exchange (implemented):** Tiger supports saved-selection
+  channel exchange only for PSD and TIFF at this milestone. PSD exchange is restricted
+  to 8-bit RGB documents; other PSD channel depths are rejected before mutation rather
+  than quantized. PSD export writes merged
+  RGBA transparency plus named extra alpha channels, AlphaIdentifiers, and Unicode
+  alpha names; import restores exact Alpha8 bytes and names. The PSD header limit is
+  enforced as 56 total merged-image channels, so RGB plus merged transparency permits
+  at most 52 saved-selection channels. Reopen tests prove RGBA transparency, six total
+  channels for two saved selections, exact channel bytes, identifiers `[0,1,2]`, and a
+  Unicode name. PSD does not preserve Tiger-only display mode, overlay color, or overlay
+  opacity; imported channels explicitly receive the documented Tiger defaults.
+- TIFF export uses uncompressed chunky RGB with one `ExtraSamples=2` unassociated
+  transparency sample followed by `ExtraSamples=0` unspecified saved-selection planes.
+  Both 8-bit and 16-bit TIFF preserve exact Alpha8 masks. The 16-bit mapping is exactly
+  `value8 * 257`; import rejects samples not divisible by 257 instead of quantizing.
+  Import also rejects duplicate IFD tags and enforces TIFF 6.0 field types for every
+  required baseline/ExtraSamples tag; a numerically plausible tag with the wrong type
+  is malformed, not accepted by coercion.
+  TIFF 6.0 has no standard alpha-channel-name field, so TIFF names are not claimed as
+  preserved and import reports deterministic synthetic names (`Alpha 1`, ...).
+- `paint.selection.channels.import_file` and the Channels-panel import button accept
+  only same-pixel-size PSD/TIFF sources. The complete incoming set is validated before
+  one Undo and any mutation. Empty channel sets, size mismatch, duplicate names,
+  unsupported suffixes, invalid precision, malformed containers, and missing files
+  fail without partial channels or Undo. Imported channels start hidden; the first
+  imported channel becomes selected. Layer, background, stroke, and active selection
+  content are invariant.
+- PNG/JPEG/WebP export reports saved-channel omission explicitly rather than silently
+  claiming preservation; interactive export surfaces the same warning in its completion
+  dialog. PSD export reports names/masks as preserved but explicitly marks
+  `display_options_preserved=false` and labels Tiger-only option values as source
+  metadata, never as on-disk PSD preservation. PDF, raw, PSB, and arbitrary compressed/tiled TIFF are not
+  supported or claimed by M46. `.tspaint` persistence remains a separate native
+  document contract, not interoperability evidence.
+- Official contracts are Adobe's PSD format specification and TIFF 6.0:
+  https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/ and
+  https://www.itu.int/itudoc/itu-t/com16/tiff-fx/docs/tiff6.pdf.
+
+### M47 canonical Painting burn-in renderer
+
+- Capture GIF frame composition must render Painting strokes through
+  `compose_pil_paint_overlays`, the same QImage/Painter layer compositor used by
+  Painter PNG export and document baking. A separate Pillow brush-style approximation
+  is forbidden because it cannot preserve the stored dab/sensor contract.
+- The canonical route preserves the complete `Stroke` object, including pressure,
+  load, dynamics, brush-engine version, bristle count, material settings, and
+  active-time filtering. `stroke_width_scale` is applied by copying the stroke and
+  scaling width only; source document state is not mutated. Capture GIF currently
+  stores stroke overlays only; this milestone makes no layer-mask preservation claim.
+- M47 deletes the duplicated Pillow textured/dashed/color-variation renderer rather
+  than approving its hundreds of empirical coefficients. An exact regression proves
+  Capture frame burn-in bytes equal the canonical transparent overlay for the same
+  material stroke and that changing pressure/load changes the burned result.
+- This contract does not approve the remaining canonical textured-brush coefficients
+  as natural-media parity. Those values remain open for the next evidence batch.
+  Krita documents a stroke as spaced brush-tip impressions whose size/color/opacity
+  may be controlled by pressure, speed, or other sensors, while Corel documents Thick
+  Paint pressure/tilt/rotation response and paint build/push/pull/scrape behavior:
+  https://docs.krita.org/en/reference_manual/brushes/brush_engines/pixel_brush_engine.html
+  and
+  https://product.corel.com/help/Painter/540111162/Corel-Painter-en/Corel-Painter-Thick-Paint.html.
+
+### M48 brush load depletion by document-pixel travel
+
+- Paint-load depletion is a function of cumulative authored path travel in
+  document pixels. Tablet event count, preview sampling density, and a second
+  width/height multiplication are forbidden as depletion inputs.
+- `depleted_load_curve` is the single load/depletion/resaturation calculation
+  shared by bristle color rendering and material-channel rasterization.
+  `incremental_stroke_segments` carries `brush_travel_offset_px`, so live
+  two-point segments and the final whole stroke use identical cumulative travel.
+  Present sparse pressure/load/tilt/rotation curves are normalized over the full
+  point count before segmentation; missing sensor curves remain missing.
+- M48 corrected two unsupported implementations found by the evidence audit:
+  `bristle_lane_paths` multiplied already-pixel coordinates by document extent a
+  second time, while material rasterization depleted load by tablet sample index
+  divided by 64 and ignored `load_dryout_px`.
+- `tools/measure_painter_brush_response.py` is the reproducible measurement gate.
+  Its exact binary travel fixture produces load `0.4375` for both sparse and dense
+  point streams, live/full max delta `0`, deterministic replay hashes match, and
+  the documented directional relations for pressure, spacing, resaturation, and
+  material deposit all pass. The generated report is diagnostic and regenerable;
+  it does not certify physical rheology or competitor pixel parity.
+- Krita documents spacing-controlled tip impressions and sensor-controlled dab
+  size/color/opacity. Corel documents finite Paint Load, bristle density,
+  Resaturation, and Plow behavior. Khronos defines normalized roughness and normal
+  texture semantics used only at the material export boundary:
+  https://docs.krita.org/en/reference_manual/brushes/brush_engines/pixel_brush_engine.html,
+  https://product.corel.com/help/Painter/540219480/Main/EN/Win-Documentation/Corel-Painter-Thick-Paint-Brush-controls.html,
+  and https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html.
+
+### M49 brush-pressure interval and zero-pickup endpoint
+
+- Tablet pressure enters the brush engine as a normalized value whose supported
+  endpoints are `0.0` and `1.0`. The persisted integer-percent calibration window
+  must therefore remain a nondegenerate subinterval of `0..100`: `pressure_min`
+  is `0..99` and `pressure_max` is `pressure_min + 1..100`. The former `100/100`
+  normalization produced `100/101`, contradicting both the published percent
+  domain and Qt's normalized maximum.
+- `normalize_brush_dynamics` now resolves collapsed or reversed inputs without
+  leaving that domain: `100/100` becomes `99/100`, and `80/20` becomes `80/81`.
+  `_map_pressure_normalized` consumes those final endpoints directly. Exact tests
+  prove raw pressure `0.99` maps to `0` and `1.0` maps to `1` for the collapsed-high
+  case. This only proves range consistency; it does not certify pressure feel,
+  device calibration, or another painter's response curve.
+- Pickup is a direct `0..100%` contribution control. The prior hidden
+  `max(0.08, pickup/100)` floor deposited paint even when Pickup was authored as
+  zero. The floor is removed. Actual QImage measurement proves both Pickup 0 and
+  Smudge Pickup 0 are byte-identical to the same background rendered with zero
+  flow; all three SHA-256 values are
+  `252cf4fbc28af867bbe5072b38805ff3ed1bf234ba23675c2a1212adeca44e29`.
+- `tools/measure_painter_brush_response.py` is the reproducible producer and
+  writes `debugCapture/painter/evidence_audit/m49_brush_response.json`. The
+  pressure endpoints and neutral-pickup checks are exact assertions, not visual
+  thresholds. Krita's Color Rate is the closest documented semantic reference,
+  but Tiger does not claim Krita pixel parity or a physical pigment model.
+- Official contracts:
+  https://doc.qt.io/qtforpython-6/PySide6/QtGui/QTabletEvent.html and
+  https://docs.krita.org/en/reference_manual/brushes/brush_engines/color_smudge_engine.html.
+- The final focused Painting plus architecture/debug-boundary gate passes 40
+  tests. The fresh audit records test functions `494`, numeric literals `6450`,
+  numeric gap `4483`, unresolved candidates `5286`, and defect/stale/pending `0`.
+  Independent QA found one P2 traceability omission in the generated report's
+  source list; after adding and regression-locking the Qt URL, re-QA passed with
+  P0/P1/P2 `0/0/0`.
+
+### M50 brush-response equations and bounded smudge workload
+
+- The dynamic-dab renderer no longer treats unexplained coefficients as brush
+  truth. M50 removed the hidden `0.7 px` spacing floor, `0.5/4 px` private width
+  fallbacks, `8%` size floor, `18% + 82% * pressure` size response, `25% + 75%
+  * pressure` alpha response, `10%` texture-scale floor, buildup divisor `34`,
+  scatter exponent `0.55`, stabilization floor/coefficient `0.08/0.9`, the
+  authored five-point default pressure curve, and sine-noise constants. These
+  values had no platform, format, product-document, or measurement basis.
+- Width, spacing, and roundness now enter through the shared Painting brush
+  domains. Missing or malformed width uses the named `6 px` Painting default;
+  a valid authored zero clamps to the declared `1 px` minimum. Spacing is exactly
+  `width * spacing_percent / 100`, so the minimum declared pair reaches the dab
+  plan as `0.01 px`. Roundness uses the shared `10..100%` domain.
+- The default pressure curve is the exact identity from `[0,0]` to `[1,1]`.
+  Dab size is `width * max(0, pressure * (1 + size_jitter + tilt))`, and alpha
+  multiplies flow, texture, and pressure directly. Consequently pressure zero
+  produces exact size and alpha zero, while full size jitter may approach zero
+  without a hidden eight-percent deposit. Full stabilization has the exact
+  authored endpoint `alpha = 0`: every output after the first uses the previous
+  authored sample. Full buildup adds one extra copy per declared scatter copy,
+  so eight copies become sixteen rather than depending on an unexplained
+  divisor.
+- Scatter radius uses `sqrt(U)` with an independently hashed angle, which is the
+  area-uniform disk transform rather than an authored exponent. Random inputs
+  are deterministic BLAKE2b digests of unsigned 64-bit seed/index/channel
+  tuples, domain-separated by `TigerDab`; replay determinism is claimed, but
+  cryptographic unpredictability and another engine's sequence are not.
+- Smudge Radius remains a percentage of brush size as documented by Krita's
+  Dulling mode. The former silent `32 px` authored-radius truncation is removed.
+  Radii through `32 px` enumerate every in-bounds disk pixel; larger radii use a
+  deterministic `17 x 17` full-radius grid with at most `289` candidates. This
+  bounded large-radius sampling is an explicit Tiger workload policy and is not
+  claimed to equal an exact full-disk average or competitor output.
+- `tools/measure_painter_brush_response.py` writes the reproducible M50 report to
+  `debugCapture/painter/evidence_audit/m50_brush_response.json`. Its 21 exact
+  checks record minimum requested spacing `0.01`, minimum full-jitter size
+  `0.001325411145726152`, zero-pressure size/alpha `0`, buildup `8 -> 16`, full
+  stabilization points `[[0,0],[0,0],[0.4,0.8]]`, one alpha value at texture
+  scale zero, large-smudge sample count/capacity `197/289`, blue response
+  `36 -> 197`, and identical deterministic replay SHA-256 values
+  `ee20cfc7d60b02eec023db681cde895f9cd34e36bd40a9fee40aa87dd8aecd1f`.
+- Official semantic and algorithm references are Qt QTabletEvent, Krita Pixel
+  Brush/Color Smudge/Texture documentation, Qt QImage bounds, and RFC 7693:
+  https://doc.qt.io/qtforpython-6/PySide6/QtGui/QTabletEvent.html,
+  https://docs.krita.org/en/reference_manual/brushes/brush_engines/pixel_brush_engine.html,
+  https://docs.krita.org/en/reference_manual/brushes/brush_engines/color_smudge_engine.html,
+  https://docs.krita.org/en/reference_manual/brushes/brush_settings/texture.html,
+  https://doc.qt.io/qt-6/qimage.html, and
+  https://www.rfc-editor.org/rfc/rfc7693.
+- Final M50 regression is split into two isolated Qt processes to avoid sharing
+  QApplication/native graphics lifetime across unrelated test modules: `62
+  passed` and `60 passed`. This includes brush domains/dynamics/measurement,
+  engine-v2, live/commit/export parity, document I/O, media/material/Actions,
+  evidence-classifier regression, architecture, and debug-capture boundary
+  guards. A fresh audit records test functions `498`, numeric literals `6464`,
+  routed scanner gaps `5067`, numeric gaps `4499`, unresolved candidates `5259`,
+  and unreviewed defects `0`. Every M50 contract is accepted with stale/pending
+  `0`; separate later-milestone contracts remain pending globally.
+- Independent QA additionally recomputed the BLAKE2b sequence, measured 20,000
+  scatter samples with mean `r^2 = 0.4995349381`, compared radii `0,1,7,31,32`
+  against brute-force disks at center/corners, bounded radii `33,64,100,1000`,
+  and verified malformed/zero domain endpoints. It found P0/P1/P2 `0/0/0`.
+  A second delta QA verified that the dynamic `QColor.setAlphaF` row belongs to
+  the Qt normalized-color contract while a pressure clamp in the same function
+  cannot inherit Qt or smudge evidence; final Qt/smudge inventories are `3/15`
+  rows and delta QA again passed P0/P1/P2 `0/0/0`.
+
+### M51 retained brush geometry, public controls, and authored style boundary
+
+- M51 does not treat the former legacy renderer as a reference implementation.
+  The exhaustive audit now routes both scanner-visible clamps and every AST-only
+  literal in the renderer, catalog, and geometry helper. This initially exposed
+  222 renderer literal rows that the earlier max/min-oriented scan did not
+  count. Independent QA then found and removed a one-pixel oil-dab thickness
+  floor plus a three-row private scumble/stipple cadence expression, leaving
+  the approved 219-row inventory. Milestone scope uses that exact inventory
+  rather than the earlier 91, 125, or pre-correction 222-row estimates.
+- Public brush width, opacity, spacing, hardness, angle, and roundness are the
+  only values allowed to define those controls. Designer profiles no longer
+  contain private `body`, `alpha`, or `spacing` multipliers. Every one of the 37
+  retained textured styles renders the canonical public tip envelope before its
+  authored interior detail. Hardness is the direct solid-radius fraction of the
+  tip; zero pressure/opacity behavior remains owned by the M49/M50 contracts.
+- Floating QPen widths are preserved. Private `0.7`, `0.8`, `1`, `2`, `2.5`,
+  `3`, `4`, `5`, `7`, and `8 px` renderer floors were removed instead of being
+  approved as style quality. Custom dash arrays that multiplied document width
+  even though Qt interprets dash entries in pen-width units were replaced by
+  Qt's declared `DashLine` style. All retained-style mark cadence now starts
+  from the public `width * spacing_percent / 100` value.
+- `_sample_polyline_xy` no longer imposes an unrelated 1 px spacing floor or
+  restarts sampling at every source segment. `sample_polyline_uniform` samples
+  cumulative document-pixel travel, is invariant to collinear input
+  tessellation, includes both endpoints, and uniformly resamples the entire path
+  when the already measured 8,192 Painter dab budget is exceeded. Its workload
+  diagnostic reports requested/effective spacing, estimated/rendered samples,
+  budget, and degradation state; it never truncates only the stroke tail.
+- The sine-based legacy random expression was removed. Retained styles now use
+  domain-separated BLAKE2b over unsigned 64-bit seed/index/channel values and a
+  process-independent BLAKE2b style seed. This claims deterministic Tiger replay
+  only, not cryptographic unpredictability or another engine's sequence.
+- Partial live invalidation formerly assumed an unexplained `max(8 px,
+  width * 1.75)` support radius even though scatter, rotation, and offsets can
+  exceed it. Until renderers publish exact support bounds, live strokes request
+  a correctness-first whole-widget update; QWidget may coalesce requests.
+- PNG stroke export now renders into Qt's premultiplied ARGB32 format, matching
+  the preview/layer path before encoding. The M51 measurement records exact PNG
+  versus PIL-overlay RGBA equality and a measured maximum one-LSB difference
+  between the premultiplied preview buffer and decoded straight-alpha PNG. It
+  does not label those two buffers byte-identical.
+- `tools/measure_painter_legacy_brush.py` regenerates
+  `debugCapture/painter/evidence_audit/m51_legacy_brush.json`. Its current 22/22
+  checks cover all 37 retained styles, all 21 designer profiles, nonempty and
+  distinct fixture hashes, exact replay, every public tip control on both a
+  designer profile and loaded oil, full-path bounded resampling, BLAKE2b
+  repeatability, and output parity. Fixture hashes freeze this Tiger-authored
+  model only; the report explicitly rejects physical-media, competitor-pixel,
+  and visual-quality-certification claims.
+- Independent M51 QA passed with P0/P1/P2 `0/0/0`: 52/52 focused and guard
+  tests, 22/22 measurements, and exact accepted inventories of 4 geometry,
+  25 geometry-literal, 41 preset/profile, and 219 renderer-literal rows. The
+  numeric-literal ledger has no stale or pending M51 contract.
+- Official semantic boundaries are Qt floating pen widths, cap/join/dash and
+  render hints; Krita brush size/spacing/scatter/softness options; Adobe Brush
+  Tip Shape preset controls; Corel dab-spacing and minimum-spacing controls; and
+  RFC 7693 BLAKE2b:
+  https://doc.qt.io/qt-6/qpen.html,
+  https://doc.qt.io/qt-6/qpainter.html,
+  https://docs.krita.org/en/reference_manual/brushes/brush_settings/options.html,
+  https://helpx.adobe.com/photoshop/desktop/apply-painting-techniques/brushes-presets/create-brush-set-painting-options.html,
+  https://product.corel.com/help/Painter/540219480/Main/EN/Win-Documentation/Corel-Painter-Spacing-controls.html,
+  and https://www.rfc-editor.org/rfc/rfc7693.
+
+### M52 Engine-v2 bristle and stylized material evidence boundary
+
+- M52 expands the AST audit to every literal in
+  `app/painter_brush_engine_v2.py` and `app/painter_material_paint.py`, plus
+  their live/commit/clipboard construction rows. The approved inventories are
+  23 numeric and 129 AST-only bristle rows, and 51 numeric and 257 AST-only
+  material rows. Passing a max/min scan alone is not sufficient evidence.
+- Corel documents bristle count or density, optional size-scaled features,
+  tilt-linked spread, finite Paint Load, Resaturation, and Plow. Adobe documents
+  Mixer Brush Wet, Load, and Mix endpoints. Neither product publishes Tiger
+  pixel coefficients. `BRISTLE_ENGINE_MODEL_CONTRACT` and
+  `MATERIAL_PAINT_MODEL_CONTRACT` therefore identify every retained coefficient
+  as Tiger art direction and explicitly reject physical-bristle, rheology,
+  visual-quality, and external-product pixel-parity claims.
+- Engine v2 no longer uses libm sine as a replay-noise source. Scalar variation
+  uses the shared domain-separated BLAKE2b unit generator; dry/scumble material
+  grain uses an exact uint64 integer-mixing field. Automatic bristle density no
+  longer has hidden 5..36 or 7..36 ranges: public width scales the declared
+  Tiger auto-density factor, bounded only by one structural lane and the
+  published 64-lane capacity. An explicit count of 64 renders all 64 lanes.
+- The private 0.25/0.35/0.55/0.65/0.8/0.85/1 px detail floors, 18% pressure
+  width, 48% pressure alpha, material 90% alpha override, and private knife
+  cadence are removed. Every v2 color stroke first uses the canonical public
+  width, opacity, spacing, hardness, angle, and roundness tip. Named style
+  profiles add distinct interior styling without replacing those controls. All
+  13 v2 style fixtures now have distinct full-RGBA hashes.
+- Unused legacy `body_width` and `body_alpha` fields were removed from bristle
+  profiles before freezing the inventory; every retained profile value is read
+  by the renderer.
+- Authored pressure zero or point-load zero is an exact no-deposit endpoint for
+  color and material channels across all 13 v2 styles, including stipple and
+  both knife styles. The former 0.04 minimum retained load is removed
+  because Corel explicitly documents Paint Load 0 for scraping or dragging
+  without selected-paint deposit. Material rasterization also removes hidden
+  0.04/0.06/0.08 deposit floors, roughness 0.04, the 0.0001 deposition cutoff,
+  sine grain, and the 0.55 px plateau-blur floor.
+- When OpenCV is unavailable, Gaussian material blur uses a deterministic
+  float32 separable kernel. It does not quantize through an 8-bit temporary and
+  therefore preserves measured sub-8-bit input. Optional line-raster fallback
+  remains separately reported; no cross-backend pixel-identity claim is made.
+- `tools/measure_painter_bristle_material.py` regenerates
+  `debugCapture/painter/evidence_audit/m52_bristle_material.json`. Its current
+  27/27 checks cover 13 distinct color styles, 13 distinct material
+  height/roughness pairs, exact replay, whole/incremental equality, pressure,
+  tilt, density and every public tip response, 64 lanes, all-style pressure/load
+  zero endpoints,
+  one-LSB preview/PNG conversion, material-channel and preview replay, load and
+  roughness response, and deterministic float blur. The corpus is a fixed Tiger
+  regression corpus, not reference artwork or a quality certificate.
+- Independent M52 QA first found and reproduced a zero-pressure/load bypass in
+  stipple and knife color plus stipple material output. After correction, its
+  78 adversarial endpoint combinations had zero failures; focused tests and
+  guards passed 66/66, Painting-wide regression passed 584/584, and final
+  P0/P1/P2 was `0/0/0`.
+- Official semantic and format boundaries:
+  https://doc.qt.io/qtforpython-6/PySide6/QtGui/QTabletEvent.html,
+  https://doc.qt.io/qt-6/qimage.html,
+  https://product.corel.com/help/Painter/540219480/Main/EN/Win-Documentation/Corel-Painter-Bristle-controls.html,
+  https://product.corel.com/help/Painter/540219480/Main/EN/Win-Documentation/Corel-Painter-Thick-Paint-Brush-controls.html,
+  https://helpx.adobe.com/photoshop/using/painting-mixer-brush.html,
+  https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html, and
+  https://www.rfc-editor.org/rfc/rfc7693.
+
+### M53 Painting persistence, recovery, and file-exchange evidence boundary
+
+- M53 audits Painting persistence and exchange only; UI Design remains outside
+  scope. The reviewed implementation surfaces are `painter_document_io.py`,
+  `painter_autosave.py`, `painter_file_exchange.py`, `painter_output.py`, and
+  the display-only recovery dialog. A passing local decode is not treated as
+  external-application interoperability or print-quality certification.
+- PNG 16-to-8 export now uses PNG Third Edition section 13.12's exact nearest
+  linear rescaling, `(sample * 255 + 32767) // 65535`, instead of discarding
+  the low byte with a right shift. Exhaustive measurement checks all 65,536
+  uint16 inputs and the actual exported PNG pixels.
+- A v5 `.tspaint` load now requires exactly one `document.json`, a list
+  manifest with object rows, unique manifest and physical ZIP entries, string
+  entry names, non-boolean integer version/serial/size fields, an exact asset
+  byte size, and canonical lowercase SHA-256. All archive data is validated
+  before extraction. An automatically created extraction root is removed on a
+  later write/resolution failure, and malformed ZIP/I/O failures cross a stable
+  `PainterDocumentError` boundary.
+- Recovery v2 skip is permitted only when a self-hashed typed manifest,
+  session-id/file-key pairing, content hash, source path, stored whole archive
+  SHA-256, ZIP CRC, JSON, and document schema still agree. A
+  structurally valid ZIP modified after the manifest is rejected, omitted from
+  restore candidates, and rewritten on the next save. Manifest replacement
+  uses a randomized same-directory temporary file and `os.replace`; a stored
+  recovery path cannot redirect outside its paired manifest name. Legacy v1
+  manifests remain visible only after strict identity/path checks and a real
+  `.tspaint` load; their unauthenticated source path is cleared, and the next
+  save upgrades them to v2. Retention
+  accepts only non-boolean nonnegative integers. The default of 12 is a Tiger
+  authored local policy, not a universal recovery-capacity promise.
+- Print state rejects nonfinite numbers and string truthiness, exposes only the
+  currently implemented sRGB output scope, names Manga B5 as 182x257 mm at 600
+  PPI, and separates ISO A-series dimensions and documented product examples
+  from Tiger-authored postcard, square, bleed, safe-margin, and large-format
+  starting values. Printer and publisher requirements remain authoritative;
+  no universal quality or bleed claim is made.
+- `tools/measure_painter_persistence_exchange.py` regenerates
+  `debugCapture/painter/evidence_audit/m53_persistence_exchange.json`. Its 18
+  checks cover exact `.tspaint` asset/manifest round-trip, pre-extraction
+  rejection, recovery tamper detection/rewrite, exhaustive sample conversion,
+  actual PNG8 pixels, PNG16/TIFF16 reopen depth, declared print math, and
+  malformed-state normalization. Focused implementation and measurement tests
+  pass 124/124. The final UI-Design/soak-excluded Painting regression passes
+  609/609, and the architecture/debug/evidence bundle passes 37/37.
+- The accepted M53 inventories are: output/archive numeric 32,
+  flat-export/inspection 15, print-output 31, PSD exchange 4, recovery-dialog
+  9, recovery snapshot 14, TIFF writer 29, `.tspaint` archive 13, and uint16 to
+  uint8 rescaling 2. The fresh audit has no stale literal contract and no
+  unreviewed defect site; unrelated pre-existing generic numeric and final-soak
+  capacity candidates remain subsequent milestones.
+- Independent QA found three issues before closure: a P1 malformed-manifest
+  crash/skip loop, a P2 session-id/file-key mismatch that made Discard target
+  the wrong pair, and a P1 v1 compatibility regression that hid loadable crash
+  recovery. The corrected manifest validator, self-hash, exact key pairing,
+  legacy-safe listing, untrusted-source clearing, and v2 upgrade path have
+  direct adversarial regressions. Independent post-fix QA passes with
+  P0/P1/P2 `0/0/0`, 129/129 focused/evidence/guard checks, 18/18 measurements,
+  and a separate 563/563 Painting batch. The one observed Windows manifest
+  `os.replace` access failure did not reproduce in five immediate measurement
+  reruns or the combined run; writer errors remain surfaced and retryable, and
+  no power-loss atomicity claim is made.
+- Official boundaries:
+  https://www.w3.org/TR/png-3/,
+  https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/,
+  https://printtechnologies.org/standards/files/tiff-v6.pdf,
+  https://www.color.org/icc32.pdf,
+  https://www.iso.org/standard/36631.html,
+  https://helpx.adobe.com/photoshop/desktop/crop-resize-transform/resize-adjust-resolution/resolution-specs-for-printing-images.html,
+  https://tips.clip-studio.com/en-us/articles/1019,
+  https://docs.python.org/3/library/zipfile.html,
+  https://docs.python.org/3/library/tempfile.html,
+  https://docs.python.org/3/library/os.html#os.replace, and
+  https://www.rfc-editor.org/rfc/rfc7693.
+
+### M54 Painting Action schema and PBR preview resource evidence boundary
+
+- M54 audits the remaining six generic Painting Action-schema rows: the
+  three-component numeric-color array, saved-selection overlay opacity, and
+  PBR preview width. UI Design remains excluded. Each schema now has an exact
+  runtime validator and a separately frozen evidence-ledger contract.
+- `paint.color.numeric.set` requires exactly three ordered numeric components.
+  The runtime no longer accepts four values and silently discards the fourth;
+  it also rejects booleans and non-finite values. JSON Schema defines
+  `minItems`/`maxItems` as array-length constraints, while Qt QColor defines
+  RGB as r/g/b and HSV as h/s/v. RGB remains 0..255 and Tiger's HSB/HSV Action
+  surface remains hue 0..360 plus saturation/value 0..100, with out-of-range
+  source values explicitly reported before the existing clipped preview.
+- Saved-selection `overlay_opacity_percent` is aligned across Action schema and
+  core normalization as a strict non-boolean integer from 0 through 100.
+  Adobe documents Channel Options color and opacity as appearance-only mask
+  settings; they do not alter protected content. Fractional values, strings,
+  booleans, and out-of-range integers fail before owner resolution or mutation.
+- The previous `paint.pbr.preview` upper bound of 8192 px had no measured
+  resource basis. `tools/measure_painter_action_schema_resources.py` measures
+  the actual CPU generator at 64, 256, 512, and 1024 square pixels. Its 14 map
+  references resolve to 12 unique arrays retaining exactly 80 bytes/pixel
+  (96 bytes/pixel when duplicate references are counted). At 1024 square the
+  unique arrays retain 83,886,080 bytes; 2048 projects to 335,544,320 bytes,
+  and the removed 8192 cap projects to 5,368,709,120 bytes.
+- Tiger therefore declares an explicit 128 MiB unique-retained-array budget,
+  a strict 64..1024 px Action domain, and a 512 px default. The validator runs
+  before owner lookup and again before source-map generation. This affects only
+  optional PBR preview generation, not PBR export dimensions. Observed elapsed
+  time and Python allocation peaks are recorded but are not acceptance gates;
+  no universal latency/memory safety, GPU parity, visual-quality threshold, or
+  external-product equivalence is claimed.
+- The M54 measurement passes 15/15 checks, and the initial schema/runtime/
+  measurement regression passes 62/62. Accepted exact inventories are numeric
+  color schema 2 rows plus 1 runtime cardinality literal, saved-selection
+  option domain 3 rows, PBR Action schema 2 rows, PBR policy literals 4 rows,
+  and the retained internal preview-capacity inventory 3 rows. The audit has no stale contract; five generic numeric
+  groups and one runtime-capacity group remain assigned to later milestones.
+- Independent M54 QA passed with P0/P1/P2 `0/0/0`. It blocked 6/6 adversarial
+  color calls, 8/8 overlay-opacity calls, and 8/8 PBR-width calls before owner
+  lookup or generation; verified both accepted endpoints; and confirmed that
+  the two shared-array pairs are identical objects, making the measured CPU
+  unique-retained total exact. Related regressions pass 61/61, guards pass
+  43/43, and the post-cleanup core pair passes 2/2. The report is
+  `debugCapture/painter/evidence_audit/m54_qa_independent.json`.
+- Official boundaries:
+  https://json-schema.org/understanding-json-schema/reference/array#length,
+  https://doc.qt.io/qt-6/qcolor.html, and
+  https://helpx.adobe.com/photoshop/using/saving-selections-alpha-channel-masks.html#edit_channel_options.
+
+### M55 strict Painting numeric, graphics, and resource contracts (complete with documented hardware limitations)
+
+- Painting only; UI Design remains excluded. M55 does not approve `max/min`,
+  zero comparisons, or length checks by syntax. Exact inventories are split by
+  required-input validation, serialized structure, mathematical degeneracy,
+  transient Qt widget geometry, derived raster extent, and Tiger-authored
+  rendering policy.
+- `app.painter_dimensions` is the shared strict boundary. Raster dimensions
+  require positive non-boolean integers; physical dimensions, PPI, scales, and
+  offsets require finite positive or explicitly nonnegative real values. Direct
+  PNG/PSD export, raster layers, masks, Wet Canvas, OpenGL, Blockout/PBR, print,
+  and selection paths must reject invalid values rather than changing them to
+  one pixel.
+- M55 removed additional silent coercions found by the exhaustive pass: invalid
+  PSD dimensions, the 0.001 PNG stroke-scale floor, zero Material Paint width
+  and 8-pixel dimension substitution, and redundant one-pixel reference/sticker
+  aspect denominators. Valid positive subpixel authored width remains exact
+  until the discrete rasterization boundary.
+- The canvas GPU path supports only the semantics it implements exactly:
+  round, non-dynamic strokes in the published GPU width/opacity/point domains.
+  Marker/highlighter, authored dynamics, invalid normalized points, and other
+  unsupported semantics take the declared CPU fallback. Zero opacity remains
+  zero and no private pressure/tilt response is guessed.
+- The retained offscreen canvas session checks `QOpenGLContext.isValid()` and
+  `makeCurrent()`. An invalid/lost or activation-failed context is released and
+  recreated once, with creations, activation failures, recoveries, recovery
+  failures, and last typed error exposed. Native churn observed 60 operations,
+  one context creation, zero activation failures, and zero errors; this is not
+  a universal leak-free driver claim.
+- Large-canvas accounting uses Qt's documented four-byte RGBA8888 storage and
+  `QImage.sizeInBytes()`. The 60/10/20/10 cache allocation sums exactly to the
+  configured bytes and every declared cache must hold one complete tile.
+  Queue/worker/result/timeout/Undo limits reject bool, fractional, zero, or
+  negative values according to their explicit domains.
+- Native 4K and 8K runs passed actual process/GPU observation, render parity,
+  single dirty-tile scope, save integrity, executor drain, zoom-reference
+  parity, and configured resource budgets. These are target-machine
+  observations, not universal latency, capacity, or GPU parity thresholds.
+- The corrected harness keeps the Windows ctypes binding process-global, stores
+  latency in a deterministic 6,623-sample bounded reservoir derived from the
+  DKW-Massart 99%/0.02 rank-error policy, and streams resource samples to
+  NDJSON. The earlier unbounded harness result is retained as failed evidence
+  and is not used for approval.
+- Three corrected 7200-second runs completed 259,481, 259,995, and 254,622
+  operations with zero workload errors. Their report SHA-256 values are
+  `78e443fb642c44f06579269c9283772ef4e56f7998022bf72232cba2f71d244b`,
+  `ba8d82273469d9f1dc6c5d7530c86685718f7e11c5d60bd6892d15120b3475b4`,
+  and `456b8619e4890388844441d1c8ab8a1ada6a94d47207a7ee4a91ca9c510049f9`.
+  None has the v3 positive late-half PrivateUsage retention signal.
+- Windows WorkingSetSize remains a reported residency observation because
+  Microsoft defines the working set as resident physical pages containing both
+  shared and private data. PROCESS_MEMORY_COUNTERS_EX.PrivateUsage is process
+  private Commit Charge and is the blocking retained-private-allocation signal.
+  A Working Set increase alone does not become a leak finding.
+- Independent M55 delta QA recomputed the stored v3 series exactly, passed
+  33/33 focused tests, found P0/P1/P2 `0/0/0`, and determined that the raw runs
+  did not require repetition. The report SHA-256 is
+  `7fa362f33d9b9ec19991f4ac53bf6b8a535c1901954d2e283926abc6131e5a0b`.
+- The final Painting-only audit covers 63 app files, 68 test files, 45 QA files,
+  and 6,415 unique AST numeric-literal sites. Unreviewed, unresolved-basis,
+  stale, pending, defect, and unreferenced-module counts are all zero. The full
+  Painting suite excluding UI Design passes 639/639; architecture,
+  debugCapture-boundary, and evidence-contract guards pass 36/36.
+- M55 approves the implemented Painting and evidence contracts only. Native
+  high-DPI observation on this 1x display, physical-tablet observation, human
+  visual review, and universal external driver/application combinations remain
+  explicit release-evidence limitations rather than manufactured PASS results.
+- The durable audit change list is
+  `docs/PAINTER_PAINTING_FULL_AUDIT_CHANGE_LIST_KO.md`.
+- Official boundaries:
+  https://doc.qt.io/qt-6/qopenglcontext.html,
+  https://doc.qt.io/qt-6/qimage.html,
+  https://doc.qt.io/qt-6/qpainter.html, and
+  https://docs.python.org/3/library/concurrent.futures.html,
+  https://learn.microsoft.com/en-us/windows/win32/procthread/process-working-set,
+  https://learn.microsoft.com/en-us/windows/win32/memory/working-set, and
+  https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex.

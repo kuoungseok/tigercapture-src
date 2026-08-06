@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -103,6 +105,16 @@ def test_raster_helpers_round_trip_png_without_sharing_storage() -> None:
     restored = QImage.fromData(encoded, "PNG")
     assert restored.size() == source.size()
     assert restored.pixelColor(7, 9).name() == "#a142cc"
+
+
+def test_raster_dimensions_reject_invalid_values_instead_of_creating_one_pixel() -> None:
+    _app()
+    from app.painter_raster_layers import normalized_raster, transparent_raster
+
+    with pytest.raises(ValueError, match="raster width must be positive"):
+        transparent_raster(0, 16)
+    with pytest.raises(TypeError, match="raster height must be an integer"):
+        normalized_raster(None, 16, 2.5)
 
 
 def test_raster_has_pixels_reads_argb32_alpha_not_hidden_rgb() -> None:

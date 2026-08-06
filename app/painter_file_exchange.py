@@ -15,6 +15,8 @@ from typing import Any, Iterable
 import numpy as np
 from PIL import Image, ImageCms
 
+from app.painter_dimensions import positive_integer
+
 
 FLAT_FORMATS = {"jpeg", "webp", "tiff", "png"}
 BIT_DEPTHS = {8, 16}
@@ -145,6 +147,17 @@ def _rgba16_values(image: Image.Image | np.ndarray) -> np.ndarray:
     return values
 
 
+def _rgba16_to_rgba8(values: np.ndarray) -> np.ndarray:
+    """Linearly rescale full-range uint16 RGBA to uint8 with nearest rounding."""
+
+    source = np.asarray(values)
+    if source.dtype != np.uint16 or source.ndim != 3 or source.shape[2] != 4:
+        raise ValueError("16-to-8 conversion requires a uint16 RGBA array")
+    # PNG 3e section 13.12: floor(input * 255 / 65535 + 0.5).
+    widened = source.astype(np.uint32)
+    return ((widened * 255 + 32767) // 65535).astype(np.uint8)
+
+
 def _write_png16(path: Path, image: Image.Image | np.ndarray, *, icc: bytes, ppi: int) -> None:
     rgba = _rgba16_values(image)
     height, width = rgba.shape[:2]
@@ -258,6 +271,7 @@ def export_flat_image(
     source_icc: bytes | str | Path | None = None,
     output_icc: bytes | str | Path | None = None,
     rendering_intent: int = 1,
+    saved_selection_channels: Iterable[Any] = (),
 ) -> dict[str, Any]:
     destination = Path(path)
     fmt = normalize_format(destination, format_name)
@@ -275,7 +289,21 @@ def export_flat_image(
         rgba = image.convert("RGBA")
     else:
         values16 = _rgba16_values(image)
-        rgba = Image.fromarray(np.uint8(values16 >> 8), "RGBA")
+        rgba = Image.fromarray(_rgba16_to_rgba8(values16), "RGBA")
+    from app.painter_alpha_channel_exchange import (
+        saved_selection_exchange_records,
+    )
+
+    saved_channel_records = saved_selection_exchange_records(
+        saved_selection_channels,
+        rgba.width,
+        rgba.height,
+    )
+    if saved_channel_records and fmt != "tiff":
+        preflight["warnings"].append(
+            f"{len(saved_channel_records)} saved selection channel(s) are not "
+            f"preserved by the {fmt.upper()} export path"
+        )
     from app.painter_color_management import (
         inspect_icc_profile,
         transform_rgba_profile,
@@ -324,7 +352,25 @@ def export_flat_image(
     icc = output_profile if embed_icc else b""
     geometry = print_geometry(output_settings, rgba.width, rgba.height)
     ppi = int((geometry.get("settings") or {}).get("ppi", 96))
-    if int(bit_depth) == 16:
+    if fmt == "tiff" and saved_channel_records:
+        from app.painter_alpha_channel_exchange import (
+            write_tiff_saved_selection_channels,
+        )
+
+        tiff_values = (
+            _rgba16_values(image if high_precision else rgba)
+            if int(bit_depth) == 16
+            else np.asarray(rgba, dtype=np.uint8)
+        )
+        write_tiff_saved_selection_channels(
+            destination,
+            tiff_values,
+            saved_channel_records,
+            bit_depth=int(bit_depth),
+            icc=icc,
+            ppi=ppi,
+        )
+    elif int(bit_depth) == 16:
         if fmt == "png":
             _write_png16(destination, image if high_precision else rgba, icc=icc, ppi=ppi)
         else:
@@ -355,6 +401,19 @@ def export_flat_image(
         "profile_transform": profile_transform,
         "icc_embedded": bool(inspected["icc_embedded"]), "geometry": geometry,
         "preflight": preflight, "inspection": inspected,
+        "saved_selection_channels": {
+            "count": len(saved_channel_records),
+            "preserved": bool(fmt == "tiff" or not saved_channel_records),
+            "names_preserved": False,
+            "channels": [
+                {
+                    key: value
+                    for key, value in row.items()
+                    if key != "pixels"
+                }
+                for row in saved_channel_records
+            ],
+        },
     }
 
 
@@ -447,6 +506,60 @@ def inspect_flat_image(path: str | Path) -> dict[str, Any]:
             "type": type(exc).__name__,
             "message": str(exc),
         }
+        custom_decode_error = None
+        if suffix in {".tif", ".tiff"}:
+            try:
+                from app.painter_alpha_channel_exchange import (
+                    read_tiff_saved_selection_channels,
+                )
+
+                exchange = read_tiff_saved_selection_channels(source)
+                icc_payload = bytes(exchange.get("icc_profile") or b"")
+                icc_report = None
+                if icc_payload:
+                    from app.painter_color_management import inspect_icc_profile
+
+                    icc_report = inspect_icc_profile(icc_payload)
+                exchange_report = {
+                    key: value
+                    for key, value in exchange.items()
+                    if key not in {"saved_selection_channels", "icc_profile"}
+                }
+                exchange_report["saved_selection_channels"] = [
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key != "pixels"
+                    }
+                    for row in exchange["saved_selection_channels"]
+                ]
+                custom_valid = bool(integrity["container_valid"]) and (
+                    icc_report is None or bool(icc_report["valid"])
+                )
+                return {
+                    "path": str(source.resolve()),
+                    "format": "tiff",
+                    "width": exchange["width"],
+                    "height": exchange["height"],
+                    "mode": f"RGB+{exchange['samples_per_pixel'] - 3} extras",
+                    "bit_depth": exchange["bit_depth"],
+                    "has_alpha": 2 in exchange["extra_samples"],
+                    "icc_embedded": bool(icc_payload),
+                    "icc": icc_report,
+                    "saved_selection_channel_exchange": exchange_report,
+                    "integrity": {
+                        **integrity,
+                        "decode_complete": True,
+                        "decoder": "tiger_tiff_extra_samples_v1",
+                        "pillow_decode_error": decode_error,
+                        "valid": custom_valid,
+                    },
+                }
+            except ValueError as custom_exc:
+                custom_decode_error = {
+                    "type": type(custom_exc).__name__,
+                    "message": str(custom_exc),
+                }
         return {
             "path": str(source.resolve()),
             "format": suffix.lstrip("."),
@@ -464,8 +577,18 @@ def inspect_flat_image(path: str | Path) -> dict[str, Any]:
                 "errors": [
                     *integrity["errors"],
                     f"decode failed: {decode_error['type']}: {decode_error['message']}",
+                    *(
+                        [
+                            "Tiger TIFF decoder failed: "
+                            f"{custom_decode_error['type']}: "
+                            f"{custom_decode_error['message']}"
+                        ]
+                        if custom_decode_error is not None
+                        else []
+                    ),
                 ],
                 "decode_error": decode_error,
+                "custom_decode_error": custom_decode_error,
             },
         }
     with opened as image:
@@ -494,12 +617,41 @@ def inspect_flat_image(path: str | Path) -> dict[str, Any]:
             "valid": bool(integrity["container_valid"])
             and (icc_report is None or bool(icc_report["valid"])),
         }
+        saved_selection_channels = None
+        if str(image.format or "").upper() == "TIFF":
+            try:
+                from app.painter_alpha_channel_exchange import (
+                    read_tiff_saved_selection_channels,
+                )
+
+                exchange = read_tiff_saved_selection_channels(source)
+                saved_selection_channels = {
+                    **{
+                        key: value
+                        for key, value in exchange.items()
+                        if key not in {
+                            "saved_selection_channels",
+                            "icc_profile",
+                        }
+                    },
+                    "saved_selection_channels": [
+                        {
+                            key: value
+                            for key, value in row.items()
+                            if key != "pixels"
+                        }
+                        for row in exchange["saved_selection_channels"]
+                    ],
+                }
+            except ValueError:
+                saved_selection_channels = None
         return {
             "path": str(source.resolve()), "format": str(image.format or "").casefold(),
             "width": image.width, "height": image.height, "mode": image.mode,
             "bit_depth": bits, "has_alpha": "A" in image.getbands(),
             "icc_embedded": bool(image.info.get("icc_profile")),
             "icc": icc_report,
+            "saved_selection_channel_exchange": saved_selection_channels,
             "integrity": integrity_report,
         }
 
@@ -543,6 +695,7 @@ def export_layered_psd(
     size: tuple[int, int],
     composite: Image.Image | None = None,
     bake_unsupported: bool = False,
+    saved_selection_channels: Iterable[Any] = (),
 ) -> dict[str, Any]:
     from psd_tools import PSDImage
     from psd_tools.api.layers import Group, PixelLayer
@@ -558,9 +711,11 @@ def export_layered_psd(
     # RGBA keeps an empty Painter canvas transparent. Creating an RGB document
     # gives psd-tools an opaque black merged backdrop even when every exported
     # pixel layer carries alpha.
+    export_width = positive_integer(size[0], field="PSD export width")
+    export_height = positive_integer(size[1], field="PSD export height")
     psd = PSDImage.new(
         "RGBA",
-        (max(1, int(size[0])), max(1, int(size[1]))),
+        (export_width, export_height),
         color=(0, 0, 0, 0),
     )
     icc = srgb_icc_bytes()
@@ -603,6 +758,20 @@ def export_layered_psd(
                 exported_names.append(name)
 
         emit(psd, "")
+    from app.painter_alpha_channel_exchange import (
+        attach_saved_selection_channels_to_psd,
+    )
+
+    merged_for_channels = (
+        composite.convert("RGBA")
+        if composite is not None
+        else psd.composite(force=True).convert("RGBA")
+    )
+    exported_saved_channels = attach_saved_selection_channels_to_psd(
+        psd,
+        saved_selection_channels,
+        composite=merged_for_channels,
+    )
     psd.save(destination)
     composite_parity = None
     if composite is not None:
@@ -660,6 +829,34 @@ def export_layered_psd(
         "width": psd.width,
         "height": psd.height,
         "layers": exported_names,
+        "saved_selection_channels": {
+            "count": len(exported_saved_channels),
+            "preserved": True,
+            "names_preserved": True,
+            "display_options_preserved": False,
+            "channels": [
+                {
+                    **{
+                        key: value
+                        for key, value in row.items()
+                        if key not in {
+                            "pixels",
+                            "display_mode",
+                            "overlay_color",
+                            "overlay_opacity_percent",
+                        }
+                    },
+                    "source_display_options": {
+                        "display_mode": row["display_mode"],
+                        "overlay_color": row["overlay_color"],
+                        "overlay_opacity_percent": row[
+                            "overlay_opacity_percent"
+                        ],
+                    },
+                }
+                for row in exported_saved_channels
+            ],
+        },
         "icc_embedded": True,
         "icc": icc_report,
         "preflight": preflight,
@@ -691,6 +888,7 @@ def inspect_layered_psd(path: str | Path) -> dict[str, Any]:
         "color_mode": struct.unpack(">H", raw[24:26])[0] if len(raw) >= 26 else -1,
     }
     layers: list[str] = []
+    saved_selection_channels: list[dict[str, Any]] = []
     icc_report = None
     decode_complete = False
     decode_error = None
@@ -701,6 +899,18 @@ def inspect_layered_psd(path: str | Path) -> dict[str, Any]:
             composite = psd.composite(force=True)
             if composite is None:
                 raise ValueError("PSD composite is unavailable")
+            from app.painter_alpha_channel_exchange import (
+                read_psd_saved_selection_channels,
+            )
+
+            saved_selection_channels = [
+                {
+                    key: value
+                    for key, value in row.items()
+                    if key != "pixels"
+                }
+                for row in read_psd_saved_selection_channels(psd)
+            ]
             icc = bytes(psd.image_resources.get_data(Resource.ICC_PROFILE, b"") or b"")
             if icc:
                 from app.painter_color_management import inspect_icc_profile
@@ -721,6 +931,7 @@ def inspect_layered_psd(path: str | Path) -> dict[str, Any]:
         "path": str(source.resolve()),
         "header": header,
         "layers": layers,
+        "saved_selection_channels": saved_selection_channels,
         "icc_embedded": icc_report is not None,
         "icc": icc_report,
         "integrity": {
@@ -740,6 +951,11 @@ def import_layered_psd(path: str | Path) -> dict[str, Any]:
     if not inspection["integrity"]["valid"]:
         raise ValueError("Invalid or corrupted PSD: " + "; ".join(inspection["integrity"]["errors"]))
     psd = PSDImage.open(source)
+    from app.painter_alpha_channel_exchange import (
+        read_psd_saved_selection_channels,
+    )
+
+    saved_selection_channels = read_psd_saved_selection_channels(psd)
     rows: list[dict[str, Any]] = []
     def visit(container, parent_key: str = "") -> None:
         # psd-tools exposes the same bottom-to-top paint order as Painter.
@@ -767,7 +983,15 @@ def import_layered_psd(path: str | Path) -> dict[str, Any]:
             if is_group:
                 visit(layer, key)
     visit(psd)
-    return {"schema": "tigerstudio.painter.psd-import.v1", "path": str(source.resolve()), "width": psd.width, "height": psd.height, "layers": rows, "inspection": inspection}
+    return {
+        "schema": "tigerstudio.painter.psd-import.v1",
+        "path": str(source.resolve()),
+        "width": psd.width,
+        "height": psd.height,
+        "layers": rows,
+        "saved_selection_channels": saved_selection_channels,
+        "inspection": inspection,
+    }
 
 
 __all__ = [

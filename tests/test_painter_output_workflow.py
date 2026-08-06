@@ -82,6 +82,45 @@ def test_print_pixel_math_and_preflight_are_explicit() -> None:
     assert "not a Qt" in runtime_limited["errors"][0]
 
 
+def test_output_normalization_rejects_nonfinite_effects_and_string_booleans() -> None:
+    from app.painter_output import (
+        normalize_output_settings,
+        pixels_for_print,
+        print_size_from_pixels,
+    )
+
+    normalized = normalize_output_settings(
+        {
+            "mode": "print",
+            "width_mm": float("nan"),
+            "height_mm": float("inf"),
+            "ppi": float("nan"),
+            "bleed_mm": float("-inf"),
+            "include_bleed": "false",
+            "resample": "false",
+            "color_space": "CMYK",
+        },
+        pixel_width=1200,
+        pixel_height=800,
+    )
+    assert normalized["ppi"] == 300
+    assert normalized["include_bleed"] is True
+    assert normalized["resample"] is True
+    assert normalized["color_space"] == "srgb"
+    assert normalized["width_mm"] > 0.0
+    assert normalized["height_mm"] > 0.0
+    with pytest.raises(ValueError):
+        pixels_for_print(8.5, 11.0, unit="points", ppi=300)
+    with pytest.raises(ValueError, match="print width must be positive"):
+        pixels_for_print(0.0, 11.0, unit="in", ppi=300)
+    with pytest.raises(TypeError, match="print ppi must be an integer"):
+        pixels_for_print(8.5, 11.0, unit="in", ppi=300.5)
+    with pytest.raises(ValueError, match="positive trim size"):
+        print_size_from_pixels(1, 1, ppi=300, bleed_mm=3.0)
+    with pytest.raises(ValueError, match="pixel width must be positive"):
+        normalize_output_settings({}, pixel_width=0, pixel_height=100)
+
+
 def test_new_canvas_print_preset_calculates_pixels_and_output_contract() -> None:
     app = _app()
     from app.drawing import NewCanvasDialog

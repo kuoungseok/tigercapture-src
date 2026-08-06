@@ -13,13 +13,43 @@ Design guardrails:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from math import cos, floor, pi, radians, sin, tan
+from math import cos, floor, isfinite, pi, radians, sin, tan
 from typing import Any, Iterable, Sequence
+
+from app.painter_dimensions import positive_integer
 
 
 Vec3 = tuple[float, float, float]
 
 BLOCKOUT_CAMERA_NEAR_PLANE = 0.06
+BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES = 35.0
+BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES = -18.0
+BLOCKOUT_CAMERA_DEFAULT_DISTANCE = 8.5
+BLOCKOUT_CAMERA_DEFAULT_TARGET = (0.0, 0.0, 0.8)
+BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES = 42.0
+BLOCKOUT_CAMERA_YAW_MIN_DEGREES = -180.0
+BLOCKOUT_CAMERA_YAW_MAX_DEGREES = 180.0
+BLOCKOUT_CAMERA_PITCH_MIN_DEGREES = -85.0
+BLOCKOUT_CAMERA_PITCH_MAX_DEGREES = 85.0
+BLOCKOUT_CAMERA_MIN_DISTANCE = 0.25
+BLOCKOUT_CAMERA_MAX_DISTANCE = 30.0
+BLOCKOUT_CAMERA_TARGET_MIN = -5.0
+BLOCKOUT_CAMERA_TARGET_MAX = 5.0
+BLOCKOUT_CAMERA_FOV_MIN_DEGREES = 15.0
+BLOCKOUT_CAMERA_FOV_MAX_DEGREES = 90.0
+BLOCKOUT_PRIMITIVE_POSITION_MIN = -5.0
+BLOCKOUT_PRIMITIVE_POSITION_MAX = 5.0
+BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES = -180.0
+BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES = 180.0
+BLOCKOUT_PRIMITIVE_SCALE_MIN = 0.1
+BLOCKOUT_PRIMITIVE_SCALE_MAX = 8.0
+BLOCKOUT_PRIMITIVE_OPACITY_MIN = 0.05
+BLOCKOUT_PRIMITIVE_OPACITY_MAX = 1.0
+BLOCKOUT_LIGHT_YAW_MIN_DEGREES = -180.0
+BLOCKOUT_LIGHT_YAW_MAX_DEGREES = 180.0
+BLOCKOUT_LIGHT_PITCH_MIN_DEGREES = 5.0
+BLOCKOUT_LIGHT_PITCH_MAX_DEGREES = 85.0
+BLOCKOUT_CAMERA_PRESETS = ("front", "side", "top", "perspective")
 BLOCKOUT_PROJECTION_MODEL_CONTRACT = {
     "schema": "tigerstudio.painter.blockout_projection_model.v1",
     "model": "tiger_authored_preview_camera_v1",
@@ -40,19 +70,62 @@ SUPPORTED_PRIMITIVES = {
 
 @dataclass(frozen=True)
 class BlockoutCamera:
-    yaw_degrees: float = 35.0
-    pitch_degrees: float = -18.0
-    distance: float = 8.5
-    target: Vec3 = (0.0, 0.0, 0.8)
-    fov_degrees: float = 42.0
+    yaw_degrees: float = BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES
+    pitch_degrees: float = BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES
+    distance: float = BLOCKOUT_CAMERA_DEFAULT_DISTANCE
+    target: Vec3 = BLOCKOUT_CAMERA_DEFAULT_TARGET
+    fov_degrees: float = BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES
+
+    def normalized(self) -> "BlockoutCamera":
+        return BlockoutCamera(
+            yaw_degrees=_clamp(
+                _restored_finite_float(
+                    self.yaw_degrees, BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES
+                ),
+                BLOCKOUT_CAMERA_YAW_MIN_DEGREES,
+                BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+            ),
+            pitch_degrees=_clamp(
+                _restored_finite_float(
+                    self.pitch_degrees, BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES
+                ),
+                BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+                BLOCKOUT_CAMERA_PITCH_MAX_DEGREES,
+            ),
+            distance=_clamp(
+                _restored_finite_float(
+                    self.distance, BLOCKOUT_CAMERA_DEFAULT_DISTANCE
+                ),
+                BLOCKOUT_CAMERA_MIN_DISTANCE,
+                BLOCKOUT_CAMERA_MAX_DISTANCE,
+            ),
+            target=tuple(
+                _clamp(
+                    value,
+                    BLOCKOUT_CAMERA_TARGET_MIN,
+                    BLOCKOUT_CAMERA_TARGET_MAX,
+                )
+                for value in _restored_vec3(
+                    self.target, BLOCKOUT_CAMERA_DEFAULT_TARGET
+                )
+            ),
+            fov_degrees=_clamp(
+                _restored_finite_float(
+                    self.fov_degrees, BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES
+                ),
+                BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+                BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+            ),
+        )
 
     def to_dict(self) -> dict[str, Any]:
+        camera = self.normalized()
         return {
-            "yaw_degrees": round(float(self.yaw_degrees), 4),
-            "pitch_degrees": round(float(self.pitch_degrees), 4),
-            "distance": round(max(0.25, float(self.distance)), 4),
-            "target": _vec_to_list(self.target),
-            "fov_degrees": round(_clamp(float(self.fov_degrees), 15.0, 90.0), 4),
+            "yaw_degrees": round(camera.yaw_degrees, 4),
+            "pitch_degrees": round(camera.pitch_degrees, 4),
+            "distance": round(camera.distance, 4),
+            "target": _vec_to_list(camera.target),
+            "fov_degrees": round(camera.fov_degrees, 4),
         }
 
 
@@ -77,11 +150,28 @@ class BlockoutPrimitive:
             id=str(self.id or "").strip() or "blockout:1",
             kind=kind,
             name=str(self.name or "").strip() or kind.title(),
-            position=_vec3(self.position),
-            rotation=_vec3(self.rotation),
-            scale=tuple(max(0.001, abs(v)) for v in _vec3(self.scale)),
+            position=tuple(
+                _clamp(value, BLOCKOUT_PRIMITIVE_POSITION_MIN, BLOCKOUT_PRIMITIVE_POSITION_MAX)
+                for value in _restored_vec3(self.position, (0.0, 0.0, 0.0))
+            ),
+            rotation=tuple(
+                _clamp(
+                    value,
+                    BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES,
+                    BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES,
+                )
+                for value in _restored_vec3(self.rotation, (0.0, 0.0, 0.0))
+            ),
+            scale=tuple(
+                _clamp(abs(value), BLOCKOUT_PRIMITIVE_SCALE_MIN, BLOCKOUT_PRIMITIVE_SCALE_MAX)
+                for value in _restored_vec3(self.scale, (1.0, 1.0, 1.0))
+            ),
             color=_normalize_hex(self.color),
-            opacity=_clamp(float(self.opacity), 0.05, 1.0),
+            opacity=_clamp(
+                _restored_finite_float(self.opacity, 1.0),
+                BLOCKOUT_PRIMITIVE_OPACITY_MIN,
+                BLOCKOUT_PRIMITIVE_OPACITY_MAX,
+            ),
             wireframe=bool(self.wireframe),
             locked=bool(self.locked),
         )
@@ -123,11 +213,14 @@ class BlockoutScene:
     def normalized(self) -> "BlockoutScene":
         primitives = tuple(p.normalized() for p in self.primitives)
         used = {_primitive_index(p.id) for p in primitives}
-        next_index = max([int(self.next_index or 1), *[n + 1 for n in used if n > 0]], default=1)
+        next_index = max(
+            [_restored_positive_int(self.next_index, 1), *[n + 1 for n in used if n > 0]],
+            default=1,
+        )
         return BlockoutScene(
-            camera=self.camera,
+            camera=self.camera.normalized(),
             primitives=primitives,
-            grid_size=max(0.05, float(self.grid_size or 1.0)),
+            grid_size=max(0.05, _restored_finite_float(self.grid_size, 1.0)),
             show_grid=bool(self.show_grid),
             show_wireframe=bool(self.show_wireframe),
             show_floor=bool(self.show_floor),
@@ -135,8 +228,16 @@ class BlockoutScene:
             show_shadows=bool(self.show_shadows),
             show_fog=bool(self.show_fog),
             show_depth=bool(self.show_depth),
-            light_yaw_degrees=float(self.light_yaw_degrees) % 360.0,
-            light_pitch_degrees=_clamp(float(self.light_pitch_degrees), 5.0, 85.0),
+            light_yaw_degrees=_clamp(
+                _restored_finite_float(self.light_yaw_degrees, 45.0),
+                BLOCKOUT_LIGHT_YAW_MIN_DEGREES,
+                BLOCKOUT_LIGHT_YAW_MAX_DEGREES,
+            ),
+            light_pitch_degrees=_clamp(
+                _restored_finite_float(self.light_pitch_degrees, 45.0),
+                BLOCKOUT_LIGHT_PITCH_MIN_DEGREES,
+                BLOCKOUT_LIGHT_PITCH_MAX_DEGREES,
+            ),
             snap_to_grid=bool(self.snap_to_grid),
             next_index=max(1, next_index),
         )
@@ -177,12 +278,30 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
         return default_blockout_scene()
     camera_payload = payload.get("camera") if isinstance(payload.get("camera"), dict) else {}
     camera = BlockoutCamera(
-        yaw_degrees=float(camera_payload.get("yaw_degrees", 35.0) or 35.0),
-        pitch_degrees=float(camera_payload.get("pitch_degrees", -18.0) or -18.0),
-        distance=max(0.25, float(camera_payload.get("distance", 8.5) or 8.5)),
-        target=_vec3(camera_payload.get("target", (0.0, 0.0, 0.8))),
-        fov_degrees=_clamp(float(camera_payload.get("fov_degrees", 42.0) or 42.0), 15.0, 90.0),
-    )
+        yaw_degrees=_restored_finite_float(
+            camera_payload.get("yaw_degrees"), BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES
+        ),
+        pitch_degrees=_restored_finite_float(
+            camera_payload.get("pitch_degrees"), BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES
+        ),
+        distance=max(
+            BLOCKOUT_CAMERA_MIN_DISTANCE,
+            _restored_finite_float(
+                camera_payload.get("distance"), BLOCKOUT_CAMERA_DEFAULT_DISTANCE
+            ),
+        ),
+        target=_restored_vec3(
+            camera_payload.get("target"), BLOCKOUT_CAMERA_DEFAULT_TARGET
+        ),
+        fov_degrees=_clamp(
+            _restored_finite_float(
+                camera_payload.get("fov_degrees"),
+                BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES,
+            ),
+            BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+            BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+        ),
+    ).normalized()
     primitives = []
     for row in payload.get("primitives", []) or []:
         if not isinstance(row, dict):
@@ -192,11 +311,11 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
                 id=str(row.get("id") or ""),
                 kind=str(row.get("kind") or "box"),
                 name=str(row.get("name") or ""),
-                position=_vec3(row.get("position", (0.0, 0.0, 0.0))),
-                rotation=_vec3(row.get("rotation", (0.0, 0.0, 0.0))),
-                scale=_vec3(row.get("scale", (1.0, 1.0, 1.0))),
+                position=_restored_vec3(row.get("position"), (0.0, 0.0, 0.0)),
+                rotation=_restored_vec3(row.get("rotation"), (0.0, 0.0, 0.0)),
+                scale=_restored_vec3(row.get("scale"), (1.0, 1.0, 1.0)),
                 color=str(row.get("color") or "#F2F2F2"),
-                opacity=float(row.get("opacity", 1.0) or 1.0),
+                opacity=_restored_finite_float(row.get("opacity"), 1.0),
                 wireframe=bool(row.get("wireframe", True)),
                 locked=bool(row.get("locked", False)),
             )
@@ -204,7 +323,7 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
     return BlockoutScene(
         camera=camera,
         primitives=tuple(primitives),
-        grid_size=float(payload.get("grid_size", 1.0) or 1.0),
+        grid_size=_restored_finite_float(payload.get("grid_size"), 1.0),
         show_grid=bool(payload.get("show_grid", True)),
         show_wireframe=bool(payload.get("show_wireframe", True)),
         show_floor=bool(payload.get("show_floor", True)),
@@ -212,37 +331,43 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
         show_shadows=bool(payload.get("show_shadows", True)),
         show_fog=bool(payload.get("show_fog", False)),
         show_depth=bool(payload.get("show_depth", False)),
-        light_yaw_degrees=float(payload.get("light_yaw_degrees", 45.0) or 45.0),
-        light_pitch_degrees=float(payload.get("light_pitch_degrees", 45.0) or 45.0),
+        light_yaw_degrees=_restored_finite_float(payload.get("light_yaw_degrees"), 45.0),
+        light_pitch_degrees=_restored_finite_float(payload.get("light_pitch_degrees"), 45.0),
         snap_to_grid=bool(payload.get("snap_to_grid", False)),
-        next_index=int(payload.get("next_index", 1) or 1),
+        next_index=_restored_positive_int(payload.get("next_index"), 1),
     ).normalized()
 
 
 def update_blockout_camera(scene: BlockoutScene | dict[str, Any], **params: Any) -> BlockoutScene:
     """Update orbit/pan/zoom/FOV camera values for the blockout guide scene."""
 
+    from app.painter_action_inputs import validate_blockout_camera_action
+
+    resolved = validate_blockout_camera_action(params, allow_aliases=True)
     base = blockout_scene_from_dict(scene)
     current = base.camera.to_dict()
-    yaw = _param_float(params, "yaw_degrees", current["yaw_degrees"], aliases=("yaw",))
-    pitch = _param_float(params, "pitch_degrees", current["pitch_degrees"], aliases=("pitch",))
-    distance = _param_float(params, "distance", current["distance"], aliases=("zoom_distance", "camera_distance"))
-    fov = _param_float(params, "fov_degrees", current["fov_degrees"], aliases=("fov",))
+    yaw = float(resolved.get("yaw_degrees", current["yaw_degrees"]))
+    pitch = float(resolved.get("pitch_degrees", current["pitch_degrees"]))
+    distance = float(resolved.get("distance", current["distance"]))
+    fov = float(resolved.get("fov_degrees", current["fov_degrees"]))
     target = list(_vec3(current["target"]))
-    target[0] = _param_float(params, "target_x", target[0], aliases=("tx", "pan_x"))
-    target[1] = _param_float(params, "target_y", target[1], aliases=("ty", "pan_y"))
-    target[2] = _param_float(params, "target_z", target[2], aliases=("tz", "pan_z"))
+    target[0] = float(resolved.get("target_x", target[0]))
+    target[1] = float(resolved.get("target_y", target[1]))
+    target[2] = float(resolved.get("target_z", target[2]))
     camera = BlockoutCamera(
         yaw_degrees=yaw,
         pitch_degrees=pitch,
-        distance=max(0.25, distance),
+        distance=distance,
         target=_vec3(target),
-        fov_degrees=_clamp(fov, 15.0, 90.0),
+        fov_degrees=fov,
     )
     return replace(base, camera=camera).normalized()
 
 
 def add_blockout_primitive(scene: BlockoutScene | dict[str, Any] | None, **params: Any) -> BlockoutScene:
+    from app.painter_action_inputs import validate_blockout_primitive_action
+
+    params = validate_blockout_primitive_action(params, require_authored_field=False)
     base = blockout_scene_from_dict(scene)
     primitive_id = str(params.get("primitive_id") or "").strip() or f"blockout:{base.next_index}"
     if any(p.id == primitive_id for p in base.primitives):
@@ -256,8 +381,14 @@ def add_blockout_primitive(scene: BlockoutScene | dict[str, Any] | None, **param
 
 
 def update_blockout_primitive(scene: BlockoutScene | dict[str, Any], primitive_id: str, **params: Any) -> BlockoutScene:
+    from app.painter_action_inputs import (
+        validate_blockout_primitive_action,
+        validate_blockout_primitive_id_action,
+    )
+
+    params = validate_blockout_primitive_action(params, require_authored_field=True)
     base = blockout_scene_from_dict(scene)
-    wanted = str(primitive_id or "").strip()
+    wanted = validate_blockout_primitive_id_action(primitive_id)
     updated: list[BlockoutPrimitive] = []
     found = False
     for primitive in base.primitives:
@@ -290,8 +421,10 @@ def update_blockout_primitive(scene: BlockoutScene | dict[str, Any], primitive_i
 
 
 def delete_blockout_primitive(scene: BlockoutScene | dict[str, Any], primitive_id: str) -> BlockoutScene:
+    from app.painter_action_inputs import validate_blockout_primitive_id_action
+
     base = blockout_scene_from_dict(scene)
-    wanted = str(primitive_id or "").strip()
+    wanted = validate_blockout_primitive_id_action(primitive_id)
     remaining = tuple(p for p in base.primitives if p.id != wanted)
     if len(remaining) == len(base.primitives):
         raise ValueError(f"3D blockout primitive not found: {wanted}")
@@ -307,19 +440,28 @@ def duplicate_blockout_primitive(
     *,
     offset: Vec3 = (0.65, 0.0, 0.25),
 ) -> BlockoutScene:
+    from app.painter_action_inputs import validate_blockout_primitive_id_action
+
     base = blockout_scene_from_dict(scene)
-    wanted = str(primitive_id or "").strip()
+    wanted = validate_blockout_primitive_id_action(primitive_id)
     source = next((p for p in base.primitives if p.id == wanted), None)
     if source is None:
         raise ValueError(f"3D blockout primitive not found: {wanted}")
     new_id = f"blockout:{base.next_index}"
     px, py, pz = source.position
-    ox, oy, oz = _vec3(offset)
+    ox, oy, oz = _strict_finite_vec3(offset, field="offset")
+    duplicated_position = (px + ox, py + oy, pz + oz)
+    if any(
+        value < BLOCKOUT_PRIMITIVE_POSITION_MIN
+        or value > BLOCKOUT_PRIMITIVE_POSITION_MAX
+        for value in duplicated_position
+    ):
+        raise ValueError("3D blockout duplicate position is outside the Painter transform controls")
     duplicated = BlockoutPrimitive(
         id=new_id,
         kind=source.kind,
         name=f"{source.name} Copy",
-        position=(px + ox, py + oy, pz + oz),
+        position=duplicated_position,
         rotation=source.rotation,
         scale=source.scale,
         color=source.color,
@@ -335,8 +477,10 @@ def duplicate_blockout_primitive(
 
 
 def align_blockout_primitive_to_ground(scene: BlockoutScene | dict[str, Any], primitive_id: str) -> BlockoutScene:
+    from app.painter_action_inputs import validate_blockout_primitive_id_action
+
     base = blockout_scene_from_dict(scene)
-    wanted = str(primitive_id or "").strip()
+    wanted = validate_blockout_primitive_id_action(primitive_id)
     updated: list[BlockoutPrimitive] = []
     found = False
     for primitive in base.primitives:
@@ -375,9 +519,16 @@ def snap_blockout_primitive_to_grid(
     *,
     grid_size: float | None = None,
 ) -> BlockoutScene:
+    from app.painter_action_inputs import (
+        validate_blockout_grid_step,
+        validate_blockout_primitive_id_action,
+    )
+
     base = blockout_scene_from_dict(scene)
-    wanted = str(primitive_id or "").strip()
-    step = max(0.05, float(grid_size if grid_size is not None else base.grid_size))
+    wanted = validate_blockout_primitive_id_action(primitive_id)
+    step = validate_blockout_grid_step(
+        grid_size if grid_size is not None else base.grid_size
+    )
     updated: list[BlockoutPrimitive] = []
     found = False
     for primitive in base.primitives:
@@ -392,7 +543,14 @@ def snap_blockout_primitive_to_grid(
                 name=primitive.name,
                 position=tuple(_snap_value(v, step) for v in primitive.position),
                 rotation=tuple(_snap_value(v, 5.0) for v in primitive.rotation),
-                scale=tuple(max(0.001, _snap_value(v, step)) for v in primitive.scale),
+                scale=tuple(
+                    _clamp(
+                        _snap_value(v, step),
+                        BLOCKOUT_PRIMITIVE_SCALE_MIN,
+                        BLOCKOUT_PRIMITIVE_SCALE_MAX,
+                    )
+                    for v in primitive.scale
+                ),
                 color=primitive.color,
                 opacity=primitive.opacity,
                 wireframe=primitive.wireframe,
@@ -408,17 +566,23 @@ def snap_blockout_primitive_to_grid(
 
 
 def set_blockout_snap(scene: BlockoutScene | dict[str, Any], enabled: bool) -> BlockoutScene:
+    if not isinstance(enabled, bool):
+        raise TypeError("Painter blockout snap enabled must be a boolean")
     base = blockout_scene_from_dict(scene)
-    return replace(base, snap_to_grid=bool(enabled)).normalized()
+    return replace(base, snap_to_grid=enabled).normalized()
 
 
 def apply_blockout_camera_preset(scene: BlockoutScene | dict[str, Any], preset: str) -> BlockoutScene:
-    key = str(preset or "perspective").strip().lower().replace("-", "_")
-    if key in {"front", "front_view"}:
+    if not isinstance(preset, str):
+        raise TypeError("Painter blockout camera preset must be a string")
+    key = preset.strip().lower()
+    if key not in BLOCKOUT_CAMERA_PRESETS:
+        raise ValueError(f"Unsupported Painter blockout camera preset: {preset}")
+    if key == "front":
         return update_blockout_camera(scene, yaw_degrees=0.0, pitch_degrees=0.0, distance=7.0, fov_degrees=35.0)
-    if key in {"side", "right", "side_view"}:
+    if key == "side":
         return update_blockout_camera(scene, yaw_degrees=90.0, pitch_degrees=0.0, distance=7.0, fov_degrees=35.0)
-    if key in {"top", "top_view"}:
+    if key == "top":
         return update_blockout_camera(scene, yaw_degrees=0.0, pitch_degrees=-82.0, distance=8.0, fov_degrees=45.0)
     return update_blockout_camera(scene, yaw_degrees=35.0, pitch_degrees=-18.0, distance=8.5, fov_degrees=42.0)
 
@@ -434,15 +598,28 @@ def screen_to_blockout_ground(
 
     normalized = blockout_scene_from_dict(scene)
     camera = normalized.camera
-    w = max(1, int(width or 1))
-    h = max(1, int(height or 1))
-    focal = 0.5 * min(w, h) / tan(radians(_clamp(camera.fov_degrees, 15.0, 90.0)) * 0.5)
+    w = positive_integer(width, field="blockout viewport width")
+    h = positive_integer(height, field="blockout viewport height")
+    focal = 0.5 * min(w, h) / tan(
+        radians(
+            _clamp(
+                camera.fov_degrees,
+                BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+                BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+            )
+        )
+        * 0.5
+    )
     ray_camera = (
         (float(screen_x) - w * 0.5) / focal,
         1.0,
         (h * 0.5 - float(screen_y)) / focal,
     )
-    origin_camera = (0.0, -max(0.25, float(camera.distance)), 0.0)
+    origin_camera = (
+        0.0,
+        -max(BLOCKOUT_CAMERA_MIN_DISTANCE, float(camera.distance)),
+        0.0,
+    )
     origin_relative = _camera_to_world_vector(origin_camera, camera)
     ray_world = _normalized(_camera_to_world_vector(ray_camera, camera))
     origin_world = (
@@ -450,7 +627,7 @@ def screen_to_blockout_ground(
         origin_relative[1] + camera.target[1],
         origin_relative[2] + camera.target[2],
     )
-    if abs(ray_world[2]) < 0.00001:
+    if ray_world[2] == 0.0:
         return (camera.target[0], camera.target[1], 0.0)
     distance = -origin_world[2] / ray_world[2]
     if distance <= 0.0:
@@ -466,8 +643,8 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
     """Project a 3D blockout scene to serializable 2D faces/edges."""
 
     normalized = blockout_scene_from_dict(scene)
-    w = max(1, int(width or 1))
-    h = max(1, int(height or 1))
+    w = positive_integer(width, field="blockout viewport width")
+    h = positive_integer(height, field="blockout viewport height")
     faces: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     shadows: list[dict[str, Any]] = []
@@ -625,8 +802,8 @@ def project_blockout_world_point(
     projected = _project_point(
         _vec3(point),
         normalized.camera,
-        max(1, int(width or 1)),
-        max(1, int(height or 1)),
+        positive_integer(width, field="blockout viewport width"),
+        positive_integer(height, field="blockout viewport height"),
     )
     if projected is None:
         return None
@@ -643,8 +820,8 @@ def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: i
     from PySide6.QtCore import QPointF, QRectF, Qt
     from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 
-    w = max(1, int(width or 1))
-    h = max(1, int(height or 1))
+    w = positive_integer(width, field="blockout viewport width")
+    h = positive_integer(height, field="blockout viewport height")
     image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
     image.fill(QColor(0, 0, 0, 0))
     projection = project_blockout_scene(scene, w, h)
@@ -964,7 +1141,7 @@ def _world_to_camera_point(point: Vec3, camera: BlockoutCamera) -> Vec3:
     x, y = x * cos(yaw) + y * sin(yaw), -x * sin(yaw) + y * cos(yaw)
     pitch = radians(camera.pitch_degrees)
     z, y = z * cos(pitch) - y * sin(pitch), z * sin(pitch) + y * cos(pitch)
-    y += max(0.25, float(camera.distance))
+    y += max(BLOCKOUT_CAMERA_MIN_DISTANCE, float(camera.distance))
     return (x, y, z)
 
 
@@ -975,7 +1152,16 @@ def _project_camera_point(
     height: int,
 ) -> dict[str, float]:
     x, y, z = point
-    focal = 0.5 * min(width, height) / tan(radians(_clamp(camera.fov_degrees, 15.0, 90.0)) * 0.5)
+    focal = 0.5 * min(width, height) / tan(
+        radians(
+            _clamp(
+                camera.fov_degrees,
+                BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+                BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+            )
+        )
+        * 0.5
+    )
     return {"x": width * 0.5 + x * focal / y, "y": height * 0.5 - z * focal / y, "depth": y}
 
 
@@ -989,7 +1175,7 @@ def _clip_camera_polygon_near(points: Sequence[Vec3], *, near: float) -> list[Ve
         current_inside = current[1] >= near
         if current_inside != previous_inside:
             denominator = current[1] - previous[1]
-            amount = 0.0 if abs(denominator) < 0.000001 else (near - previous[1]) / denominator
+            amount = 0.0 if denominator == 0.0 else (near - previous[1]) / denominator
             clipped.append(
                 (
                     previous[0] + (current[0] - previous[0]) * amount,
@@ -1036,7 +1222,9 @@ def _dot(a: Vec3, b: Vec3) -> float:
 
 
 def _normalized(value: Vec3) -> Vec3:
-    length = max(0.000001, (_dot(value, value)) ** 0.5)
+    length = (_dot(value, value)) ** 0.5
+    if length == 0.0:
+        return (0.0, 0.0, 0.0)
     return (value[0] / length, value[1] / length, value[2] / length)
 
 
@@ -1086,6 +1274,53 @@ def _vec3(value: Any) -> Vec3:
     return (0.0, 0.0, 0.0)
 
 
+def _restored_finite_float(value: Any, default: float) -> float:
+    if value is None or isinstance(value, bool):
+        return float(default)
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+    return result if isfinite(result) else float(default)
+
+
+def _restored_vec3(value: Any, default: Vec3) -> Vec3:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return default
+    row = list(value)[:3]
+    return tuple(
+        _restored_finite_float(row[index] if index < len(row) else None, default[index])
+        for index in range(3)
+    )  # type: ignore[return-value]
+
+
+def _restored_positive_int(value: Any, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return int(default)
+    try:
+        result = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return int(default)
+    return max(1, result)
+
+
+def _strict_finite_vec3(value: Any, *, field: str) -> Vec3:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 3:
+        raise TypeError(f"Painter blockout {field} must contain exactly three real numbers")
+    resolved: list[float] = []
+    for component in value:
+        if isinstance(component, bool):
+            raise TypeError(f"Painter blockout {field} components must be real numbers, not bool")
+        try:
+            number = float(component)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TypeError(f"Painter blockout {field} components must be real numbers") from exc
+        if not isfinite(number):
+            raise ValueError(f"Painter blockout {field} components must be finite")
+        resolved.append(number)
+    return (resolved[0], resolved[1], resolved[2])
+
+
 def _vec_to_list(value: Vec3) -> list[float]:
     return [round(float(value[0]), 4), round(float(value[1]), 4), round(float(value[2]), 4)]
 
@@ -1103,7 +1338,11 @@ def _primitive_index(primitive_id: str) -> int:
 
 def _normalize_hex(value: Any) -> str:
     text = str(value or "#F2F2F2").strip()
-    if len(text) == 7 and text.startswith("#"):
+    if (
+        len(text) == 7
+        and text.startswith("#")
+        and all(character in "0123456789abcdefABCDEF" for character in text[1:])
+    ):
         return text.upper()
     return "#F2F2F2"
 

@@ -2,20 +2,41 @@
 from __future__ import annotations
 
 from typing import Iterable
+import math
+import numbers
+import operator
 
 from PySide6.QtCore import QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QTransform
 
+from app.painter_dimensions import positive_integer
+
+
+def _alpha8_value(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"Painter {field} must be an integer, not bool")
+    try:
+        resolved = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"Painter {field} must be an integer") from exc
+    if not 0 <= resolved <= 255:
+        raise ValueError(f"Painter {field} must be between 0 and 255")
+    return resolved
+
 
 def alpha8_mask(width: int, height: int, value: int = 255) -> QImage:
-    image = QImage(max(1, int(width)), max(1, int(height)), QImage.Format.Format_Alpha8)
-    image.fill(max(0, min(255, int(value))))
+    image = QImage(
+        positive_integer(width, field="mask width"),
+        positive_integer(height, field="mask height"),
+        QImage.Format.Format_Alpha8,
+    )
+    image.fill(_alpha8_value(value, field="mask value"))
     return image
 
 
 def normalized_alpha8(mask: QImage, width: int, height: int) -> QImage:
-    target_width = max(1, int(width))
-    target_height = max(1, int(height))
+    target_width = positive_integer(width, field="mask width")
+    target_height = positive_integer(height, field="mask height")
     if not isinstance(mask, QImage) or mask.isNull():
         return alpha8_mask(target_width, target_height, 255)
     source = mask.convertToFormat(QImage.Format.Format_Alpha8)
@@ -45,7 +66,7 @@ def polygon_alpha8_mask(
     try:
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         painter.setPen(QColor(0, 0, 0, 0))
-        painter.fillPath(path, QColor(0, 0, 0, max(0, min(255, int(inside)))))
+        painter.fillPath(path, QColor(0, 0, 0, _alpha8_value(inside, field="inside value")))
     finally:
         painter.end()
     return image
@@ -65,8 +86,8 @@ def linear_gradient_alpha8_mask(
         QPointF(float(start[0]) * image.width(), float(start[1]) * image.height()),
         QPointF(float(end[0]) * image.width(), float(end[1]) * image.height()),
     )
-    gradient.setColorAt(0.0, QColor(0, 0, 0, max(0, min(255, int(start_value)))))
-    gradient.setColorAt(1.0, QColor(0, 0, 0, max(0, min(255, int(end_value)))))
+    gradient.setColorAt(0.0, QColor(0, 0, 0, _alpha8_value(start_value, field="gradient start value")))
+    gradient.setColorAt(1.0, QColor(0, 0, 0, _alpha8_value(end_value, field="gradient end value")))
     painter = QPainter(image)
     try:
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
@@ -88,8 +109,14 @@ def paint_mask_circle(
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
         painter.setPen(QColor(0, 0, 0, 0))
-        radius = max(0.5, float(radius_px))
-        painter.setBrush(QColor(0, 0, 0, max(0, min(255, int(value)))))
+        if isinstance(radius_px, bool) or not isinstance(radius_px, numbers.Real):
+            raise TypeError("Painter mask radius_px must be a real number, not bool")
+        radius = float(radius_px)
+        if not math.isfinite(radius):
+            raise ValueError("Painter mask radius_px must be finite")
+        if radius < 0.5:
+            raise ValueError("Painter mask radius_px must be at least 0.5")
+        painter.setBrush(QColor(0, 0, 0, _alpha8_value(value, field="mask value")))
         painter.drawEllipse(
             QPointF(float(center[0]), float(center[1])),
             radius,

@@ -132,12 +132,22 @@ def test_m2_layer_actions_use_the_same_dialog_operations() -> None:
     assert locked["ok"]
     top_state = next(row for row in locked["result"]["layers"] if row["layer_id"] == top_id)
     assert top_state["locks"]["pixels"] and top_state["locks"]["position"]
+    unlocked_position = registry.execute(
+        "paint.layer.set_locks",
+        {"layer_id": top_id, "position": False},
+    ).to_dict()
+    assert unlocked_position["ok"]
     grouped = registry.execute(
         "paint.layer.group.create",
         {"name": "Action Group", "layer_ids": [base_id, top_id]},
     ).to_dict()
     assert grouped["ok"]
-    assert any(row["node_type"] == "group" for row in grouped["result"]["layers"])
+    group_row = next(row for row in grouped["result"]["layers"] if row["node_type"] == "group")
+    assert all(
+        next(row for row in grouped["result"]["layers"] if row["layer_id"] == layer_id)["parent_id"]
+        == group_row["layer_id"]
+        for layer_id in (base_id, top_id)
+    )
     flattened = registry.execute("paint.layer.flatten", {}).to_dict()
     assert flattened["ok"]
     assert len(flattened["result"]["layers"]) == 1
@@ -177,6 +187,98 @@ def test_merge_respects_group_effects_and_inherited_visibility() -> None:
     before = dialog._pbr_source_image()[0].tobytes()
     dialog._merge_visible()
     assert dialog._pbr_source_image()[0].tobytes() == before
+    dialog.close(); dialog.deleteLater(); app.processEvents()
+
+
+def test_layer_actions_do_not_mutate_previous_selection_on_missing_duplicate_or_delete() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(48, 48, "transparent"),
+        initial_strokes=[], time_ms=0, standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    base_id = dialog._active_paint_layer_id
+    second = dialog._new_paint_layer("Second")
+    dialog._select_paint_layer_by_id(base_id)
+    before_ids = [layer.layer_id for layer in dialog._paint_layers]
+    before_selected = dialog._selected_layer_id
+
+    missing_duplicate = registry.execute(
+        "paint.layer.duplicate", {"layer_id": "paint-layer:missing"}
+    ).to_dict()
+    assert not missing_duplicate["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == before_ids
+    assert dialog._selected_layer_id == before_selected
+
+    missing_delete = registry.execute(
+        "paint.layer.delete", {"layer_id": "paint-layer:missing"}
+    ).to_dict()
+    assert not missing_delete["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == before_ids
+    assert dialog._selected_layer_id == before_selected
+
+    second.locked = True
+    locked_delete = registry.execute(
+        "paint.layer.delete", {"layer_id": second.layer_id}
+    ).to_dict()
+    assert not locked_delete["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == before_ids
+    second.locked = False
+
+    unknown_group = registry.execute(
+        "paint.layer.group.create",
+        {"layer_ids": ["paint-layer:missing"]},
+    ).to_dict()
+    assert not unknown_group["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == before_ids
+
+    second.lock_position = True
+    locked_group = registry.execute(
+        "paint.layer.group.create",
+        {"layer_ids": [second.layer_id]},
+    ).to_dict()
+    assert not locked_group["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == before_ids
+    second.lock_position = False
+
+    no_op_setters = (
+        ("paint.layer.set_clipping", {"clipping": False}),
+        ("paint.layer.set_locks", {"pixels": False}),
+        ("paint.layer.set_type", {"layer_type": "standard"}),
+        ("paint.layer.rename", {"name": "Second"}),
+        ("paint.layer.set_visible", {"visible": True}),
+        ("paint.layer.set_locked", {"locked": False}),
+        ("paint.layer.set_opacity", {"opacity": 100}),
+        ("paint.layer.set_blend_mode", {"blend_mode": "normal"}),
+        ("paint.layer.set_color", {"color_label": "none"}),
+    )
+    for action_id, params in no_op_setters:
+        dialog._select_paint_layer_by_id(base_id)
+        result = registry.execute(
+            action_id,
+            {"layer_id": second.layer_id, **params},
+        ).to_dict()
+        assert not result["ok"], action_id
+        assert dialog._selected_layer_id == base_id, action_id
+        assert dialog._active_paint_layer_id == base_id, action_id
+
+    deleted = registry.execute(
+        "paint.layer.delete", {"layer_id": second.layer_id}
+    ).to_dict()
+    assert deleted["ok"]
+    only_id = dialog._paint_layers[0].layer_id
+    last_delete = registry.execute(
+        "paint.layer.delete", {"layer_id": only_id}
+    ).to_dict()
+    assert not last_delete["ok"]
+    assert [layer.layer_id for layer in dialog._paint_layers] == [only_id]
+
+    duplicated = registry.execute("paint.layer.duplicate", {}).to_dict()
+    assert duplicated["ok"]
+    assert len(dialog._paint_layers) == 2
     dialog.close(); dialog.deleteLater(); app.processEvents()
 
 

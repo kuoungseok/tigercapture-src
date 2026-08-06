@@ -12,17 +12,39 @@ from pathlib import Path
 from typing import Any
 
 
+REFERENCE_SAMPLE_DEFAULT_COORDINATE = 0.5
+REFERENCE_POSITION_MIN_NORM = 0.0
+REFERENCE_POSITION_MAX_NORM = 1.0
+REFERENCE_SIZE_MIN_NORM = 0.02
+REFERENCE_SIZE_MAX_NORM = 1.0
+REFERENCE_OPACITY_MIN = 0.05
+REFERENCE_OPACITY_MAX = 1.0
+REFERENCE_ROTATION_MIN_DEGREES = -180.0
+REFERENCE_ROTATION_MAX_DEGREES = 180.0
+REFERENCE_NAME_MAX_CHARACTERS = 80
+REFERENCE_TARGET_ID_MIN_CHARACTERS = 1
+REFERENCE_TARGET_ID_MIN_CHARACTERS = 1
+REFERENCE_DEFAULT_X_NORM = 0.04
+REFERENCE_DEFAULT_Y_NORM = 0.04
+REFERENCE_DEFAULT_WIDTH_NORM = 0.34
+REFERENCE_DEFAULT_HEIGHT_NORM = 0.34
+REFERENCE_DEFAULT_OPACITY = 0.58
+REFERENCE_DEFAULT_ROTATION_DEGREES = 0.0
+REFERENCE_DUPLICATE_OFFSET_NORM = 0.04
+REFERENCE_DUPLICATE_MAX_POSITION_NORM = REFERENCE_POSITION_MAX_NORM - REFERENCE_SIZE_MIN_NORM
+
+
 @dataclass(frozen=True)
 class PainterReferenceImage:
     id: str
     path: str
     name: str = ""
-    x_norm: float = 0.04
-    y_norm: float = 0.04
-    width_norm: float = 0.34
-    height_norm: float = 0.34
-    opacity: float = 0.58
-    rotation_deg: float = 0.0
+    x_norm: float = REFERENCE_DEFAULT_X_NORM
+    y_norm: float = REFERENCE_DEFAULT_Y_NORM
+    width_norm: float = REFERENCE_DEFAULT_WIDTH_NORM
+    height_norm: float = REFERENCE_DEFAULT_HEIGHT_NORM
+    opacity: float = REFERENCE_DEFAULT_OPACITY
+    rotation_deg: float = REFERENCE_DEFAULT_ROTATION_DEGREES
     visible: bool = True
     locked: bool = False
 
@@ -32,12 +54,12 @@ class PainterReferenceImage:
         return PainterReferenceImage(
             id=str(self.id or "").strip() or "reference:1",
             path=path,
-            name=name[:80],
-            x_norm=_clamp(float(self.x_norm), 0.0, 1.0),
-            y_norm=_clamp(float(self.y_norm), 0.0, 1.0),
-            width_norm=_clamp(float(self.width_norm), 0.02, 1.0),
-            height_norm=_clamp(float(self.height_norm), 0.02, 1.0),
-            opacity=_clamp(float(self.opacity), 0.05, 1.0),
+            name=name[:REFERENCE_NAME_MAX_CHARACTERS],
+            x_norm=_clamp(float(self.x_norm), REFERENCE_POSITION_MIN_NORM, REFERENCE_POSITION_MAX_NORM),
+            y_norm=_clamp(float(self.y_norm), REFERENCE_POSITION_MIN_NORM, REFERENCE_POSITION_MAX_NORM),
+            width_norm=_clamp(float(self.width_norm), REFERENCE_SIZE_MIN_NORM, REFERENCE_SIZE_MAX_NORM),
+            height_norm=_clamp(float(self.height_norm), REFERENCE_SIZE_MIN_NORM, REFERENCE_SIZE_MAX_NORM),
+            opacity=_clamp(float(self.opacity), REFERENCE_OPACITY_MIN, REFERENCE_OPACITY_MAX),
             rotation_deg=_normalize_rotation(self.rotation_deg),
             visible=bool(self.visible),
             locked=bool(self.locked),
@@ -102,12 +124,12 @@ def reference_board_from_dict(payload: Any) -> PainterReferenceBoard:
                 id=str(row.get("id") or ""),
                 path=str(row.get("path") or ""),
                 name=str(row.get("name") or ""),
-                x_norm=float(row.get("x_norm", 0.04) or 0.04),
-                y_norm=float(row.get("y_norm", 0.04) or 0.04),
-                width_norm=float(row.get("width_norm", 0.34) or 0.34),
-                height_norm=float(row.get("height_norm", 0.34) or 0.34),
-                opacity=float(row.get("opacity", 0.58) or 0.58),
-                rotation_deg=float(row.get("rotation_deg", 0.0) or 0.0),
+                x_norm=_restored_reference_real(row.get("x_norm"), REFERENCE_DEFAULT_X_NORM),
+                y_norm=_restored_reference_real(row.get("y_norm"), REFERENCE_DEFAULT_Y_NORM),
+                width_norm=_restored_reference_real(row.get("width_norm"), REFERENCE_DEFAULT_WIDTH_NORM),
+                height_norm=_restored_reference_real(row.get("height_norm"), REFERENCE_DEFAULT_HEIGHT_NORM),
+                opacity=_restored_reference_real(row.get("opacity"), REFERENCE_DEFAULT_OPACITY),
+                rotation_deg=_restored_reference_real(row.get("rotation_deg"), REFERENCE_DEFAULT_ROTATION_DEGREES),
                 visible=bool(row.get("visible", True)),
                 locked=bool(row.get("locked", False)),
             )
@@ -130,12 +152,12 @@ def add_reference_image(board: PainterReferenceBoard | dict[str, Any] | None, **
         id=reference_id,
         path=path,
         name=str(params.get("name") or ""),
-        x_norm=float(params.get("x_norm", 0.04) or 0.04),
-        y_norm=float(params.get("y_norm", 0.04) or 0.04),
-        width_norm=float(params.get("width_norm", 0.34) or 0.34),
-        height_norm=float(params.get("height_norm", 0.34) or 0.34),
-        opacity=float(params.get("opacity", 0.58) or 0.58),
-        rotation_deg=float(params.get("rotation_deg", 0.0) or 0.0),
+        x_norm=float(params.get("x_norm", REFERENCE_DEFAULT_X_NORM)),
+        y_norm=float(params.get("y_norm", REFERENCE_DEFAULT_Y_NORM)),
+        width_norm=float(params.get("width_norm", REFERENCE_DEFAULT_WIDTH_NORM)),
+        height_norm=float(params.get("height_norm", REFERENCE_DEFAULT_HEIGHT_NORM)),
+        opacity=float(params.get("opacity", REFERENCE_DEFAULT_OPACITY)),
+        rotation_deg=float(params.get("rotation_deg", REFERENCE_DEFAULT_ROTATION_DEGREES)),
         visible=bool(params.get("visible", True)),
         locked=bool(params.get("locked", False)),
     ).normalized()
@@ -179,12 +201,12 @@ def update_reference_image(
                 id=ref.id,
                 path=str(row.get("path") or ""),
                 name=str(row.get("name") or ""),
-                x_norm=float(row.get("x_norm", 0.04) or 0.04),
-                y_norm=float(row.get("y_norm", 0.04) or 0.04),
-                width_norm=float(row.get("width_norm", 0.34) or 0.34),
-                height_norm=float(row.get("height_norm", 0.34) or 0.34),
-                opacity=float(row.get("opacity", 0.58) or 0.58),
-                rotation_deg=float(row.get("rotation_deg", 0.0) or 0.0),
+                x_norm=float(row.get("x_norm", REFERENCE_DEFAULT_X_NORM)),
+                y_norm=float(row.get("y_norm", REFERENCE_DEFAULT_Y_NORM)),
+                width_norm=float(row.get("width_norm", REFERENCE_DEFAULT_WIDTH_NORM)),
+                height_norm=float(row.get("height_norm", REFERENCE_DEFAULT_HEIGHT_NORM)),
+                opacity=float(row.get("opacity", REFERENCE_DEFAULT_OPACITY)),
+                rotation_deg=float(row.get("rotation_deg", REFERENCE_DEFAULT_ROTATION_DEGREES)),
                 visible=bool(row.get("visible", True)),
                 locked=bool(row.get("locked", False)),
             ).normalized()
@@ -207,8 +229,8 @@ def duplicate_reference_image(
     board: PainterReferenceBoard | dict[str, Any],
     reference_id: str,
     *,
-    offset_x: float = 0.04,
-    offset_y: float = 0.04,
+    offset_x: float = REFERENCE_DUPLICATE_OFFSET_NORM,
+    offset_y: float = REFERENCE_DUPLICATE_OFFSET_NORM,
 ) -> PainterReferenceBoard:
     base = reference_board_from_dict(board)
     wanted = str(reference_id or "").strip()
@@ -219,8 +241,8 @@ def duplicate_reference_image(
         id=f"reference:{base.next_index}",
         path=source.path,
         name=f"{source.name} Copy",
-        x_norm=min(0.98, source.x_norm + float(offset_x or 0.0)),
-        y_norm=min(0.98, source.y_norm + float(offset_y or 0.0)),
+        x_norm=min(REFERENCE_DUPLICATE_MAX_POSITION_NORM, source.x_norm + float(offset_x or 0.0)),
+        y_norm=min(REFERENCE_DUPLICATE_MAX_POSITION_NORM, source.y_norm + float(offset_y or 0.0)),
         width_norm=source.width_norm,
         height_norm=source.height_norm,
         opacity=source.opacity,
@@ -234,20 +256,33 @@ def duplicate_reference_image(
     ).normalized()
 
 
-def sample_reference_color(path: str, *, x_norm: float = 0.5, y_norm: float = 0.5) -> dict[str, Any]:
+def sample_reference_color(
+    path: str,
+    *,
+    x_norm: float = REFERENCE_SAMPLE_DEFAULT_COORDINATE,
+    y_norm: float = REFERENCE_SAMPLE_DEFAULT_COORDINATE,
+) -> dict[str, Any]:
     from PySide6.QtGui import QImage
+    from app.painter_action_inputs import validate_reference_sample_action
+
+    _reference_id, resolved_x, resolved_y, _apply = validate_reference_sample_action(
+        reference_id="",
+        x_norm=x_norm,
+        y_norm=y_norm,
+        apply=True,
+    )
 
     image = QImage(str(path or ""))
     if image.isNull():
         raise ValueError("reference image could not be loaded")
-    x = int(round(_clamp(float(x_norm), 0.0, 1.0) * max(0, image.width() - 1)))
-    y = int(round(_clamp(float(y_norm), 0.0, 1.0) * max(0, image.height() - 1)))
+    x = int(round(resolved_x * max(0, image.width() - 1)))
+    y = int(round(resolved_y * max(0, image.height() - 1)))
     color = image.pixelColor(x, y)
     return {
         "schema": "tigerstudio.painter.reference_board.sample_color.v1",
         "path": str(path or ""),
-        "x_norm": round(_clamp(float(x_norm), 0.0, 1.0), 5),
-        "y_norm": round(_clamp(float(y_norm), 0.0, 1.0), 5),
+        "x_norm": resolved_x,
+        "y_norm": resolved_y,
         "rgb": [int(color.red()), int(color.green()), int(color.blue())],
         "hex": "#{:02X}{:02X}{:02X}".format(int(color.red()), int(color.green()), int(color.blue())),
         "alpha": int(color.alpha()),
@@ -259,6 +294,13 @@ def extract_reference_palette(path: str, *, max_colors: int = 6) -> dict[str, An
 
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QImage
+    from app.painter_action_inputs import validate_reference_palette_action
+
+    _reference_id, limit, _apply = validate_reference_palette_action(
+        reference_id="",
+        max_colors=max_colors,
+        apply=True,
+    )
 
     image = QImage(str(path or ""))
     if image.isNull():
@@ -281,7 +323,6 @@ def extract_reference_palette(path: str, *, max_colors: int = 6) -> dict[str, An
                 int(round(color.blue() / 24.0) * 24),
             )
             counts[tuple(max(0, min(255, channel)) for channel in bucket)] += 1
-    limit = max(1, min(12, int(max_colors or 6)))
     palette = []
     total = max(1, sum(counts.values()))
     for rgb, count in counts.most_common(limit):
@@ -311,6 +352,18 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
 
 
+def _restored_reference_real(value: Any, default: float) -> float:
+    try:
+        if value is None or isinstance(value, bool):
+            raise TypeError("missing or boolean reference scalar")
+        resolved = float(value)
+        if not math.isfinite(resolved):
+            raise ValueError("reference scalar must be finite")
+        return resolved
+    except (TypeError, ValueError, OverflowError):
+        return float(default)
+
+
 def _normalize_rotation(value: Any) -> float:
     try:
         if isinstance(value, bool):
@@ -327,6 +380,26 @@ def _normalize_rotation(value: Any) -> float:
 
 
 __all__ = [
+    "REFERENCE_DEFAULT_HEIGHT_NORM",
+    "REFERENCE_DEFAULT_OPACITY",
+    "REFERENCE_DEFAULT_ROTATION_DEGREES",
+    "REFERENCE_DEFAULT_WIDTH_NORM",
+    "REFERENCE_DEFAULT_X_NORM",
+    "REFERENCE_DEFAULT_Y_NORM",
+    "REFERENCE_DUPLICATE_MAX_POSITION_NORM",
+    "REFERENCE_DUPLICATE_OFFSET_NORM",
+    "REFERENCE_NAME_MAX_CHARACTERS",
+    "REFERENCE_OPACITY_MAX",
+    "REFERENCE_OPACITY_MIN",
+    "REFERENCE_POSITION_MAX_NORM",
+    "REFERENCE_POSITION_MIN_NORM",
+    "REFERENCE_ROTATION_MAX_DEGREES",
+    "REFERENCE_ROTATION_MIN_DEGREES",
+    "REFERENCE_SAMPLE_DEFAULT_COORDINATE",
+    "REFERENCE_SIZE_MAX_NORM",
+    "REFERENCE_SIZE_MIN_NORM",
+    "REFERENCE_TARGET_ID_MIN_CHARACTERS",
+    "REFERENCE_TARGET_ID_MIN_CHARACTERS",
     "PainterReferenceBoard",
     "PainterReferenceImage",
     "add_reference_image",

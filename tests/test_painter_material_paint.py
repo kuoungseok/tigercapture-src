@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 def _app():
@@ -26,7 +27,36 @@ def test_material_brush_capability_discloses_authored_nonphysical_model() -> Non
     assert fallback["fallback"] == "stylized_reduced_relief"
 
 
-def test_gaussian_blur_has_a_real_fallback_when_opencv_is_unavailable(monkeypatch) -> None:
+def test_material_render_rejects_invalid_dimensions_and_stroke_width() -> None:
+    from app.painter_material_paint import (
+        material_paint_signature,
+        rasterize_material_channels,
+    )
+
+    layer = {
+        "layer_id": "material-1",
+        "layer_type": "material",
+        "visible": True,
+        "opacity": 100,
+    }
+    stroke = {
+        "layer_id": "material-1",
+        "material_enabled": True,
+        "points": [(0.5, 0.5)],
+        "width_px": 0.0,
+    }
+
+    with pytest.raises(ValueError, match="material raster width must be positive"):
+        rasterize_material_channels([], [layer], width=0, height=8)
+    with pytest.raises(TypeError, match="material signature width must be an integer"):
+        material_paint_signature([], [layer], width=8.5, height=8)
+    with pytest.raises(ValueError, match="material stroke width_px must be positive"):
+        rasterize_material_channels([stroke], [layer], width=8, height=8)
+    with pytest.raises(ValueError, match="material stroke width_px must be positive"):
+        material_paint_signature([stroke], [layer], width=8, height=8)
+
+
+def test_gaussian_blur_has_a_deterministic_float_fallback_when_opencv_is_unavailable(monkeypatch) -> None:
     import sys
 
     from app.painter_material_paint import _blur, material_raster_backend_status
@@ -35,16 +65,52 @@ def test_gaussian_blur_has_a_real_fallback_when_opencv_is_unavailable(monkeypatc
     before = material_raster_backend_status()
     source = np.zeros((17, 17), dtype=np.float32)
     source[8, 8] = 1.0
+    source[2, 2] = 1.0 / 1024.0
     blurred = _blur(source, 2.0)
+    repeated = _blur(source, 2.0)
     status = material_raster_backend_status()
     assert blurred.shape == source.shape
     assert blurred.dtype == np.float32
     assert 0.0 < float(blurred[8, 8]) < 1.0
     assert float(blurred[8, 7]) > 0.0
-    assert status["backend"] == "pillow"
-    assert status["fallback_count"] == before["fallback_count"] + 1
+    assert np.array_equal(blurred, repeated)
+    assert float(blurred[2, 2]) > 0.0
+    assert status["backend"] == "numpy_gaussian"
+    assert status["fallback_count"] == before["fallback_count"] + 2
     assert "ModuleNotFoundError" in status["last_fallback_error"]
     assert "cv2" in status["last_fallback_error"]
+
+
+def test_zero_pressure_or_zero_load_has_exact_zero_material_deposit_for_all_v2_styles() -> None:
+    from app.drawing import PaintLayer, Stroke
+    from app.painter_brush_engine_v2 import BRISTLE_V2_STYLES
+    from app.painter_material_paint import rasterize_material_channels
+
+    layer = PaintLayer("zero", "Zero endpoints", layer_type="material")
+    common = {
+        "points": [(0.15, 0.5), (0.85, 0.5)],
+        "width_px": 28,
+        "layer_id": layer.layer_id,
+        "material_enabled": True,
+        "material_load": 1.0,
+        "material_thickness": 1.0,
+        "brush_engine_version": 2,
+        "bristle_count": 12,
+    }
+    for style in sorted(BRISTLE_V2_STYLES):
+        for pressure, point_load in (([0.0, 0.0], [1.0, 1.0]), ([1.0, 1.0], [0.0, 0.0])):
+            stroke = Stroke(
+                **common,
+                brush_style=style,
+                point_pressure=pressure,
+                point_load=point_load,
+            )
+            channels = rasterize_material_channels(
+                [stroke], [layer], width=128, height=64
+            )
+            assert float(np.max(channels["coverage"])) == 0.0, style
+            assert float(np.max(channels["height"])) == 0.0, style
+            assert float(np.max(channels["excavation"])) == 0.0, style
 
 
 def test_polyline_and_weighted_segment_have_deterministic_pillow_fallback(

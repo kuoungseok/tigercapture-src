@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
 
+from app.painter_dimensions import positive_integer
+
 
 BLEND_MODES = (
     "normal",
@@ -139,7 +141,8 @@ def composite_layer_images(
     layer_masks: Mapping[str, QImage] | None = None,
 ) -> QImage:
     """Composite ordered layer images with groups, clipping, masks and blends."""
-    width, height = max(1, int(width)), max(1, int(height))
+    width = positive_integer(width, field="compositor width")
+    height = positive_integer(height, field="compositor height")
     rows = list(layers or [])
     raster_masks = dict(layer_masks or {})
     by_id = {str(getattr(row, "layer_id", "")): row for row in rows}

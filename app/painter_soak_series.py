@@ -10,9 +10,22 @@ from app.painter_runtime_metrics import linear_slope_per_hour
 from app.painter_soak_acceptance import RESOURCE_KEYS, evaluate_long_soak
 
 
-REPORT_SCHEMA = "tigerstudio.painter.three-run-soak-envelope.v2"
+REPORT_SCHEMA = "tigerstudio.painter.three-run-soak-envelope.v3"
 REQUIRED_RUNS = 3
-RETENTION_RESOURCE_KEYS = ("working_set_bytes", "private_usage_bytes")
+RETENTION_RESOURCE_KEYS = ("private_usage_bytes",)
+RESIDENCY_OBSERVATION_KEYS = ("working_set_bytes",)
+WINDOWS_MEMORY_SEMANTICS = {
+    "working_set_bytes": {
+        "meaning": "currently_resident_physical_pages_including_shared_and_private_data",
+        "acceptance_role": "observational_non_blocking",
+        "source": "https://learn.microsoft.com/en-us/windows/win32/procthread/process-working-set",
+    },
+    "private_usage_bytes": {
+        "meaning": "process_private_commit_charge",
+        "acceptance_role": "retained_private_commit_blocking",
+        "source": "https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex",
+    },
+}
 
 
 def _distribution(values: Iterable[float]) -> dict[str, float]:
@@ -97,7 +110,7 @@ def evaluate_three_run_envelope(
             field: _distribution(payload["summary"]["operation_latency_ms"][field] for _path, payload in rows)
             for field in ("p50", "p95", "p99")
         }
-        for key in RETENTION_RESOURCE_KEYS:
+        for key in (*RETENTION_RESOURCE_KEYS, *RESIDENCY_OBSERVATION_KEYS):
             retention_reviews[key] = [
                 {
                     "run_id": str(payload.get("run_id") or ""),
@@ -105,16 +118,17 @@ def evaluate_three_run_envelope(
                 }
                 for _path, payload in rows
             ]
-            growing_runs = [
-                review["run_id"]
-                for review in retention_reviews[key]
-                if review["positive_late_growth"]
-            ]
-            if growing_runs:
-                failures.append(
-                    "one or more bounded runs show unresolved positive late-run "
-                    f"retention: {key} ({', '.join(growing_runs)})"
-                )
+            if key in RETENTION_RESOURCE_KEYS:
+                growing_runs = [
+                    review["run_id"]
+                    for review in retention_reviews[key]
+                    if review["positive_late_growth"]
+                ]
+                if growing_runs:
+                    failures.append(
+                        "one or more bounded runs show unresolved positive late-run "
+                        f"retention: {key} ({', '.join(growing_runs)})"
+                    )
 
     passed = not failures
     provenance = evidence_record(
@@ -141,9 +155,11 @@ def evaluate_three_run_envelope(
         "retention_reviews": retention_reviews,
         "retention_acceptance_contract": {
             "rule": "reject_when_any_run_has_positive_late_half_slope_and_strictly_increasing_last_three_quarter_medians",
-            "resources": list(RETENTION_RESOURCE_KEYS),
+            "blocking_resources": list(RETENTION_RESOURCE_KEYS),
+            "observational_non_blocking_resources": list(RESIDENCY_OBSERVATION_KEYS),
             "magnitude_threshold_used": False,
-            "reason": "every bounded cyclic release-evidence run must show stabilization; a contradictory retained-growth run remains unresolved rather than being outvoted",
+            "reason": "private commit is the Windows process-owned retained allocation signal; working set is reported separately because it is current physical residency and includes shared pages",
+            "windows_memory_semantics": WINDOWS_MEMORY_SEMANTICS,
         },
         "claims": {"leak_free": False, "universal_performance": False, "acceptance_threshold": False},
         "provenance": [provenance],
@@ -153,6 +169,8 @@ def evaluate_three_run_envelope(
 __all__ = [
     "REPORT_SCHEMA",
     "REQUIRED_RUNS",
+    "RESIDENCY_OBSERVATION_KEYS",
     "RETENTION_RESOURCE_KEYS",
+    "WINDOWS_MEMORY_SEMANTICS",
     "evaluate_three_run_envelope",
 ]

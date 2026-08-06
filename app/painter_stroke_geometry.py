@@ -21,6 +21,23 @@ ACTION_STROKE_SAMPLING_MODEL_CONTRACT = {
 }
 
 
+def rounded_dab_corner_radius(length: object, thickness: object) -> float:
+    """Return the exact capsule radius for a positive rectangular dab."""
+
+    if isinstance(length, bool) or isinstance(thickness, bool):
+        raise TypeError("Painter dab length and thickness must be real numbers")
+    try:
+        dab_length = float(length)
+        dab_thickness = float(thickness)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("Painter dab length and thickness must be real numbers") from exc
+    if not math.isfinite(dab_length) or not math.isfinite(dab_thickness):
+        raise ValueError("Painter dab length and thickness must be finite")
+    if dab_length <= 0.0 or dab_thickness <= 0.0:
+        raise ValueError("Painter dab length and thickness must be positive")
+    return min(dab_length, dab_thickness) / 2.0
+
+
 def smooth_action_points(
     points: Sequence[Mapping[str, Any]],
     *,
@@ -85,7 +102,7 @@ def smooth_action_points(
                         t,
                     )
                 )
-            if not out or _distance(out[-1], row) > 1e-7:
+            if not out or _distance(out[-1], row) != 0.0:
                 out.append(row)
         out.append(dict(p2))
     return out[:budget]
@@ -137,4 +154,4 @@ def _clamp_signed(value: float) -> float:
     return max(-1.0, min(1.0, float(value)))
 
 
-__all__ = ["smooth_action_points"]
+__all__ = ["rounded_dab_corner_radius", "smooth_action_points"]

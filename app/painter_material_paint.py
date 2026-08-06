@@ -8,10 +8,31 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+from app.painter_legacy_brush import deterministic_unit
+from app.painter_dimensions import positive_integer, positive_real
+
 
 STANDARD_LAYER_TYPE = "standard"
 MATERIAL_LAYER_TYPE = "material"
 MATERIAL_PAINT_SCHEMA = "tigerstudio.painter.material_paint.v1"
+MATERIAL_PAINT_MODEL_CONTRACT = {
+    "schema": "tigerstudio.painter.material_model.v1",
+    "model": "tiger_authored_deterministic_stylized_relief_v1",
+    "coefficient_source": "authored_product_policy_not_measured_physical_media",
+    "deterministic_replay_claim": True,
+    "physical_media_claim": False,
+    "paint_rheology_claim": False,
+    "external_product_pixel_parity_claim": False,
+    "normalized_material_channel_domain": [0.0, 1.0],
+    "signed_height_domain": [-1.0, 1.0],
+    "fallback_blur": "deterministic_float32_separable_gaussian",
+}
+MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES = -180.0
+MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES = 180.0
+MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES = 5.0
+MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES = 85.0
+MATERIAL_PREVIEW_AZIMUTH_DEFAULT_DEGREES = -38.0
+MATERIAL_PREVIEW_ELEVATION_DEFAULT_DEGREES = 48.0
 _MATERIAL_RASTER_BACKEND_STATUS: dict[str, Any] = {
     "backend": "uninitialized",
     "fallback_count": 0,
@@ -50,6 +71,43 @@ MATERIAL_COMPATIBLE_STYLES = frozenset(
         "gouache_flat",
     }
 )
+
+
+def normalize_material_preview_light_angles(
+    azimuth_deg: object,
+    elevation_deg: object,
+) -> tuple[float, float]:
+    def normalized(
+        value: object,
+        *,
+        default: float,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        if isinstance(value, bool):
+            return default
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return default
+        if not math.isfinite(result):
+            return default
+        return max(minimum, min(maximum, result))
+
+    return (
+        normalized(
+            azimuth_deg,
+            default=MATERIAL_PREVIEW_AZIMUTH_DEFAULT_DEGREES,
+            minimum=MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES,
+            maximum=MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES,
+        ),
+        normalized(
+            elevation_deg,
+            default=MATERIAL_PREVIEW_ELEVATION_DEFAULT_DEGREES,
+            minimum=MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES,
+            maximum=MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES,
+        ),
+    )
 
 _STYLE_THICKNESS = {
     "impasto_oil": 1.35,
@@ -165,6 +223,8 @@ def material_paint_signature(
     light_azimuth_deg: float = -38.0,
     light_elevation_deg: float = 48.0,
 ) -> str:
+    resolved_width = positive_integer(width, field="material signature width")
+    resolved_height = positive_integer(height, field="material signature height")
     specs = material_layer_specs(layers)
     rows = []
     for stroke in strokes:
@@ -176,7 +236,10 @@ def material_paint_signature(
             {
                 "layer": layer_id,
                 "points": list(_value(stroke, "points", []) or []),
-                "width": float(_value(stroke, "width_px", 1.0) or 1.0),
+                "width": positive_real(
+                    _value(stroke, "width_px", 1.0),
+                    field="material stroke width_px",
+                ),
                 "style": str(_value(stroke, "brush_style", "round") or "round"),
                 "enabled": bool(_value(stroke, "material_enabled", False)),
                 "engine": int(_value(stroke, "brush_engine_version", 1) or 1),
@@ -211,7 +274,7 @@ def material_paint_signature(
             }
         )
     payload = {
-        "size": [int(width), int(height)],
+        "size": [resolved_width, resolved_height],
         "time_ms": int(time_ms),
         "light": [float(light_azimuth_deg), float(light_elevation_deg)],
         "layers": specs,
@@ -259,7 +322,7 @@ def _draw_polyline_pillow(
 
 
 def _draw_polyline(mask: np.ndarray, points: list[tuple[int, int]], width: int) -> None:
-    if not points:
+    if not points or int(width) <= 0:
         return
     try:
         import cv2
@@ -290,6 +353,8 @@ def _draw_weighted_segment(
     value: float,
 ) -> None:
     value = max(0.0, min(1.0, float(value)))
+    if int(width) <= 0 or value <= 0.0:
+        return
     try:
         import cv2
 
@@ -311,32 +376,60 @@ def _draw_weighted_segment(
 
 
 def _blur(values: np.ndarray, radius: float) -> np.ndarray:
+    source = np.asarray(values, dtype=np.float32)
+    if source.ndim != 2:
+        raise ValueError("Painter material blur expects a two-dimensional channel")
+    if not bool(np.isfinite(source).all()):
+        raise ValueError("Painter material blur input must be finite")
+    sigma = float(radius)
+    if not math.isfinite(sigma):
+        raise ValueError("Painter material blur radius must be finite")
+    if sigma <= 0.0:
+        return source.copy()
     try:
         import cv2
 
-        sigma = max(0.1, float(radius))
-        blurred = cv2.GaussianBlur(values, (0, 0), sigmaX=sigma, sigmaY=sigma)
+        blurred = cv2.GaussianBlur(source, (0, 0), sigmaX=sigma, sigmaY=sigma)
         _record_material_raster_backend("opencv")
         return blurred
     except Exception as exc:
-        _record_material_raster_backend("pillow", exc)
-        from PIL import Image, ImageFilter
+        _record_material_raster_backend("numpy_gaussian", exc)
+        kernel_radius = max(1, int(math.ceil(sigma * 3.0)))
+        offsets = np.arange(-kernel_radius, kernel_radius + 1, dtype=np.float64)
+        kernel = np.exp(-(offsets * offsets) / (2.0 * sigma * sigma))
+        kernel /= np.sum(kernel)
+        horizontal_source = np.pad(source, ((0, 0), (kernel_radius, kernel_radius)), mode="edge")
+        horizontal = np.zeros_like(source, dtype=np.float64)
+        for offset, weight in enumerate(kernel):
+            horizontal += horizontal_source[:, offset : offset + source.shape[1]] * weight
+        vertical_source = np.pad(horizontal, ((kernel_radius, kernel_radius), (0, 0)), mode="edge")
+        blurred = np.zeros_like(horizontal, dtype=np.float64)
+        for offset, weight in enumerate(kernel):
+            blurred += vertical_source[offset : offset + source.shape[0], :] * weight
+        return blurred.astype(np.float32)
 
-        source = np.asarray(values, dtype=np.float32)
-        if source.ndim != 2:
-            raise ValueError("Painter material blur expects a two-dimensional channel")
-        if not bool(np.isfinite(source).all()):
-            raise ValueError("Painter material blur input must be finite")
-        minimum = float(source.min())
-        maximum = float(source.max())
-        if maximum <= minimum:
-            return source.copy()
-        normalized = np.rint((source - minimum) * (255.0 / (maximum - minimum))).astype(np.uint8)
-        blurred = Image.fromarray(normalized, mode="L").filter(
-            ImageFilter.GaussianBlur(radius=max(0.1, float(radius)))
-        )
-        restored = np.asarray(blurred, dtype=np.float32) / 255.0
-        return (restored * (maximum - minimum) + minimum).astype(np.float32)
+
+def _deterministic_noise_field(
+    shape: tuple[int, int], seed: int, channel: int
+) -> np.ndarray:
+    """Return a stable Tiger-authored [0, 1] field without libm sine noise."""
+
+    yy, xx = np.indices(shape, dtype=np.uint64)
+    mask = np.uint64(0xFFFFFFFFFFFFFFFF)
+    value = (
+        xx * np.uint64(0x9E3779B185EBCA87)
+        ^ yy * np.uint64(0xC2B2AE3D27D4EB4F)
+        ^ np.uint64(int(seed) & int(mask))
+        ^ np.uint64(int(channel) & int(mask))
+    )
+    value ^= value >> np.uint64(30)
+    value *= np.uint64(0xBF58476D1CE4E5B9)
+    value ^= value >> np.uint64(27)
+    value *= np.uint64(0x94D049BB133111EB)
+    value ^= value >> np.uint64(31)
+    return ((value >> np.uint64(40)).astype(np.float32) / float(0xFFFFFF)).astype(
+        np.float32
+    )
 
 
 def _shift_clamped(values: np.ndarray, dx: int, dy: int) -> np.ndarray:
@@ -360,8 +453,8 @@ def rasterize_material_channels(
     light_elevation_deg: float = 48.0,
     surface_settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    width = max(8, int(width))
-    height = max(8, int(height))
+    width = positive_integer(width, field="material raster width")
+    height = positive_integer(height, field="material raster height")
     specs = material_layer_specs(layers)
     relief = np.zeros((height, width), dtype=np.float32)
     excavation = np.zeros((height, width), dtype=np.float32)
@@ -407,7 +500,7 @@ def rasterize_material_channels(
         )
         gloss = max(0.0, min(1.0, float(_value(stroke, "material_gloss", settings["gloss"]))))
         authored_roughness = max(
-            0.04,
+            0.0,
             min(1.0, float(_value(stroke, "material_roughness", settings["roughness"]))),
         )
         plow = max(
@@ -432,7 +525,11 @@ def rasterize_material_channels(
         )
         style = str(_value(stroke, "brush_style", "round") or "round").casefold()
         profile_counts[style] = int(profile_counts.get(style, 0)) + 1
-        width_px = max(1, int(round(float(_value(stroke, "width_px", 1.0) or 1.0))))
+        authored_width_px = positive_real(
+            _value(stroke, "width_px", 1.0),
+            field="material stroke width_px",
+        )
+        width_px = max(1, int(round(authored_width_px)))
         opacity = max(0.0, min(1.0, float(_value(stroke, "opacity", 255) or 0) / 255.0))
         deposition = (
             thickness
@@ -441,7 +538,7 @@ def rasterize_material_channels(
             * layer["opacity"]
             * float(_STYLE_THICKNESS.get(style, 0.72))
         )
-        if deposition <= 0.0001:
+        if deposition <= 0.0:
             continue
 
         mask = np.zeros_like(relief)
@@ -449,6 +546,7 @@ def rasterize_material_channels(
         direction_written = False
         from app.painter_brush_engine_v2 import (
             bristle_lane_paths,
+            depleted_load_curve,
             normalize_curve,
             normalize_signed_curve,
             stipple_dabs,
@@ -468,57 +566,17 @@ def rasterize_material_channels(
             _value(stroke, "point_tilt_y", []) or [],
             point_count,
         )
-        load_curve = normalize_curve(
-            _value(stroke, "point_load", []) or [],
-            point_count,
-            1.0,
+        load_curve = depleted_load_curve(
+            stroke,
+            width=width - 1,
+            height=height - 1,
         )
-        depletion = max(
-            0.0,
-            min(1.0, float(_value(stroke, "load_depletion", 0.28) or 0.0)),
-        )
-        if point_count:
-            load_curve = [
-                (
-                    max(
-                        0.04,
-                        value
-                        * (
-                            1.0
-                            - depletion
-                            * min(
-                                1.0,
-                                (
-                                    int(_value(stroke, "brush_sample_offset", 0) or 0)
-                                    + index
-                                )
-                                / 64.0,
-                            )
-                        ),
-                    )
-                    + (
-                        1.0
-                        - max(
-                            0.04,
-                            value
-                            * (
-                                1.0
-                                - depletion
-                                * min(
-                                    1.0,
-                                    (
-                                        int(_value(stroke, "brush_sample_offset", 0) or 0)
-                                        + index
-                                    )
-                                    / 64.0,
-                                )
-                            ),
-                        )
-                    )
-                    * resaturation
-                )
-                for index, value in enumerate(load_curve)
-            ]
+        point_response = [
+            pressure_curve[index] * load_curve[index]
+            for index in range(point_count)
+        ]
+        if not any(value > 0.0 for value in point_response):
+            continue
         rotation_curve = normalize_curve(
             _value(stroke, "point_rotation", []) or [],
             point_count,
@@ -536,35 +594,35 @@ def rasterize_material_channels(
             for index, point in enumerate(points)
         ]
         dynamic_widths = [
-            max(
-                1,
-                int(
-                    round(
-                        width_px
-                        * (0.18 + pressure_curve[index] * 0.82)
-                        * (0.72 + load_curve[index] * 0.28)
-                        * (
-                            1.0
-                            + min(
-                                1.0,
-                                math.hypot(tilt_x_curve[index], tilt_y_curve[index]),
-                            )
-                            * 0.24
+            int(
+                round(
+                    width_px
+                    * pressure_curve[index]
+                    * load_curve[index]
+                    * (
+                        1.0
+                        + min(
+                            1.0,
+                            math.hypot(tilt_x_curve[index], tilt_y_curve[index]),
                         )
+                        * 0.24
                     )
-                ),
+                )
             )
             for index in range(point_count)
         ]
 
         if style == "stipple_oil":
             brush_seed = int(_value(stroke, "brush_seed", 0) or 0)
-            for x, y, radius_x, radius_y, angle in stipple_dabs(
-                stroke,
-                width=width - 1,
-                height=height - 1,
+            stipple_response = sum(point_response) / len(point_response)
+            for dab_index, (x, y, radius_x, radius_y, angle) in enumerate(
+                stipple_dabs(
+                    stroke,
+                    width=width - 1,
+                    height=height - 1,
+                )
             ):
-                half_length = max(0.5, radius_x * 0.46)
+                half_length = radius_x * 0.46
                 first = (
                     max(0, min(width - 1, int(round(x - math.cos(angle) * half_length)))),
                     max(0, min(height - 1, int(round(y - math.sin(angle) * half_length)))),
@@ -577,8 +635,19 @@ def rasterize_material_channels(
                     mask,
                     first,
                     second,
-                    max(1, int(round(radius_y * 2.0))),
-                    0.72 + 0.18 * math.sin(brush_seed * 0.11 + x * 0.07 + y * 0.05),
+                    int(round(radius_y * 2.0)),
+                    stipple_response
+                    * (
+                        0.72
+                        + 0.18
+                        * (
+                            deterministic_unit(
+                                brush_seed, dab_index, 0x4D41544C
+                            )
+                            * 2.0
+                            - 1.0
+                        )
+                    ),
                 )
             direction_written = True
         elif style in {"palette_knife", "knife_scrape_oil"}:
@@ -588,7 +657,7 @@ def rasterize_material_channels(
                     dynamic_points[0],
                     dynamic_points[0],
                     dynamic_widths[0],
-                    max(0.08, pressure_curve[0] * load_curve[0]),
+                    pressure_curve[0] * load_curve[0],
                 )
             else:
                 for index, (first, second) in enumerate(
@@ -600,36 +669,42 @@ def rasterize_material_channels(
                         mask,
                         first,
                         second,
-                        max(
-                            2,
-                            int(
-                                round(
-                                    (dynamic_widths[index] + dynamic_widths[index + 1])
-                                    * 0.47
-                                )
-                            ),
+                        int(
+                            round(
+                                (dynamic_widths[index] + dynamic_widths[index + 1])
+                                * 0.47
+                            )
                         ),
-                        max(0.06, local_pressure * local_load),
+                        local_pressure * local_load,
                     )
         elif stroke_uses_bristle_v2(stroke):
             lanes = bristle_lane_paths(stroke, width=width - 1, height=height - 1)
-            lane_width = max(1, int(round(width_px / max(5, len(lanes)) * 0.92)))
+            lane_width = int(round(width_px / len(lanes) * 0.92)) if lanes else 0
             if style not in {"dry_oil", "scumble_oil", "fan_bristle_oil"}:
-                for first, second in zip(points, points[1:]):
+                for index, (first, second) in enumerate(zip(points, points[1:])):
+                    body_deposit = (
+                        min(pressure_curve[index], pressure_curve[index + 1])
+                        * min(load_curve[index], load_curve[index + 1])
+                    )
                     _draw_weighted_segment(
                         mask,
                         first,
                         second,
-                        max(1, int(round(width_px * 0.70))),
-                        0.34,
+                        int(
+                            round(
+                                width_px
+                                * 0.70
+                                * min(pressure_curve[index], pressure_curve[index + 1])
+                            )
+                        ),
+                        body_deposit,
                     )
             for lane in lanes:
                 for first, second in zip(lane, lane[1:]):
                     x1, y1, pressure_a, load_a = first
                     x2, y2, pressure_b, load_b = second
-                    lane_deposit = max(
-                        0.04,
-                        min(1.0, (pressure_a + pressure_b) * 0.25 + (load_a + load_b) * 0.25),
+                    lane_deposit = (
+                        min(pressure_a, pressure_b) * min(load_a, load_b)
                     )
                     segment_points = [
                         (
@@ -666,13 +741,30 @@ def rasterize_material_channels(
                         mask,
                         first,
                         second,
-                        max(1, int(round((dynamic_widths[index] + dynamic_widths[index + 1]) * 0.5))),
+                        int(round((dynamic_widths[index] + dynamic_widths[index + 1]) * 0.5)),
                         1.0,
                     )
 
         if style in {"loaded_oil", "impasto_oil"}:
             body = np.zeros_like(relief)
-            _draw_polyline(body, points, max(2, int(round(width_px * 0.82))))
+            for index, (first, second) in enumerate(zip(points, points[1:])):
+                local_pressure = min(pressure_curve[index], pressure_curve[index + 1])
+                local_load = min(load_curve[index], load_curve[index + 1])
+                _draw_weighted_segment(
+                    body,
+                    first,
+                    second,
+                    int(round(width_px * 0.82 * local_pressure)),
+                    local_pressure * local_load,
+                )
+            if len(points) == 1:
+                _draw_weighted_segment(
+                    body,
+                    points[0],
+                    points[0],
+                    int(round(width_px * 0.82 * pressure_curve[0])),
+                    pressure_curve[0] * load_curve[0],
+                )
             burial_mask = body
             rounded_body = _blur(body, max(0.9, width_px * 0.085))
             bristle_deposit = np.clip(mask, 0.0, 1.0)
@@ -690,21 +782,18 @@ def rasterize_material_channels(
             ):
                 local_pressure = (pressure_curve[index] + pressure_curve[index + 1]) * 0.5
                 local_load = (load_curve[index] + load_curve[index + 1]) * 0.5
-                segment_width = max(
-                    2,
-                    int(
-                        round(
-                            (dynamic_widths[index] + dynamic_widths[index + 1])
-                            * 0.47
-                        )
-                    ),
+                segment_width = int(
+                    round(
+                        (dynamic_widths[index] + dynamic_widths[index + 1])
+                        * 0.47
+                    )
                 )
                 _draw_weighted_segment(
                     body,
                     first,
                     second,
                     segment_width,
-                    max(0.06, local_pressure * local_load),
+                    local_pressure * local_load,
                 )
                 dx = float(second[0] - first[0])
                 dy = float(second[1] - first[1])
@@ -727,12 +816,12 @@ def rasterize_material_channels(
                     ridge,
                     ridge_first,
                     ridge_second,
-                    max(1, int(round(segment_width * 0.13))),
-                    max(0.08, local_pressure * local_load),
+                    int(round(segment_width * 0.13)),
+                    local_pressure * local_load,
                 )
             if len(dynamic_points) == 1:
                 _draw_polyline(body, dynamic_points, dynamic_widths[0])
-            plateau = _blur(body, max(0.55, width_px * 0.028))
+            plateau = _blur(body, width_px * 0.028)
             plateau = np.clip((plateau - 0.12) * 1.28, 0.0, 1.0)
             burial_mask = plateau
             mask = np.clip(plateau * 0.88 + mask * 0.12 + ridge * 0.62, 0.0, 1.0)
@@ -749,10 +838,11 @@ def rasterize_material_channels(
                 _draw_polyline(ridge, shifted, max(1, width_px // 9))
             mask = np.clip(mask * 0.62 + ridge * 0.62, 0.0, 1.0)
         elif style in {"dry_oil", "scumble_oil"}:
-            yy, xx = np.indices(mask.shape)
-            grain = (
-                np.sin(xx * 0.47 + yy * 0.19 + stroke_count * 1.7) * 0.5 + 0.5
-            ).astype(np.float32)
+            grain = _deterministic_noise_field(
+                mask.shape,
+                int(_value(stroke, "brush_seed", 0) or 0),
+                stroke_count,
+            )
             mask *= np.clip((grain - 0.22) * 1.35, 0.0, 1.0)
         elif style == "stipple_oil":
             mask = np.clip(mask, 0.0, 1.0)
@@ -809,7 +899,7 @@ def rasterize_material_channels(
         }.get(style, 0.08)
         surface_roughness = np.clip(
             authored_roughness + (1.0 - load) * 0.12 - wetness * 0.22 - gloss * 0.30,
-            0.04,
+            0.0,
             1.0,
         )
         local_roughness = np.clip(
@@ -817,7 +907,7 @@ def rasterize_material_channels(
             + style_roughness
             + (1.0 - mask) * 0.10
             - mask * wetness * 0.09,
-            0.04,
+            0.0,
             1.0,
         )
         roughness_sum += mask * local_roughness
@@ -876,8 +966,12 @@ def rasterize_material_channels(
     normal = normal_map_from_height(signed_height, shared_settings)
     ao = ao_map_from_height(signed_height, shared_settings, realtime=True)
 
-    azimuth = math.radians(float(light_azimuth_deg))
-    elevation = math.radians(max(5.0, min(85.0, float(light_elevation_deg))))
+    resolved_azimuth, resolved_elevation = normalize_material_preview_light_angles(
+        light_azimuth_deg,
+        light_elevation_deg,
+    )
+    azimuth = math.radians(resolved_azimuth)
+    elevation = math.radians(resolved_elevation)
     light = np.asarray(
         [
             math.cos(elevation) * math.cos(azimuth),

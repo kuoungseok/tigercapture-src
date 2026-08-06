@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from PySide6.QtGui import QColor, QImage
 
 
@@ -49,6 +51,19 @@ def test_mask_brush_can_hide_and_reveal_without_binary_polygon_loss() -> None:
     assert hidden.pixelColor(16, 16).alpha() == 0
     assert 175 <= revealed.pixelColor(16, 16).alpha() <= 185
     assert revealed.pixelColor(2, 2).alpha() == 255
+
+
+def test_layer_mask_channels_and_dimensions_reject_silent_coercion() -> None:
+    from app.painter_layer_masks import alpha8_mask, paint_mask_circle
+
+    with pytest.raises(ValueError, match="mask width must be positive"):
+        alpha8_mask(0, 16)
+    with pytest.raises(TypeError, match="mask value must be an integer"):
+        alpha8_mask(16, 16, 127.5)
+    with pytest.raises(ValueError, match="between 0 and 255"):
+        alpha8_mask(16, 16, 256)
+    with pytest.raises(ValueError, match="at least 0.5"):
+        paint_mask_circle(alpha8_mask(16, 16), (8, 8), 0.49, 0)
 
 
 def test_painter_layer_mask_undo_redo_restores_raster_asset() -> None:
@@ -188,6 +203,136 @@ def test_raster_mask_actions_are_registered() -> None:
         "paint.layer.mask.gradient",
         "paint.layer.mask.apply",
     } <= action_ids
+
+
+def test_layer_mask_path_source_and_apply_have_exact_alpha8_contract() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor, QImage
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, PaintLayer, create_blank_paint_pixmap
+    from app.painter_layer_masks import alpha8_mask
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(4, 1, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    layer = dialog._active_paint_layer()
+    raster = QImage(4, 1, QImage.Format.Format_ARGB32_Premultiplied)
+    raster.fill(QColor("#FF0000"))
+    dialog._set_paint_layer_raster(layer.layer_id, raster)
+    mask = alpha8_mask(4, 1, 0)
+    for x, alpha in enumerate((255, 128, 0, 255)):
+        mask.setPixelColor(x, 0, QColor(0, 0, 0, alpha))
+    dialog._set_paint_layer_mask(layer.layer_id, mask)
+    layer.mask_enabled = True
+
+    applied = registry.execute(
+        "paint.layer.mask.apply",
+        {"layer_id": layer.layer_id},
+    ).to_dict()
+    assert applied["ok"]
+    baked = dialog._paint_layer_raster(layer.layer_id, create=False)
+    assert baked is not None
+    assert [baked.pixelColor(x, 0).alpha() for x in range(4)] == [255, 128, 0, 255]
+    assert dialog._paint_layer_mask(layer.layer_id, create=False) is None
+
+    dialog.canvas.set_path_snapshot(
+        [(0.0, 0.0), (0.5, 0.0), (0.0, 1.0)]
+    )
+    selected_before = dialog._selected_path_item_id
+    from_path = registry.execute(
+        "paint.layer.mask_from_path",
+        {"layer_id": layer.layer_id, "path_id": "work-path"},
+    ).to_dict()
+    assert from_path["ok"]
+    assert dialog._selected_path_item_id == selected_before
+    path_mask = dialog._paint_layer_mask(layer.layer_id, create=False)
+    assert path_mask is not None
+    assert path_mask.format() == QImage.Format.Format_Alpha8
+
+    repeated = registry.execute(
+        "paint.layer.mask_from_path",
+        {"layer_id": layer.layer_id, "path_id": "work-path"},
+    ).to_dict()
+    assert repeated["ok"] is False
+    unchanged = dialog._paint_layer_mask(layer.layer_id, create=False)
+    assert unchanged is not None and unchanged == path_mask
+
+    locked_layer = PaintLayer("locked-target", "Locked", locked=True)
+    dialog._paint_layers.append(locked_layer)
+    selected_layer_before = dialog._current_layer_id()
+    locked_create = registry.execute(
+        "paint.layer.mask_create",
+        {"layer_id": locked_layer.layer_id, "mask_type": "white"},
+    ).to_dict()
+    assert locked_create["ok"] is False
+    assert dialog._current_layer_id() == selected_layer_before
+    locked_apply = registry.execute(
+        "paint.layer.mask.apply",
+        {"layer_id": locked_layer.layer_id},
+    ).to_dict()
+    assert locked_apply["ok"] is False
+    assert dialog._current_layer_id() == selected_layer_before
+    dialog.close()
+    app.processEvents()
+
+
+def test_group_mask_creation_is_composited_but_apply_remains_paint_only() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor, QImage
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, PaintLayer, create_blank_paint_pixmap
+    from app.painter_layer_compositor import composite_layer_images
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(8, 8, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    group = PaintLayer("group:1", "Group", node_type="group")
+    child = PaintLayer("paint:child", "Child", parent_id=group.layer_id)
+    dialog._paint_layers = [group, child]
+    dialog._active_paint_layer_id = child.layer_id
+    dialog._selected_layer_id = child.layer_id
+    child_raster = QImage(8, 8, QImage.Format.Format_ARGB32_Premultiplied)
+    child_raster.fill(QColor("#FF0000"))
+    dialog._paint_layer_rasters = {child.layer_id: child_raster}
+    dialog.canvas.set_path_snapshot(
+        [(0.0, 0.0), (0.75, 0.0), (0.0, 0.75)]
+    )
+    registry = ActionRegistry(owner=dialog)
+
+    created = registry.execute(
+        "paint.layer.mask_from_path",
+        {"layer_id": group.layer_id, "path_id": "work-path"},
+    ).to_dict()
+    assert created["ok"]
+    group_mask = dialog._paint_layer_mask(group.layer_id, create=False)
+    assert group_mask is not None
+    composed = composite_layer_images(
+        dialog._paint_layers,
+        dialog._paint_layer_rasters,
+        8,
+        8,
+        layer_masks=dialog._paint_layer_masks,
+    )
+    assert composed.pixelColor(1, 1).alpha() == 255
+    assert composed.pixelColor(7, 7).alpha() == 0
+
+    mask_before = group_mask.copy()
+    apply_group = registry.execute(
+        "paint.layer.mask.apply",
+        {"layer_id": group.layer_id},
+    ).to_dict()
+    assert apply_group["ok"] is False
+    mask_after = dialog._paint_layer_mask(group.layer_id, create=False)
+    assert mask_after is not None and mask_after == mask_before
+    dialog.close()
+    app.processEvents()
 
 
 def test_layer_clipboard_round_trip_keeps_alpha8_mask() -> None:

@@ -128,6 +128,23 @@ def test_user_operations_expose_exact_failure_and_preserve_document(monkeypatch,
     )
     assert len(information) == info_before
 
+    omission_warning = "Saved selection channels are not preserved by PNG"
+    monkeypatch.setattr(
+        dialog,
+        "export_document_to_path",
+        lambda *_args, **_kwargs: {
+            "path": str(tmp_path / "art.png"),
+            "icc_embedded": True,
+            "preflight": {"warnings": [omission_warning]},
+        },
+    )
+    warning_before = len(warnings)
+    dialog._prompt_export_painter_document(bit_depth=8)
+    assert dialog._painter_operational_errors["document_export"] == ""
+    assert len(warnings) == warning_before + 1
+    assert omission_warning in warnings[-1]
+    assert "Wrote" in warnings[-1]
+
     export_attempt = 0
 
     def fail_psd_exports(*_args, **kwargs):

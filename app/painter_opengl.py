@@ -8,6 +8,7 @@ window does not import PyOpenGL until a GPU preview is actually requested.
 from __future__ import annotations
 
 import math
+import numbers
 import os
 import ctypes
 import operator
@@ -17,12 +18,17 @@ from typing import Any
 import numpy as np
 from PySide6.QtGui import QGuiApplication, QImage, QOffscreenSurface, QOpenGLContext, QSurfaceFormat
 
+from app.painter_zoom import PAINTER_ZOOM_MAX_PERCENT
+
 
 PAINTER_OPENGL_RENDERER_ID = "painter_blockout_opengl_offscreen_v1"
 PAINTER_CANVAS_OPENGL_RENDERER_ID = "painter_canvas_opengl_stroke_fbo_v1"
 PAINTER_CANVAS_ATLAS_RENDERER_ID = "painter_canvas_opengl_persistent_stroke_atlas_v1"
 PAINTER_CANVAS_FALLBACK_RENDERER_ID = "painter_canvas_qpainter_strokes_v1"
-_BASIC_CANVAS_STYLES = frozenset({"round", "marker", "highlighter"})
+# Only the default round QPen contract is pixel-semantically represented by
+# both retained OpenGL paths. Other styles and authored dynamics fall back to
+# the canonical QPainter renderer until their complete contracts are mapped.
+_BASIC_CANVAS_STYLES = frozenset({"round"})
 _TEXTURED_CANVAS_STYLES = frozenset(
     {
         "real_wet_oil",
@@ -42,6 +48,30 @@ _GL_CLEANUP_STATUS: dict[str, Any] = {
     "last_error": "",
     "primary_error_preserved": False,
 }
+
+
+def _strict_gl_real(value: object, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise PainterOpenGLUnavailable(f"Painter OpenGL {field} must be a real number.")
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise PainterOpenGLUnavailable(f"Painter OpenGL {field} must be finite.")
+    return resolved
+
+
+def _strict_gl_range(
+    value: object,
+    *,
+    field: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    resolved = _strict_gl_real(value, field=field)
+    if not minimum <= resolved <= maximum:
+        raise PainterOpenGLUnavailable(
+            f"Painter OpenGL {field} must be between {minimum} and {maximum}."
+        )
+    return resolved
 
 
 def _best_effort_gl_cleanup(operation: str, callback: Any) -> bool:
@@ -197,7 +227,7 @@ class PainterRetainedGLTileUploader:
 
     def composite_normal_layers(self, layers: list[tuple[QImage, float]], width: int, height: int) -> tuple[QImage, dict[str, Any]]:
         """Composite pre-masked normal-blend layers in the retained GL FBO."""
-        self._current(); GL = self.GL; width = max(1, int(width)); height = max(1, int(height))
+        self._current(); GL = self.GL; width, height = _validated_render_dimensions(width, height)
         output_fbo = self.FBO(width, height)
         temporary: list[int] = []
         try:
@@ -213,7 +243,13 @@ class PainterRetainedGLTileUploader:
                 handle = self((f"compose:{index}", 0, 0), image, 0); temporary.append(handle)
                 output_fbo.bind()
                 self._clear_qt_boundary_errors()
-                self._gl("glBindTexture", GL.GL_TEXTURE_2D, handle); self._gl("glColor4f", 1.0, 1.0, 1.0, max(0.0, min(1.0, float(opacity))))
+                layer_opacity = _strict_gl_range(
+                    opacity,
+                    field=f"normal layer {index} opacity",
+                    minimum=0.0,
+                    maximum=1.0,
+                )
+                self._gl("glBindTexture", GL.GL_TEXTURE_2D, handle); self._gl("glColor4f", 1.0, 1.0, 1.0, layer_opacity)
                 self._gl("glBegin", GL.GL_QUADS)
                 self._gl("glTexCoord2f", 0, 0); self._gl("glVertex2f", 0, 0)
                 self._gl("glTexCoord2f", 1, 0); self._gl("glVertex2f", width, 0)
@@ -235,7 +271,18 @@ class PainterRetainedGLTileUploader:
     def composite_tile_records(self, records, width: int, height: int, tile_size: int) -> tuple[QImage, dict[str, Any]]:
         """Consume retained texture handles into the actual Canvas display image."""
         self._current(); GL = self.GL
-        width = max(1, int(width)); height = max(1, int(height)); tile_size = max(1, int(tile_size))
+        width, height = _validated_render_dimensions(width, height)
+        from app.painter_large_canvas import (
+            MAX_TILE_SIZE,
+            MIN_TILE_SIZE,
+            _strict_bounded_resource_integer,
+        )
+        tile_size = _strict_bounded_resource_integer(
+            tile_size,
+            field="retained compositor tile_size",
+            minimum=MIN_TILE_SIZE,
+            maximum=MAX_TILE_SIZE,
+        )
         output_fbo = self.FBO(width, height)
         reads = 0
         try:
@@ -433,7 +480,7 @@ def painter_canvas_gpu_capabilities() -> dict[str, Any]:
             "shader_plan": "per_layer_fbo_opacity_blend_mask_shader",
         },
         "high_zoom_canvas": {
-            "max_zoom_percent": 800,
+            "max_zoom_percent": PAINTER_ZOOM_MAX_PERCENT,
             "pixel_grid": "dirty_region_qpainter_overlay",
             "stroke_cache": "signature_atlas_cache",
             "next": "widget-native_zero-readback_texture_display",
@@ -461,16 +508,53 @@ class _PainterCanvasOffscreenSession:
         self.surface: QOffscreenSurface | None = None
         self.context: QOpenGLContext | None = None
         self.context_creations = 0
+        self.context_activation_failures = 0
+        self.context_recoveries = 0
+        self.context_recovery_failures = 0
+        self.last_context_error = ""
         self.closed = False
+
+    def _release_context(self, *, operation: str) -> None:
+        context, surface = self.context, self.surface
+        self.context = None
+        self.surface = None
+        if context is not None:
+            _best_effort_gl_cleanup(f"{operation}_context_done_current", context.doneCurrent)
+        if surface is not None:
+            _best_effort_gl_cleanup(f"{operation}_surface_destroy", surface.destroy)
 
     def make_current(self) -> tuple[QOffscreenSurface, QOpenGLContext]:
         if self.closed:
             raise PainterOpenGLUnavailable("Painter canvas OpenGL session is closed.")
+        activation_failed = False
+        invalid_context = False
         if self.surface is None or self.context is None:
             self.surface, self.context = _make_offscreen_context()
             self.context_creations += 1
-        elif not self.context.makeCurrent(self.surface):
-            raise PainterOpenGLUnavailable("Painter canvas OpenGL session could not reactivate its context.")
+        else:
+            is_valid = getattr(self.context, "isValid", None)
+            invalid_context = callable(is_valid) and not bool(is_valid())
+            activation_failed = invalid_context or not self.context.makeCurrent(
+                self.surface
+            )
+        if activation_failed:
+            self.context_activation_failures += 1
+            self.last_context_error = (
+                "QOpenGLContext.isValid returned false"
+                if invalid_context
+                else "QOpenGLContext.makeCurrent returned false"
+            )
+            self._release_context(operation="canvas_lost_context")
+            try:
+                self.surface, self.context = _make_offscreen_context()
+                self.context_creations += 1
+                self.context_recoveries += 1
+            except Exception as exc:
+                self.context_recovery_failures += 1
+                self.last_context_error = f"{type(exc).__name__}: {exc}"
+                raise PainterOpenGLUnavailable(
+                    "Painter canvas OpenGL session could not recover its context."
+                ) from exc
         return self.surface, self.context
 
     def done_current(self) -> None:
@@ -480,23 +564,17 @@ class _PainterCanvasOffscreenSession:
     def close(self) -> None:
         if self.closed:
             return
-        context, surface = self.context, self.surface
-        self.context = None
-        self.surface = None
         self.closed = True
-        if context is not None:
-            _best_effort_gl_cleanup(
-                "canvas_session_context_done_current", context.doneCurrent
-            )
-        if surface is not None:
-            _best_effort_gl_cleanup(
-                "canvas_session_surface_destroy", surface.destroy
-            )
+        self._release_context(operation="canvas_session")
 
     def telemetry(self) -> dict[str, Any]:
         return {
             "closed": bool(self.closed),
             "context_creations": int(self.context_creations),
+            "context_activation_failures": int(self.context_activation_failures),
+            "context_recoveries": int(self.context_recoveries),
+            "context_recovery_failures": int(self.context_recovery_failures),
+            "last_context_error": str(self.last_context_error),
             "context_retained": self.context is not None,
             "surface_retained": self.surface is not None,
         }
@@ -755,10 +833,11 @@ def canvas_stroke_gpu_signature(
 
     import hashlib
 
+    target_w, target_h = _validated_render_dimensions(width, height)
     h = hashlib.blake2b(digest_size=16)
-    h.update(str(max(1, int(width or 1))).encode("ascii"))
+    h.update(str(target_w).encode("ascii"))
     h.update(b"x")
-    h.update(str(max(1, int(height or 1))).encode("ascii"))
+    h.update(str(target_h).encode("ascii"))
     h.update(b"@")
     h.update(str(int(time_ms or 0)).encode("ascii"))
     visibility = dict(layer_visibility or {})
@@ -774,23 +853,27 @@ def canvas_stroke_gpu_signature(
             continue
         h.update(f"|layer:{layer_id}:{opacity.get(layer_id, 100)}".encode("utf-8", "ignore"))
         h.update(_stroke_style(stroke).encode("ascii", "ignore"))
-        h.update(f":{float(getattr(stroke, 'width_px', 1.0) or 1.0):.3f}".encode("ascii"))
-        h.update(f":{int(getattr(stroke, 'opacity', 255) or 255)}".encode("ascii"))
+        h.update(f":{float(getattr(stroke, 'width_px', 1.0)):.3f}".encode("ascii"))
+        h.update(f":{int(getattr(stroke, 'opacity', 255))}".encode("ascii"))
         color = tuple(getattr(stroke, "color", (255, 255, 255)) or (255, 255, 255))
         h.update((":%s" % ",".join(str(int(c)) for c in color[:3])).encode("ascii", "ignore"))
         h.update(f":closed={bool(getattr(stroke, 'closed_path', False))}".encode("ascii"))
         for x, y in list(getattr(stroke, "points", []) or []):
             h.update(f";{float(x):.5f},{float(y):.5f}".encode("ascii"))
-        for channel in (
-            "point_pressure",
-            "point_tilt_x",
-            "point_tilt_y",
-            "point_rotation",
-            "point_tangential_pressure",
-        ):
-            values = list(getattr(stroke, channel, []) or [])
-            h.update(f":{channel}=".encode("ascii"))
-            h.update(",".join(f"{float(value):.4f}" for value in values).encode("ascii"))
+        dynamics = dict(getattr(stroke, "brush_dynamics", {}) or {})
+        dynamic_enabled = bool(dynamics.get("enabled", False))
+        h.update(f":dynamics={dynamic_enabled}".encode("ascii"))
+        if dynamic_enabled:
+            for channel in (
+                "point_pressure",
+                "point_tilt_x",
+                "point_tilt_y",
+                "point_rotation",
+                "point_tangential_pressure",
+            ):
+                values = list(getattr(stroke, channel, []) or [])
+                h.update(f":{channel}=".encode("ascii"))
+                h.update(",".join(f"{float(value):.4f}" for value in values).encode("ascii"))
     return h.hexdigest()
 
 
@@ -859,7 +942,7 @@ def render_canvas_strokes_opengl_qimage(
             rgba = tuple(row.get("color") or (1.0, 1.0, 1.0, 1.0))
             color = QColor.fromRgbF(*rgba)
             widths = list(row.get("dynamic_widths", []) or [])
-            base_width = max(1.0, float(row.get("width", 1.0) or 1.0))
+            base_width = float(row["width"])
             if len(points) == 1:
                 painter.setPen(QPen(color, widths[0] if widths else base_width))
                 painter.drawPoint(points[0])
@@ -870,7 +953,7 @@ def render_canvas_strokes_opengl_qimage(
             for first, second in pairs:
                 width = base_width
                 if widths:
-                    width = max(1.0, (widths[first] + widths[second]) * 0.5)
+                    width = (widths[first] + widths[second]) * 0.5
                 pen = QPen(color, width)
                 pen.setCapStyle(Qt.PenCapStyle.RoundCap)
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -952,12 +1035,41 @@ def _draw_face(
     depth_range: dict[str, Any],
 ) -> None:
     if bool(face.get("depth_preview", False)):
-        value = max(0.0, min(1.0, float(face.get("depth_value", 1.0) or 1.0)))
-        rgba = (value, value, value, float(face.get("opacity", 1.0) or 1.0))
+        value = _strict_gl_range(
+            face.get("depth_value", 1.0),
+            field="blockout depth value",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        opacity = _strict_gl_range(
+            face.get("opacity", 1.0),
+            field="blockout face opacity",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        rgba = (value, value, value, opacity)
     else:
-        rgba = _hex_to_rgba(str(face.get("color") or "#F2F2F2"), float(face.get("opacity", 1.0) or 1.0))
-    shade = max(0.0, min(1.0, float(face.get("shade", 1.0) or 1.0)))
-    fog = 0.0 if bool(face.get("depth_preview", False)) else max(0.0, min(0.75, float(face.get("fog", 0.0) or 0.0)))
+        rgba = _hex_to_rgba(
+            str(face.get("color") or "#F2F2F2"),
+            _strict_gl_range(
+                face.get("opacity", 1.0),
+                field="blockout face opacity",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+    shade = _strict_gl_range(
+        face.get("shade", 1.0),
+        field="blockout face shade",
+        minimum=0.0,
+        maximum=1.0,
+    )
+    fog = 0.0 if bool(face.get("depth_preview", False)) else _strict_gl_range(
+        face.get("fog", 0.0),
+        field="blockout face fog",
+        minimum=0.0,
+        maximum=0.75,
+    )
     fog_rgb = (58 / 255.0, 60 / 255.0, 63 / 255.0)
     shade = 1.0 if bool(face.get("depth_preview", False)) else shade
     rgba = (
@@ -1011,7 +1123,12 @@ def _draw_shadow(
 
     polygon = shadow.get("polygon") or []
     depth = float(shadow.get("depth", 0.0) or 0.0)
-    opacity = max(0.0, min(0.5, float(shadow.get("opacity", 0.25) or 0.25)))
+    opacity = _strict_gl_range(
+        shadow.get("opacity", 0.25),
+        field="blockout shadow opacity",
+        minimum=0.0,
+        maximum=0.5,
+    )
     if len(polygon) >= 3:
         GL.glColor4f(0.0, 0.0, 0.0, opacity)
         GL.glBegin(GL.GL_POLYGON)
@@ -1134,50 +1251,67 @@ def _collect_canvas_gpu_strokes(
             raise PainterOpenGLUnavailable(f"Painter canvas OpenGL unsupported brush style: {style}")
         if not _stroke_tip_is_default(stroke):
             raise PainterOpenGLUnavailable("Painter canvas OpenGL does not yet handle tip dynamics.")
-        points = [
-            (
-                max(0.0, min(1.0, float(x))) * float(width),
-                max(0.0, min(1.0, float(y))) * float(height),
+        if bool(dict(getattr(stroke, "brush_dynamics", {}) or {}).get("enabled", False)):
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL does not yet handle authored brush dynamics."
             )
-            for x, y in list(getattr(stroke, "points", []) or [])
-        ]
+        points = []
+        for point_index, (x, y) in enumerate(
+            list(getattr(stroke, "points", []) or [])
+        ):
+            x_norm = _strict_gl_range(
+                x,
+                field=f"stroke point {point_index} x",
+                minimum=0.0,
+                maximum=1.0,
+            )
+            y_norm = _strict_gl_range(
+                y,
+                field=f"stroke point {point_index} y",
+                minimum=0.0,
+                maximum=1.0,
+            )
+            points.append((x_norm * float(width), y_norm * float(height)))
         if not points:
             continue
-        from app.painter_brush_engine_v2 import normalize_curve, normalize_signed_curve
+        from app.painter_brush_domains import BRUSH_WIDTH_RANGE_PX
 
-        point_count = len(points)
-        pressure = normalize_curve(
-            getattr(stroke, "point_pressure", []) or [],
-            point_count,
-            1.0,
-        )
-        tilt_x = normalize_signed_curve(
-            getattr(stroke, "point_tilt_x", []) or [],
-            point_count,
-        )
-        tilt_y = normalize_signed_curve(
-            getattr(stroke, "point_tilt_y", []) or [],
-            point_count,
-        )
-        base_width = max(1.0, float(getattr(stroke, "width_px", 1.0) or 1.0))
-        points = [
-            (
-                point[0] + tilt_x[index] * base_width * 0.10,
-                point[1] + tilt_y[index] * base_width * 0.10,
+        try:
+            raw_width = getattr(stroke, "width_px", None)
+            if isinstance(raw_width, bool) or not isinstance(raw_width, numbers.Real):
+                raise TypeError("width must be a real number")
+            base_width = float(raw_width)
+            if not math.isfinite(base_width):
+                raise ValueError("width must be finite")
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL received an invalid brush width."
+            ) from exc
+        if not BRUSH_WIDTH_RANGE_PX[0] <= base_width <= BRUSH_WIDTH_RANGE_PX[1]:
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL cannot preserve a stroke width outside the "
+                "published GPU brush domain; use the canonical CPU renderer."
             )
-            for index, point in enumerate(points)
-        ]
-        dynamic_widths = [
-            base_width
-            * (0.18 + pressure[index] * 0.82)
-            * (1.0 + min(1.0, math.hypot(tilt_x[index], tilt_y[index])) * 0.24)
-            for index in range(point_count)
-        ]
+        dynamic_widths: list[float] = []
         color = tuple(getattr(stroke, "color", (255, 255, 255)) or (255, 255, 255))
-        alpha = max(0.0, min(1.0, float(getattr(stroke, "opacity", 255) or 255) / 255.0))
-        alpha *= max(0.0, min(1.0, float(layer_opacity.get(layer_id, 100)) / 100.0))
-        if style == "highlighter":
-            alpha = min(alpha, 110.0 / 255.0)
+        try:
+            stroke_opacity = operator.index(getattr(stroke, "opacity", 255))
+            resolved_layer_opacity = operator.index(layer_opacity.get(layer_id, 100))
+        except TypeError as exc:
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL received a non-integer opacity."
+            ) from exc
+        if isinstance(getattr(stroke, "opacity", 255), bool) or isinstance(
+            layer_opacity.get(layer_id, 100), bool
+        ):
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL received a non-integer opacity."
+            )
+        if not 0 <= stroke_opacity <= 255 or not 0 <= resolved_layer_opacity <= 100:
+            raise PainterOpenGLUnavailable(
+                "Painter canvas OpenGL received opacity outside its document domain."
+            )
+        alpha = (stroke_opacity / 255.0) * (resolved_layer_opacity / 100.0)
         visible.append(
             {
                 "points": points,
@@ -1202,12 +1336,10 @@ def _draw_canvas_stroke(GL: Any, stroke: dict[str, Any], width: int, height: int
         return
     rgba = tuple(stroke.get("color") or (1.0, 1.0, 1.0, 1.0))
     GL.glColor4f(float(rgba[0]), float(rgba[1]), float(rgba[2]), float(rgba[3]))
-    line_width = max(1.0, float(stroke.get("width", 1.0) or 1.0))
-    if str(stroke.get("style") or "") == "marker":
-        line_width *= 1.08
+    line_width = float(stroke["width"])
     dynamic_widths = list(stroke.get("dynamic_widths", []) or [])
     GL.glLineWidth(line_width)
-    GL.glPointSize(max(1.0, dynamic_widths[0] if dynamic_widths else line_width))
+    GL.glPointSize(dynamic_widths[0] if dynamic_widths else line_width)
     if len(points) == 1:
         GL.glBegin(GL.GL_POINTS)
         try:

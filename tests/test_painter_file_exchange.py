@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import struct
 from pathlib import Path
@@ -28,6 +29,23 @@ def _art() -> Image.Image:
         for x in range(3, 16):
             image.putpixel((x, y), (x * 11, y * 17, 180, 40 + x * 10))
     return image
+
+
+def test_uint16_to_uint8_uses_png_linear_nearest_rescaling() -> None:
+    from app.painter_file_exchange import _rgba16_to_rgba8
+
+    values = np.array(
+        [[(0, 129, 32767, 65535), (65534, 32896, 257, 128)]],
+        dtype=np.uint16,
+    )
+    converted = _rgba16_to_rgba8(values)
+    expected = np.floor(values.astype(np.float64) * 255.0 / 65535.0 + 0.5).astype(
+        np.uint8
+    )
+
+    assert np.array_equal(converted, expected)
+    assert int(converted[0, 0, 1]) == 1
+    assert int((values >> 8)[0, 0, 1]) == 0
 
 
 @pytest.mark.parametrize("fmt,suffix,alpha", [
@@ -343,6 +361,167 @@ def test_layered_psd_composite_preserves_bottom_to_top_paint_order(tmp_path: Pat
     assert report["composite_parity"]["byte_identical_claim"] is False
 
 
+def test_psd_named_extra_alpha_channels_round_trip_exact_bytes(tmp_path: Path) -> None:
+    from psd_tools import PSDImage
+    from psd_tools.constants import Resource
+    from app.painter_alpha_channel_exchange import qimage_from_alpha8_bytes
+    from app.painter_file_exchange import export_layered_psd, import_layered_psd
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    first = bytes((index * 17) % 256 for index in range(width * height))
+    second = bytes(255 - value for value in first)
+    channels = [
+        SavedSelectionChannel(
+            "saved-selection-1",
+            "인물 선택",
+            qimage_from_alpha8_bytes(first, width, height),
+            "selected_areas",
+            "#123456",
+            75,
+        ),
+        SavedSelectionChannel(
+            "saved-selection-2",
+            "Edge Mask",
+            qimage_from_alpha8_bytes(second, width, height),
+        ),
+    ]
+    exported = export_layered_psd(
+        tmp_path / "extra-alpha.psd",
+        [{"model": _model("Paint", "paint"), "image": _art()}],
+        size=(width, height),
+        composite=_art(),
+        saved_selection_channels=channels,
+    )
+
+    reopened = PSDImage.open(exported["path"])
+    assert reopened.channels == 6
+    assert reopened.topil().mode == "RGBA"
+    assert reopened.topil(channel=4, apply_icc=False).tobytes() == first
+    assert reopened.topil(channel=5, apply_icc=False).tobytes() == second
+    assert list(reopened.image_resources.get_data(Resource.ALPHA_IDENTIFIERS)) == [
+        0,
+        1,
+        2,
+    ]
+    assert list(reopened.image_resources.get_data(Resource.ALPHA_NAMES_UNICODE)) == [
+        "인물 선택",
+        "Edge Mask",
+    ]
+    assert [
+        row["name"] for row in exported["inspection"]["saved_selection_channels"]
+    ] == ["인물 선택", "Edge Mask"]
+    imported = import_layered_psd(exported["path"])
+    assert [row["pixels"] for row in imported["saved_selection_channels"]] == [
+        first,
+        second,
+    ]
+    assert [row["name"] for row in imported["saved_selection_channels"]] == [
+        "인물 선택",
+        "Edge Mask",
+    ]
+    saved_report = exported["saved_selection_channels"]
+    assert saved_report["preserved"] is True
+    assert saved_report["names_preserved"] is True
+    assert saved_report["display_options_preserved"] is False
+    assert saved_report["channels"][0]["source_display_options"] == {
+        "display_mode": "selected_areas",
+        "overlay_color": "#123456",
+        "overlay_opacity_percent": 75,
+    }
+
+
+def test_psd_extra_alpha_import_rejects_non_8bit_depth_before_decode() -> None:
+    from psd_tools import PSDImage
+    from app.painter_alpha_channel_exchange import read_psd_saved_selection_channels
+
+    psd = PSDImage.new("RGBA", (2, 1), depth=16, color=(0, 0, 0, 0))
+    with pytest.raises(ValueError, match="requires 8-bit channel depth"):
+        read_psd_saved_selection_channels(psd)
+
+
+@pytest.mark.parametrize("bit_depth", [8, 16])
+def test_tiff_unspecified_extra_alpha_channels_round_trip_exact_alpha8(
+    tmp_path: Path,
+    bit_depth: int,
+) -> None:
+    from app.painter_alpha_channel_exchange import (
+        qimage_from_alpha8_bytes,
+        read_tiff_saved_selection_channels,
+    )
+    from app.painter_file_exchange import export_flat_image
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    first = bytes((index * 31) % 256 for index in range(width * height))
+    second = bytes(255 - value for value in first)
+    channels = [
+        SavedSelectionChannel(
+            "saved-selection-1",
+            "Subject",
+            qimage_from_alpha8_bytes(first, width, height),
+        ),
+        SavedSelectionChannel(
+            "saved-selection-2",
+            "Edge",
+            qimage_from_alpha8_bytes(second, width, height),
+        ),
+    ]
+    exported = export_flat_image(
+        tmp_path / f"extra-alpha-{bit_depth}.tiff",
+        _art(),
+        format_name="tiff",
+        bit_depth=bit_depth,
+        saved_selection_channels=channels,
+    )
+    reopened = read_tiff_saved_selection_channels(exported["path"])
+
+    assert reopened["bit_depth"] == bit_depth
+    assert reopened["samples_per_pixel"] == 6
+    assert reopened["extra_samples"] == [2, 0, 0]
+    assert [row["pixels"] for row in reopened["saved_selection_channels"]] == [
+        first,
+        second,
+    ]
+    assert [row["name"] for row in reopened["saved_selection_channels"]] == [
+        "Alpha 1",
+        "Alpha 2",
+    ]
+    assert reopened["names_preserved"] is False
+    assert exported["saved_selection_channels"]["preserved"] is True
+    exchange = exported["inspection"]["saved_selection_channel_exchange"]
+    assert exchange["extra_samples"] == [2, 0, 0]
+    assert len(exchange["saved_selection_channels"]) == 2
+
+
+def test_flat_format_reports_saved_channel_omission_instead_of_silent_drop(
+    tmp_path: Path,
+) -> None:
+    from app.painter_alpha_channel_exchange import qimage_from_alpha8_bytes
+    from app.painter_file_exchange import export_flat_image
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    channel = SavedSelectionChannel(
+        "saved-selection-1",
+        "Subject",
+        qimage_from_alpha8_bytes(bytes([255]) * (width * height), width, height),
+    )
+    exported = export_flat_image(
+        tmp_path / "flat.png",
+        _art(),
+        format_name="png",
+        saved_selection_channels=[channel],
+    )
+
+    assert exported["saved_selection_channels"]["count"] == 1
+    assert exported["saved_selection_channels"]["preserved"] is False
+    assert any(
+        "not preserved" in warning
+        for warning in exported["preflight"]["warnings"]
+    )
+
+
 def test_dialog_export_actions_and_psd_import_have_undo(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
     from app.actions.registry import ActionRegistry
@@ -353,6 +532,26 @@ def test_dialog_export_actions_and_psd_import_have_undo(tmp_path: Path) -> None:
     dialog._set_paint_layer_raster(dialog._active_paint_layer_id, dialog._pil_rgba_to_qimage(_art()))
     dialog._paint_layer_by_id(dialog._active_paint_layer_id).name = "Original"
     original_pixels = dialog._painter_composite_pil(include_background=False).tobytes()
+    from app.painter_alpha_channel_exchange import (
+        qimage_from_alpha8_bytes,
+        saved_selection_exchange_records,
+    )
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    alpha_pixels = bytes(
+        (index * 29) % 256
+        for index in range(19 * 13)
+    )
+    dialog._saved_selection_channels = [SavedSelectionChannel(
+        "saved-selection-1",
+        "Subject",
+        qimage_from_alpha8_bytes(alpha_pixels, 19, 13),
+        "selected_areas",
+        "#00ff00",
+        25,
+    )]
+    dialog._saved_selection_channel_serial = 1
+    dialog._channel_visibility["saved-selection-1"] = True
     psd = tmp_path / "dialog.psd"
     report = dialog.export_document_to_path(psd)
     assert Path(report["path"]).exists()
@@ -361,9 +560,263 @@ def test_dialog_export_actions_and_psd_import_have_undo(tmp_path: Path) -> None:
     assert dialog._paint_layers[0].name == "Original"
     assert dialog._canvas_document_size == (19, 13)
     assert dialog._painter_composite_pil(include_background=False).tobytes() == original_pixels
+    assert imported["imported_saved_selection_channel_ids"] == [
+        "saved-selection-1"
+    ]
+    restored_channel = dialog._saved_selection_channels[0]
+    assert restored_channel.name == "Subject"
+    assert saved_selection_exchange_records(
+        [restored_channel], 19, 13
+    )[0]["pixels"] == alpha_pixels
+    assert restored_channel.display_mode == "masked_areas"
+    assert restored_channel.overlay_color == "#ff0000"
+    assert restored_channel.overlay_opacity_percent == 50
+    assert dialog._channel_visibility[restored_channel.channel_id] is False
     dialog._undo()
     assert dialog._paint_layers[0].name == "Original"
     registry = ActionRegistry(owner=dialog)
     ids = {row["id"] for row in registry.list_actions()}
     assert {"paint.document.exchange.preflight", "paint.document.export", "paint.document.import_psd"} <= ids
+    action_import = registry.execute(
+        "paint.document.import_psd",
+        {"path": str(psd)},
+    ).to_dict()
+    assert action_import["ok"]
+    json.dumps(action_import)
+    assert "image" not in action_import["result"]["layers"][0]
+    assert "pixels" not in action_import["result"]["saved_selection_channels"][0]
     dialog.close(); app.processEvents()
+
+
+def test_tiff_channel_action_import_is_exact_atomic_and_one_undo(
+    tmp_path: Path,
+) -> None:
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_alpha_channel_exchange import (
+        qimage_from_alpha8_bytes,
+        saved_selection_exchange_records,
+    )
+    from app.painter_file_exchange import export_flat_image
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    app = QApplication.instance() or QApplication([])
+    width, height = _art().size
+    alpha_pixels = bytes((index * 43) % 256 for index in range(width * height))
+    source = tmp_path / "action-alpha.tiff"
+    export_flat_image(
+        source,
+        _art(),
+        format_name="tiff",
+        bit_depth=16,
+        saved_selection_channels=[SavedSelectionChannel(
+            "saved-selection-1",
+            "Source name is not a TIFF field",
+            qimage_from_alpha8_bytes(alpha_pixels, width, height),
+        )],
+    )
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(width, height, "#203040"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    background_before = QImage(dialog._bg_pixmap_source.toImage())
+    layers_before = [row.layer_id for row in dialog._paint_layers]
+    undo_before = len(dialog._undo_stack)
+    result = ActionRegistry(owner=dialog).execute(
+        "paint.selection.channels.import_file",
+        {"path": str(source)},
+    ).to_dict()
+
+    assert result["ok"]
+    json.dumps(result)
+    assert result["result"]["count"] == 1
+    assert result["result"]["names"] == ["Alpha 1"]
+    assert result["result"]["names_preserved"] is False
+    assert result["result"]["display_options_preserved"] is False
+    assert len(dialog._undo_stack) == undo_before + 1
+    assert dialog._bg_pixmap_source.toImage() == background_before
+    assert [row.layer_id for row in dialog._paint_layers] == layers_before
+    assert saved_selection_exchange_records(
+        dialog._saved_selection_channels, width, height
+    )[0]["pixels"] == alpha_pixels
+    assert dialog._channel_visibility[dialog._saved_selection_channels[0].channel_id] is False
+    dialog._undo()
+    assert dialog._saved_selection_channels == []
+    dialog._redo()
+    assert saved_selection_exchange_records(
+        dialog._saved_selection_channels, width, height
+    )[0]["pixels"] == alpha_pixels
+    undo_after_redo = len(dialog._undo_stack)
+    channels_after_redo = list(dialog._saved_selection_channels)
+    duplicate_name = ActionRegistry(owner=dialog).execute(
+        "paint.selection.channels.import_file",
+        {"path": str(source)},
+    ).to_dict()
+    assert not duplicate_name["ok"]
+    assert len(dialog._undo_stack) == undo_after_redo
+    assert dialog._saved_selection_channels == channels_after_redo
+
+    mismatch = tmp_path / "mismatched-alpha.tiff"
+    mismatch_width = width + 1
+    export_flat_image(
+        mismatch,
+        Image.new("RGBA", (mismatch_width, height), (0, 0, 0, 0)),
+        format_name="tiff",
+        saved_selection_channels=[SavedSelectionChannel(
+            "saved-selection-1",
+            "Mismatch",
+            qimage_from_alpha8_bytes(
+                bytes(mismatch_width * height), mismatch_width, height
+            ),
+        )],
+    )
+    mismatch_result = ActionRegistry(owner=dialog).execute(
+        "paint.selection.channels.import_file",
+        {"path": str(mismatch)},
+    ).to_dict()
+    assert not mismatch_result["ok"]
+    assert len(dialog._undo_stack) == undo_after_redo
+    assert dialog._saved_selection_channels == channels_after_redo
+    dialog.close()
+    app.processEvents()
+
+
+def test_psd_saved_alpha_channel_count_cannot_exceed_format_header_limit(
+    tmp_path: Path,
+) -> None:
+    from app.painter_alpha_channel_exchange import qimage_from_alpha8_bytes
+    from app.painter_file_exchange import export_layered_psd
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    mask = qimage_from_alpha8_bytes(bytes(width * height), width, height)
+    channels = [
+        SavedSelectionChannel(f"saved-selection-{index}", f"Alpha {index}", mask)
+        for index in range(1, 54)
+    ]
+    destination = tmp_path / "too-many-alpha.psd"
+    with pytest.raises(ValueError, match="at most 56"):
+        export_layered_psd(
+            destination,
+            [{"model": _model("Paint", "paint"), "image": _art()}],
+            size=(width, height),
+            composite=_art(),
+            saved_selection_channels=channels,
+        )
+    assert not destination.exists()
+
+
+def test_tiff16_saved_alpha_rejects_values_not_exactly_representable_as_alpha8(
+    tmp_path: Path,
+) -> None:
+    from app.painter_alpha_channel_exchange import (
+        qimage_from_alpha8_bytes,
+        read_tiff_saved_selection_channels,
+    )
+    from app.painter_file_exchange import export_flat_image, inspect_flat_image
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    destination = tmp_path / "non-alpha8.tiff"
+    export_flat_image(
+        destination,
+        _art(),
+        format_name="tiff",
+        bit_depth=16,
+        saved_selection_channels=[SavedSelectionChannel(
+            "saved-selection-1",
+            "Alpha",
+            qimage_from_alpha8_bytes(bytes(width * height), width, height),
+        )],
+    )
+    payload = bytearray(destination.read_bytes())
+    endian = "<" if payload[:2] == b"II" else ">"
+    ifd_offset = struct.unpack_from(f"{endian}I", payload, 4)[0]
+    entry_count = struct.unpack_from(f"{endian}H", payload, ifd_offset)[0]
+    entries = {
+        tag: (field_type, count, value)
+        for tag, field_type, count, value in (
+            struct.unpack_from(f"{endian}HHII", payload, ifd_offset + 2 + index * 12)
+            for index in range(entry_count)
+        )
+    }
+    strip_offset = entries[273][2]
+    # RGBA is followed by the first saved-selection sample in chunky order.
+    struct.pack_into(f"{endian}H", payload, strip_offset + 4 * 2, 1)
+    destination.write_bytes(payload)
+
+    with pytest.raises(ValueError, match="exactly as Alpha8"):
+        read_tiff_saved_selection_channels(destination)
+    inspected = inspect_flat_image(destination)
+    assert inspected["integrity"]["valid"] is False
+    assert inspected["integrity"]["custom_decode_error"] == {
+        "type": "ValueError",
+        "message": "16-bit TIFF alpha channel cannot be represented exactly as Alpha8",
+    }
+    assert any(
+        "Tiger TIFF decoder failed" in message
+        for message in inspected["integrity"]["errors"]
+    )
+
+
+def test_tiff_extra_alpha_rejects_wrong_required_type_and_duplicate_ifd_tag(
+    tmp_path: Path,
+) -> None:
+    from app.painter_alpha_channel_exchange import (
+        qimage_from_alpha8_bytes,
+        read_tiff_saved_selection_channels,
+    )
+    from app.painter_file_exchange import export_flat_image
+    from app.painter_saved_selection_channels import SavedSelectionChannel
+
+    width, height = _art().size
+    source = tmp_path / "strict-ifd.tiff"
+    export_flat_image(
+        source,
+        _art(),
+        format_name="tiff",
+        saved_selection_channels=[SavedSelectionChannel(
+            "saved-selection-1",
+            "Alpha",
+            qimage_from_alpha8_bytes(bytes(width * height), width, height),
+        )],
+    )
+    original = bytearray(source.read_bytes())
+    endian = "<" if original[:2] == b"II" else ">"
+    ifd_offset = struct.unpack_from(f"{endian}I", original, 4)[0]
+    entry_count = struct.unpack_from(f"{endian}H", original, ifd_offset)[0]
+    entry_offsets = {}
+    for index in range(entry_count):
+        offset = ifd_offset + 2 + index * 12
+        tag = struct.unpack_from(f"{endian}H", original, offset)[0]
+        entry_offsets[tag] = offset
+
+    wrong_type = bytearray(original)
+    struct.pack_into(f"{endian}H", wrong_type, entry_offsets[259] + 2, 4)
+    wrong_type_path = tmp_path / "wrong-compression-type.tiff"
+    wrong_type_path.write_bytes(wrong_type)
+    with pytest.raises(ValueError, match="tag 259 has an invalid field type"):
+        read_tiff_saved_selection_channels(wrong_type_path)
+
+    duplicate = bytearray(original)
+    struct.pack_into(f"{endian}H", duplicate, entry_offsets[34675], 259)
+    duplicate_path = tmp_path / "duplicate-compression-tag.tiff"
+    duplicate_path.write_bytes(duplicate)
+    with pytest.raises(ValueError, match="duplicate IFD tag"):
+        read_tiff_saved_selection_channels(duplicate_path)
+
+
+def test_layered_psd_export_rejects_invalid_dimensions_instead_of_resizing(
+    tmp_path: Path,
+) -> None:
+    from app.painter_file_exchange import export_layered_psd
+
+    with pytest.raises(ValueError, match="PSD export width must be positive"):
+        export_layered_psd(tmp_path / "invalid.psd", [], size=(0, 13))
+
+    with pytest.raises(TypeError, match="PSD export width must be an integer"):
+        export_layered_psd(tmp_path / "invalid.psd", [], size=(12.5, 13))

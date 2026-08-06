@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +26,16 @@ def main() -> int:
     parser.add_argument("--additional-runs", type=int, default=2)
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--timeout-seconds", type=float, default=43200.0)
+    parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
+    output_dir = (
+        args.output_dir.resolve()
+        if args.output_dir is not None
+        else ROOT / "debugCapture" / "painter" / "soak" / "series_runs" / (
+            time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
+        )
+    )
+    output_dir.mkdir(parents=True, exist_ok=False)
     seed = args.seed_report.resolve(); started = time.monotonic()
     while not seed.is_file():
         if time.monotonic() - started >= args.timeout_seconds:
@@ -45,10 +55,16 @@ def main() -> int:
     accepted = _run([
         sys.executable, str(ROOT / "tools" / "qa_painter_soak_series_acceptance.py"),
         *(str(path) for path in reports),
+        "--output", str(output_dir / "series_acceptance_report.json"),
     ])
     if accepted.returncode:
         return accepted.returncode
-    return _run([sys.executable, str(ROOT / "tools" / "qa_painter_product_reapproval.py")]).returncode
+    return _run([
+        sys.executable,
+        str(ROOT / "tools" / "qa_painter_product_reapproval.py"),
+        "--soak-series", str(output_dir / "series_acceptance_report.json"),
+        "--output", str(output_dir / "product_reapproval_report.json"),
+    ]).returncode
 
 
 if __name__ == "__main__":

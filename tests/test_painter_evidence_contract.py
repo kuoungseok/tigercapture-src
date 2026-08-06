@@ -178,7 +178,82 @@ def test_qt_normalized_color_api_is_split_from_generic_unit_clamps() -> None:
         "reviewed_qt_normalized_color_or_opacity_contract"
     )
     assert audit._classify_numeric_control(authored_row) == (
-        "explicit_normalized_or_signed_unit_channel_domain"
+        "reviewed_normalized_painting_geometry_sensor_and_channel_contract"
+    )
+
+
+def test_smudge_rgba_fallback_stays_reachable_after_legacy_geometry_routing() -> None:
+    from tools import audit_painter_painting_evidence as audit
+
+    row = {
+        "path": "app/painter_brush_dynamics.py",
+        "class": "",
+        "function": "paint_dynamic_stroke",
+        "text": "QColor(*row[:4]) if len(row) >= 4 else QColor(*row[:3])",
+    }
+
+    assert audit._classify_numeric_control(row) == (
+        "reviewed_smudge_sampling_geometry_and_workload_contract"
+    )
+
+
+def test_legacy_renderer_ast_literals_route_to_explicit_m51_contracts() -> None:
+    from tools import audit_painter_painting_evidence as audit
+
+    renderer = {
+        "path": "app/drawing.py",
+        "function": "_paint_textured_stroke",
+        "text": "value_scale=0.78 if style == 'impasto_oil' else 0.90",
+    }
+    geometry = {
+        "path": "app/painter_legacy_brush.py",
+        "function": "deterministic_unit",
+        "text": "digest_size=8",
+    }
+
+    assert audit._classify_numeric_literal_coverage(renderer) == (
+        "candidate_explicit_ledger_authored_legacy_brush_renderer_literal_contract"
+    )
+    assert audit._classify_numeric_literal_coverage(geometry) == (
+        "candidate_explicit_ledger_authored_legacy_brush_geometry_literal_contract"
+    )
+
+
+def test_v2_bristle_and_material_ast_literals_route_to_explicit_m52_contracts() -> None:
+    from tools import audit_painter_painting_evidence as audit
+
+    bristle = {
+        "path": "app/painter_brush_engine_v2.py",
+        "function": "bristle_lane_paths",
+        "text": 'jitter = noise * base_width * 0.025',
+    }
+    material = {
+        "path": "app/painter_material_paint.py",
+        "function": "rasterize_material_channels",
+        "text": 'ridge *= 0.38',
+    }
+
+    assert audit._classify_numeric_literal_coverage(bristle) == (
+        "candidate_explicit_ledger_authored_bristle_stylization_literal_contract"
+    )
+    assert audit._classify_numeric_literal_coverage(material) == (
+        "candidate_explicit_ledger_authored_stylized_material_model_literal_contract"
+    )
+
+
+def test_material_float_blur_fallback_routes_to_explicit_m52_exception_contract() -> None:
+    from tools import audit_painter_painting_evidence as audit
+
+    row = {
+        "path": "app/painter_material_paint.py",
+        "class": "",
+        "function": "_blur",
+        "text": "except Exception as exc:",
+    }
+
+    assert audit._classify_suppressed_exception(row) == (
+        "candidate_explicit_ledger_exception_"
+        "declared_optional_opencv_to_numpy_gaussian_blur_fallback"
     )
 
 
@@ -383,11 +458,11 @@ def test_tspaint_versions_route_to_a_tiger_contract_not_an_external_standard() -
     row = {
         "path": "app/painter_document_io.py",
         "function": "",
-        "text": "PAINTER_DOCUMENT_VERSION = 3",
+        "text": "PAINTER_DOCUMENT_VERSION = 5",
     }
 
     assert audit._classify_numeric_literal_coverage(row) == (
-        "candidate_explicit_ledger_tspaint_v1_v2_v3_migration_contract"
+        "candidate_explicit_ledger_tspaint_v1_v2_v3_v4_v5_migration_contract"
     )
 
 
@@ -419,6 +494,46 @@ def test_uint16_conversion_rows_are_routed_without_png_compression_policy() -> N
     assert audit._classify_numeric_literal_coverage(integer_array) == (
         "unreviewed_uint8_ndarray_is_not_scaled_to_uint16_full_range"
     )
+
+
+def test_m53_persistence_exchange_rows_have_separate_evidence_contracts() -> None:
+    from tools import audit_painter_painting_evidence as audit
+
+    cases = (
+        (
+            {"path": "app/painter_file_exchange.py", "function": "_rgba16_to_rgba8", "text": "255"},
+            "uint16_to_uint8_linear_rescaling_contract",
+        ),
+        (
+            {"path": "app/painter_output.py", "function": "pixels_for_print", "text": "300"},
+            "print_output_model_literal_contract",
+        ),
+        (
+            {"path": "app/painter_autosave.py", "function": "_file_sha256", "text": "1024"},
+            "recovery_snapshot_integrity_and_retention_literal_contract",
+        ),
+        (
+            {"path": "app/painter_document_io.py", "function": "load_painter_document", "text": "64"},
+            "tspaint_archive_integrity_and_asset_literal_contract",
+        ),
+        (
+            {"path": "app/painter_recovery_dialog.py", "function": "_format_age", "text": "60"},
+            "recovery_dialog_product_policy_literal_contract",
+        ),
+        (
+            {"path": "app/painter_file_exchange.py", "function": "export_layered_psd", "text": "4"},
+            "psd_exchange_policy_literal_contract",
+        ),
+        (
+            {"path": "app/painter_file_exchange.py", "function": "inspect_flat_image", "text": "24"},
+            "flat_export_and_inspection_policy_literal_contract",
+        ),
+    )
+
+    for row, contract in cases:
+        assert audit._classify_numeric_literal_coverage(row) == (
+            f"candidate_explicit_ledger_{contract}"
+        )
 
 
 def test_action_schema_numeric_audit_links_action_ids_and_excludes_ui_design() -> None:

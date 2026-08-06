@@ -2,21 +2,29 @@
 from __future__ import annotations
 
 import ctypes
+import functools
 import math
+import operator
 import os
+import random
 import statistics
 import sys
 import time
 from typing import Any, Iterable, Mapping
 
 
-def windows_process_resources() -> dict[str, Any]:
-    if sys.platform != "win32":
-        return {"available": False, "reason": "windows_only"}
+LATENCY_RANK_ERROR_BOUND = 0.02
+LATENCY_CONFIDENCE = 0.99
+LATENCY_RESERVOIR_CAPACITY = math.ceil(
+    math.log(2.0 / (1.0 - LATENCY_CONFIDENCE))
+    / (2.0 * LATENCY_RANK_ERROR_BOUND**2)
+)
 
+
+if sys.platform == "win32":
     from ctypes import wintypes
 
-    class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
+    class _PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
         _fields_ = [
             ("cb", wintypes.DWORD),
             ("PageFaultCount", wintypes.DWORD),
@@ -31,13 +39,24 @@ def windows_process_resources() -> dict[str, Any]:
             ("PrivateUsage", ctypes.c_size_t),
         ]
 
+
+@functools.lru_cache(maxsize=1)
+def _windows_resource_api() -> tuple[Any, Any, Any, Any]:
+    """Bind the Windows resource API once.
+
+    ctypes caches pointer types by their target class. Defining the counter
+    structure inside every sample permanently retained one class and pointer
+    type per sample, which made the measurement process look like Painter was
+    leaking memory.
+    """
+
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     psapi = ctypes.WinDLL("psapi", use_last_error=True)
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     psapi.GetProcessMemoryInfo.argtypes = [
         wintypes.HANDLE,
-        ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX),
+        ctypes.POINTER(_PROCESS_MEMORY_COUNTERS_EX),
         wintypes.DWORD,
     ]
     psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
@@ -48,8 +67,64 @@ def windows_process_resources() -> dict[str, Any]:
     kernel32.GetProcessHandleCount.restype = wintypes.BOOL
     user32.GetGuiResources.argtypes = [wintypes.HANDLE, wintypes.DWORD]
     user32.GetGuiResources.restype = wintypes.DWORD
-    process = kernel32.GetCurrentProcess()
-    counters = PROCESS_MEMORY_COUNTERS_EX()
+    return kernel32, psapi, user32, kernel32.GetCurrentProcess()
+
+
+class BoundedLatencySampler:
+    """Deterministic Algorithm-R reservoir for whole-run latency percentiles."""
+
+    def __init__(
+        self,
+        capacity: int = LATENCY_RESERVOIR_CAPACITY,
+        *,
+        seed: int = 0,
+    ) -> None:
+        if isinstance(capacity, bool):
+            raise ValueError("latency sampler capacity must be positive")
+        try:
+            validated_capacity = operator.index(capacity)
+        except TypeError as exc:
+            raise TypeError("latency sampler capacity must be an integer") from exc
+        if validated_capacity <= 0:
+            raise ValueError("latency sampler capacity must be positive")
+        self.capacity = validated_capacity
+        self.observation_count = 0
+        self._values: list[float] = []
+        self.seed = int(seed)
+        self._random = random.Random(seed)
+
+    def add(self, value: float) -> None:
+        self.observation_count += 1
+        if len(self._values) < self.capacity:
+            self._values.append(float(value))
+            return
+        replacement = self._random.randrange(self.observation_count)
+        if replacement < self.capacity:
+            self._values[replacement] = float(value)
+
+    def values(self) -> tuple[float, ...]:
+        return tuple(self._values)
+
+    def report(self) -> dict[str, Any]:
+        return {
+            "method": "deterministic_algorithm_r_reservoir",
+            "method_reference": "https://doi.org/10.1145/3147.3165",
+            "capacity_basis": "DKW-Massart_two_sided_CDF_bound",
+            "capacity_basis_reference": "https://doi.org/10.1214/aop/1176990746",
+            "rank_error_bound": LATENCY_RANK_ERROR_BOUND,
+            "confidence": LATENCY_CONFIDENCE,
+            "capacity": self.capacity,
+            "observation_count": self.observation_count,
+            "retained_sample_count": len(self._values),
+            "seed": self.seed,
+        }
+
+
+def windows_process_resources() -> dict[str, Any]:
+    if sys.platform != "win32":
+        return {"available": False, "reason": "windows_only"}
+    kernel32, psapi, user32, process = _windows_resource_api()
+    counters = _PROCESS_MEMORY_COUNTERS_EX()
     counters.cb = ctypes.sizeof(counters)
     memory_ok = bool(
         psapi.GetProcessMemoryInfo(
@@ -158,6 +233,10 @@ def summarize_runtime_samples(
 
 
 __all__ = [
+    "BoundedLatencySampler",
+    "LATENCY_CONFIDENCE",
+    "LATENCY_RANK_ERROR_BOUND",
+    "LATENCY_RESERVOIR_CAPACITY",
     "linear_slope_per_hour",
     "percentile",
     "resource_sample",

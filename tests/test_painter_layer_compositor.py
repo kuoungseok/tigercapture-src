@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -38,6 +40,13 @@ def test_clipping_layer_uses_previous_sibling_alpha() -> None:
     )
     assert output.pixelColor(10, 10).name() == "#315fe0"
     assert output.pixelColor(30, 10).alpha() == 0
+
+
+def test_layer_compositor_rejects_invalid_raster_dimensions() -> None:
+    from app.painter_layer_compositor import composite_layer_images
+
+    with pytest.raises(ValueError, match="compositor width must be positive"):
+        composite_layer_images([], {}, 0, 8)
 
 
 def test_group_opacity_and_extended_blend_modes_are_composited() -> None:

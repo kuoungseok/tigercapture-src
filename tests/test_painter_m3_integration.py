@@ -656,6 +656,36 @@ def test_advanced_brush_settings_survive_stroke_history_and_document_payload() -
     dialog.close(); dialog.deleteLater(); app.processEvents()
 
 
+def test_clipboard_stroke_uses_shared_brush_domains_and_named_width_default() -> None:
+    app = _app()
+    dialog = _dialog()
+
+    missing = dialog._stroke_from_clipboard_dict({"points": [[0.0, 0.0]]})
+    assert missing.width_px == 6.0
+
+    endpoints = dialog._stroke_from_clipboard_dict(
+        {
+            "points": [[0.0, 0.0]],
+            "width_px": 0,
+            "brush_hardness": 0,
+            "brush_spacing": 999,
+            "brush_angle": -999,
+            "brush_roundness": 0,
+        }
+    )
+    assert endpoints.width_px == 1.0
+    assert endpoints.brush_hardness == 1
+    assert endpoints.brush_spacing == 200
+    assert endpoints.brush_angle == -180
+    assert endpoints.brush_roundness == 10
+
+    malformed = dialog._stroke_from_clipboard_dict(
+        {"points": [[0.0, 0.0]], "width_px": float("inf")}
+    )
+    assert malformed.width_px == 6.0
+    dialog.close(); dialog.deleteLater(); app.processEvents()
+
+
 def test_dynamic_dab_budget_degrade_is_exposed_without_mutating_document() -> None:
     app = _app()
     from app.drawing import Stroke
@@ -743,7 +773,7 @@ def test_feather_alpha_weights_survive_fill_copy_and_cut(monkeypatch) -> None:
     from PySide6.QtGui import QColor
 
     dialog = _dialog()
-    monkeypatch.setattr(dialog, "_write_payload_to_system_clipboard", lambda _payload: None)
+    monkeypatch.setattr(dialog, "_write_payload_to_system_clipboard", lambda _payload: True)
     dialog.canvas.select_rectangle(0.25, 0.25, 0.75, 0.75)
     dialog._sync_pixel_selection_from_canvas()
     assert dialog._modify_selection("feather", 4)

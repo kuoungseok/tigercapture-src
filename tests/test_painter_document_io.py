@@ -59,6 +59,11 @@ def test_native_painter_document_round_trips_2d_wet_and_3d_state(
         },
         layer_id=layer.layer_id,
     )
+    dialog._set_material_preview(
+        enabled=True,
+        azimuth_deg=0.0,
+        elevation_deg=85.0,
+    )
     dialog._on_stroke_added(
         Stroke(
             points=[(0.15, 0.4), (0.82, 0.58)],
@@ -127,8 +132,8 @@ def test_native_painter_document_round_trips_2d_wet_and_3d_state(
     with zipfile.ZipFile(output, "r") as archive:
         assert "document.json" in archive.namelist()
         stored = json.loads(archive.read("document.json"))
-        assert stored["schema"] == "tigerstudio.painter.document.v3"
-        assert stored["format_version"] == 3
+        assert stored["schema"] == "tigerstudio.painter.document.v5"
+        assert stored["format_version"] == 5
         assert stored["blockout_3d"]["primitives"][0]["name"] == "Room Mass"
         assert stored["reference_board"]["references"][0]["path"].startswith(
             "asset://"
@@ -140,6 +145,11 @@ def test_native_painter_document_round_trips_2d_wet_and_3d_state(
         assert stored_layer["mask_asset"].startswith("asset://assets/layer-masks/")
         assert stored_layer["mask"] == []
         assert stored["selection"]["mask_asset"] == "asset://assets/selection/mask.png"
+        assert stored["material_preview"] == {
+            "enabled": True,
+            "azimuth_deg": 0.0,
+            "elevation_deg": 85.0,
+        }
         assert "assets/selection/mask.png" in archive.namelist()
 
     restored = PaintDialog(
@@ -154,6 +164,9 @@ def test_native_painter_document_round_trips_2d_wet_and_3d_state(
     assert loaded["blockout_primitive_count"] == 1
     assert restored._canvas_document_size == (640, 360)
     assert restored._background_layer_present is True
+    assert restored._material_preview_enabled is True
+    assert restored._material_preview_light_azimuth_deg == 0.0
+    assert restored._material_preview_light_elevation_deg == 85.0
     restored_layer = restored._paint_layer_by_id(layer.layer_id)
     assert restored_layer is not None
     assert restored_layer.mask_enabled is True
@@ -242,7 +255,7 @@ def test_painter_document_actions_save_and_open_native_format(tmp_path: Path) ->
     app.processEvents()
 
 
-def test_stroke_only_v1_document_migrates_losslessly_to_v3(tmp_path: Path) -> None:
+def test_stroke_only_v1_document_migrates_losslessly_to_v4(tmp_path: Path) -> None:
     from app.painter_document_io import load_painter_document
 
     legacy = {
@@ -263,8 +276,8 @@ def test_stroke_only_v1_document_migrates_losslessly_to_v3(tmp_path: Path) -> No
         archive.writestr("document.json", json.dumps(legacy).encode("utf-8"))
 
     document, report = load_painter_document(path, asset_root=tmp_path / "assets")
-    assert document["schema"] == "tigerstudio.painter.document.v3"
-    assert document["format_version"] == 3
+    assert document["schema"] == "tigerstudio.painter.document.v5"
+    assert document["format_version"] == 5
     assert document["layers"][0]["raster_asset"] == ""
     assert document["layers"][0]["mask_asset"] == ""
     assert document["strokes"] == legacy["strokes"]
@@ -286,14 +299,42 @@ def test_stroke_only_v1_document_migrates_losslessly_to_v3(tmp_path: Path) -> No
     dialog.close()
 
 
-def test_v3_document_missing_canvas_dimensions_is_rejected_not_changed_to_full_hd(
+def test_v3_document_migrates_to_v5_with_empty_saved_selection_channels(
+    tmp_path: Path,
+) -> None:
+    from app.painter_document_io import load_painter_document
+
+    payload = {
+        "schema": "tigerstudio.painter.document.v3",
+        "format_version": 3,
+        "document": {"width": 23, "height": 17},
+        "channels": {"visibility": {"Blue": False}, "selected": "Blue"},
+        "layers": [],
+        "strokes": [],
+        "asset_manifest": [],
+    }
+    path = tmp_path / "legacy-v3.tspaint"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("document.json", json.dumps(payload).encode("utf-8"))
+
+    document, report = load_painter_document(path, asset_root=tmp_path / "v3-assets")
+    assert document["schema"] == "tigerstudio.painter.document.v5"
+    assert document["format_version"] == 5
+    assert document["channels"]["saved_selection_channels"] == []
+    assert document["channels"]["saved_selection_channel_serial"] == 0
+    assert document["channels"]["visibility"]["Blue"] is False
+    assert report["migrated"] is True
+    assert report["source_format_version"] == 3
+
+
+def test_v4_document_missing_canvas_dimensions_is_rejected_not_changed_to_full_hd(
     tmp_path: Path,
 ) -> None:
     from app.painter_document_io import PainterDocumentError, load_painter_document
 
     payload = {
-        "schema": "tigerstudio.painter.document.v3",
-        "format_version": 3,
+        "schema": "tigerstudio.painter.document.v4",
+        "format_version": 4,
         "document": {},
         "layers": [],
         "strokes": [],
@@ -307,7 +348,7 @@ def test_v3_document_missing_canvas_dimensions_is_rejected_not_changed_to_full_h
 
 
 @pytest.mark.parametrize("width,height", [(19.9, 13), (True, 13), (19, 13.5)])
-def test_v3_document_rejects_non_integer_canvas_dimensions(
+def test_v4_document_rejects_non_integer_canvas_dimensions(
     tmp_path: Path,
     width,
     height,
@@ -315,8 +356,8 @@ def test_v3_document_rejects_non_integer_canvas_dimensions(
     from app.painter_document_io import PainterDocumentError, load_painter_document
 
     payload = {
-        "schema": "tigerstudio.painter.document.v3",
-        "format_version": 3,
+        "schema": "tigerstudio.painter.document.v4",
+        "format_version": 4,
         "document": {"width": width, "height": height},
         "layers": [],
         "strokes": [],
@@ -489,3 +530,211 @@ def test_archive_entries_reject_posix_windows_drive_and_ads_escape_paths() -> No
             _safe_archive_entry(entry)
 
     assert _safe_archive_entry("assets\\layers\\paint.png") == "assets/layers/paint.png"
+
+
+@pytest.mark.parametrize(
+    "mutation,error_fragment",
+    (
+        ("manifest_not_list", "asset_manifest must be a list"),
+        ("row_not_object", "manifest rows must be objects"),
+        ("missing_size", "asset size is invalid"),
+        ("size_mismatch", "asset size mismatch"),
+        ("missing_sha", "SHA-256 is invalid"),
+        ("entry_not_string", "manifest entry must be a string"),
+        ("serial_is_bool", "channel serial is invalid"),
+        ("duplicate_manifest", "manifest entry is duplicated"),
+        ("duplicate_archive", "archive asset entry is duplicated"),
+    ),
+)
+def test_v5_asset_manifest_is_strict_and_fails_before_extraction(
+    tmp_path: Path,
+    mutation: str,
+    error_fragment: str,
+) -> None:
+    import hashlib
+
+    from app.painter_document_io import PainterDocumentError, load_painter_document
+
+    data = b"asset-pixels"
+    entry = "assets/layers/000_asset.png"
+    row = {
+        "entry": entry,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    document = {
+        "schema": "tigerstudio.painter.document.v5",
+        "format_version": 5,
+        "document": {"width": 8, "height": 6},
+        "channels": {
+            "saved_selection_channels": [],
+            "saved_selection_channel_serial": 0,
+        },
+        "asset_manifest": [row],
+    }
+    if mutation == "manifest_not_list":
+        document["asset_manifest"] = {}
+    elif mutation == "row_not_object":
+        document["asset_manifest"] = [entry]
+    elif mutation == "missing_size":
+        row.pop("size")
+    elif mutation == "size_mismatch":
+        row["size"] += 1
+    elif mutation == "missing_sha":
+        row.pop("sha256")
+    elif mutation == "entry_not_string":
+        row["entry"] = 7
+    elif mutation == "serial_is_bool":
+        document["channels"]["saved_selection_channel_serial"] = True
+    elif mutation == "duplicate_manifest":
+        document["asset_manifest"] = [row, dict(row)]
+
+    archive_path = tmp_path / f"{mutation}.tspaint"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("document.json", json.dumps(document))
+        archive.writestr(entry, data)
+        if mutation == "duplicate_archive":
+            archive.writestr(entry, data)
+
+    extraction_root = tmp_path / f"extract-{mutation}"
+    with pytest.raises(PainterDocumentError, match=error_fragment):
+        load_painter_document(archive_path, asset_root=extraction_root)
+    assert not extraction_root.exists()
+
+
+def test_duplicate_document_json_is_rejected_as_ambiguous(tmp_path: Path) -> None:
+    from app.painter_document_io import PainterDocumentError, load_painter_document
+
+    document = {
+        "schema": "tigerstudio.painter.document.v5",
+        "format_version": 5,
+        "document": {"width": 8, "height": 6},
+        "channels": {
+            "saved_selection_channels": [],
+            "saved_selection_channel_serial": 0,
+        },
+        "asset_manifest": [],
+    }
+    archive_path = tmp_path / "duplicate-document.tspaint"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("document.json", json.dumps(document))
+        archive.writestr("document.json", json.dumps(document))
+
+    with pytest.raises(PainterDocumentError, match="exactly one document.json"):
+        load_painter_document(archive_path, asset_root=tmp_path / "extract")
+
+
+@pytest.mark.parametrize("format_version", (True, 5.0, "5", None))
+def test_document_version_must_be_a_non_boolean_integer(
+    tmp_path: Path,
+    format_version: object,
+) -> None:
+    from app.painter_document_io import PainterDocumentError, load_painter_document
+
+    document = {
+        "schema": "tigerstudio.painter.document.v5",
+        "format_version": format_version,
+        "document": {"width": 8, "height": 6},
+        "channels": {
+            "saved_selection_channels": [],
+            "saved_selection_channel_serial": 0,
+        },
+        "asset_manifest": [],
+    }
+    archive_path = tmp_path / "invalid-version.tspaint"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("document.json", json.dumps(document))
+
+    with pytest.raises(PainterDocumentError, match="format_version is invalid"):
+        load_painter_document(archive_path)
+
+
+def test_invalid_zip_uses_painter_document_error_boundary(tmp_path: Path) -> None:
+    from app.painter_document_io import PainterDocumentError, load_painter_document
+
+    archive_path = tmp_path / "not-a-zip.tspaint"
+    archive_path.write_bytes(b"not a zip archive")
+
+    with pytest.raises(PainterDocumentError, match="archive could not be read"):
+        load_painter_document(archive_path)
+
+
+def test_auto_asset_root_is_removed_when_extraction_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.painter_document_io as document_io
+
+    archive_path = tmp_path / "write-failure.tspaint"
+    document_io.save_painter_document(
+        archive_path,
+        {
+            "document": {"width": 8, "height": 6},
+            "channels": {
+                "saved_selection_channels": [],
+                "saved_selection_channel_serial": 0,
+            },
+            "layers": [{"layer_id": "paint-1"}],
+        },
+        layer_raster_pngs={"paint-1": b"asset-pixels"},
+    )
+    extraction_root = tmp_path / "controlled-auto-root"
+    monkeypatch.setattr(document_io.tempfile, "mkdtemp", lambda **_kwargs: str(extraction_root))
+    original_write_bytes = Path.write_bytes
+
+    def fail_asset_write(path: Path, data: bytes) -> int:
+        if extraction_root in path.parents:
+            raise OSError("measured extraction failure")
+        return original_write_bytes(path, data)
+
+    monkeypatch.setattr(Path, "write_bytes", fail_asset_write)
+
+    with pytest.raises(document_io.PainterDocumentError, match="archive could not be read"):
+        document_io.load_painter_document(archive_path)
+    assert not extraction_root.exists()
+
+
+def test_archive_entry_inventory_is_built_once_for_multiple_assets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.painter_document_io as document_io
+
+    archive_path = tmp_path / "multiple-assets.tspaint"
+    document_io.save_painter_document(
+        archive_path,
+        {
+            "document": {"width": 8, "height": 6},
+            "channels": {
+                "saved_selection_channels": [],
+                "saved_selection_channel_serial": 0,
+            },
+            "layers": [
+                {"layer_id": "paint-1"},
+                {"layer_id": "paint-2"},
+                {"layer_id": "paint-3"},
+            ],
+        },
+        layer_raster_pngs={
+            "paint-1": b"asset-one",
+            "paint-2": b"asset-two",
+            "paint-3": b"asset-three",
+        },
+    )
+    calls = 0
+    original_infolist = zipfile.ZipFile.infolist
+
+    def counted_infolist(archive: zipfile.ZipFile):
+        nonlocal calls
+        calls += 1
+        return original_infolist(archive)
+
+    monkeypatch.setattr(zipfile.ZipFile, "infolist", counted_infolist)
+
+    loaded, report = document_io.load_painter_document(
+        archive_path,
+        asset_root=tmp_path / "extracted",
+    )
+    assert len(loaded["layers"]) == 3
+    assert report["asset_count"] == 3
+    assert calls == 1

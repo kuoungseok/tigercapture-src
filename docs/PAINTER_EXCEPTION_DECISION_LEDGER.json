@@ -20,8 +20,8 @@
       "resolution": "approved",
       "decision_basis": "operational_failure_or_fallback_contract",
       "row_count": 26,
-      "rows_sha256": "31c8045f00e02ae6aaa370d4dbce34c8d094de1ec0a1fc247e335c03bf7d37d2",
-      "evidence": "All Painter OpenGL teardown calls now pass one named operation to _best_effort_gl_cleanup. The helper records a bounded last operation, typed error, cumulative failure count, and whether an active render exception was preserved; it also adds a note to that primary exception without replacing it. Blockout texture/renderbuffer/FBO/default-bind/context/surface teardown, canvas FBO/session/context teardown, context-create/activation failure cleanup, retained compositor temporary textures/FBOs, retained tile FBOs, and retained uploader texture/context/surface close all use this path. State handles are invalidated before destroy calls. Qt documents that doneCurrent clears the thread's current context and that QOffscreenSurface destruction occurs on the GUI thread; Khronos documents the GL deletion entry points; Python documents exception notes. tests/test_painter_3d_blockout.py::test_gl_cleanup_failure_is_typed_and_preserves_primary_error, ::test_retained_compositors_release_resources_when_rendering_fails, ::test_retained_uploader_close_continues_after_texture_destroy_failure, ::test_canvas_session_close_destroys_surface_after_done_current_failure, and ::test_context_create_failure_preserves_product_error_when_surface_destroy_fails inject helper, readback, missing-handle, texture-destroy, doneCurrent, and double-failure setup paths. They prove primary-error preservation, all later cleanup calls, invalidated handles, and exact telemetry. Driver reclamation after context loss is not claimed."
+      "rows_sha256": "1e2ec74ea677863c608ecbcb0c00df023bac4ac71c5953786ef9769f70572081",
+      "evidence": "All 26 Painter OpenGL teardown calls pass a named operation to _best_effort_gl_cleanup. M55 adds explicit invalid-context and failed-makeCurrent recovery: the old context/surface is released, one replacement is attempted, and creation/activation/recovery/failure counters plus the typed last error are exposed. Handles are invalidated before destroy calls; cleanup failure records bounded telemetry and preserves/adds a note to the primary render error. Qt documents create/isValid, makeCurrent-before-render, aboutToBeDestroyed cleanup, and that false isValid can indicate context loss; Khronos documents GL deletion. Injected failure tests cover readback, missing handles, texture/FBO destruction, doneCurrent, context creation/activation, and one-shot context recreation. The native churn probe measured 60 operations with one retained context, zero activation failures, and zero errors. Driver reclamation or universal leak freedom after a driver failure is not claimed."
     },
     "best_effort_gpu_resource_cleanup_after_fallback": {
       "resolution": "approved",
@@ -43,6 +43,13 @@
       "row_count": 2,
       "rows_sha256": "11602ca10c55c1937d60a3e614e3312313772f5eb71c62c13f9dd2ce634763b2",
       "evidence": "The two exact material-mask handlers attempt OpenCV antialiased polyline/line rasterization and then execute a real Pillow L-mode line/ellipse fallback over the same points, width, and weighted value. The backend, fallback count, and typed last reason are exposed through material_raster_backend_status and Painter Action state. tests/test_painter_material_paint.py::test_polyline_and_weighted_segment_have_deterministic_pillow_fallback removes cv2 and proves stable shape and float32 dtype, deterministic non-identity coverage, bounded weighted maximum, identical nonzero support, and explicit Pillow telemetry. Pixel identity with OpenCV and external paint-engine parity are not claimed."
+    },
+    "declared_optional_opencv_to_numpy_gaussian_blur_fallback": {
+      "resolution": "approved",
+      "decision_basis": "operational_failure_or_fallback_contract",
+      "row_count": 1,
+      "rows_sha256": "432c80a2dcd0aee626a8ddddf6dfc1e8076e73be7598b73846065a9f96efb358",
+      "evidence": "The exact material-blur handler attempts OpenCV float Gaussian blur and, on import or execution failure, records backend numpy_gaussian plus the typed reason before running a deterministic float32 separable Gaussian fallback. tests/test_painter_material_paint.py::test_blur_fallback_is_deterministic_float_and_preserves_sub_8bit_signal removes cv2, proves exact repeated output, float32 shape preservation, explicit fallback telemetry, and preservation of a measured 1/1024 signal that an 8-bit temporary would erase. tools/measure_painter_bristle_material.py repeats the fallback check in the frozen M52 corpus. Cross-backend pixel identity, physical paint behavior, and external-engine parity are not claimed."
     },
     "clipboard_failure_recorded_in_operational_state": {
       "resolution": "approved",

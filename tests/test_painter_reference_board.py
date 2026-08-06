@@ -43,6 +43,13 @@ def test_painter_reference_board_crud_and_contract(tmp_path: Path) -> None:
     assert ref["opacity"] == 1.0
     assert ref["rotation_deg"] == 5.0
 
+    zero_board = add_reference_image(
+        default_reference_board(), path="E:/refs/zero.png", x_norm=0.0, y_norm=0.0
+    )
+    zero_ref = zero_board.to_dict()["references"][0]
+    assert zero_ref["x_norm"] == 0.0
+    assert zero_ref["y_norm"] == 0.0
+
     board = update_reference_image(
         board,
         "reference:key",
@@ -75,6 +82,21 @@ def test_painter_reference_board_crud_and_contract(tmp_path: Path) -> None:
     assert image.save(str(image_path), "PNG")
     sample = sample_reference_color(str(image_path), x_norm=0.66, y_norm=0.66)
     assert sample["hex"] == "#CC8844"
+
+    endpoint_path = tmp_path / "reference_sample_endpoints.png"
+    endpoint_image = QImage(2, 2, QImage.Format.Format_ARGB32)
+    endpoint_image.fill(QColor("#000000"))
+    endpoint_image.setPixelColor(0, 1, QColor("#12ABEF"))
+    assert endpoint_image.save(str(endpoint_path), "PNG")
+    endpoint_sample = sample_reference_color(
+        str(endpoint_path),
+        x_norm=0.0,
+        y_norm=1.0,
+    )
+    assert endpoint_sample["x_norm"] == 0.0
+    assert endpoint_sample["y_norm"] == 1.0
+    assert endpoint_sample["hex"] == "#12ABEF"
+
     palette = extract_reference_palette(str(image_path), max_colors=3)
     assert palette["color_count"] >= 1
     assert palette["colors"][0]["hex"] in {"#184860", "#C09048"}
@@ -88,6 +110,12 @@ def test_painter_reference_board_crud_and_contract(tmp_path: Path) -> None:
 
     restored = reference_board_from_dict(board.to_dict())
     assert restored.to_dict()["reference_count"] == 2
+
+    restored_zero = reference_board_from_dict({
+        "references": [{"id": "reference:zero", "path": "zero.png", "x_norm": 0.0, "y_norm": 0.0}],
+    })
+    assert restored_zero.to_dict()["references"][0]["x_norm"] == 0.0
+    assert restored_zero.to_dict()["references"][0]["y_norm"] == 0.0
 
     board = delete_reference_image(restored, "reference:key")
     assert board.to_dict()["reference_count"] == 1

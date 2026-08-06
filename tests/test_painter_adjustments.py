@@ -177,6 +177,18 @@ def test_numeric_rgb_hsb_gamut_shortcuts_and_action_surface() -> None:
     )
     report = dialog._set_painter_numeric_color("rgb", [300, -20, 128])
     assert not report["in_gamut"] and report["rgb"] == [255, 0, 128]
+    for invalid in (
+        [1, 2],
+        [1, 2, 3, 4],
+        [True, 2, 3],
+        ["1", 2, 3],
+        [float("nan"), 2, 3],
+        [float("inf"), 2, 3],
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            dialog._set_painter_numeric_color("rgb", invalid)
+    with pytest.raises(TypeError):
+        dialog._set_painter_numeric_color("rgb", (1, 2, 3))
     invalid_hsb = dialog._set_painter_numeric_color("hsb", [720, 150, -20])
     assert invalid_hsb["in_gamut"] is False
     assert invalid_hsb["source_range_valid"] is False

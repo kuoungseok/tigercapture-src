@@ -5,11 +5,68 @@ from typing import Any
 
 from app.actions.schema import schema_object
 from app.painter_action_contract import (
+    PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+    PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+    PAINT_ACTION_PBR_PREVIEW_MAX_PX,
+    PAINT_ACTION_PBR_PREVIEW_MIN_PX,
     PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
     PAINT_ACTION_MAX_POINTS_PER_STROKE,
+    PAINT_ACTION_PATH_MIN_POINTS,
+    PAINT_ACTION_PATH_SELECTION_MIN_POINTS,
+    PAINT_ACTION_PATH_COORDINATE_MIN_NORM,
+    PAINT_ACTION_PATH_COORDINATE_MAX_NORM,
+    PAINT_ACTION_PATH_INDEX_MIN,
+    PAINT_ACTION_PATH_NAME_MIN_CHARACTERS,
     PAINT_ACTION_MAX_REFERENCE_COLORS,
     PAINT_ACTION_MAX_STROKES_PER_REQUEST,
     PAINT_ACTION_MAX_STUDY_STROKES,
+    PAINT_ACTION_BRUSH_STYLES,
+    PAINT_ACTION_STROKE_BRISTLE_COUNT_MAX,
+    PAINT_ACTION_STROKE_BRISTLE_COUNT_MIN,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MAX,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MIN,
+    PAINT_ACTION_STROKE_MIN_WIDTH_PX,
+    PAINT_ACTION_STROKE_OPACITY_MAX_PERCENT,
+    PAINT_ACTION_STROKE_OPACITY_MIN_PERCENT,
+    PAINT_ACTION_STROKE_SEED_MAX,
+    PAINT_ACTION_STROKE_SEED_MIN,
+    PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM,
+    PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+    PAINT_ACTION_BRUSH_OPACITY_MAX_PERCENT,
+    PAINT_ACTION_BRUSH_OPACITY_MIN_PERCENT,
+    PAINT_ACTION_QPOINT_COORDINATE_MAX,
+    PAINT_ACTION_QPOINT_COORDINATE_MIN,
+)
+from app.painter_brush_domains import (
+    BRUSH_ANGLE_RANGE,
+    BRUSH_HARDNESS_RANGE,
+    BRUSH_ROUNDNESS_RANGE,
+    BRUSH_SPACING_RANGE,
+    BRUSH_WIDTH_RANGE_PX,
+)
+from app.painter_action_inputs import (
+    PAINTER_COLOR_SELECTION_PHASES,
+    PAINTER_DOCUMENT_EXPORT_BIT_DEPTHS,
+    PAINTER_DOCUMENT_EXPORT_FORMATS,
+    PAINTER_DOCUMENT_EXPORT_QUALITY_MAX,
+    PAINTER_DOCUMENT_EXPORT_QUALITY_MIN,
+    PAINTER_DOCUMENT_RENDERING_INTENT_MAX,
+    PAINTER_DOCUMENT_RENDERING_INTENT_MIN,
+    PAINTER_LAYER_OPACITY_MAX_PERCENT,
+    PAINTER_LAYER_OPACITY_MIN_PERCENT,
+    PAINTER_LAYER_MASK_ALPHA_MAX,
+    PAINTER_LAYER_MASK_ALPHA_MIN,
+    PAINTER_LAYER_MASK_RADIUS_MIN_PX,
+    PAINTER_PERSPECTIVE_MODE_MAX,
+    PAINTER_PERSPECTIVE_MODE_MIN,
+    PAINTER_SELECTION_ASPECTS,
+    PAINTER_SELECTION_MODIFY_OPERATIONS,
+    PAINTER_SELECTION_MODES,
+    PAINTER_SELECTION_SKEW_MAX_DEGREES,
+    PAINTER_SELECTION_SKEW_MIN_DEGREES,
+    PAINTER_SELECTION_TRANSFORM_PHASES,
+    PAINTER_SELECTION_TRANSFORM_TARGETS,
+    PAINTER_SYMMETRY_AXES,
 )
 from app.painter_large_canvas import (
     MAX_TILE_BUDGET_MB,
@@ -19,8 +76,71 @@ from app.painter_large_canvas import (
     MIN_TILE_SIZE,
     MIN_UNDO_BUDGET_MB,
 )
-from app.painter_brush_catalog import DESIGNER_BRUSH_STYLE_IDS
 from app.painter_layer_compositor import BLEND_MODES
+from app.painter_layer_contract import (
+    PAINTER_LAYER_COLOR_LABEL_IDS,
+    PAINTER_LAYER_ID_MIN_CHARACTERS,
+    PAINTER_LAYER_NAME_MAX_CHARACTERS,
+    PAINTER_LAYER_TYPES,
+)
+from app.painter_channel_contract import PAINTER_CHANNEL_IDS
+from app.painter_reference_board import (
+    REFERENCE_NAME_MAX_CHARACTERS,
+    REFERENCE_OPACITY_MAX,
+    REFERENCE_OPACITY_MIN,
+    REFERENCE_POSITION_MAX_NORM,
+    REFERENCE_POSITION_MIN_NORM,
+    REFERENCE_ROTATION_MAX_DEGREES,
+    REFERENCE_ROTATION_MIN_DEGREES,
+    REFERENCE_SIZE_MAX_NORM,
+    REFERENCE_SIZE_MIN_NORM,
+    REFERENCE_TARGET_ID_MIN_CHARACTERS,
+)
+from app.painter_selection_mask import (
+    PAINTER_COLOR_SELECTION_TOLERANCE_MAX,
+    PAINTER_COLOR_SELECTION_TOLERANCE_MIN,
+)
+from app.painter_output import (
+    PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+    PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+)
+from app.painter_grid import PAINTER_GRID_SIZE_MAX_PX, PAINTER_GRID_SIZE_MIN_PX
+from app.painter_zoom import PAINTER_ZOOM_MAX_PERCENT, PAINTER_ZOOM_MIN_PERCENT
+from app.painter_wet_canvas import (
+    WET_CANVAS_DRYING_MAX_SECONDS,
+    WET_CANVAS_DRYING_MIN_SECONDS,
+)
+from app.painter_material_paint import (
+    MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES,
+    MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES,
+    MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES,
+    MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES,
+)
+from app.painter_3d_blockout import (
+    BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+    BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+    BLOCKOUT_CAMERA_MAX_DISTANCE,
+    BLOCKOUT_CAMERA_MIN_DISTANCE,
+    BLOCKOUT_CAMERA_PITCH_MAX_DEGREES,
+    BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+    BLOCKOUT_CAMERA_TARGET_MAX,
+    BLOCKOUT_CAMERA_TARGET_MIN,
+    BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+    BLOCKOUT_CAMERA_YAW_MIN_DEGREES,
+    BLOCKOUT_CAMERA_PRESETS,
+    BLOCKOUT_LIGHT_PITCH_MAX_DEGREES,
+    BLOCKOUT_LIGHT_PITCH_MIN_DEGREES,
+    BLOCKOUT_LIGHT_YAW_MAX_DEGREES,
+    BLOCKOUT_LIGHT_YAW_MIN_DEGREES,
+    BLOCKOUT_PRIMITIVE_OPACITY_MAX,
+    BLOCKOUT_PRIMITIVE_OPACITY_MIN,
+    BLOCKOUT_PRIMITIVE_POSITION_MAX,
+    BLOCKOUT_PRIMITIVE_POSITION_MIN,
+    BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES,
+    BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES,
+    BLOCKOUT_PRIMITIVE_SCALE_MAX,
+    BLOCKOUT_PRIMITIVE_SCALE_MIN,
+)
 from app.painter_ui_document import (
     UI_DELIVERY_TARGETS,
     UI_INTERACTION_ACTIONS,
@@ -40,33 +160,35 @@ from app.painter_ui_variables import (
 )
 
 
-PAINT_ACTION_BRUSH_STYLES = tuple(
-    sorted(
+def _paint_optional_export_size_schema(
+    properties: dict[str, Any],
+) -> dict[str, Any]:
+    schema = schema_object(properties)
+    schema["oneOf"] = [
         {
-            "round",
-            "marker",
-            "highlighter",
-            "dashed",
-            "loaded_oil",
-            "impasto_oil",
-            "oil_smear",
-            "soft_oil_glaze",
-            "real_wet_oil",
-            "bristle_oil",
-            "dry_oil",
-            "palette_knife",
-            "filbert_oil",
-            "flat_hog_oil",
-            "fan_bristle_oil",
-            "rigger_oil",
-            "scumble_oil",
-            "stipple_oil",
-            "knife_scrape_oil",
-            "textured_chalk",
-        }
-        | set(DESIGNER_BRUSH_STYLE_IDS)
-    )
-)
+            "not": {
+                "anyOf": [
+                    {"required": ["width"]},
+                    {"required": ["height"]},
+                ]
+            }
+        },
+        {
+            "required": ["width", "height"],
+            "properties": {
+                "width": {"const": 0},
+                "height": {"const": 0},
+            },
+        },
+        {
+            "required": ["width", "height"],
+            "properties": {
+                "width": {"minimum": 1},
+                "height": {"minimum": 1},
+            },
+        },
+    ]
+    return schema
 
 
 def register_paint_actions(registry: Any) -> None:
@@ -117,8 +239,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_document_new",
         params_schema=schema_object(
             {
-                "width": {"type": "integer", "minimum": 64, "maximum": 16384},
-                "height": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "width": {"type": "integer", "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
                 "background": {"type": "string"},
             }
         ),
@@ -509,7 +631,6 @@ def register_paint_actions(registry: Any) -> None:
             },
             required=("preset",),
         ),
-        required=("preset",),
         mutating=False,
         changed=False,
         dry_summary="a non-destructive Painter UI content stress preview would be shown",
@@ -531,7 +652,6 @@ def register_paint_actions(registry: Any) -> None:
             },
             required=("object_id", "changes"),
         ),
-        required=("object_id", "changes"),
         undo_label="Set UI responsive override",
         dry_summary="a responsive object override would be updated",
     )
@@ -3289,12 +3409,12 @@ def register_paint_actions(registry: Any) -> None:
         "Export the active Painter document to PNG.",
         "paint",
         "paint_document_export_png",
-        params_schema=schema_object(
+        params_schema=_paint_optional_export_size_schema(
             {
                 "path": {"type": "string"},
                 "include_background": {"type": "boolean"},
-                "width": {"type": "integer", "minimum": 0},
-                "height": {"type": "integer", "minimum": 0},
+                "width": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
             }
         ),
         mutating=False,
@@ -3320,19 +3440,41 @@ def register_paint_actions(registry: Any) -> None:
         "paint.document.export",
         "Export Painter artwork as JPEG, WebP, PNG, TIFF, or layered PSD with preflight.",
         "paint", "paint_document_export",
-        params_schema=schema_object(
-            {
-                "path": {"type": "string"},
-                "format": {"type": "string", "enum": ["", "png", "jpeg", "webp", "tiff", "psd"]},
+        params_schema={
+            **schema_object(
+                {
+                "path": {"type": "string", "pattern": r".*\S.*"},
+                "format": {"type": "string", "enum": list(PAINTER_DOCUMENT_EXPORT_FORMATS)},
                 "include_background": {"type": "boolean"},
-                "bit_depth": {"type": "integer", "enum": [8, 16]},
+                "bit_depth": {"type": "integer", "enum": list(PAINTER_DOCUMENT_EXPORT_BIT_DEPTHS)},
                 "bake_unsupported": {"type": "boolean"},
-                "quality": {"type": "integer", "minimum": 1, "maximum": 100},
+                "quality": {
+                    "type": "integer",
+                    "minimum": PAINTER_DOCUMENT_EXPORT_QUALITY_MIN,
+                    "maximum": PAINTER_DOCUMENT_EXPORT_QUALITY_MAX,
+                },
                 "source_icc": {"type": "string"},
                 "output_icc": {"type": "string"},
-                "rendering_intent": {"type": "integer", "minimum": 0, "maximum": 3},
-            }, required=("path",),
-        ),
+                "rendering_intent": {
+                    "type": "integer",
+                    "minimum": PAINTER_DOCUMENT_RENDERING_INTENT_MIN,
+                    "maximum": PAINTER_DOCUMENT_RENDERING_INTENT_MAX,
+                },
+                },
+                required=("path", "format"),
+            ),
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"bit_depth": {"const": 16}},
+                        "required": ["bit_depth"],
+                    },
+                    "then": {
+                        "properties": {"format": {"enum": ["png", "tiff"]}}
+                    },
+                }
+            ],
+        },
         mutating=False, changed=False,
         dry_summary="active Painter document would be exported with production metadata",
     )
@@ -3349,7 +3491,7 @@ def register_paint_actions(registry: Any) -> None:
         "Set the active Painter canvas zoom percentage.",
         "paint",
         "paint_view_zoom",
-        params_schema=schema_object({"percent": {"type": "integer", "minimum": 25, "maximum": 800}}),
+        params_schema=schema_object({"percent": {"type": "integer", "minimum": PAINTER_ZOOM_MIN_PERCENT, "maximum": PAINTER_ZOOM_MAX_PERCENT}}),
         undo_label="Set Painter zoom",
         dry_summary="active Painter zoom would change",
     )
@@ -3362,8 +3504,8 @@ def register_paint_actions(registry: Any) -> None:
             {
                 "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "width": {"type": "number", "minimum": 0.001, "maximum": 1.0},
-                "height": {"type": "number", "minimum": 0.001, "maximum": 1.0},
+                "width": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
+                "height": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
             },
             required=("x", "y", "width", "height"),
         ),
@@ -3375,15 +3517,37 @@ def register_paint_actions(registry: Any) -> None:
         "Move or reset the active Painter canvas pan offset.",
         "paint",
         "paint_view_pan",
-        params_schema=schema_object(
-            {
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
-                "dx": {"type": "integer"},
-                "dy": {"type": "integer"},
-                "reset": {"type": "boolean"},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    field: {
+                        "type": "integer",
+                        "minimum": PAINT_ACTION_QPOINT_COORDINATE_MIN,
+                        "maximum": PAINT_ACTION_QPOINT_COORDINATE_MAX,
+                    }
+                    for field in ("x", "y", "dx", "dy")
+                }
+                | {"reset": {"type": "boolean"}}
+            ),
+            "oneOf": [
+                {
+                    "required": ["reset"],
+                    "properties": {"reset": {"const": True}},
+                    "not": {"anyOf": [{"required": [field]} for field in ("x", "y", "dx", "dy")]},
+                },
+                {
+                    "anyOf": [{"required": ["x"]}, {"required": ["y"]}],
+                    "not": {"anyOf": [{"required": [field]} for field in ("dx", "dy", "reset")]},
+                },
+                {
+                    "anyOf": [
+                        {"required": ["dx"], "properties": {"dx": {"not": {"const": 0}}}},
+                        {"required": ["dy"], "properties": {"dy": {"not": {"const": 0}}}},
+                    ],
+                    "not": {"anyOf": [{"required": [field]} for field in ("x", "y", "reset")]},
+                },
+            ],
+        },
         undo_label="Pan Painter canvas",
         dry_summary="active Painter pan would change",
     )
@@ -3396,7 +3560,7 @@ def register_paint_actions(registry: Any) -> None:
             {
                 "visible": {"type": "boolean"},
                 "snap": {"type": "boolean"},
-                "size_px": {"type": "integer", "minimum": 4, "maximum": 512},
+                "size_px": {"type": "integer", "minimum": PAINTER_GRID_SIZE_MIN_PX, "maximum": PAINTER_GRID_SIZE_MAX_PX},
             }
         ),
         undo_label="Set Painter grid",
@@ -3411,8 +3575,12 @@ def register_paint_actions(registry: Any) -> None:
             {
                 "enabled": {"type": "boolean"},
                 "snap": {"type": "boolean"},
-                "mode": {"type": "integer", "minimum": 1, "maximum": 3},
-                "horizon": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+                "mode": {
+                    "type": "integer",
+                    "minimum": PAINTER_PERSPECTIVE_MODE_MIN,
+                    "maximum": PAINTER_PERSPECTIVE_MODE_MAX,
+                },
+                "horizon": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "center_x": {"type": "number"},
                 "center_y": {"type": "number"},
                 "left_x": {"type": "number"},
@@ -3434,8 +3602,8 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "enabled": {"type": "boolean"},
-                "axis": {"type": "string", "enum": ["vertical", "horizontal"]},
-                "position": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+                "axis": {"type": "string", "enum": list(PAINTER_SYMMETRY_AXES)},
+                "position": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             }
         ),
         undo_label="Set Painter symmetry guide",
@@ -3496,28 +3664,45 @@ def register_paint_actions(registry: Any) -> None:
         "Set the active Painter brush preset, style, size, opacity, and brush detail controls.",
         "paint",
         "paint_brush_set",
-        params_schema=schema_object(
-            {
-                "preset": {"type": "string"},
+        params_schema={
+            **schema_object(
+                {
+                "preset": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
                 "style": {
                     "type": "string",
                     "enum": list(PAINT_ACTION_BRUSH_STYLES),
                 },
                 "width": {
                     "type": "integer",
-                    "minimum": 1,
+                    "minimum": int(BRUSH_WIDTH_RANGE_PX[0]),
                     "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
                 },
-                "opacity": {"type": "integer", "minimum": 10, "maximum": 100},
-                "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
-                "spacing": {"type": "integer", "minimum": 1, "maximum": 200},
-                "angle": {"type": "integer", "minimum": -180, "maximum": 180},
-                "roundness": {"type": "integer", "minimum": 10, "maximum": 100},
+                "opacity": {"type": "integer", "minimum": PAINT_ACTION_BRUSH_OPACITY_MIN_PERCENT, "maximum": PAINT_ACTION_BRUSH_OPACITY_MAX_PERCENT},
+                "hardness": {"type": "integer", "minimum": BRUSH_HARDNESS_RANGE[0], "maximum": BRUSH_HARDNESS_RANGE[1]},
+                "spacing": {"type": "integer", "minimum": BRUSH_SPACING_RANGE[0], "maximum": BRUSH_SPACING_RANGE[1]},
+                "angle": {"type": "integer", "minimum": BRUSH_ANGLE_RANGE[0], "maximum": BRUSH_ANGLE_RANGE[1]},
+                "roundness": {"type": "integer", "minimum": BRUSH_ROUNDNESS_RANGE[0], "maximum": BRUSH_ROUNDNESS_RANGE[1]},
                 "flip_x": {"type": "boolean"},
                 "flip_y": {"type": "boolean"},
                 "dynamics": {"type": "object"},
-            }
-        ),
+                }
+            ),
+            "anyOf": [
+                {
+                    "required": ["preset"],
+                    "properties": {
+                        "preset": {"type": "string", "minLength": 1, "pattern": r".*\S.*"}
+                    },
+                },
+                *[
+                    {"required": [field]}
+                    for field in (
+                        "style", "width", "opacity", "hardness", "spacing",
+                        "angle", "roundness", "flip_x", "flip_y", "dynamics",
+                    )
+                ],
+            ],
+        },
         undo_label="Set Painter brush",
         dry_summary="active Painter brush preset or brush parameters would change",
     )
@@ -3528,9 +3713,9 @@ def register_paint_actions(registry: Any) -> None:
         "paint_brush_calibration_set",
         params_schema=schema_object(
             {
-                "device_id": {"type": "string"},
-                "minimum": {"type": "number", "minimum": 0.0, "maximum": 0.99},
-                "maximum": {"type": "number", "minimum": 0.01, "maximum": 1.0},
+                "device_id": {"type": "string", "minLength": 1, "pattern": r".*\S.*"},
+                "minimum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "maximum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "curve": {
                     "type": "array",
                     "items": {
@@ -3706,25 +3891,29 @@ def register_paint_actions(registry: Any) -> None:
                 "maxItems": PAINT_ACTION_MAX_POINTS_PER_STROKE,
             },
             "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
-            "opacity": {"type": "integer", "minimum": 1, "maximum": 100},
+            "opacity": {"type": "integer", "minimum": PAINT_ACTION_STROKE_OPACITY_MIN_PERCENT, "maximum": PAINT_ACTION_STROKE_OPACITY_MAX_PERCENT},
             "width": {
                 "type": "number",
-                "minimum": 0.25,
+                "minimum": PAINT_ACTION_STROKE_MIN_WIDTH_PX,
                 "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
             },
             "style": {
                 "type": "string",
                 "enum": list(PAINT_ACTION_BRUSH_STYLES),
             },
-            "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
-            "spacing": {"type": "integer", "minimum": 1, "maximum": 200},
-            "angle": {"type": "integer", "minimum": -180, "maximum": 180},
-            "roundness": {"type": "integer", "minimum": 10, "maximum": 100},
+            "hardness": {"type": "integer", "minimum": BRUSH_HARDNESS_RANGE[0], "maximum": BRUSH_HARDNESS_RANGE[1]},
+            "spacing": {"type": "integer", "minimum": BRUSH_SPACING_RANGE[0], "maximum": BRUSH_SPACING_RANGE[1]},
+            "angle": {"type": "integer", "minimum": BRUSH_ANGLE_RANGE[0], "maximum": BRUSH_ANGLE_RANGE[1]},
+            "roundness": {"type": "integer", "minimum": BRUSH_ROUNDNESS_RANGE[0], "maximum": BRUSH_ROUNDNESS_RANGE[1]},
             "closed": {"type": "boolean"},
             "layer_id": {"type": "string"},
-            "engine_version": {"type": "integer", "minimum": 1, "maximum": 2},
-            "bristle_count": {"type": "integer", "minimum": 0, "maximum": 64},
-            "seed": {"type": "integer"},
+            "engine_version": {"type": "integer", "minimum": PAINT_ACTION_STROKE_ENGINE_VERSION_MIN, "maximum": PAINT_ACTION_STROKE_ENGINE_VERSION_MAX},
+            "bristle_count": {"type": "integer", "minimum": PAINT_ACTION_STROKE_BRISTLE_COUNT_MIN, "maximum": PAINT_ACTION_STROKE_BRISTLE_COUNT_MAX},
+            "seed": {
+                "type": "integer",
+                "minimum": PAINT_ACTION_STROKE_SEED_MIN,
+                "maximum": PAINT_ACTION_STROKE_SEED_MAX,
+            },
             "load_depletion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "path_mode": {
                 "type": "string",
@@ -3785,6 +3974,16 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Show Painter panel",
         dry_summary="active Painter panel would change",
     )
+    layer_optional_id_schema = {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}
+    layer_required_id_schema = {
+        "type": "string",
+        "minLength": PAINTER_LAYER_ID_MIN_CHARACTERS,
+        "pattern": r".*\S.*",
+    }
+    layer_optional_name_schema = {
+        "type": "string",
+        "maxLength": PAINTER_LAYER_NAME_MAX_CHARACTERS,
+    }
     registry.register_adapter_action(
         "paint.layer.add",
         "Add a standard or stroke-native Material Paint layer to the active Painter document.",
@@ -3792,8 +3991,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_add",
         params_schema=schema_object(
             {
-                "name": {"type": "string"},
-                "layer_type": {"type": "string", "enum": ["standard", "material"]},
+                "name": layer_optional_name_schema,
+                "layer_type": {"type": "string", "enum": list(PAINTER_LAYER_TYPES)},
             }
         ),
         undo_label="Add Painter layer",
@@ -3805,7 +4004,10 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_import_image",
         params_schema=schema_object(
-            {"path": {"type": "string"}, "name": {"type": "string"}},
+            {
+                "path": {"type": "string", "pattern": r".*\S.*"},
+                "name": layer_optional_name_schema,
+            },
             required=("path",),
         ),
         undo_label="Import image as Painter layer",
@@ -3818,8 +4020,12 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_group_create",
         params_schema=schema_object(
             {
-                "name": {"type": "string"},
-                "layer_ids": {"type": "array", "items": {"type": "string"}},
+                "name": layer_optional_name_schema,
+                "layer_ids": {
+                    "type": "array",
+                    "items": layer_required_id_schema,
+                    "uniqueItems": True,
+                },
             }
         ),
         undo_label="Create Painter layer group",
@@ -3831,7 +4037,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_set_clipping",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "clipping": {"type": "boolean"}},
+            {"layer_id": layer_optional_id_schema, "clipping": {"type": "boolean"}},
             required=("clipping",),
         ),
         undo_label="Set Painter clipping mask",
@@ -3843,7 +4049,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_group_set_expanded",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "expanded": {"type": "boolean"}},
+            {"layer_id": layer_required_id_schema, "expanded": {"type": "boolean"}},
             required=("layer_id", "expanded"),
         ),
         undo_label="Set Painter group disclosure",
@@ -3854,15 +4060,21 @@ def register_paint_actions(registry: Any) -> None:
         "Set independent pixel, transparency, position, or all-layer locks.",
         "paint",
         "paint_layer_set_locks",
-        params_schema=schema_object(
-            {
-                "layer_id": {"type": "string"},
-                "pixels": {"type": "boolean"},
-                "transparency": {"type": "boolean"},
-                "position": {"type": "boolean"},
-                "all_locked": {"type": "boolean"},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": layer_optional_id_schema,
+                    "pixels": {"type": "boolean"},
+                    "transparency": {"type": "boolean"},
+                    "position": {"type": "boolean"},
+                    "all_locked": {"type": "boolean"},
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("pixels", "transparency", "position", "all_locked")
+            ],
+        },
         undo_label="Set Painter layer locks",
         dry_summary="Painter layer lock channels would change",
     )
@@ -3876,7 +4088,11 @@ def register_paint_actions(registry: Any) -> None:
             description,
             "paint",
             method,
-            params_schema=schema_object({"layer_id": {"type": "string"}}),
+            params_schema=schema_object(
+                {"layer_id": layer_optional_id_schema}
+                if action_id == "paint.layer.merge_down"
+                else {}
+            ),
             undo_label=label,
             dry_summary=description,
         )
@@ -3887,8 +4103,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_set_type",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
-                "layer_type": {"type": "string", "enum": ["standard", "material"]},
+                "layer_id": layer_optional_id_schema,
+                "layer_type": {"type": "string", "enum": list(PAINTER_LAYER_TYPES)},
             },
             required=("layer_type",),
         ),
@@ -3919,13 +4135,27 @@ def register_paint_actions(registry: Any) -> None:
         "Set the canvas Material Paint relief preview and inspection light direction.",
         "paint",
         "paint_material_preview_set",
-        params_schema=schema_object(
-            {
-                "enabled": {"type": "boolean"},
-                "azimuth_deg": {"type": "number", "minimum": -180.0, "maximum": 180.0},
-                "elevation_deg": {"type": "number", "minimum": 5.0, "maximum": 85.0},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "enabled": {"type": "boolean"},
+                    "azimuth_deg": {
+                        "type": "number",
+                        "minimum": MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES,
+                        "maximum": MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES,
+                    },
+                    "elevation_deg": {
+                        "type": "number",
+                        "minimum": MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES,
+                        "maximum": MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES,
+                    },
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("enabled", "azimuth_deg", "elevation_deg")
+            ],
+        },
         undo_label="Set Painter material preview",
         dry_summary="Material Paint relief preview would change",
     )
@@ -3937,20 +4167,26 @@ def register_paint_actions(registry: Any) -> None:
         ),
         "paint",
         "paint_wet_canvas_settings_set",
-        params_schema=schema_object(
-            {
-                "layer_id": {"type": "string"},
-                "enabled": {"type": "boolean"},
-                "mixing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "diffusion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "pickup": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "drying_seconds": {
-                    "type": "number",
-                    "minimum": 1.0,
-                    "maximum": 86400.0,
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": layer_optional_id_schema,
+                    "enabled": {"type": "boolean"},
+                    "mixing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "diffusion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "pickup": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "drying_seconds": {
+                        "type": "number",
+                        "minimum": WET_CANVAS_DRYING_MIN_SECONDS,
+                        "maximum": WET_CANVAS_DRYING_MAX_SECONDS,
+                    },
                 },
-            }
-        ),
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("enabled", "mixing", "diffusion", "pickup", "drying_seconds")
+            ],
+        },
         undo_label="Set Painter Wet Canvas",
         dry_summary="Wet Canvas settings would change",
     )
@@ -3961,11 +4197,11 @@ def register_paint_actions(registry: Any) -> None:
         "paint_wet_canvas_advance",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
+                "layer_id": layer_optional_id_schema,
                 "seconds": {
                     "type": "number",
-                    "minimum": 0.0,
-                    "maximum": 86400.0,
+                    "exclusiveMinimum": 0.0,
+                    "maximum": WET_CANVAS_DRYING_MAX_SECONDS,
                 },
             },
             required=("seconds",),
@@ -3978,7 +4214,7 @@ def register_paint_actions(registry: Any) -> None:
         "Dry the selected Painter material layer without flattening its strokes.",
         "paint",
         "paint_wet_canvas_dry",
-        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
         undo_label="Dry Painter Wet Canvas",
         dry_summary="Wet Canvas would become dry",
     )
@@ -3987,7 +4223,7 @@ def register_paint_actions(registry: Any) -> None:
         "Select a Painter layer by id.",
         "paint",
         "paint_layer_select",
-        params_schema=schema_object({"layer_id": {"type": "string"}}, required=("layer_id",)),
+        params_schema=schema_object({"layer_id": layer_required_id_schema}, required=("layer_id",)),
         undo_label="Select Painter layer",
         dry_summary="a Painter layer would be selected",
     )
@@ -3997,7 +4233,15 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_rename",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "name": {"type": "string"}},
+            {
+                "layer_id": layer_optional_id_schema,
+                "name": {
+                    "type": "string",
+                    "minLength": PAINTER_LAYER_ID_MIN_CHARACTERS,
+                    "maxLength": PAINTER_LAYER_NAME_MAX_CHARACTERS,
+                    "pattern": r".*\S.*",
+                },
+            },
             required=("name",),
         ),
         undo_label="Rename Painter layer",
@@ -4008,7 +4252,7 @@ def register_paint_actions(registry: Any) -> None:
         "Duplicate the selected Painter layer or a layer by id.",
         "paint",
         "paint_layer_duplicate",
-        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
         undo_label="Duplicate Painter layer",
         dry_summary="a Painter layer would be duplicated",
     )
@@ -4017,7 +4261,7 @@ def register_paint_actions(registry: Any) -> None:
         "Delete the selected Painter layer or a layer by id.",
         "paint",
         "paint_layer_delete",
-        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
         undo_label="Delete Painter layer",
         dry_summary="a Painter layer would be deleted",
     )
@@ -4027,7 +4271,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_set_visible",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "visible": {"type": "boolean"}},
+            {"layer_id": layer_optional_id_schema, "visible": {"type": "boolean"}},
             required=("visible",),
         ),
         undo_label="Set Painter layer visibility",
@@ -4039,7 +4283,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_set_locked",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "locked": {"type": "boolean"}},
+            {"layer_id": layer_optional_id_schema, "locked": {"type": "boolean"}},
             required=("locked",),
         ),
         undo_label="Set Painter layer lock",
@@ -4051,7 +4295,14 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_set_opacity",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "opacity": {"type": "integer", "minimum": 0, "maximum": 100}},
+            {
+                "layer_id": layer_optional_id_schema,
+                "opacity": {
+                    "type": "integer",
+                    "minimum": PAINTER_LAYER_OPACITY_MIN_PERCENT,
+                    "maximum": PAINTER_LAYER_OPACITY_MAX_PERCENT,
+                },
+            },
             required=("opacity",),
         ),
         undo_label="Set Painter layer opacity",
@@ -4064,7 +4315,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_set_blend_mode",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
+                "layer_id": layer_optional_id_schema,
                 "blend_mode": {"type": "string", "enum": list(BLEND_MODES)},
             },
             required=("blend_mode",),
@@ -4079,10 +4330,10 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_set_color",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
+                "layer_id": layer_optional_id_schema,
                 "color_label": {
                     "type": "string",
-                    "enum": ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"],
+                    "enum": list(PAINTER_LAYER_COLOR_LABEL_IDS),
                 },
             },
             required=("color_label",),
@@ -4092,12 +4343,18 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.channel.set_visible",
-        "Set RGB, Red, Green, Blue, or Alpha visibility in the active Painter document.",
+        "Set component/transparency or saved-selection channel visibility in the active Painter document.",
         "paint",
         "paint_channel_set_visible",
         params_schema=schema_object(
             {
-                "channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]},
+                "channel": {
+                    "type": "string",
+                    "oneOf": [
+                        {"enum": list(PAINTER_CHANNEL_IDS)},
+                        {"pattern": r"^saved-selection-[1-9][0-9]*$"},
+                    ],
+                },
                 "visible": {"type": "boolean"},
             },
             required=("channel", "visible"),
@@ -4107,11 +4364,11 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.channel.select",
-        "Select RGB, Red, Green, Blue, or Alpha as the active Painter channel target.",
+        "Select a component/transparency or saved-selection Painter channel target.",
         "paint",
         "paint_channel_select",
         params_schema=schema_object(
-            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}},
+            {"channel": {"type": "string", "minLength": 1}},
             required=("channel",),
         ),
         undo_label="Select Painter channel",
@@ -4123,7 +4380,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_channel_copy_image",
         params_schema=schema_object(
-            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}}
+            {"channel": {"type": "string"}}
         ),
         mutating=False,
         changed=False,
@@ -4135,10 +4392,250 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_channel_paste_image",
         params_schema=schema_object(
-            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}}
+            {"channel": {"type": "string"}}
         ),
         undo_label="Paste Painter channel image",
         dry_summary="clipboard image would be pasted into a Painter channel",
+    )
+    save_selection_channel_schema = schema_object(
+        {
+            "name": {"type": "string"},
+            "channel_id": {"type": "string"},
+            "operation": {
+                "type": "string",
+                "enum": ["new", "replace", "add", "subtract", "intersect"],
+            },
+        }
+    )
+    save_selection_channel_schema["oneOf"] = [
+        {
+            "properties": {
+                "name": {"type": "string", "pattern": r".*\S.*"},
+                "channel_id": {"type": "string", "maxLength": 0},
+                "operation": {"type": "string", "enum": ["new"]},
+            },
+            "required": ["name"],
+        },
+        {
+            "properties": {
+                "name": {"type": "string", "maxLength": 0},
+                "channel_id": {
+                    "type": "string",
+                    "pattern": r"^saved-selection-[1-9][0-9]*$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["replace", "add", "subtract", "intersect"],
+                },
+            },
+            "required": ["channel_id", "operation"],
+        },
+    ]
+    registry.register_adapter_action(
+        "paint.selection.save_channel",
+        "Save the exact active selection to a new or existing persistent Alpha8 channel.",
+        "paint",
+        "paint_selection_save_channel",
+        params_schema=save_selection_channel_schema,
+        undo_label="Save Painter selection channel",
+        dry_summary="active selection would be saved to a persistent channel",
+    )
+    registry.register_adapter_action(
+        "paint.selection.load_channel",
+        "Load a persistent Alpha8 channel into the active selection.",
+        "paint",
+        "paint_selection_load_channel",
+        params_schema=schema_object(
+            {
+                "channel_id": {"type": "string", "minLength": 1},
+                "operation": {
+                    "type": "string",
+                    "enum": ["new", "add", "subtract", "intersect"],
+                },
+                "invert": {"type": "boolean"},
+            },
+            required=("channel_id",),
+        ),
+        undo_label="Load Painter selection channel",
+        dry_summary="persistent channel would be loaded into the active selection",
+    )
+    runtime_document_id_schema = {
+        "type": "string",
+        "pattern": r"^painter-document-[0-9a-f]{32}$",
+    }
+    registry.register_adapter_action(
+        "paint.documents.inspect",
+        "List open Painter documents with runtime identity and exact pixel dimensions.",
+        "paint",
+        "paint_documents_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="open Painter documents would be inspected",
+    )
+    cross_document_save_schema = schema_object(
+        {
+            "destination_document_id": runtime_document_id_schema,
+            "name": {"type": "string"},
+            "channel_id": {"type": "string"},
+            "operation": {
+                "type": "string",
+                "enum": ["new", "replace", "add", "subtract", "intersect"],
+            },
+        },
+        required=("destination_document_id",),
+    )
+    cross_document_save_schema["oneOf"] = save_selection_channel_schema["oneOf"]
+    registry.register_adapter_action(
+        "paint.selection.save_channel_to_document",
+        "Save the active selection into another open same-size Painter document.",
+        "paint",
+        "paint_selection_save_channel_to_document",
+        params_schema=cross_document_save_schema,
+        undo_label="Save selection in destination Painter document",
+        dry_summary="selection would be saved in another open document",
+    )
+    registry.register_adapter_action(
+        "paint.selection.load_channel_from_document",
+        "Load a saved Alpha8 channel from another open same-size Painter document.",
+        "paint",
+        "paint_selection_load_channel_from_document",
+        params_schema=schema_object(
+            {
+                "source_document_id": runtime_document_id_schema,
+                "channel_id": {
+                    "type": "string",
+                    "pattern": r"^saved-selection-[1-9][0-9]*$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["new", "add", "subtract", "intersect"],
+                },
+                "invert": {"type": "boolean"},
+            },
+            required=("source_document_id", "channel_id"),
+        ),
+        undo_label="Load selection from source Painter document",
+        dry_summary="selection would be loaded from another open document",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channels.import_file",
+        "Import saved-selection alpha channels from a same-size PSD or TIFF file.",
+        "paint",
+        "paint_selection_channels_import_file",
+        params_schema=schema_object(
+            {
+                "path": {
+                    "type": "string",
+                    "minLength": 5,
+                    "pattern": (
+                        r"^.+\.(?:[Pp][Ss][Dd]|[Tt][Ii][Ff](?:[Ff])?)$"
+                    ),
+                },
+            },
+            required=("path",),
+        ),
+        undo_label="Import saved selection channels",
+        dry_summary="saved-selection channels would be imported from PSD or TIFF",
+    )
+    saved_selection_channel_id_schema = {
+        "type": "string",
+        "pattern": r"^saved-selection-[1-9][0-9]*$",
+    }
+    saved_selection_channel_name_schema = {
+        "type": "string",
+        "pattern": r".*\S.*",
+    }
+    registry.register_adapter_action(
+        "paint.selection.channel.rename",
+        "Rename a persistent Alpha8 saved-selection channel without changing its ID.",
+        "paint",
+        "paint_selection_channel_rename",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "name": saved_selection_channel_name_schema,
+            },
+            required=("channel_id", "name"),
+        ),
+        undo_label="Rename Painter selection channel",
+        dry_summary="persistent selection channel would be renamed",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.duplicate",
+        "Duplicate exact Alpha8 saved-selection bytes inside the current document.",
+        "paint",
+        "paint_selection_channel_duplicate",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "name": saved_selection_channel_name_schema,
+                "invert": {"type": "boolean"},
+            },
+            required=("channel_id", "name"),
+        ),
+        undo_label="Duplicate Painter selection channel",
+        dry_summary="persistent selection channel would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.options.set",
+        "Set saved alpha-channel selected/masked-area semantics and appearance-only overlay options.",
+        "paint",
+        "paint_selection_channel_options_set",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "display_mode": {
+                    "type": "string",
+                    "enum": ["masked_areas", "selected_areas"],
+                },
+                "overlay_color": {
+                    "type": "string",
+                    "pattern": r"^#[0-9A-Fa-f]{6}$",
+                },
+                "overlay_opacity_percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            required=(
+                "channel_id",
+                "display_mode",
+                "overlay_color",
+                "overlay_opacity_percent",
+            ),
+        ),
+        undo_label="Set Painter selection channel options",
+        dry_summary="persistent selection channel options would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.reorder",
+        "Place one persistent saved-selection channel before or after another.",
+        "paint",
+        "paint_selection_channel_reorder",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "target_channel_id": saved_selection_channel_id_schema,
+                "placement": {"type": "string", "enum": ["before", "after"]},
+            },
+            required=("channel_id", "target_channel_id", "placement"),
+        ),
+        undo_label="Reorder Painter selection channel",
+        dry_summary="persistent selection channel order would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.delete",
+        "Delete a persistent saved-selection channel without changing paint pixels.",
+        "paint",
+        "paint_selection_channel_delete",
+        params_schema=schema_object(
+            {"channel_id": saved_selection_channel_id_schema},
+            required=("channel_id",),
+        ),
+        undo_label="Delete Painter selection channel",
+        dry_summary="persistent selection channel would be deleted",
     )
     registry.register_adapter_action(
         "paint.selection.select_all",
@@ -4187,8 +4684,8 @@ def register_paint_actions(registry: Any) -> None:
                 "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
-                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
+                "aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)},
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
             },
             required=("x1", "y1", "x2", "y2"),
         ),
@@ -4206,8 +4703,8 @@ def register_paint_actions(registry: Any) -> None:
                 "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
-                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
+                "aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)},
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
             },
             required=("x1", "y1", "x2", "y2"),
         ),
@@ -4220,7 +4717,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_selection_set_aspect",
         params_schema=schema_object(
-            {"aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]}},
+            {"aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)}},
             required=("aspect",),
         ),
         undo_label="Set Painter selection aspect",
@@ -4243,7 +4740,7 @@ def register_paint_actions(registry: Any) -> None:
                         "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                     },
                 },
-                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
                 "polygonal": {"type": "boolean"},
             },
             required=("points",),
@@ -4256,13 +4753,35 @@ def register_paint_actions(registry: Any) -> None:
         "Feather, expand, contract, or border the active Painter selection mask.",
         "paint",
         "paint_selection_modify",
-        params_schema=schema_object(
-            {
-                "operation": {"type": "string", "enum": ["feather", "expand", "contract", "border"]},
-                "radius_px": {"type": "number", "minimum": 0.1, "maximum": 4096.0},
-            },
-            required=("operation",),
-        ),
+        params_schema={
+            "oneOf": [
+                schema_object(
+                    {
+                        "operation": {"const": "feather"},
+                        "radius_px": {
+                            "type": "number",
+                            "exclusiveMinimum": 0.0,
+                            "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                        },
+                    },
+                    required=("operation",),
+                ),
+                schema_object(
+                    {
+                        "operation": {
+                            "type": "string",
+                            "enum": list(PAINTER_SELECTION_MODIFY_OPERATIONS[1:]),
+                        },
+                        "radius_px": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                        },
+                    },
+                    required=("operation",),
+                ),
+            ]
+        },
         undo_label="Modify Painter selection",
         dry_summary="Painter selection mask would be modified",
     )
@@ -4272,7 +4791,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_selection_set_mode",
         params_schema=schema_object(
-            {"mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]}},
+            {"mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)}},
             required=("mode",),
         ),
         undo_label="Set Painter selection mode",
@@ -4287,9 +4806,9 @@ def register_paint_actions(registry: Any) -> None:
             {
                 "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "tolerance": {"type": "integer", "minimum": 0, "maximum": 255},
+                "tolerance": {"type": "integer", "minimum": PAINTER_COLOR_SELECTION_TOLERANCE_MIN, "maximum": PAINTER_COLOR_SELECTION_TOLERANCE_MAX},
                 "contiguous": {"type": "boolean"},
-                "phase": {"type": "string", "enum": ["preview", "commit", "cancel"]},
+                "phase": {"type": "string", "enum": list(PAINTER_COLOR_SELECTION_PHASES)},
             },
             required=("x", "y"),
         ),
@@ -4312,13 +4831,22 @@ def register_paint_actions(registry: Any) -> None:
     ):
         crop_schema = schema_object({})
         if action_name == "paint.crop.preview":
-            crop_schema = schema_object({
+            straighten_schema = {"straighten_degrees": {"type": "number"}}
+            crop_coordinate_schema = {
                 "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "straighten_degrees": {"type": "number", "minimum": -45.0, "maximum": 45.0},
-            })
+            }
+            crop_schema = {
+                "oneOf": [
+                    schema_object(straighten_schema),
+                    schema_object(
+                        {**crop_coordinate_schema, **straighten_schema},
+                        required=("x1", "y1", "x2", "y2"),
+                    ),
+                ]
+            }
         registry.register_adapter_action(
             action_name,
             description,
@@ -4336,14 +4864,24 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "translate_x": {"type": "number"}, "translate_y": {"type": "number"},
-                "scale_x": {"type": "number"}, "scale_y": {"type": "number"},
+                "scale_x": {"type": "number", "not": {"const": 0.0}},
+                "scale_y": {"type": "number", "not": {"const": 0.0}},
                 "rotation_degrees": {"type": "number"},
-                "skew_x_degrees": {"type": "number"}, "skew_y_degrees": {"type": "number"},
+                "skew_x_degrees": {
+                    "type": "number",
+                    "exclusiveMinimum": PAINTER_SELECTION_SKEW_MIN_DEGREES,
+                    "exclusiveMaximum": PAINTER_SELECTION_SKEW_MAX_DEGREES,
+                },
+                "skew_y_degrees": {
+                    "type": "number",
+                    "exclusiveMinimum": PAINTER_SELECTION_SKEW_MIN_DEGREES,
+                    "exclusiveMaximum": PAINTER_SELECTION_SKEW_MAX_DEGREES,
+                },
                 "pivot_x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "pivot_y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "flip_x": {"type": "boolean"}, "flip_y": {"type": "boolean"},
-                "phase": {"type": "string", "enum": ["preview", "commit", "cancel"]},
-                "target": {"type": "string", "enum": ["selected_pixels", "raster", "strokes", "layer_mask", "layer_all"]},
+                "phase": {"type": "string", "enum": list(PAINTER_SELECTION_TRANSFORM_PHASES)},
+                "target": {"type": "string", "enum": list(PAINTER_SELECTION_TRANSFORM_TARGETS)},
             }
         ),
         undo_label="Free transform Painter selection",
@@ -4356,8 +4894,16 @@ def register_paint_actions(registry: Any) -> None:
         "paint_image_resize",
         params_schema=schema_object(
             {
-                "width": {"type": "integer", "minimum": 64, "maximum": 16384},
-                "height": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+                "height": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
             },
             required=("width", "height"),
         ),
@@ -4371,8 +4917,16 @@ def register_paint_actions(registry: Any) -> None:
         "paint_canvas_resize",
         params_schema=schema_object(
             {
-                "width": {"type": "integer", "minimum": 64, "maximum": 16384},
-                "height": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+                "height": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
                 "background": {"type": "string"},
             },
             required=("width", "height"),
@@ -4386,7 +4940,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_canvas_flip",
         params_schema=schema_object(
-            {"axis": {"type": "string", "enum": ["horizontal", "vertical", "x", "y"]}}
+            {"axis": {"type": "string", "enum": ["horizontal", "vertical"]}},
+            required=("axis",),
         ),
         undo_label="Flip Painter canvas",
         dry_summary="Painter canvas would be flipped",
@@ -4396,7 +4951,10 @@ def register_paint_actions(registry: Any) -> None:
         "Fill the active Painter selection, or full canvas if none is selected, with one color.",
         "paint",
         "paint_fill_solid",
-        params_schema=schema_object({"color": {"type": "string"}}),
+        params_schema=schema_object(
+            {"color": {"type": "string", "pattern": r".*\S.*"}},
+            required=("color",),
+        ),
         undo_label="Painter solid fill",
         dry_summary="Painter selection or canvas would be solid-filled",
     )
@@ -4406,18 +4964,26 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_fill_gradient",
         params_schema=schema_object(
-            {"color1": {"type": "string"}, "color2": {"type": "string"}}
+            {
+                "color1": {"type": "string", "pattern": r".*\S.*"},
+                "color2": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("color1", "color2"),
         ),
         undo_label="Painter gradient fill",
         dry_summary="Painter selection or canvas would be gradient-filled",
     )
     registry.register_adapter_action(
         "paint.fill.pattern",
-        "Fill the active Painter selection, or full canvas if none is selected, with a compact pattern.",
+        "Fill the active Painter selection, or full canvas if none is selected, with Qt's Dense4 pattern.",
         "paint",
         "paint_fill_pattern",
         params_schema=schema_object(
-            {"color1": {"type": "string"}, "color2": {"type": "string"}}
+            {
+                "color1": {"type": "string", "pattern": r".*\S.*"},
+                "color2": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("color1", "color2"),
         ),
         undo_label="Painter pattern fill",
         dry_summary="Painter selection or canvas would be pattern-filled",
@@ -4427,12 +4993,15 @@ def register_paint_actions(registry: Any) -> None:
         "Set Painter mirrored drawing along the canvas horizontal and/or vertical axes.",
         "paint",
         "paint_mirror_set",
-        params_schema=schema_object(
-            {
-                "x": {"type": "boolean"},
-                "y": {"type": "boolean"},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "x": {"type": "boolean"},
+                    "y": {"type": "boolean"},
+                }
+            ),
+            "anyOf": [{"required": ["x"]}, {"required": ["y"]}],
+        },
         undo_label="Set Painter mirror drawing",
         dry_summary="Painter mirror drawing mode would change",
     )
@@ -4441,7 +5010,9 @@ def register_paint_actions(registry: Any) -> None:
         "Create or replace the selected Painter layer mask from the active selection.",
         "paint",
         "paint_layer_mask_from_selection",
-        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        params_schema=schema_object(
+            {"layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}}
+        ),
         undo_label="Layer mask from selection",
         dry_summary="Painter layer mask would be created from selection",
     )
@@ -4451,7 +5022,11 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_layer_mask_from_path",
         params_schema=schema_object(
-            {"layer_id": {"type": "string"}, "path_id": {"type": "string"}}
+            {
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "path_id": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("path_id",),
         ),
         undo_label="Layer mask from path",
         dry_summary="Painter layer mask would be created from path",
@@ -4463,12 +5038,13 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_mask_create",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
                 "mask_type": {
                     "type": "string",
                     "enum": ["selection", "path", "channel", "alpha", "layer_alpha", "white", "reveal_all"],
                 },
-            }
+            },
+            required=("mask_type",),
         ),
         undo_label="Create Painter layer mask",
         dry_summary="Painter layer mask would be created",
@@ -4478,14 +5054,27 @@ def register_paint_actions(registry: Any) -> None:
         "Enable, link, unlink, or delete a Painter layer mask.",
         "paint",
         "paint_layer_mask_state_set",
-        params_schema=schema_object(
-            {
-                "layer_id": {"type": "string"},
-                "enabled": {"type": "boolean"},
-                "linked": {"type": "boolean"},
-                "delete": {"type": "boolean"},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                    "enabled": {"type": "boolean"},
+                    "linked": {"type": "boolean"},
+                    "delete": {"type": "boolean"},
+                }
+            ),
+            "oneOf": [
+                {
+                    "anyOf": [{"required": ["enabled"]}, {"required": ["linked"]}],
+                    "not": {"required": ["delete"]},
+                },
+                {
+                    "required": ["delete"],
+                    "properties": {"delete": {"const": True}},
+                    "not": {"anyOf": [{"required": ["enabled"]}, {"required": ["linked"]}]},
+                },
+            ],
+        },
         undo_label="Set Painter layer mask state",
         dry_summary="Painter layer mask state would change",
     )
@@ -4496,11 +5085,11 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_mask_paint",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "radius_px": {"type": "number"},
-                "value": {"type": "integer"},
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "radius_px": {"type": "number", "minimum": PAINTER_LAYER_MASK_RADIUS_MIN_PX},
+                "value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
             },
             required=("x", "y", "radius_px", "value"),
         ),
@@ -4514,11 +5103,11 @@ def register_paint_actions(registry: Any) -> None:
         "paint_layer_mask_gradient",
         params_schema=schema_object(
             {
-                "layer_id": {"type": "string"},
-                "start": {"type": "array"},
-                "end": {"type": "array"},
-                "start_value": {"type": "integer"},
-                "end_value": {"type": "integer"},
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "start": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "end": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "start_value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
+                "end_value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
             },
             required=("start", "end"),
         ),
@@ -4530,16 +5119,35 @@ def register_paint_actions(registry: Any) -> None:
         "Bake the selected Painter layer mask into its pixels and remove the mask.",
         "paint",
         "paint_layer_mask_apply",
-        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        params_schema=schema_object(
+            {"layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}}
+        ),
         undo_label="Apply Painter layer mask",
         dry_summary="Painter layer mask would be applied",
     )
+    path_optional_id_schema = {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}
+    path_point_pair_schema = {
+        "type": "array",
+        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "items": {
+            "type": "number",
+            "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM,
+            "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM,
+        },
+    }
+    path_handle_pair_schema = {
+        "type": "array",
+        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "items": {"type": "number"},
+    }
     registry.register_adapter_action(
         "paint.path.to_selection",
         "Convert the active or specified Painter path to a marching-ants selection.",
         "paint",
         "paint_path_to_selection",
-        params_schema=schema_object({"path_id": {"type": "string"}}),
+        params_schema=schema_object({"path_id": path_optional_id_schema}),
         undo_label="Path to selection",
         dry_summary="Painter path would become a selection",
     )
@@ -4548,15 +5156,61 @@ def register_paint_actions(registry: Any) -> None:
         "Create a saved Painter path from normalized 0..1 points.",
         "paint",
         "paint_path_create",
-        params_schema=schema_object(
-            {
-                "points": {"type": "array"},
-                "closed": {"type": "boolean"},
-                "make_selection": {"type": "boolean"},
-            },
-            required=("points",),
-            additional_properties=True,
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "points": {
+                        "type": "array",
+                        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+                        "maxItems": PAINT_ACTION_MAX_POINTS_PER_STROKE,
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "array",
+                                    "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+                                    "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+                                    "items": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                        "y": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                    },
+                                    "required": ["x", "y"],
+                                    "additionalProperties": False,
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "x_norm": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                        "y_norm": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                    },
+                                    "required": ["x_norm", "y_norm"],
+                                    "additionalProperties": False,
+                                },
+                            ]
+                        },
+                    },
+                    "closed": {"type": "boolean"},
+                    "make_selection": {"type": "boolean"},
+                },
+                required=("points",),
+            ),
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"make_selection": {"const": True}},
+                        "required": ["make_selection"],
+                    },
+                    "then": {
+                        "properties": {
+                            "points": {"minItems": PAINT_ACTION_PATH_SELECTION_MIN_POINTS}
+                        }
+                    },
+                }
+            ],
+        },
         undo_label="Create Painter path",
         dry_summary="Painter path would be created",
     )
@@ -4565,7 +5219,7 @@ def register_paint_actions(registry: Any) -> None:
         "Delete the active or specified Painter work, selection, or saved path.",
         "paint",
         "paint_path_delete",
-        params_schema=schema_object({"path_id": {"type": "string"}}),
+        params_schema=schema_object({"path_id": path_optional_id_schema}),
         undo_label="Delete Painter path",
         dry_summary="Painter path would be deleted",
     )
@@ -4582,20 +5236,47 @@ def register_paint_actions(registry: Any) -> None:
         "paint.path.anchor.edit",
         "Add, delete, move, or convert a Painter path anchor and its Bezier handles.",
         "paint", "paint_path_anchor_edit",
-        params_schema=schema_object(
-            {
-                "path_id": {"type": "string"}, "index": {"type": "integer", "minimum": 0},
-                "operation": {"type": "string", "enum": ["add", "delete", "move", "corner", "smooth"]},
-                "point": {"type": "array"}, "in_handle": {"type": "array"}, "out_handle": {"type": "array"},
-            }, required=("index", "operation"), additional_properties=True,
-        ), undo_label="Edit Painter path anchor", dry_summary="Painter path anchor would be edited",
+        params_schema={
+            **schema_object(
+                {
+                    "path_id": path_optional_id_schema,
+                    "index": {"type": "integer", "minimum": PAINT_ACTION_PATH_INDEX_MIN},
+                    "operation": {"type": "string", "enum": ["add", "delete", "move", "corner", "smooth"]},
+                    "point": path_point_pair_schema,
+                    "in_handle": path_handle_pair_schema,
+                    "out_handle": path_handle_pair_schema,
+                },
+                required=("index", "operation"),
+            ),
+            "allOf": [
+                {
+                    "if": {"properties": {"operation": {"enum": ["add", "move"]}}},
+                    "then": {"required": ["point"]},
+                },
+                {
+                    "if": {"properties": {"operation": {"enum": ["add", "delete", "corner"]}}},
+                    "then": {
+                        "not": {
+                            "anyOf": [
+                                {"required": ["in_handle"]},
+                                {"required": ["out_handle"]},
+                            ]
+                        }
+                    },
+                },
+                {
+                    "if": {"properties": {"operation": {"const": "delete"}}},
+                    "then": {"not": {"required": ["point"]}},
+                },
+            ],
+        }, undo_label="Edit Painter path anchor", dry_summary="Painter path anchor would be edited",
     )
     for action_name, method_name, description, schema in (
-        ("paint.path.duplicate", "paint_path_duplicate", "Duplicate a saved Painter path.", schema_object({"path_id": {"type": "string"}})),
-        ("paint.path.rename", "paint_path_rename", "Rename a saved Painter path.", schema_object({"path_id": {"type": "string"}, "name": {"type": "string", "minLength": 1}}, required=("name",))),
-        ("paint.path.reorder", "paint_path_reorder", "Move a saved Painter path to a new path-stack index.", schema_object({"path_id": {"type": "string"}, "index": {"type": "integer", "minimum": 0}}, required=("index",))),
-        ("paint.path.fill", "paint_path_fill", "Fill a closed saved Painter path on the active raster layer.", schema_object({"path_id": {"type": "string"}, "color": {"type": "string"}})),
-        ("paint.path.stroke", "paint_path_stroke", "Stroke a saved Painter path onto the active raster layer.", schema_object({"path_id": {"type": "string"}, "color": {"type": "string"}, "width_px": {"type": "number", "minimum": 0.1, "maximum": 4096.0}})),
+        ("paint.path.duplicate", "paint_path_duplicate", "Duplicate a saved Painter path.", schema_object({"path_id": path_optional_id_schema})),
+        ("paint.path.rename", "paint_path_rename", "Rename a saved Painter path.", schema_object({"path_id": path_optional_id_schema, "name": {"type": "string", "minLength": PAINT_ACTION_PATH_NAME_MIN_CHARACTERS, "pattern": r".*\S.*"}}, required=("name",))),
+        ("paint.path.reorder", "paint_path_reorder", "Move a saved Painter path to a new path-stack index.", schema_object({"path_id": path_optional_id_schema, "index": {"type": "integer", "minimum": PAINT_ACTION_PATH_INDEX_MIN}}, required=("index",))),
+        ("paint.path.fill", "paint_path_fill", "Fill a closed saved Painter path on the active raster layer.", schema_object({"path_id": path_optional_id_schema, "color": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}})),
+        ("paint.path.stroke", "paint_path_stroke", "Stroke a saved Painter path onto the active raster layer.", schema_object({"path_id": path_optional_id_schema, "color": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}, "width_px": {"type": "number", "minimum": PAINT_ACTION_STROKE_MIN_WIDTH_PX, "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX}})),
     ):
         registry.register_adapter_action(
             action_name, description, "paint", method_name,
@@ -4638,6 +5319,20 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Paste Painter content",
         dry_summary="Painter clipboard content would be pasted",
     )
+    editor_object_locator_not_both = {
+        "not": {
+            "allOf": [
+                {
+                    "required": ["object_id"],
+                    "properties": {"object_id": {"pattern": r".*\S.*"}},
+                },
+                {
+                    "required": ["kind"],
+                    "properties": {"kind": {"pattern": r".*\S.*"}},
+                },
+            ]
+        }
+    }
     registry.register_adapter_action(
         "paint.editor_objects.list",
         "List editor typography, AR/PBR, and actor objects importable into Paint.",
@@ -4659,16 +5354,19 @@ def register_paint_actions(registry: Any) -> None:
         "Render one editor object to a Paint-import PNG without placing it.",
         "paint",
         "paint_editor_object_render",
-        params_schema=schema_object(
-            {
-                "object_id": {"type": "string"},
-                "kind": {"type": "string"},
-                "time_ms": {"type": "integer", "minimum": 0},
-                "include_inactive": {"type": "boolean"},
-                "output_dir": {"type": "string"},
-                "force": {"type": "boolean"},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "object_id": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "time_ms": {"type": "integer", "minimum": 0},
+                    "include_inactive": {"type": "boolean"},
+                    "output_dir": {"type": "string"},
+                    "force": {"type": "boolean"},
+                }
+            ),
+            **editor_object_locator_not_both,
+        },
         mutating=False,
         changed=False,
         dry_summary="editor object poster would be rendered for Paint",
@@ -4678,37 +5376,51 @@ def register_paint_actions(registry: Any) -> None:
         "Import one editor object into Paint as a movable sticker layer.",
         "paint",
         "paint_editor_object_import",
-        params_schema=schema_object(
-            {
+        params_schema={
+            **schema_object(
+                {
                 "object_id": {"type": "string"},
                 "kind": {"type": "string"},
                 "time_ms": {"type": "integer", "minimum": 0},
                 "include_inactive": {"type": "boolean"},
-                "x_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "y_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "width_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                "height_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x_norm": {"type": "number", "minimum": 0.0, "maximum": PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM},
+                "y_norm": {"type": "number", "minimum": 0.0, "maximum": PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM},
+                "width_norm": {"type": "number", "minimum": PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM, "maximum": 1.0},
+                "height_norm": {"type": "number", "minimum": PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM, "maximum": 1.0},
                 "output_dir": {"type": "string"},
                 "force": {"type": "boolean"},
-                "metadata": any_object,
-            }
-        ),
+                }
+            ),
+            **editor_object_locator_not_both,
+        },
         undo_label="Import editor object into Paint",
         dry_summary="editor object would be imported into Paint as a sticker layer",
     )
     reference_params = {
-        "reference_id": {"type": "string"},
-        "path": {"type": "string"},
-        "name": {"type": "string"},
-        "x_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "y_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "width_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
-        "height_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
-        "opacity": {"type": "number", "minimum": 0.05, "maximum": 1.0},
-        "rotation_deg": {"type": "number", "minimum": -180.0, "maximum": 180.0},
+        "reference_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+        "path": {"type": "string", "pattern": r".*\S.*"},
+        "name": {"type": "string", "maxLength": REFERENCE_NAME_MAX_CHARACTERS},
+        "x_norm": {"type": "number", "minimum": REFERENCE_POSITION_MIN_NORM, "maximum": REFERENCE_POSITION_MAX_NORM},
+        "y_norm": {"type": "number", "minimum": REFERENCE_POSITION_MIN_NORM, "maximum": REFERENCE_POSITION_MAX_NORM},
+        "width_norm": {"type": "number", "minimum": REFERENCE_SIZE_MIN_NORM, "maximum": REFERENCE_SIZE_MAX_NORM},
+        "height_norm": {"type": "number", "minimum": REFERENCE_SIZE_MIN_NORM, "maximum": REFERENCE_SIZE_MAX_NORM},
+        "opacity": {"type": "number", "minimum": REFERENCE_OPACITY_MIN, "maximum": REFERENCE_OPACITY_MAX},
+        "rotation_deg": {"type": "number", "minimum": REFERENCE_ROTATION_MIN_DEGREES, "maximum": REFERENCE_ROTATION_MAX_DEGREES},
         "visible": {"type": "boolean"},
         "locked": {"type": "boolean"},
     }
+    reference_target_id_schema = {
+        "type": "string",
+        "minLength": REFERENCE_TARGET_ID_MIN_CHARACTERS,
+        "pattern": r".*\S.*",
+    }
+    reference_add_params = {
+        key: value for key, value in reference_params.items() if key != "reference_id"
+    }
+    reference_update_params = {
+        key: value for key, value in reference_params.items() if key != "path"
+    }
+    reference_update_params["reference_id"] = reference_target_id_schema
     registry.register_adapter_action(
         "paint.reference.state",
         "Read the active Painter reference board without changing paint layers.",
@@ -4724,7 +5436,7 @@ def register_paint_actions(registry: Any) -> None:
         "Add a non-destructive reference image to the Painter board.",
         "paint",
         "paint_reference_add",
-        params_schema=schema_object(reference_params, required=("path",)),
+        params_schema=schema_object(reference_add_params, required=("path",)),
         undo_label="Add Painter reference image",
         dry_summary="Painter reference image would be added",
     )
@@ -4733,7 +5445,16 @@ def register_paint_actions(registry: Any) -> None:
         "Update position, size, opacity, visibility, or label for a Painter reference image.",
         "paint",
         "paint_reference_update",
-        params_schema=schema_object(reference_params, required=("reference_id",)),
+        params_schema={
+            **schema_object(reference_update_params, required=("reference_id",)),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "name", "x_norm", "y_norm", "width_norm", "height_norm",
+                    "opacity", "rotation_deg", "visible", "locked",
+                )
+            ],
+        },
         undo_label="Update Painter reference image",
         dry_summary="Painter reference image would be updated",
     )
@@ -4742,7 +5463,7 @@ def register_paint_actions(registry: Any) -> None:
         "Delete a Painter reference image from the reference board.",
         "paint",
         "paint_reference_delete",
-        params_schema=schema_object({"reference_id": {"type": "string"}}, required=("reference_id",)),
+        params_schema=schema_object({"reference_id": reference_target_id_schema}, required=("reference_id",)),
         undo_label="Delete Painter reference image",
         dry_summary="Painter reference image would be deleted",
     )
@@ -4753,7 +5474,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint_reference_duplicate",
         params_schema=schema_object(
             {
-                "reference_id": {"type": "string"},
+                "reference_id": reference_target_id_schema,
                 "offset_x": {"type": "number"},
                 "offset_y": {"type": "number"},
             },
@@ -4767,7 +5488,7 @@ def register_paint_actions(registry: Any) -> None:
         "Bake a selected Painter reference into an exportable sticker layer.",
         "paint",
         "paint_reference_bake",
-        params_schema=schema_object({"reference_id": {"type": "string"}}),
+        params_schema=schema_object({"reference_id": reference_params["reference_id"]}),
         undo_label="Bake Painter reference image",
         dry_summary="Painter reference image would be baked into an exportable sticker layer",
     )
@@ -4925,28 +5646,39 @@ def register_paint_actions(registry: Any) -> None:
         changed=False,
         dry_summary="Painter study quality gates would be reported",
     )
+    blockout_preview_size = {
+        "preview_width": {
+            "type": "integer",
+            "minimum": PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+            "maximum": PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+        },
+        "preview_height": {
+            "type": "integer",
+            "minimum": PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+            "maximum": PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+        },
+    }
     blockout_primitive = {
-        "primitive_id": {"type": "string"},
+        "primitive_id": {"type": "string", "minLength": 1},
         "kind": {
             "type": "string",
             "enum": ["box", "sphere", "cylinder", "cone", "plane", "arch"],
         },
         "name": {"type": "string"},
-        "x": {"type": "number"},
-        "y": {"type": "number"},
-        "z": {"type": "number"},
-        "rx": {"type": "number"},
-        "ry": {"type": "number"},
-        "rz": {"type": "number"},
-        "sx": {"type": "number", "minimum": 0.001},
-        "sy": {"type": "number", "minimum": 0.001},
-        "sz": {"type": "number", "minimum": 0.001},
-        "color": {"type": "string"},
-        "opacity": {"type": "number", "minimum": 0.05, "maximum": 1.0},
+        "x": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "y": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "z": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "rx": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "ry": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "rz": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "sx": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "sy": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "sz": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "opacity": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_OPACITY_MIN, "maximum": BLOCKOUT_PRIMITIVE_OPACITY_MAX},
         "wireframe": {"type": "boolean"},
         "locked": {"type": "boolean"},
-        "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-        "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+        **blockout_preview_size,
     }
     registry.register_adapter_action(
         "paint.3d_blockout.state",
@@ -4955,8 +5687,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_state",
         params_schema=schema_object(
             {
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                **blockout_preview_size,
             }
         ),
         mutating=False,
@@ -4988,9 +5719,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_delete",
         params_schema=schema_object(
             {
-                "primitive_id": {"type": "string"},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "primitive_id": {"type": "string", "minLength": 1},
+                **blockout_preview_size,
             },
             required=("primitive_id",),
         ),
@@ -5004,12 +5734,11 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_duplicate",
         params_schema=schema_object(
             {
-                "primitive_id": {"type": "string"},
+                "primitive_id": {"type": "string", "minLength": 1},
                 "offset_x": {"type": "number"},
                 "offset_y": {"type": "number"},
                 "offset_z": {"type": "number"},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                **blockout_preview_size,
             },
             required=("primitive_id",),
         ),
@@ -5023,9 +5752,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_align_ground",
         params_schema=schema_object(
             {
-                "primitive_id": {"type": "string"},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "primitive_id": {"type": "string", "minLength": 1},
+                **blockout_preview_size,
             },
             required=("primitive_id",),
         ),
@@ -5037,14 +5765,16 @@ def register_paint_actions(registry: Any) -> None:
         "Enable/disable blockout grid snapping or snap a selected primitive to the current grid.",
         "paint",
         "paint_3d_blockout_snap",
-        params_schema=schema_object(
-            {
-                "enabled": {"type": "boolean"},
-                "primitive_id": {"type": "string"},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                    "enabled": {"type": "boolean"},
+                    "primitive_id": {"type": "string", "minLength": 1},
+                    **blockout_preview_size,
+                }
+            ),
+            "anyOf": [{"required": ["enabled"]}, {"required": ["primitive_id"]}],
+        },
         undo_label="Set Painter 3D blockout snap",
         dry_summary="Painter 3D blockout snap would be changed",
     )
@@ -5053,19 +5783,60 @@ def register_paint_actions(registry: Any) -> None:
         "Adjust the Painter 3D blockout camera orbit, pan, zoom distance, or FOV.",
         "paint",
         "paint_3d_blockout_camera",
-        params_schema=schema_object(
-            {
-                "yaw_degrees": {"type": "number"},
-                "pitch_degrees": {"type": "number"},
-                "distance": {"type": "number", "minimum": 0.25},
-                "target_x": {"type": "number"},
-                "target_y": {"type": "number"},
-                "target_z": {"type": "number"},
-                "fov_degrees": {"type": "number", "minimum": 15.0, "maximum": 90.0},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
-            }
-        ),
+        params_schema={
+            **schema_object(
+                {
+                "yaw_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_YAW_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+                },
+                "pitch_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_PITCH_MAX_DEGREES,
+                },
+                "distance": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_MIN_DISTANCE,
+                    "maximum": BLOCKOUT_CAMERA_MAX_DISTANCE,
+                },
+                "target_x": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "target_y": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "target_z": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "fov_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+                },
+                **blockout_preview_size,
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "yaw_degrees",
+                    "pitch_degrees",
+                    "distance",
+                    "target_x",
+                    "target_y",
+                    "target_z",
+                    "fov_degrees",
+                )
+            ],
+        },
         undo_label="Adjust Painter 3D blockout camera",
         dry_summary="Painter 3D blockout camera would be adjusted",
     )
@@ -5074,19 +5845,27 @@ def register_paint_actions(registry: Any) -> None:
         "Adjust the Painter blockout lit-white material, shadows, and directional light.",
         "paint",
         "paint_3d_blockout_material_preview",
-        params_schema=schema_object(
-            {
+        params_schema={
+            **schema_object(
+                {
                 "material_lit": {"type": "boolean"},
                 "show_floor": {"type": "boolean"},
                 "show_shadows": {"type": "boolean"},
                 "show_fog": {"type": "boolean"},
                 "show_depth": {"type": "boolean"},
-                "light_yaw_degrees": {"type": "number", "minimum": -180.0, "maximum": 180.0},
-                "light_pitch_degrees": {"type": "number", "minimum": 5.0, "maximum": 85.0},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
-            }
-        ),
+                "light_yaw_degrees": {"type": "number", "minimum": BLOCKOUT_LIGHT_YAW_MIN_DEGREES, "maximum": BLOCKOUT_LIGHT_YAW_MAX_DEGREES},
+                "light_pitch_degrees": {"type": "number", "minimum": BLOCKOUT_LIGHT_PITCH_MIN_DEGREES, "maximum": BLOCKOUT_LIGHT_PITCH_MAX_DEGREES},
+                **blockout_preview_size,
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "material_lit", "show_floor", "show_shadows", "show_fog",
+                    "show_depth", "light_yaw_degrees", "light_pitch_degrees",
+                )
+            ],
+        },
         undo_label="Adjust Painter 3D blockout material preview",
         dry_summary="Painter 3D blockout material preview would be adjusted",
     )
@@ -5097,9 +5876,8 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_camera_preset",
         params_schema=schema_object(
             {
-                "preset": {"type": "string", "enum": ["front", "side", "top", "perspective"]},
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preset": {"type": "string", "enum": list(BLOCKOUT_CAMERA_PRESETS)},
+                **blockout_preview_size,
             },
             required=("preset",),
         ),
@@ -5113,8 +5891,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint_3d_blockout_bake",
         params_schema=schema_object(
             {
-                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
-                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+                **blockout_preview_size,
             }
         ),
         undo_label="Bake Painter 3D blockout",
@@ -5125,13 +5902,13 @@ def register_paint_actions(registry: Any) -> None:
         "Export the current Paint overlays as a PNG from the editor window.",
         "paint",
         "paint_export_png",
-        params_schema=schema_object(
+        params_schema=_paint_optional_export_size_schema(
             {
                 "path": {"type": "string"},
                 "mode": {"type": "string", "enum": ["composited", "overlay", "transparent_overlay"]},
                 "time_ms": {"type": "integer", "minimum": 0},
-                "width": {"type": "integer", "minimum": 0},
-                "height": {"type": "integer", "minimum": 0},
+                "width": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
             }
         ),
         mutating=False,
@@ -5192,7 +5969,11 @@ def register_paint_actions(registry: Any) -> None:
                     ],
                 },
                 "preview_shape": {"type": "string", "enum": ["plane", "sphere"]},
-                "width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINT_ACTION_PBR_PREVIEW_MIN_PX,
+                    "maximum": PAINT_ACTION_PBR_PREVIEW_MAX_PX,
+                },
                 "settings": pbr_settings,
                 "allow_cpu": {
                     "type": "boolean",

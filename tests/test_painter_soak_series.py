@@ -90,6 +90,43 @@ def test_three_run_envelope_rejects_any_unresolved_positive_late_retention(tmp_p
     assert "one-growing" in " ".join(mixed["failures"])
 
 
+def test_working_set_residency_growth_is_reported_but_not_called_private_retention(
+    tmp_path: Path,
+) -> None:
+    from app.painter_soak_series import evaluate_three_run_envelope
+
+    rows = _rows(tmp_path)
+    for _path, payload in rows:
+        for index, sample in enumerate(payload["samples"]):
+            sample["working_set_bytes"] += index
+        resource = payload["summary"]["resources"]["working_set_bytes"]
+        resource.update(
+            last=resource["first"] + 999.0,
+            max=resource["first"] + 999.0,
+            delta=999.0,
+            linear_slope_per_hour=499.5,
+        )
+
+    report = evaluate_three_run_envelope(rows)
+
+    assert report["passed"] is True
+    assert all(
+        row["positive_late_growth"]
+        for row in report["retention_reviews"]["working_set_bytes"]
+    )
+    contract = report["retention_acceptance_contract"]
+    assert contract["blocking_resources"] == ["private_usage_bytes"]
+    assert contract["observational_non_blocking_resources"] == [
+        "working_set_bytes"
+    ]
+    assert (
+        contract["windows_memory_semantics"]["working_set_bytes"][
+            "acceptance_role"
+        ]
+        == "observational_non_blocking"
+    )
+
+
 def test_three_run_envelope_rejects_too_few_or_duplicate_runs(tmp_path: Path) -> None:
     from app.painter_soak_series import evaluate_three_run_envelope
 

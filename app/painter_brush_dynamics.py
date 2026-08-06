@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import colorsys
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -11,13 +12,20 @@ from typing import Any, Iterable
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
+from app.painter_brush_domains import (
+    BRUSH_DETAIL_DEFAULTS,
+    BRUSH_WIDTH_DEFAULT_PX,
+    normalize_brush_detail_integer,
+    normalize_brush_width_px,
+)
+
 
 BRUSH_DYNAMICS_DEFAULTS: dict[str, object] = {
     "enabled": False,
     "flow": 100,
     "buildup": 0,
     "stabilization": 0,
-    "pressure_curve": [[0.0, 0.0], [0.25, 0.18], [0.5, 0.5], [0.75, 0.82], [1.0, 1.0]],
+    "pressure_curve": [[0.0, 0.0], [1.0, 1.0]],
     "pressure_min": 0,
     "pressure_max": 100,
     "scatter": 0,
@@ -66,7 +74,10 @@ BRUSH_DYNAMICS_MODEL_CONTRACT: dict[str, object] = {
     "physical_media_claim": False,
     "driver_latency_claim": False,
     "external_brush_engine_parity_claim": False,
-    "smudge_sample_radius_px_domain": [0, 32],
+    "smudge_radius_behavior": "authored_percentage_without_hidden_pixel_cap",
+    "smudge_exact_enumeration_radius_max_px": 32,
+    "smudge_large_radius_axis_samples": 17,
+    "smudge_large_radius_sample_capacity": 289,
     "max_scatter_copies_per_path_sample": 16,
     "max_materialized_dabs_per_stroke": 8192,
     "dab_budget_behavior": "uniform_full_path_resampling_with_explicit_workload_diagnostic",
@@ -80,6 +91,9 @@ BRUSH_DYNAMICS_MODEL_CONTRACT: dict[str, object] = {
 }
 
 PAINTER_DYNAMIC_DAB_BUDGET = 8192
+SMUDGE_EXACT_RADIUS_MAX_PX = 32
+SMUDGE_LARGE_RADIUS_AXIS_SAMPLES = 17
+UINT64_MAX = (1 << 64) - 1
 
 _PERCENT_KEYS = {
     "flow", "buildup", "stabilization", "pressure_min", "pressure_max",
@@ -149,7 +163,11 @@ def normalize_brush_dynamics(values: dict[str, object] | None = None) -> dict[st
         except (TypeError, ValueError, OverflowError):
             result[key] = int(default)
             normalization_errors.append(f"{key} must be finite numeric percent")
-    result["pressure_max"] = max(int(result["pressure_min"]) + 1, int(result["pressure_max"]))
+    result["pressure_min"] = min(99, int(result["pressure_min"]))
+    result["pressure_max"] = max(
+        int(result["pressure_min"]) + 1,
+        min(100, int(result["pressure_max"])),
+    )
     try:
         result["scatter_count"] = max(
             1, min(8, int(result.get("scatter_count", 1) or 1))
@@ -169,7 +187,7 @@ def normalize_brush_dynamics(values: dict[str, object] | None = None) -> dict[st
         result[key] = bool(result.get(key, False))
     for key in ("dual_brush_seed", "noise_seed"):
         try:
-            result[key] = int(result.get(key, 0) or 0) & ((1 << 64) - 1)
+            result[key] = int(result.get(key, 0) or 0) & UINT64_MAX
         except (TypeError, ValueError, OverflowError):
             result[key] = 0
             normalization_errors.append(f"{key} must be an integer")
@@ -231,7 +249,7 @@ def normalize_pressure_curve(points: object) -> list[list[float]]:
         clean.append([1.0, 1.0])
     deduped: list[list[float]] = []
     for row in clean:
-        if deduped and abs(deduped[-1][0] - row[0]) < 1e-9:
+        if deduped and deduped[-1][0] == row[0]:
             deduped[-1] = row
         else:
             deduped.append(row)
@@ -245,12 +263,12 @@ def map_pressure(value: float, settings: dict[str, object]) -> float:
 
 def _map_pressure_normalized(value: float, cfg: dict[str, object]) -> float:
     low = float(cfg["pressure_min"]) / 100.0
-    high = max(low + 0.01, float(cfg["pressure_max"]) / 100.0)
+    high = float(cfg["pressure_max"]) / 100.0
     x = max(0.0, min(1.0, (float(value) - low) / (high - low)))
     curve = cfg["pressure_curve"]
     for left, right in zip(curve, curve[1:]):
         if x <= right[0]:
-            amount = (x - left[0]) / max(1e-9, right[0] - left[0])
+            amount = (x - left[0]) / (right[0] - left[0])
             return max(0.0, min(1.0, left[1] * (1.0 - amount) + right[1] * amount))
     return float(curve[-1][1])
 
@@ -264,7 +282,7 @@ def stabilize_points(
     amount = max(0.0, min(1.0, float(strength)))
     if amount <= 0.0:
         return rows
-    alpha = max(0.08, 1.0 - amount * 0.9)
+    alpha = 1.0 - amount
     out = [rows[0]]
     for (px, py), (x, y) in zip(rows, rows[1:]):
         # Use the previous authored sample rather than the previous filtered
@@ -293,7 +311,16 @@ def _curve(values: object, count: int, default: float) -> list[float]:
 
 
 def _noise(seed: int, index: int, channel: int) -> float:
-    return math.sin(seed * 0.173 + index * 12.9898 + channel * 78.233) * 0.5 + 0.5
+    payload = b"".join(
+        int(value & UINT64_MAX).to_bytes(8, "little", signed=False)
+        for value in (seed, index, channel)
+    )
+    digest = hashlib.blake2b(
+        payload,
+        digest_size=8,
+        person=b"TigerDab",
+    ).digest()
+    return int.from_bytes(digest, "little", signed=False) / UINT64_MAX
 
 
 def _dynamic_dab_plan(stroke: Any, width: int, height: int) -> dict[str, object]:
@@ -309,12 +336,30 @@ def _dynamic_dab_plan(stroke: Any, width: int, height: int) -> dict[str, object]
     tilt_y = _curve(getattr(stroke, "point_tilt_y", []), len(points), 0.0)
     rotation = _curve(getattr(stroke, "point_rotation", []), len(points), 0.5)
     barrel = _curve(getattr(stroke, "point_tangential_pressure", []), len(points), 0.0)
-    base_width = max(0.5, float(getattr(stroke, "width_px", 4.0) or 4.0))
-    spacing = max(0.7, base_width * max(0.01, float(getattr(stroke, "brush_spacing", 25))) / 100.0)
-    count = min(
-        16,
-        int(cfg["scatter_count"])
-        * (1 + int(round(float(cfg["buildup"]) / 34.0))),
+    try:
+        base_width = normalize_brush_width_px(
+            getattr(stroke, "width_px", BRUSH_WIDTH_DEFAULT_PX)
+        )
+    except (TypeError, ValueError):
+        base_width = BRUSH_WIDTH_DEFAULT_PX
+    try:
+        spacing_percent = normalize_brush_detail_integer(
+            getattr(stroke, "brush_spacing", BRUSH_DETAIL_DEFAULTS["spacing"]),
+            field="spacing",
+        )
+    except (TypeError, ValueError):
+        spacing_percent = int(BRUSH_DETAIL_DEFAULTS["spacing"])
+    try:
+        roundness_percent = normalize_brush_detail_integer(
+            getattr(stroke, "brush_roundness", BRUSH_DETAIL_DEFAULTS["roundness"]),
+            field="roundness",
+        )
+    except (TypeError, ValueError):
+        roundness_percent = int(BRUSH_DETAIL_DEFAULTS["roundness"])
+    spacing = base_width * spacing_percent / 100.0
+    scatter_count = int(cfg["scatter_count"])
+    count = scatter_count + int(
+        round(scatter_count * float(cfg["buildup"]) / 100.0)
     )
     segment_distances = [
         math.hypot(
@@ -356,6 +401,7 @@ def _dynamic_dab_plan(stroke: Any, width: int, height: int) -> dict[str, object]
         "rotation": rotation,
         "barrel": barrel,
         "base_width": base_width,
+        "roundness": roundness_percent / 100.0,
         "count": count,
         "segment_distances": segment_distances,
         "max_path_samples": max_path_samples,
@@ -383,6 +429,7 @@ def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float |
     rotation = list(plan["rotation"])
     barrel = list(plan["barrel"])
     base_width = float(plan["base_width"])
+    roundness = float(plan["roundness"])
     count = int(plan["count"])
     segment_distances = list(plan["segment_distances"])
     max_path_samples = int(plan["max_path_samples"])
@@ -425,7 +472,7 @@ def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float |
             samples = [samples[index] for index in sample_indices]
         workload_degraded = True
     try:
-        seed = int(getattr(stroke, "brush_seed", 0) or 0) & ((1 << 64) - 1)
+        seed = int(getattr(stroke, "brush_seed", 0) or 0) & UINT64_MAX
     except (TypeError, ValueError, OverflowError):
         seed = 0
     base_rgb = tuple(int(v) for v in getattr(stroke, "color", (255, 50, 50)))
@@ -437,29 +484,32 @@ def dynamic_dabs(stroke: Any, width: int, height: int) -> list[dict[str, float |
         for copy_index in range(count):
             index = sample_index * count + copy_index
             a = _noise(seed, index, 1) * math.tau
-            radius = (_noise(seed, index, 2) ** 0.55) * base_width * float(cfg["scatter"]) / 100.0
+            radius = math.sqrt(_noise(seed, index, 2)) * base_width * float(cfg["scatter"]) / 100.0
             size_jitter = (2.0 * _noise(seed, index, 3) - 1.0) * float(cfg["size_jitter"]) / 100.0
             tilt_amount = math.hypot(tx, ty) * float(cfg["tilt_size"]) / 100.0
-            dab_size = base_width * max(0.08, (0.18 + local_pressure * 0.82) * (1.0 + size_jitter + tilt_amount))
+            dab_size = base_width * max(
+                0.0,
+                local_pressure * (1.0 + size_jitter + tilt_amount),
+            )
             texture = 1.0 - float(cfg["texture_strength"]) / 100.0 * _noise(
-                seed, int(index * max(0.1, float(cfg["texture_scale"]) / 100.0)), 4
+                seed, int(index * float(cfg["texture_scale"]) / 100.0), 4
             )
             flow = float(cfg["flow"]) / 100.0 * float(cfg["transfer_flow"]) / 100.0
             flow *= float(cfg["transfer_opacity"]) / 100.0
             flow *= 1.0 + max(0.0, tangential) * float(cfg["barrel_flow"]) / 100.0
-            alpha = max(0.0, min(1.0, flow * texture * (0.25 + local_pressure * 0.75)))
+            alpha = max(0.0, min(1.0, flow * texture * local_pressure))
             hue = (h + (2.0 * _noise(seed, index, 5) - 1.0) * float(cfg["hue_jitter"]) / 360.0) % 1.0
             sat = max(0.0, min(1.0, s + (2.0 * _noise(seed, index, 6) - 1.0) * float(cfg["saturation_jitter"]) / 100.0))
             val = max(0.0, min(1.0, v + (2.0 * _noise(seed, index, 7) - 1.0) * float(cfg["value_jitter"]) / 100.0))
             rgb = tuple(int(round(channel * 255.0)) for channel in colorsys.hsv_to_rgb(hue, sat, val))
             angle = float(getattr(stroke, "brush_angle", 0.0))
-            angle += math.degrees(math.atan2(ty, tx)) * float(cfg["tilt_angle"]) / 100.0 if abs(tx) + abs(ty) > 1e-6 else 0.0
+            angle += math.degrees(math.atan2(ty, tx)) * float(cfg["tilt_angle"]) / 100.0 if tx != 0.0 or ty != 0.0 else 0.0
             angle += (rot - 0.5) * 360.0 * float(cfg["rotation_angle"]) / 100.0
             result.append({
                 "x": x * width + math.cos(a) * radius,
                 "y": y * height + math.sin(a) * radius,
                 "size": dab_size,
-                "roundness": max(0.1, float(getattr(stroke, "brush_roundness", 100)) / 100.0),
+                "roundness": roundness,
                 "angle": angle,
                 "alpha": alpha,
                 "pressure": local_pressure,
@@ -497,22 +547,20 @@ def _sample_radius_color(
 ) -> QColor:
     if not isinstance(image, QImage) or image.isNull():
         return QColor(fallback)
-    radius = max(0, min(32, int(round(float(radius_px)))))
+    radius = max(0, int(round(float(radius_px))))
     center_x = max(0, min(image.width() - 1, int(round(x))))
     center_y = max(0, min(image.height() - 1, int(round(y))))
     if radius <= 0:
         return _sample_color(image, center_x, center_y, fallback)
     red = green = blue = alpha = count = 0
-    radius_squared = radius * radius
-    for py in range(max(0, center_y - radius), min(image.height(), center_y + radius + 1)):
-        for px in range(max(0, center_x - radius), min(image.width(), center_x + radius + 1)):
-            if (px - center_x) ** 2 + (py - center_y) ** 2 > radius_squared:
-                continue
-            color = image.pixelColor(px, py)
-            if color.alpha() <= 0:
-                continue
-            red += color.red(); green += color.green(); blue += color.blue(); alpha += color.alpha()
-            count += 1
+    for px, py in _smudge_sample_pixels(
+        image.width(), image.height(), center_x, center_y, radius
+    ):
+        color = image.pixelColor(px, py)
+        if color.alpha() <= 0:
+            continue
+        red += color.red(); green += color.green(); blue += color.blue(); alpha += color.alpha()
+        count += 1
     if not count:
         return QColor(fallback)
     return QColor(
@@ -521,6 +569,39 @@ def _sample_radius_color(
         int(round(blue / count)),
         int(round(alpha / count)),
     )
+
+
+def _smudge_sample_pixels(
+    width: int,
+    height: int,
+    center_x: int,
+    center_y: int,
+    radius: int,
+) -> list[tuple[int, int]]:
+    """Cover the authored radius with exact or bounded deterministic samples."""
+
+    radius = max(0, int(radius))
+    radius_squared = radius * radius
+    if radius <= SMUDGE_EXACT_RADIUS_MAX_PX:
+        return [
+            (px, py)
+            for py in range(max(0, center_y - radius), min(height, center_y + radius + 1))
+            for px in range(max(0, center_x - radius), min(width, center_x + radius + 1))
+            if (px - center_x) ** 2 + (py - center_y) ** 2 <= radius_squared
+        ]
+    axis_last = SMUDGE_LARGE_RADIUS_AXIS_SAMPLES - 1
+    pixels: set[tuple[int, int]] = set()
+    for row in range(SMUDGE_LARGE_RADIUS_AXIS_SAMPLES):
+        py = center_y - radius + int(round(2 * radius * row / axis_last))
+        if py < 0 or py >= height:
+            continue
+        for column in range(SMUDGE_LARGE_RADIUS_AXIS_SAMPLES):
+            px = center_x - radius + int(round(2 * radius * column / axis_last))
+            if px < 0 or px >= width:
+                continue
+            if (px - center_x) ** 2 + (py - center_y) ** 2 <= radius_squared:
+                pixels.add((px, py))
+    return sorted(pixels, key=lambda point: (point[1], point[0]))
 
 
 def _mix_color(first: QColor, second: QColor, second_amount: float) -> QColor:
@@ -625,7 +706,7 @@ def paint_dynamic_stroke(
                 previous_position = (x, y)
             opacity = base_opacity * float(dab["alpha"])
             if mode in {"smudge", "pickup"}:
-                opacity *= max(0.08, float(cfg["pickup"]) / 100.0)
+                opacity *= float(cfg["pickup"]) / 100.0
             dab_color.setAlphaF(max(0.0, min(1.0, opacity)))
             painter.save()
             painter.translate(QPointF(float(dab["x"]), float(dab["y"])))

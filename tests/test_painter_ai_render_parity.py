@@ -98,3 +98,92 @@ def test_png_overlay_uses_canvas_bristle_renderer_for_material_oil() -> None:
     assert green > 170
     assert blue > 70
     assert alpha > 230
+
+
+def test_legacy_frame_burn_in_uses_exact_canonical_pressure_load_renderer() -> None:
+    _app()
+    from PIL import Image
+    from app.drawing import (
+        Stroke,
+        compose_pil_frame_with_overlays,
+        compose_pil_paint_overlays,
+    )
+
+    stroke = Stroke(
+        points=[(0.15, 0.50), (0.50, 0.50), (0.85, 0.50)],
+        color=(244, 215, 107),
+        opacity=255,
+        width_px=30,
+        brush_style="impasto_oil",
+        brush_engine_version=2,
+        bristle_count=18,
+        material_enabled=True,
+        point_pressure=[0.2, 1.0, 0.4],
+        point_load=[1.0, 0.5, 0.1],
+    )
+    frame = Image.new("RGBA", (320, 180), (0, 0, 0, 0))
+    canonical = compose_pil_paint_overlays(
+        strokes=[stroke],
+        time_ms=0,
+        frame_size=frame.size,
+    )
+    burned = compose_pil_frame_with_overlays(frame, [stroke], [], 0)
+
+    assert burned.tobytes() == canonical.tobytes()
+
+    changed = Stroke(**{
+        **stroke.__dict__,
+        "point_pressure": [1.0, 1.0, 1.0],
+        "point_load": [0.0, 0.0, 0.0],
+    })
+    changed_burned = compose_pil_frame_with_overlays(frame, [changed], [], 0)
+    assert changed_burned.tobytes() != burned.tobytes()
+
+
+def test_gif_composed_frames_preserves_canonical_scale_time_and_source_stroke() -> None:
+    _app()
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from app.drawing import Stroke, compose_pil_paint_overlays
+    from app.gif_editor_window import GifEditorWindow
+
+    stroke = Stroke(
+        points=[(0.20, 0.50), (0.80, 0.50)],
+        color=(80, 160, 240),
+        opacity=255,
+        width_px=12,
+        brush_style="impasto_oil",
+        brush_engine_version=2,
+        bristle_count=10,
+        material_enabled=True,
+        point_pressure=[0.4, 0.9],
+        point_load=[1.0, 0.2],
+        start_ms=100,
+        end_ms=200,
+    )
+    frames = [
+        Image.new("RGBA", (256, 1440), (0, 0, 0, 0)),
+        Image.new("RGBA", (256, 1440), (0, 0, 0, 0)),
+    ]
+    holder = SimpleNamespace(
+        _frames=frames,
+        _strokes=[stroke],
+        _bubbles=[],
+        _stickers=[],
+        _subtitle_panel=SimpleNamespace(subtitles=lambda: []),
+        _get_fps=lambda: 10,
+    )
+
+    composed = GifEditorWindow._composed_frames(holder)
+    canonical_at_100 = compose_pil_paint_overlays(
+        strokes=[stroke],
+        time_ms=100,
+        frame_size=frames[1].size,
+        stroke_width_scale=2.0,
+    )
+
+    assert composed[0].getbbox() is None
+    assert composed[1].tobytes() == canonical_at_100.tobytes()
+    assert stroke.width_px == 12

@@ -42,6 +42,16 @@ def test_brush_dynamics_contract_separates_replay_from_physical_claims() -> None
     assert BRUSH_DYNAMICS_MODEL_CONTRACT["physical_media_claim"] is False
     assert BRUSH_DYNAMICS_MODEL_CONTRACT["driver_latency_claim"] is False
     assert BRUSH_DYNAMICS_MODEL_CONTRACT["external_brush_engine_parity_claim"] is False
+    assert BRUSH_DYNAMICS_MODEL_CONTRACT["smudge_radius_behavior"] == (
+        "authored_percentage_without_hidden_pixel_cap"
+    )
+    assert BRUSH_DYNAMICS_MODEL_CONTRACT[
+        "smudge_exact_enumeration_radius_max_px"
+    ] == 32
+    assert BRUSH_DYNAMICS_MODEL_CONTRACT["smudge_large_radius_axis_samples"] == 17
+    assert BRUSH_DYNAMICS_MODEL_CONTRACT[
+        "smudge_large_radius_sample_capacity"
+    ] == 289
 
 
 def test_advanced_texture_mapping_normalization_rejects_nonfinite_serialized_values() -> None:
@@ -101,6 +111,159 @@ def test_corrupt_dynamic_scalars_and_negative_seed_fallback_with_diagnostics() -
         "sampled_rgba rejected 1 invalid rows",
     ]
     assert _render(normalized)
+
+
+def test_pressure_window_remains_inside_published_percent_domain() -> None:
+    from app.painter_brush_dynamics import map_pressure, normalize_brush_dynamics
+
+    collapsed_high = normalize_brush_dynamics(
+        {"pressure_min": 100, "pressure_max": 100}
+    )
+    reversed_window = normalize_brush_dynamics(
+        {"pressure_min": 80, "pressure_max": 20}
+    )
+
+    assert collapsed_high["pressure_min"] == 99
+    assert collapsed_high["pressure_max"] == 100
+    assert reversed_window["pressure_min"] == 80
+    assert reversed_window["pressure_max"] == 81
+    assert map_pressure(0.99, collapsed_high) == 0.0
+    assert map_pressure(1.0, collapsed_high) == 1.0
+
+
+def test_default_pressure_and_stabilization_have_exact_linear_endpoints() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_dynamics import (
+        dynamic_dabs,
+        map_pressure,
+        stabilize_points,
+    )
+
+    assert map_pressure(0.0, {}) == 0.0
+    assert map_pressure(0.25, {}) == 0.25
+    assert map_pressure(1.0, {}) == 1.0
+    assert stabilize_points(
+        [(0.0, 0.0), (0.4, 0.8), (0.9, 0.3)], 1.0
+    ) == [(0.0, 0.0), (0.0, 0.0), (0.4, 0.8)]
+
+    no_pressure = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        width_px=20,
+        brush_spacing=25,
+        brush_dynamics={"enabled": True},
+        point_pressure=[0.0, 0.0],
+    )
+    dabs = dynamic_dabs(no_pressure, 200, 64)
+    assert dabs
+    assert all(float(dab["size"]) == 0.0 for dab in dabs)
+    assert all(float(dab["alpha"]) == 0.0 for dab in dabs)
+
+
+def test_buildup_doubles_declared_scatter_count_at_full_endpoint() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_dynamics import dynamic_dabs
+
+    def count_for(buildup: int) -> int:
+        stroke = Stroke(
+            points=[(0.5, 0.5)],
+            width_px=10,
+            brush_dynamics={
+                "enabled": True,
+                "scatter_count": 8,
+                "buildup": buildup,
+            },
+        )
+        return len(dynamic_dabs(stroke, 64, 64))
+
+    assert count_for(0) == 8
+    assert count_for(100) == 16
+
+
+def test_declared_spacing_size_jitter_and_texture_zero_reach_dab_engine() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_dynamics import dynamic_dab_workload, dynamic_dabs
+
+    minimum_domain = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        width_px=0,
+        brush_spacing=0,
+        brush_dynamics={"enabled": True},
+    )
+    assert dynamic_dab_workload(minimum_domain, 100, 32)[
+        "requested_spacing_px"
+    ] == 0.01
+
+    malformed_width = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        width_px="not-a-width",
+        brush_spacing=25,
+        brush_dynamics={"enabled": True},
+    )
+    assert dynamic_dab_workload(malformed_width, 100, 32)[
+        "requested_spacing_px"
+    ] == 1.5
+
+    zero_texture_scale = Stroke(
+        points=[(0.1, 0.5), (0.9, 0.5)],
+        width_px=10,
+        brush_spacing=100,
+        brush_seed=73,
+        brush_dynamics={
+            "enabled": True,
+            "texture_strength": 100,
+            "texture_scale": 0,
+        },
+        point_pressure=[1.0, 1.0],
+    )
+    texture_alphas = {
+        round(float(dab["alpha"]), 12)
+        for dab in dynamic_dabs(zero_texture_scale, 400, 32)
+    }
+    assert len(texture_alphas) == 1
+
+    full_size_jitter = Stroke(
+        points=[(0.0, 0.5), (1.0, 0.5)],
+        width_px=10,
+        brush_spacing=1,
+        brush_seed=17,
+        brush_dynamics={"enabled": True, "size_jitter": 100},
+        point_pressure=[1.0, 1.0],
+    )
+    jitter_sizes = [
+        float(dab["size"])
+        for dab in dynamic_dabs(full_size_jitter, 800, 32)
+    ]
+    assert min(jitter_sizes) < 0.08 * 10
+
+
+def test_large_smudge_radius_covers_authored_radius_with_bounded_samples() -> None:
+    from PySide6.QtGui import QColor, QImage
+    from app.painter_brush_dynamics import (
+        SMUDGE_LARGE_RADIUS_AXIS_SAMPLES,
+        _sample_radius_color,
+        _smudge_sample_pixels,
+    )
+
+    extent = 241
+    center = extent // 2
+    image = QImage(extent, extent, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("#2468D8"))
+    for y in range(extent):
+        for x in range(extent):
+            if (x - center) ** 2 + (y - center) ** 2 <= 32**2:
+                image.setPixelColor(x, y, QColor("#D83224"))
+
+    near = _sample_radius_color(image, center, center, 32, QColor("black"))
+    wide = _sample_radius_color(image, center, center, 100, QColor("black"))
+    samples = _smudge_sample_pixels(extent, extent, center, center, 100)
+
+    assert near.blue() == 0x24
+    assert wide.blue() > near.blue()
+    assert len(samples) <= SMUDGE_LARGE_RADIUS_AXIS_SAMPLES**2
+    assert any(
+        (x - center) ** 2 + (y - center) ** 2 > 32**2
+        for x, y in samples
+    )
 
 
 def test_engine_v2_dynamic_render_is_invariant_to_collinear_input_tessellation() -> None:
@@ -240,6 +403,19 @@ def test_smudge_mixer_pickup_use_underlying_canvas_color() -> None:
     mixer = _render({"mode": "mixer", "mix": 50}, background="#2877C8")
     pickup = _render({"mode": "pickup", "pickup": 45}, background="#2877C8")
     assert len({paint, smudge, mixer, pickup}) == 4
+
+
+def test_zero_pickup_is_exact_no_deposit_endpoint() -> None:
+    background = "#2877C8"
+
+    assert _render(
+        {"mode": "pickup", "pickup": 0},
+        background=background,
+    ) == _render({"mode": "paint", "flow": 0}, background=background)
+    assert _render(
+        {"mode": "smudge", "pickup": 0},
+        background=background,
+    ) == _render({"mode": "paint", "flow": 0}, background=background)
 
 
 def _render_smudge_response(

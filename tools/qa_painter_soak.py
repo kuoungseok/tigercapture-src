@@ -42,7 +42,11 @@ def main() -> int:
     from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
     from app.painter_evidence_contract import evidence_record
     from app.painter_native_environment import environment_overrides, is_native_qt_environment
-    from app.painter_runtime_metrics import resource_sample, summarize_runtime_samples
+    from app.painter_runtime_metrics import (
+        BoundedLatencySampler,
+        resource_sample,
+        summarize_runtime_samples,
+    )
 
     app = QApplication.instance() or QApplication([])
     dialog = PaintDialog(
@@ -57,8 +61,14 @@ def main() -> int:
     dialog._painter_recovery_timer.stop()
     app.processEvents()
 
-    samples = []
-    latencies = []
+    samples_path = root / "resource_samples.ndjson"
+
+    def record_resource_sample(row: dict) -> None:
+        with samples_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+            handle.write("\n")
+
+    latencies = BoundedLatencySampler(seed=0)
     operation_errors = []
     operation_count = 0
     cycle_count = 0
@@ -98,7 +108,7 @@ def main() -> int:
                 gc.collect()
                 cycle_count += 1
             app.processEvents()
-            latencies.append((time.perf_counter() - op_started) * 1000.0)
+            latencies.add((time.perf_counter() - op_started) * 1000.0)
         except Exception as exc:
             operation_errors.append({
                 "operation": operation_count,
@@ -108,7 +118,7 @@ def main() -> int:
         operation_count += 1
         now = time.perf_counter()
         if now >= next_sample:
-            samples.append(resource_sample(
+            record_resource_sample(resource_sample(
                 elapsed_seconds=now - started,
                 operation_count=operation_count,
                 cycle_count=cycle_count,
@@ -118,12 +128,18 @@ def main() -> int:
             time.sleep(interval)
 
     ended = time.perf_counter()
-    samples.append(resource_sample(
+    record_resource_sample(resource_sample(
         elapsed_seconds=ended - started,
         operation_count=operation_count,
         cycle_count=cycle_count,
     ))
-    summary = summarize_runtime_samples(samples, latencies)
+    samples = [
+        json.loads(line)
+        for line in samples_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    summary = summarize_runtime_samples(samples, latencies.values())
+    summary["operation_latency_sampling"] = latencies.report()
     native = is_native_qt_environment(app.platformName(), environment_overrides())
     measurement_completed = bool(native and not operation_errors and cycle_count > 0)
     # A single run has no evidence-derived leak envelope. Even a two-hour run
@@ -159,8 +175,14 @@ def main() -> int:
             "strokes_per_cycle": 100,
             "operation_count": operation_count,
             "cycle_count": cycle_count,
+            "latency_observation_count": latencies.observation_count,
         },
         "samples": samples,
+        "resource_sample_storage": {
+            "during_measurement": "append_only_ndjson",
+            "path": str(samples_path.resolve()),
+            "assembled_after_measurement": True,
+        },
         "summary": summary,
         "operation_errors": operation_errors,
         "measurement_completed": measurement_completed,

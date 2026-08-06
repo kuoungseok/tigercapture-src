@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -61,6 +63,18 @@ def test_selection_combine_and_morphology_preserve_non_rectangular_shape() -> No
     assert border.pixelColor(4, 4).alpha() > 0
 
 
+def test_selection_mask_dimensions_require_complete_positive_pairs() -> None:
+    from PySide6.QtGui import QImage
+    from app.painter_selection_mask import polygon_selection_mask, selection_mask_alpha8
+
+    mask = QImage(8, 8, QImage.Format.Format_Alpha8)
+    mask.fill(0)
+    with pytest.raises(ValueError, match="selection width must be positive"):
+        polygon_selection_mask(0, 8, [])
+    with pytest.raises(ValueError, match="selection mask height must be positive"):
+        selection_mask_alpha8(mask, 8, 0)
+
+
 def test_selection_expand_honors_radius_above_pillow_single_filter_limit() -> None:
     from PIL import Image
     from PySide6.QtGui import QImage
@@ -72,3 +86,27 @@ def test_selection_expand_honors_radius_above_pillow_single_filter_limit() -> No
     mask = QImage(payload, 320, 320, 320, QImage.Format.Format_Alpha8).copy()
     expanded = modify_selection_mask(mask, "expand", 120)
     assert selection_mask_bounds(expanded) == (40, 40, 281, 281)
+
+
+def test_selection_mask_modify_rejects_invalid_inputs_before_pillow() -> None:
+    from PySide6.QtGui import QImage
+    from app.painter_output import PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT
+    from app.painter_selection_mask import modify_selection_mask
+
+    mask = QImage(8, 8, QImage.Format.Format_Alpha8)
+    mask.fill(0)
+    invalid_calls = (
+        ("grow", 1),
+        ("feather", True),
+        ("feather", float("nan")),
+        ("feather", float("inf")),
+        ("feather", 0.0),
+        ("feather", -1.0),
+        ("feather", PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT + 1),
+        ("expand", 1.5),
+        ("contract", 0),
+        ("border", PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT + 1),
+    )
+    for operation, radius in invalid_calls:
+        with pytest.raises((TypeError, ValueError)):
+            modify_selection_mask(mask, operation, radius)

@@ -1,6 +1,6 @@
 # Tiger Studio Painter Native Document
 
-Status: implemented v3; v1/v2 migration supported
+Status: implemented v5; v1/v2/v3/v4 migration supported
 
 ## Purpose
 
@@ -12,8 +12,8 @@ non-destructive construction state used to continue the work.
 ## Container
 
 - Extension: `.tspaint`
-- Schema: `tigerstudio.painter.document.v3` (v1/v2 documents migrate on open)
-- Current format version: `3`
+- Schema: `tigerstudio.painter.document.v5` (v1/v2/v3/v4 documents migrate on open)
+- Current format version: `5`
 - Container: ZIP with `document.json` plus embedded assets
 - Save: atomic temporary-file replacement
 - Load: version/schema validation, safe archive paths, asset size limits, and
@@ -34,7 +34,11 @@ remains the durable source.
 - complete editable strokes, including brush style, pressure, X/Y tilt,
   rotation, tangential pressure, load, bristle seed/count, and material values
 - Wet Canvas enabled state, Mix, Bleed, Pickup, dry duration, and elapsed time
-- selection geometry/inversion/mode, Quick Mask, channels, and Work Path
+- selection geometry/inversion/mode, temporary Quick Mask state boundary,
+  component/transparency channel view state, exact named Alpha8 saved-selection
+  channels, their stable identities, `masked_areas`/`selected_areas` display
+  semantics, appearance-only `#RRGGBB` overlay color and integer 0..100 overlay
+  opacity, and Work Path. v4 saved channels migrate to `masked_areas`, red, 50%.
 - active/selected layer, selected channel/path, grid, mirror, zoom, and pan
 - editable 1/2/3-point perspective ruler state, off-canvas vanishing points,
   and the separate brush-snap toggle

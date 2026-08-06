@@ -55,6 +55,10 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
     out = tmp_path / "blockout_preview.png"
     assert image.save(str(out))
     assert out.exists()
+    with pytest.raises(ValueError, match="viewport width must be positive"):
+        project_blockout_scene(scene, 0, 360)
+    with pytest.raises(TypeError, match="viewport height must be an integer"):
+        render_blockout_scene_qimage(scene, 320, 180.5)
 
 
 def test_painter_opengl_status_is_remote_safe() -> None:
@@ -239,9 +243,9 @@ def test_retained_compositors_release_resources_when_rendering_fails() -> None:
         painter_opengl.PainterOpenGLUnavailable,
         match="no GPU texture handle",
     ):
-        painter_opengl.PainterRetainedGLTileUploader.composite_tile_records(
-            tiles, [(0, 0, missing)], 32, 24, 16
-        )
+            painter_opengl.PainterRetainedGLTileUploader.composite_tile_records(
+                tiles, [(0, 0, missing)], 32, 24, 32
+            )
     assert tiles.fbos[0].releases == 1
 
 
@@ -456,7 +460,7 @@ def test_painter_canvas_stroke_atlas_reuses_signature(monkeypatch) -> None:
     assert report_2["readback"] is False
 
 
-def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None:
+def test_painter_3d_blockout_crud_validates_inputs_and_rejects_duplicate_ids() -> None:
     from app.painter_3d_blockout import (
         add_blockout_primitive,
         align_blockout_primitive_to_ground,
@@ -469,12 +473,23 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
         update_blockout_primitive,
     )
 
+    for invalid in (
+        {"kind": "unknown"},
+        {"color": "bad"},
+        {"opacity": 9.0},
+        {"x": float("nan")},
+        {"sx": 0.001},
+        {"wireframe": 1},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            add_blockout_primitive(default_blockout_scene(), **invalid)
+
     scene = add_blockout_primitive(
         default_blockout_scene(),
         primitive_id="blockout:room",
-        kind="unknown",
-        color="bad",
-        opacity=9.0,
+        kind="box",
+        color="#F2F2F2",
+        opacity=1.0,
     )
     primitive = scene.to_dict()["primitives"][0]
     assert primitive["kind"] == "box"
@@ -515,9 +530,18 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
 
     scene = set_blockout_snap(scene, True)
     assert scene.to_dict()["snap_to_grid"] is True
+    with pytest.raises(TypeError):
+        set_blockout_snap(scene, 1)
+    for invalid_step in (True, 0.0, float("nan"), float("inf")):
+        with pytest.raises((TypeError, ValueError)):
+            snap_blockout_primitive_to_grid(
+                scene, "blockout:room", grid_size=invalid_step
+            )
 
     scene = apply_blockout_camera_preset(scene, "top")
     assert scene.to_dict()["camera"]["pitch_degrees"] == -82.0
+    with pytest.raises((TypeError, ValueError)):
+        apply_blockout_camera_preset(scene, "right")
 
     scene = delete_blockout_primitive(scene, "blockout:room")
     assert scene.to_dict()["primitive_count"] == 1
@@ -536,6 +560,48 @@ def test_malformed_custom_blockout_ids_do_not_claim_generated_index() -> None:
         next_index=2,
     ).normalized()
     assert scene.next_index == 8
+
+
+def test_blockout_malformed_primitive_and_light_restore_is_finite_and_bounded() -> None:
+    import json
+
+    from app.painter_3d_blockout import (
+        BLOCKOUT_LIGHT_PITCH_MAX_DEGREES,
+        BLOCKOUT_LIGHT_YAW_MIN_DEGREES,
+        BLOCKOUT_PRIMITIVE_POSITION_MAX,
+        BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES,
+        BLOCKOUT_PRIMITIVE_SCALE_MAX,
+        blockout_scene_from_dict,
+        project_blockout_scene,
+    )
+
+    scene = blockout_scene_from_dict(
+        {
+            "primitives": [{
+                "id": "blockout:1",
+                "position": [1e308, float("nan"), float("inf")],
+                "rotation": [float("-inf"), -1e308, "bad"],
+                "scale": [1e308, float("nan"), -1e308],
+                "opacity": float("nan"),
+                "color": "#GGGGGG",
+                "kind": "torus",
+            }],
+            "grid_size": float("nan"),
+            "light_yaw_degrees": -1e308,
+            "light_pitch_degrees": 1e308,
+        }
+    )
+    payload = scene.to_dict()
+    primitive = payload["primitives"][0]
+    assert primitive["position"] == [BLOCKOUT_PRIMITIVE_POSITION_MAX, 0.0, 0.0]
+    assert primitive["rotation"] == [0.0, BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, 0.0]
+    assert primitive["scale"] == [BLOCKOUT_PRIMITIVE_SCALE_MAX, 1.0, BLOCKOUT_PRIMITIVE_SCALE_MAX]
+    assert primitive["color"] == "#F2F2F2"
+    assert primitive["kind"] == "box"
+    assert payload["light_yaw_degrees"] == BLOCKOUT_LIGHT_YAW_MIN_DEGREES
+    assert payload["light_pitch_degrees"] == BLOCKOUT_LIGHT_PITCH_MAX_DEGREES
+    json.dumps(payload, allow_nan=False)
+    json.dumps(project_blockout_scene(scene, 640, 360), allow_nan=False)
 
 
 def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:
@@ -559,6 +625,140 @@ def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:
     assert abs(world[2]) < 0.0001
 
 
+def test_blockout_camera_direct_update_is_strict_but_restore_is_finite() -> None:
+    import json
+
+    from app.painter_3d_blockout import (
+        BLOCKOUT_CAMERA_DEFAULT_DISTANCE,
+        BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES,
+        BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES,
+        BLOCKOUT_CAMERA_DEFAULT_TARGET,
+        BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES,
+        BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+        BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+        BLOCKOUT_CAMERA_MAX_DISTANCE,
+        BLOCKOUT_CAMERA_MIN_DISTANCE,
+        BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+        BLOCKOUT_CAMERA_TARGET_MAX,
+        BLOCKOUT_CAMERA_TARGET_MIN,
+        BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+        add_blockout_primitive,
+        blockout_scene_from_dict,
+        default_blockout_scene,
+        project_blockout_scene,
+        update_blockout_camera,
+    )
+
+    for payload in (
+        {},
+        {"yaw_degrees": True},
+        {"yaw_degrees": float("nan")},
+        {"distance": float("inf")},
+        {"target_x": float("-inf")},
+        {"target_x": 1e308},
+        {"distance": 1e308},
+        {"fov_degrees": float("nan")},
+        {"yaw": 1.0, "yaw_degrees": 2.0},
+        {"unknown": 1.0},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            update_blockout_camera(default_blockout_scene(), **payload)
+
+    restored = blockout_scene_from_dict(
+        {
+            "camera": {
+                "yaw_degrees": float("nan"),
+                "pitch_degrees": True,
+                "distance": float("inf"),
+                "target": [float("inf"), False, "bad"],
+                "fov_degrees": float("nan"),
+            }
+        }
+    ).to_dict()
+    assert restored["camera"] == {
+        "yaw_degrees": BLOCKOUT_CAMERA_DEFAULT_YAW_DEGREES,
+        "pitch_degrees": BLOCKOUT_CAMERA_DEFAULT_PITCH_DEGREES,
+        "distance": BLOCKOUT_CAMERA_DEFAULT_DISTANCE,
+        "target": list(BLOCKOUT_CAMERA_DEFAULT_TARGET),
+        "fov_degrees": BLOCKOUT_CAMERA_DEFAULT_FOV_DEGREES,
+    }
+    json.dumps(restored, allow_nan=False)
+
+    extreme_restore = blockout_scene_from_dict(
+        {
+            "camera": {
+                "yaw_degrees": 1e308,
+                "pitch_degrees": -1e308,
+                "distance": 1e308,
+                "target": [1e308, -1e308, 1e308],
+                "fov_degrees": 42.0,
+            }
+        }
+    )
+    extreme_camera = extreme_restore.to_dict()["camera"]
+    assert extreme_camera["yaw_degrees"] == BLOCKOUT_CAMERA_YAW_MAX_DEGREES
+    assert extreme_camera["pitch_degrees"] == BLOCKOUT_CAMERA_PITCH_MIN_DEGREES
+    assert extreme_camera["distance"] == BLOCKOUT_CAMERA_MAX_DISTANCE
+    assert extreme_camera["target"] == [
+        BLOCKOUT_CAMERA_TARGET_MAX,
+        BLOCKOUT_CAMERA_TARGET_MIN,
+        BLOCKOUT_CAMERA_TARGET_MAX,
+    ]
+    json.dumps(
+        project_blockout_scene(
+            add_blockout_primitive(extreme_restore, kind="box"), 8192, 8192
+        ),
+        allow_nan=False,
+    )
+
+    clamped_restore = blockout_scene_from_dict(
+        {
+            "camera": {
+                "yaw_degrees": 0.0,
+                "pitch_degrees": 0.0,
+                "distance": -100.0,
+                "target": [0.0, 0.0, 0.0],
+                "fov_degrees": 999.0,
+            }
+        }
+    ).to_dict()["camera"]
+    assert clamped_restore["distance"] == BLOCKOUT_CAMERA_MIN_DISTANCE
+    assert clamped_restore["fov_degrees"] == BLOCKOUT_CAMERA_FOV_MAX_DEGREES
+    assert clamped_restore["yaw_degrees"] == 0.0
+    assert clamped_restore["target"] == [0.0, 0.0, 0.0]
+
+    endpoints = update_blockout_camera(
+        default_blockout_scene(),
+        yaw_degrees=0.0,
+        pitch_degrees=0.0,
+        distance=BLOCKOUT_CAMERA_MIN_DISTANCE,
+        target_x=0.0,
+        target_y=0.0,
+        target_z=0.0,
+        fov_degrees=BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+    ).to_dict()["camera"]
+    assert endpoints["fov_degrees"] == BLOCKOUT_CAMERA_FOV_MIN_DEGREES
+    assert endpoints["target"] == [0.0, 0.0, 0.0]
+    assert update_blockout_camera(
+        default_blockout_scene(),
+        fov_degrees=BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+    ).to_dict()["camera"]["fov_degrees"] == BLOCKOUT_CAMERA_FOV_MAX_DEGREES
+
+    endpoint_scene = add_blockout_primitive(default_blockout_scene(), kind="box")
+    for camera_update in (
+        {"yaw_degrees": BLOCKOUT_CAMERA_YAW_MAX_DEGREES},
+        {"pitch_degrees": BLOCKOUT_CAMERA_PITCH_MIN_DEGREES},
+        {"distance": BLOCKOUT_CAMERA_MAX_DISTANCE},
+        {"target_x": BLOCKOUT_CAMERA_TARGET_MAX},
+        {"target_y": BLOCKOUT_CAMERA_TARGET_MIN},
+        {"target_z": BLOCKOUT_CAMERA_TARGET_MAX},
+    ):
+        projected = project_blockout_scene(
+            update_blockout_camera(endpoint_scene, **camera_update), 8192, 8192
+        )
+        json.dumps(projected, allow_nan=False)
+
+
 def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QEvent, QPoint, Qt
@@ -566,6 +766,14 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     from PySide6.QtWidgets import QApplication
 
     from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.painter_3d_blockout import (
+        BLOCKOUT_CAMERA_DEFAULT_TARGET,
+        BLOCKOUT_CAMERA_MAX_DISTANCE,
+        BLOCKOUT_CAMERA_TARGET_MAX,
+        BLOCKOUT_CAMERA_TARGET_MIN,
+        apply_blockout_camera_preset,
+        update_blockout_camera,
+    )
 
     app = QApplication.instance() or QApplication([])
     dialog = PaintDialog(
@@ -584,6 +792,32 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     assert dialog._blockout_transform_buttons["move"].isChecked()
     assert dialog._paint_3d_blockout_panel.isHidden()
     assert dialog._blockout_canvas_shape_palette.isVisible()
+
+    boundary_camera = update_blockout_camera(
+        dialog._current_3d_blockout_scene(),
+        target_x=BLOCKOUT_CAMERA_TARGET_MAX,
+        target_y=BLOCKOUT_CAMERA_TARGET_MAX,
+        target_z=BLOCKOUT_CAMERA_TARGET_MAX,
+        distance=BLOCKOUT_CAMERA_MAX_DISTANCE,
+    )
+    dialog._store_3d_blockout_scene(boundary_camera)
+    dialog._nudge_3d_blockout_camera(Qt.Key.Key_W)
+    dialog._zoom_3d_blockout_camera(-120)
+    bounded_camera = dialog._current_3d_blockout_scene().camera
+    assert BLOCKOUT_CAMERA_TARGET_MIN <= bounded_camera.target[0] <= BLOCKOUT_CAMERA_TARGET_MAX
+    assert BLOCKOUT_CAMERA_TARGET_MIN <= bounded_camera.target[1] <= BLOCKOUT_CAMERA_TARGET_MAX
+    assert BLOCKOUT_CAMERA_TARGET_MIN <= bounded_camera.target[2] <= BLOCKOUT_CAMERA_TARGET_MAX
+    assert bounded_camera.distance == BLOCKOUT_CAMERA_MAX_DISTANCE
+    dialog._store_3d_blockout_scene(
+        update_blockout_camera(
+            apply_blockout_camera_preset(
+                dialog._current_3d_blockout_scene(), "perspective"
+            ),
+            target_x=BLOCKOUT_CAMERA_DEFAULT_TARGET[0],
+            target_y=BLOCKOUT_CAMERA_DEFAULT_TARGET[1],
+            target_z=BLOCKOUT_CAMERA_DEFAULT_TARGET[2],
+        )
+    )
     assert dialog._blockout_scene_menu_btn.isVisible()
     scene_menu = dialog._build_3d_blockout_scene_menu()
     assert [action.text() for action in scene_menu.actions()] == [

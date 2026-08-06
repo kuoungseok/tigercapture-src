@@ -5,6 +5,19 @@ import os
 import pytest
 
 
+def test_rounded_dab_uses_exact_capsule_geometry_without_pixel_caps() -> None:
+    from app.painter_stroke_geometry import rounded_dab_corner_radius
+
+    assert rounded_dab_corner_radius(40.0, 30.0) == 15.0
+    assert rounded_dab_corner_radius(0.25, 0.1) == 0.05
+    for values in ((0, 1), (1, 0), (-1, 1)):
+        with pytest.raises(ValueError, match="positive"):
+            rounded_dab_corner_radius(*values)
+    for values in ((True, 1), (1, "bad")):
+        with pytest.raises(TypeError):
+            rounded_dab_corner_radius(*values)
+
+
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
@@ -268,16 +281,20 @@ def test_action_smoothing_rejects_noninteger_sampling_controls() -> None:
         smooth_action_points(controls[:2], samples_per_segment=8.5)
 
 
-def test_gpu_canvas_payload_and_signature_retain_stylus_dynamics() -> None:
+def test_gpu_canvas_only_accepts_semantically_mapped_default_round_strokes() -> None:
+    import pytest
+
     from app.drawing import Stroke
     from app.painter_opengl import (
+        PainterOpenGLUnavailable,
         _collect_canvas_gpu_strokes,
         canvas_stroke_gpu_signature,
     )
 
     stroke = Stroke(
         points=[(0.1, 0.5), (0.9, 0.5)],
-        width_px=20,
+        width_px=1.0,
+        opacity=0,
         point_pressure=[0.2, 1.0],
         point_tilt_x=[0.5, -0.5],
         point_tilt_y=[-0.25, 0.25],
@@ -291,8 +308,10 @@ def test_gpu_canvas_payload_and_signature_retain_stylus_dynamics() -> None:
         layer_opacity={},
         layer_masks={},
     )[0]
-    assert payload["dynamic_widths"][0] < payload["dynamic_widths"][1]
-    assert payload["points"][0] != (20.0, 50.0)
+    assert payload["width"] == 1.0
+    assert payload["dynamic_widths"] == []
+    assert payload["points"][0] == (20.0, 50.0)
+    assert payload["color"][3] == 0.0
 
     signature = canvas_stroke_gpu_signature(
         [stroke],
@@ -301,9 +320,91 @@ def test_gpu_canvas_payload_and_signature_retain_stylus_dynamics() -> None:
         time_ms=0,
     )
     stroke.point_pressure = [1.0, 1.0]
-    assert signature != canvas_stroke_gpu_signature(
+    assert signature == canvas_stroke_gpu_signature(
         [stroke],
         width=200,
         height=100,
         time_ms=0,
     )
+    stroke.brush_dynamics = {"enabled": True}
+    assert signature != canvas_stroke_gpu_signature(
+        [stroke], width=200, height=100, time_ms=0
+    )
+    with pytest.raises(PainterOpenGLUnavailable, match="authored brush dynamics"):
+        _collect_canvas_gpu_strokes(
+            [stroke], width=200, height=100, time_ms=0,
+            layer_visibility={}, layer_opacity={}, layer_masks={},
+        )
+    stroke.brush_dynamics = {}
+    for style in ("marker", "highlighter"):
+        stroke.brush_style = style
+        with pytest.raises(PainterOpenGLUnavailable, match="unsupported brush style"):
+            _collect_canvas_gpu_strokes(
+                [stroke], width=200, height=100, time_ms=0,
+                layer_visibility={}, layer_opacity={}, layer_masks={},
+            )
+    stroke.brush_style = "round"
+    stroke.width_px = 0.25
+    with pytest.raises(PainterOpenGLUnavailable, match="canonical CPU renderer"):
+        _collect_canvas_gpu_strokes(
+            [stroke], width=200, height=100, time_ms=0,
+            layer_visibility={}, layer_opacity={}, layer_masks={},
+        )
+    stroke.width_px = 1.0
+    stroke.points = [(-0.01, 0.5), (0.9, 0.5)]
+    with pytest.raises(PainterOpenGLUnavailable, match="stroke point 0 x"):
+        _collect_canvas_gpu_strokes(
+            [stroke], width=200, height=100, time_ms=0,
+            layer_visibility={}, layer_opacity={}, layer_masks={},
+        )
+
+
+def test_gpu_canvas_session_recreates_a_lost_context_once(monkeypatch) -> None:
+    import app.painter_opengl as painter_opengl
+
+    released: list[str] = []
+
+    class Surface:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def destroy(self) -> None:
+            released.append(f"surface:{self.name}")
+
+    class Context:
+        def __init__(self, name: str, *, active: bool) -> None:
+            self.name = name
+            self.active = active
+
+        def makeCurrent(self, _surface) -> bool:
+            return self.active
+
+        def doneCurrent(self) -> None:
+            released.append(f"context:{self.name}")
+
+    created = iter(
+        (
+            (Surface("first"), Context("first", active=False)),
+            (Surface("second"), Context("second", active=True)),
+        )
+    )
+    monkeypatch.setattr(painter_opengl, "_make_offscreen_context", lambda: next(created))
+    session = painter_opengl._PainterCanvasOffscreenSession()
+
+    first_surface, first_context = session.make_current()
+    assert first_surface.name == first_context.name == "first"
+    second_surface, second_context = session.make_current()
+    assert second_surface.name == second_context.name == "second"
+    assert released == ["context:first", "surface:first"]
+    assert session.telemetry() == {
+        "closed": False,
+        "context_creations": 2,
+        "context_activation_failures": 1,
+        "context_recoveries": 1,
+        "context_recovery_failures": 0,
+        "last_context_error": "QOpenGLContext.makeCurrent returned false",
+        "context_retained": True,
+        "surface_retained": True,
+    }
+    session.close()
+    assert released[-2:] == ["context:second", "surface:second"]

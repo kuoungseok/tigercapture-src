@@ -7,7 +7,7 @@ from typing import Iterable, Mapping
 
 def _unit(vector: tuple[float, float]) -> tuple[float, float] | None:
     length = math.hypot(float(vector[0]), float(vector[1]))
-    if length <= 1e-9:
+    if length == 0.0:
         return None
     return float(vector[0]) / length, float(vector[1]) / length
 

@@ -7,6 +7,12 @@ from collections.abc import Sequence
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from PySide6.QtGui import QImage
 
+from app.painter_dimensions import positive_integer
+
+PAINTER_COLOR_SELECTION_TOLERANCE_MIN = 0
+PAINTER_COLOR_SELECTION_TOLERANCE_MAX = 255
+PAINTER_SELECTION_MASK_FULL_VALUE = PAINTER_COLOR_SELECTION_TOLERANCE_MAX
+
 
 def _qimage_rgba(image: QImage) -> Image.Image:
     converted = image.convertToFormat(QImage.Format.Format_RGBA8888)
@@ -46,13 +52,22 @@ def _qimage_mask_to_pil(mask: QImage, width: int = 0, height: int = 0) -> Image.
         rgba = _qimage_rgba(mask)
         alpha = rgba.getchannel("A")
         image = alpha if alpha.getextrema()[0] < 255 else rgba.convert("L")
-    if width > 0 and height > 0 and image.size != (width, height):
-        image = image.resize((width, height), Image.Resampling.NEAREST)
+    if width == 0 and height == 0:
+        return image
+    target_width = positive_integer(width, field="selection mask width")
+    target_height = positive_integer(height, field="selection mask height")
+    if image.size != (target_width, target_height):
+        image = image.resize((target_width, target_height), Image.Resampling.NEAREST)
     return image
 
 
 def selection_mask_alpha8(mask: QImage, width: int = 0, height: int = 0) -> QImage:
     return _pil_mask_to_qimage(_qimage_mask_to_pil(mask, width, height))
+
+
+def selection_mask_is_full(mask: QImage) -> bool:
+    minimum, maximum = _qimage_mask_to_pil(mask).getextrema()
+    return minimum == maximum == PAINTER_SELECTION_MASK_FULL_VALUE
 
 
 def polygon_selection_mask(
@@ -62,7 +77,8 @@ def polygon_selection_mask(
     *,
     ellipse: bool = False,
 ) -> QImage:
-    width, height = max(1, int(width)), max(1, int(height))
+    width = positive_integer(width, field="selection width")
+    height = positive_integer(height, field="selection height")
     mask = Image.new("L", (width, height), 0)
     rows = [(float(x) * width, float(y) * height) for x, y in points]
     if len(rows) >= 3:
@@ -86,7 +102,10 @@ def color_selection_mask(
     source = _qimage_rgba(image)
     width, height = source.size
     x, y = max(0, min(width - 1, int(x))), max(0, min(height - 1, int(y)))
-    tolerance = max(0, min(255, int(tolerance)))
+    tolerance = max(
+        PAINTER_COLOR_SELECTION_TOLERANCE_MIN,
+        min(PAINTER_COLOR_SELECTION_TOLERANCE_MAX, int(tolerance)),
+    )
     target = source.getpixel((x, y))
 
     def matches(pixel) -> bool:
@@ -135,9 +154,14 @@ def combine_selection_masks(
 
 
 def modify_selection_mask(mask: QImage, operation: str, radius_px: float) -> QImage:
+    from app.painter_action_inputs import validate_selection_modify_action
+
+    operation, radius_px = validate_selection_modify_action(
+        operation=operation,
+        radius_px=radius_px,
+    )
     source = _qimage_mask_to_pil(mask)
     radius = max(0, int(round(float(radius_px))))
-    operation = str(operation or "feather").casefold()
     if operation == "feather":
         result = source.filter(ImageFilter.GaussianBlur(max(0.0, float(radius_px))))
     else:

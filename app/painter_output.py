@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
+
+from app.painter_dimensions import nonnegative_real, positive_integer, positive_real
 
 
 MM_PER_INCH = 25.4
@@ -21,12 +24,23 @@ class PrintPreset:
 PRINT_PRESETS: tuple[PrintPreset, ...] = (
     PrintPreset("A4 Print · 300 PPI", 210.0, 297.0),
     PrintPreset("A5 Print · 300 PPI", 148.0, 210.0),
-    PrintPreset("B5 Manga · 600 PPI", 182.0, 257.0, 600, 3.0, "line_art"),
-    PrintPreset("Postcard · 300 PPI", 100.0, 148.0),
+    PrintPreset("Manga B5 182×257 mm · 600 PPI", 182.0, 257.0, 600, 3.0, "line_art"),
+    PrintPreset("Tiger Postcard · 300 PPI", 100.0, 148.0),
     PrintPreset("A3 Poster · 300 PPI", 297.0, 420.0),
     PrintPreset("A2 Large Poster · 150 PPI", 420.0, 594.0, 150, 5.0, "large_format"),
     PrintPreset("Square 200 mm · 300 PPI", 200.0, 200.0),
 )
+
+PRINT_PRESET_MODEL_CONTRACT = {
+    "schema": "tigerstudio.painter.print_preset_model.v1",
+    "iso_216_trim_sizes": ("A2", "A3", "A4", "A5"),
+    "manga_b5_source": "clip_studio_official_182x257mm_600dpi_guidance",
+    "postcard_and_square_source": "tiger_authored_starting_presets",
+    "bleed_and_safe_margin_source": "tiger_authored_starting_values_confirm_with_printer",
+    "large_format_ppi_source": "tiger_authored_starting_value_confirm_with_printer",
+    "universal_print_quality_claim": False,
+    "universal_bleed_claim": False,
+}
 
 OUTPUT_KIND_TARGET_PPI = {
     "color": 300,
@@ -53,27 +67,53 @@ OUTPUT_KIND_TARGET_CONTRACT = {
 }
 
 PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT = 16384
+PAINTER_NEW_CANVAS_MIN_DIMENSION_PX = 64
 PAINTER_CANVAS_LIMIT_CONTRACT = {
     "source": "tiger_authored_current_runtime_capacity_not_a_qt_or_file_format_limit",
     "limit_px_per_axis": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
     "largest_native_runtime_evidence_px": [8192, 8192],
     "universal_capacity_claim": False,
 }
+PAINTER_NEW_CANVAS_DIMENSION_CONTRACT = {
+    "source": "tiger_authored_new_canvas_control_domain_not_format_limit",
+    "minimum_px_per_axis": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+    "maximum_px_per_axis": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+    "artwork_quality_threshold_claim": False,
+}
 
 
 def _number(value: Any, fallback: float) -> float:
+    if isinstance(value, bool):
+        return float(fallback)
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return float(fallback)
+    return number if math.isfinite(number) else float(fallback)
+
+
+def _boolean(value: Any, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else bool(fallback)
 
 
 def to_millimetres(value: float, unit: str) -> float:
-    return float(value) * MM_PER_INCH if str(unit).casefold() in {"in", "inch", "inches"} else float(value)
+    normalized_unit = str(unit).strip().casefold()
+    if normalized_unit not in {"mm", "in", "inch", "inches"}:
+        raise ValueError(f"Unsupported Painter print unit: {unit}")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError("Painter print dimension must be finite")
+    return number * MM_PER_INCH if normalized_unit in {"in", "inch", "inches"} else number
 
 
 def from_millimetres(value_mm: float, unit: str) -> float:
-    return float(value_mm) / MM_PER_INCH if str(unit).casefold() in {"in", "inch", "inches"} else float(value_mm)
+    normalized_unit = str(unit).strip().casefold()
+    if normalized_unit not in {"mm", "in", "inch", "inches"}:
+        raise ValueError(f"Unsupported Painter print unit: {unit}")
+    number = float(value_mm)
+    if not math.isfinite(number):
+        raise ValueError("Painter print dimension must be finite")
+    return number / MM_PER_INCH if normalized_unit in {"in", "inch", "inches"} else number
 
 
 def pixels_for_print(
@@ -85,12 +125,13 @@ def pixels_for_print(
     bleed_mm: float = 0.0,
     include_bleed: bool = True,
 ) -> tuple[int, int]:
-    width_mm = max(0.1, to_millimetres(width, unit))
-    height_mm = max(0.1, to_millimetres(height, unit))
-    bleed = max(0.0, float(bleed_mm)) if include_bleed else 0.0
+    width_mm = positive_real(to_millimetres(width, unit), field="print width")
+    height_mm = positive_real(to_millimetres(height, unit), field="print height")
+    resolved_ppi = positive_integer(ppi, field="print ppi")
+    bleed = nonnegative_real(bleed_mm, field="print bleed_mm") if include_bleed else 0.0
     return (
-        max(1, int(round((width_mm + bleed * 2.0) / MM_PER_INCH * max(1, int(ppi))))),
-        max(1, int(round((height_mm + bleed * 2.0) / MM_PER_INCH * max(1, int(ppi))))),
+        max(1, int(round((width_mm + bleed * 2.0) / MM_PER_INCH * resolved_ppi))),
+        max(1, int(round((height_mm + bleed * 2.0) / MM_PER_INCH * resolved_ppi))),
     )
 
 
@@ -102,11 +143,16 @@ def print_size_from_pixels(
     unit: str = "mm",
     bleed_mm: float = 0.0,
 ) -> tuple[float, float]:
-    safe_ppi = max(1, int(ppi))
-    full_width_mm = max(0.1, int(pixel_width)) / safe_ppi * MM_PER_INCH
-    full_height_mm = max(0.1, int(pixel_height)) / safe_ppi * MM_PER_INCH
-    trim_width_mm = max(0.1, full_width_mm - max(0.0, bleed_mm) * 2.0)
-    trim_height_mm = max(0.1, full_height_mm - max(0.0, bleed_mm) * 2.0)
+    safe_ppi = positive_integer(ppi, field="print ppi")
+    resolved_width = positive_integer(pixel_width, field="pixel width")
+    resolved_height = positive_integer(pixel_height, field="pixel height")
+    bleed = nonnegative_real(bleed_mm, field="print bleed_mm")
+    full_width_mm = resolved_width / safe_ppi * MM_PER_INCH
+    full_height_mm = resolved_height / safe_ppi * MM_PER_INCH
+    trim_width_mm = full_width_mm - bleed * 2.0
+    trim_height_mm = full_height_mm - bleed * 2.0
+    if trim_width_mm <= 0.0 or trim_height_mm <= 0.0:
+        raise ValueError("Painter print bleed must leave a positive trim size")
     return (
         from_millimetres(trim_width_mm, unit),
         from_millimetres(trim_height_mm, unit),
@@ -119,6 +165,8 @@ def normalize_output_settings(
     pixel_width: int,
     pixel_height: int,
 ) -> dict:
+    resolved_pixel_width = positive_integer(pixel_width, field="pixel width")
+    resolved_pixel_height = positive_integer(pixel_height, field="pixel height")
     source = payload if isinstance(payload, dict) else {}
     mode = str(source.get("mode") or "screen").strip().casefold()
     if mode not in {"screen", "print"}:
@@ -126,15 +174,15 @@ def normalize_output_settings(
     output_kind = str(source.get("output_kind") or "color").strip().casefold()
     if output_kind not in OUTPUT_KIND_TARGET_PPI:
         output_kind = "color"
-    include_bleed = bool(source.get("include_bleed", mode == "print"))
+    include_bleed = _boolean(source.get("include_bleed"), mode == "print")
     ppi = max(36, min(1200, int(round(_number(source.get("ppi"), 300 if mode == "print" else 96)))))
     bleed_mm = max(0.0, min(50.0, _number(source.get("bleed_mm"), 3.0 if mode == "print" else 0.0)))
     width_mm = _number(source.get("width_mm"), 0.0)
     height_mm = _number(source.get("height_mm"), 0.0)
     if width_mm <= 0.0 or height_mm <= 0.0:
         width_mm, height_mm = print_size_from_pixels(
-            pixel_width,
-            pixel_height,
+            resolved_pixel_width,
+            resolved_pixel_height,
             ppi=ppi,
             unit="mm",
             bleed_mm=bleed_mm if mode == "print" and include_bleed else 0.0,
@@ -150,10 +198,10 @@ def normalize_output_settings(
         "include_bleed": include_bleed,
         "safe_margin_mm": round(max(0.0, min(100.0, _number(source.get("safe_margin_mm"), 5.0 if mode == "print" else 0.0))), 4),
         "output_kind": output_kind,
-        "color_space": str(source.get("color_space") or "srgb"),
-        "resample": bool(source.get("resample", True)),
-        "pixel_width": max(1, int(pixel_width)),
-        "pixel_height": max(1, int(pixel_height)),
+        "color_space": "srgb",
+        "resample": _boolean(source.get("resample"), True),
+        "pixel_width": resolved_pixel_width,
+        "pixel_height": resolved_pixel_height,
     }
 
 
@@ -167,8 +215,8 @@ def effective_ppi(settings: dict, pixel_width: int, pixel_height: int) -> tuple[
     full_width_in = (normalized["width_mm"] + bleed * 2.0) / MM_PER_INCH
     full_height_in = (normalized["height_mm"] + bleed * 2.0) / MM_PER_INCH
     return (
-        max(1, int(pixel_width)) / max(0.001, full_width_in),
-        max(1, int(pixel_height)) / max(0.001, full_height_in),
+        normalized["pixel_width"] / full_width_in,
+        normalized["pixel_height"] / full_height_in,
     )
 
 

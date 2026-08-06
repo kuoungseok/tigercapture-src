@@ -202,6 +202,13 @@ not synthesized from the wet RGB result.
   Roughness.
 - `paint.material.preview.set` enables/disables the canvas material preview and
   controls light azimuth/elevation.
+  It requires at least one authored field. Azimuth is a finite real in
+  `[-180,180]` degrees and elevation is a finite real in `[5,85]` degrees;
+  enabled is an actual boolean. Empty, null, non-finite, coerced, and
+  out-of-range Action inputs fail before owner resolution, while the direct
+  dialog path validates before preview state or cache mutation. These retained
+  endpoints are Tiger inspection-light policy, not calibrated physical-light
+  or competitor-parity values.
 - `paint.wet_canvas.settings.set` controls enabled state, Mix, Bleed, Pickup,
   and Dry Time on a material layer.
 - `paint.wet_canvas.advance` advances saved drying state by an explicit number

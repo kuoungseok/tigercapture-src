@@ -7,6 +7,8 @@ from math import radians, tan
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QTransform
 
+from app.painter_dimensions import positive_integer
+
 
 @dataclass(frozen=True)
 class PixelTransform:
@@ -28,11 +30,13 @@ def selection_transform_matrix(
     height: int,
     settings: PixelTransform,
 ) -> QTransform:
-    px = float(settings.pivot_x) * max(1, int(width))
-    py = float(settings.pivot_y) * max(1, int(height))
+    target_width = positive_integer(width, field="transform width")
+    target_height = positive_integer(height, field="transform height")
+    px = float(settings.pivot_x) * target_width
+    py = float(settings.pivot_y) * target_height
     sx = float(settings.scale_x) * (-1.0 if settings.flip_x else 1.0)
     sy = float(settings.scale_y) * (-1.0 if settings.flip_y else 1.0)
-    if abs(sx) < 1e-6 or abs(sy) < 1e-6:
+    if sx == 0.0 or sy == 0.0:
         raise ValueError("Transform scale cannot be zero")
     transform = QTransform()
     transform.translate(float(settings.translate_x), float(settings.translate_y))

@@ -6,6 +6,7 @@ import hashlib
 import math
 import threading
 import dataclasses
+import operator
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from collections import OrderedDict, deque
@@ -25,6 +26,18 @@ MIN_TILE_BUDGET_MB = 1
 MAX_TILE_BUDGET_MB = 4096
 MIN_UNDO_BUDGET_MB = 1
 MAX_UNDO_BUDGET_MB = 8192
+BYTES_PER_RGBA8_PIXEL = 4
+MIB_BYTES = 1024 * 1024
+LARGE_CANVAS_CACHE_PERCENTAGES = {
+    "main_tiles": 60,
+    "brush_stamps": 10,
+    "material_maps": 20,
+    "wet_canvas": 10,
+}
+DEFAULT_MATERIAL_TASK_CAPACITY = 4096
+DEFAULT_MATERIAL_RESULT_CAPACITY = 4096
+DEFAULT_MATERIAL_WORKERS = 1
+MATERIAL_ERROR_CAPACITY = 32
 
 LARGE_CANVAS_RESOURCE_POLICY_CONTRACT = {
     "schema": "tigerstudio.painter.large_canvas_resource_policy.v1",
@@ -37,21 +50,126 @@ LARGE_CANVAS_RESOURCE_POLICY_CONTRACT = {
         "tile_budget_mb": [MIN_TILE_BUDGET_MB, MAX_TILE_BUDGET_MB],
         "undo_budget_mb": [MIN_UNDO_BUDGET_MB, MAX_UNDO_BUDGET_MB],
     },
-    "cache_shares": {
-        "main_tiles": 0.60,
-        "brush_stamps": 0.10,
-        "material_maps": 0.20,
-        "wet_canvas": 0.10,
-    },
-    "default_material_task_capacity": 4096,
-    "default_material_result_capacity": 4096,
+    "cache_percentages": dict(LARGE_CANVAS_CACHE_PERCENTAGES),
+    "default_material_task_capacity": DEFAULT_MATERIAL_TASK_CAPACITY,
+    "default_material_result_capacity": DEFAULT_MATERIAL_RESULT_CAPACITY,
+    "default_material_workers": DEFAULT_MATERIAL_WORKERS,
+    "material_error_capacity": MATERIAL_ERROR_CAPACITY,
     "performance_threshold_claim": False,
     "universal_memory_safety_claim": False,
 }
 
 
+def validate_large_canvas_configuration(
+    *,
+    tile_size: object,
+    tile_budget_mb: object,
+    undo_budget_mb: object,
+) -> tuple[int, int, int]:
+    resolved_tile_size = _strict_bounded_resource_integer(
+        tile_size,
+        field="tile_size",
+        minimum=MIN_TILE_SIZE,
+        maximum=MAX_TILE_SIZE,
+    )
+    resolved_tile_budget_mb = _strict_bounded_resource_integer(
+        tile_budget_mb,
+        field="tile_budget_mb",
+        minimum=MIN_TILE_BUDGET_MB,
+        maximum=MAX_TILE_BUDGET_MB,
+    )
+    resolved_undo_budget_mb = _strict_bounded_resource_integer(
+        undo_budget_mb,
+        field="undo_budget_mb",
+        minimum=MIN_UNDO_BUDGET_MB,
+        maximum=MAX_UNDO_BUDGET_MB,
+    )
+    required_mb = minimum_tile_budget_mb_for_tile_size(resolved_tile_size)
+    if resolved_tile_budget_mb < required_mb:
+        raise ValueError(
+            "Painter tile_budget_mb cannot retain one RGBA8 tile in every declared "
+            f"cache at tile_size={resolved_tile_size}; minimum is {required_mb} MiB"
+        )
+    return resolved_tile_size, resolved_tile_budget_mb, resolved_undo_budget_mb
+
+
+def _strict_bounded_resource_integer(
+    value: object,
+    *,
+    field: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"Painter {field} must be an integer, not bool")
+    try:
+        resolved = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"Painter {field} must be an integer") from exc
+    if not minimum <= resolved <= maximum:
+        raise ValueError(f"Painter {field} must be between {minimum} and {maximum}")
+    return resolved
+
+
+def _strict_positive_integer(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"Painter {field} must be an integer, not bool")
+    try:
+        resolved = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"Painter {field} must be an integer") from exc
+    if resolved <= 0:
+        raise ValueError(f"Painter {field} must be positive")
+    return resolved
+
+
+def _strict_nonnegative_integer(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"Painter {field} must be an integer, not bool")
+    try:
+        resolved = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"Painter {field} must be an integer") from exc
+    if resolved < 0:
+        raise ValueError(f"Painter {field} must be nonnegative")
+    return resolved
+
+
+def _strict_nonnegative_real(value: object, *, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"Painter {field} must be a real number, not bool")
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise ValueError(f"Painter {field} must be finite")
+    if resolved < 0.0:
+        raise ValueError(f"Painter {field} must be nonnegative")
+    return resolved
+
+
+def _strict_unit_real(value: object, *, field: str) -> float:
+    resolved = _strict_nonnegative_real(value, field=field)
+    if resolved > 1.0:
+        raise ValueError(f"Painter {field} must be between 0 and 1")
+    return resolved
+
+
+def minimum_tile_budget_mb_for_tile_size(tile_size: object) -> int:
+    size = _strict_bounded_resource_integer(
+        tile_size,
+        field="tile_size",
+        minimum=MIN_TILE_SIZE,
+        maximum=MAX_TILE_SIZE,
+    )
+    tile_bytes = size * size * BYTES_PER_RGBA8_PIXEL
+    smallest_percentage = min(LARGE_CANVAS_CACHE_PERCENTAGES.values())
+    required_total_bytes = math.ceil(tile_bytes * 100 / smallest_percentage)
+    return math.ceil(required_total_bytes / MIB_BYTES)
+
+
 def _rect(value: QRect | tuple[int, int, int, int] | None, width: int, height: int) -> QRect:
-    bounds = QRect(0, 0, max(1, int(width)), max(1, int(height)))
+    resolved_width = _strict_positive_integer(width, field="raster width")
+    resolved_height = _strict_positive_integer(height, field="raster height")
+    bounds = QRect(0, 0, resolved_width, resolved_height)
     if value is None:
         return bounds
     candidate = QRect(value) if isinstance(value, QRect) else QRect(*map(int, value))
@@ -62,7 +180,12 @@ def tile_coordinates(rect: QRect, width: int, height: int, tile_size: int = DEFA
     clipped = _rect(rect, width, height)
     if clipped.isEmpty():
         return []
-    size = max(MIN_TILE_SIZE, int(tile_size))
+    size = _strict_bounded_resource_integer(
+        tile_size,
+        field="tile_size",
+        minimum=MIN_TILE_SIZE,
+        maximum=MAX_TILE_SIZE,
+    )
     left, top = clipped.left() // size, clipped.top() // size
     right, bottom = clipped.right() // size, clipped.bottom() // size
     return [(tx, ty) for ty in range(top, bottom + 1) for tx in range(left, right + 1)]
@@ -87,8 +210,20 @@ class RetainedTileCache:
         gpu_uploader: Callable[[tuple[str, int, int], QImage, int], int] | None = None,
         gpu_deleter: Callable[[int], None] | None = None,
     ) -> None:
-        self.tile_size = max(MIN_TILE_SIZE, min(MAX_TILE_SIZE, int(tile_size)))
-        self.budget_bytes = max(self.tile_size * self.tile_size * 4, int(budget_bytes))
+        self.tile_size = _strict_bounded_resource_integer(
+            tile_size,
+            field="tile_size",
+            minimum=MIN_TILE_SIZE,
+            maximum=MAX_TILE_SIZE,
+        )
+        self.budget_bytes = _strict_positive_integer(
+            budget_bytes, field="tile cache budget_bytes"
+        )
+        minimum_budget = self.tile_size * self.tile_size * BYTES_PER_RGBA8_PIXEL
+        if self.budget_bytes < minimum_budget:
+            raise ValueError(
+                "Painter tile cache budget_bytes must retain at least one RGBA8 tile"
+            )
         self.gpu_uploader = gpu_uploader; self.gpu_deleter = gpu_deleter
         self._tiles: OrderedDict[tuple[str, int, int], TileRecord] = OrderedDict()
         self._layer_sizes: dict[str, tuple[int, int]] = {}
@@ -225,8 +360,9 @@ class RetainedTileCache:
 
 
 class DirtyMaterialTileQueue:
-    def __init__(self, *, max_tasks: int = 4096) -> None:
-        self.max_tasks = max(1, int(max_tasks)); self._queue: deque[tuple[str, int, int]] = deque(); self._known: set[tuple[str, int, int]] = set(); self.dropped = 0
+    def __init__(self, *, max_tasks: int = DEFAULT_MATERIAL_TASK_CAPACITY) -> None:
+        self.max_tasks = _strict_positive_integer(max_tasks, field="max_tasks")
+        self._queue: deque[tuple[str, int, int]] = deque(); self._known: set[tuple[str, int, int]] = set(); self.dropped = 0
 
     def schedule(self, kinds: Iterable[str], coordinates: Iterable[tuple[int, int]]) -> int:
         added = 0
@@ -241,7 +377,8 @@ class DirtyMaterialTileQueue:
 
     def drain(self, worker: Callable[[str, int, int], Any], *, limit: int = 32) -> list[Any]:
         output = []
-        for _ in range(min(max(0, int(limit)), len(self._queue))):
+        resolved_limit = _strict_nonnegative_integer(limit, field="material queue drain limit")
+        for _ in range(min(resolved_limit, len(self._queue))):
             task = self._queue.popleft(); self._known.discard(task); output.append(worker(*task))
         return output
 
@@ -258,13 +395,16 @@ class DirtyMaterialTileQueue:
 class MaterialTileExecutor:
     """Process actual derived-map tile bytes with revision/stale/cancel semantics."""
 
-    def __init__(self, *, max_workers: int = 1, max_results: int = 4096, processor=None) -> None:
-        self._pool = ThreadPoolExecutor(max_workers=max(1, int(max_workers)), thread_name_prefix="PainterMaterialTile")
-        self.max_results = max(1, int(max_results)); self._processor = processor or self._fingerprint
+    def __init__(self, *, max_workers: int = DEFAULT_MATERIAL_WORKERS, max_results: int = DEFAULT_MATERIAL_RESULT_CAPACITY, processor=None) -> None:
+        resolved_workers = _strict_positive_integer(max_workers, field="max_workers")
+        resolved_results = _strict_positive_integer(max_results, field="max_results")
+        self._pool = ThreadPoolExecutor(max_workers=resolved_workers, thread_name_prefix="PainterMaterialTile")
+        self.max_workers = resolved_workers
+        self.max_results = resolved_results; self._processor = processor or self._fingerprint
         self._lock = threading.RLock(); self._revision: dict[str, int] = {}; self._futures: set[Future] = set()
         self._results: OrderedDict[tuple[str, int, int], dict[str, Any]] = OrderedDict()
         self.submitted = 0; self.completed = 0; self.stale = 0; self.cancelled = 0; self.failed = 0
-        self.error_capacity = 32
+        self.error_capacity = MATERIAL_ERROR_CAPACITY
         self._recent_errors: deque[dict[str, Any]] = deque(maxlen=self.error_capacity)
 
     @staticmethod
@@ -272,7 +412,13 @@ class MaterialTileExecutor:
         return {"kind": kind, "tx": tx, "ty": ty, "revision": revision, "width": width, "height": height, "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
 
     def submit_image(self, kind: str, image: QImage, coordinates: Iterable[tuple[int, int]], tile_size: int) -> dict[str, int]:
-        target = str(kind); size = max(1, int(tile_size))
+        target = str(kind)
+        size = _strict_bounded_resource_integer(
+            tile_size,
+            field="material tile_size",
+            minimum=MIN_TILE_SIZE,
+            maximum=MAX_TILE_SIZE,
+        )
         with self._lock:
             revision = self._revision.get(target, 0) + 1; self._revision[target] = revision
         added = 0
@@ -316,9 +462,12 @@ class MaterialTileExecutor:
             return len(removed)
 
     def wait(self, timeout: float = 5.0) -> bool:
+        resolved_timeout = _strict_nonnegative_real(
+            timeout, field="material executor timeout"
+        )
         with self._lock: pending = tuple(self._futures)
         if not pending: return True
-        _done, unfinished = wait(pending, timeout=max(0.0, float(timeout)))
+        _done, unfinished = wait(pending, timeout=resolved_timeout)
         return not unfinished
 
     def close(self) -> None:
@@ -326,7 +475,7 @@ class MaterialTileExecutor:
 
     def telemetry(self) -> dict[str, Any]:
         with self._lock:
-            return {"schema": "tigerstudio.painter.material-tile-executor.v1", "pending": len(self._futures), "submitted": self.submitted, "completed": self.completed, "stale": self.stale, "cancelled": self.cancelled, "failed": self.failed, "result_count": len(self._results), "max_results": self.max_results, "bounded": len(self._results) <= self.max_results, "revisions": dict(self._revision), "recent_errors": list(self._recent_errors), "error_capacity": self.error_capacity}
+            return {"schema": "tigerstudio.painter.material-tile-executor.v1", "pending": len(self._futures), "submitted": self.submitted, "completed": self.completed, "stale": self.stale, "cancelled": self.cancelled, "failed": self.failed, "result_count": len(self._results), "max_workers": self.max_workers, "max_results": self.max_results, "bounded": len(self._results) <= self.max_results, "revisions": dict(self._revision), "recent_errors": list(self._recent_errors), "error_capacity": self.error_capacity}
 
 
 def measure_history_payload_bytes(value: Any, _seen: set[int] | None = None) -> int:
@@ -367,7 +516,12 @@ def estimate_history_bytes(value: Any, _seen: set[int] | None = None) -> int:
 
 class UndoMemoryBudget:
     def __init__(self, budget_bytes: int = DEFAULT_UNDO_BUDGET_MB * 1024 * 1024) -> None:
-        self.budget_bytes = max(1024 * 1024, int(budget_bytes)); self.evicted_states = 0; self.last_bytes = 0; self.last_count = 0
+        self.budget_bytes = _strict_positive_integer(
+            budget_bytes, field="undo budget_bytes"
+        )
+        if self.budget_bytes < MIB_BYTES:
+            raise ValueError("Painter undo budget_bytes must be at least one MiB")
+        self.evicted_states = 0; self.last_bytes = 0; self.last_count = 0
 
     def enforce(self, stack: list[Any], labels: list[str]) -> dict[str, Any]:
         sizes = [measure_history_payload_bytes(row) for row in stack]; total = sum(sizes)
@@ -386,12 +540,28 @@ class UndoMemoryBudget:
 
 class LargeCanvasRuntime:
     def __init__(self, *, tile_size: int = DEFAULT_TILE_SIZE, tile_budget_mb: int = DEFAULT_TILE_BUDGET_MB, undo_budget_mb: int = DEFAULT_UNDO_BUDGET_MB, gpu_uploader=None, gpu_deleter=None) -> None:
-        total_budget = max(3, int(tile_budget_mb)) * 1024 * 1024
-        self.tiles = RetainedTileCache(tile_size=tile_size, budget_bytes=int(total_budget * 0.60), gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
-        self.brush_stamps = RetainedTileCache(tile_size=tile_size, budget_bytes=int(total_budget * 0.10), gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
-        self.material_maps = RetainedTileCache(tile_size=tile_size, budget_bytes=int(total_budget * 0.20), gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
-        self.wet_canvas = RetainedTileCache(tile_size=tile_size, budget_bytes=int(total_budget * 0.10), gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
-        self.material_tasks = DirtyMaterialTileQueue(); self.undo = UndoMemoryBudget(int(undo_budget_mb) * 1024 * 1024)
+        tile_size, tile_budget_mb, undo_budget_mb = validate_large_canvas_configuration(
+            tile_size=tile_size,
+            tile_budget_mb=tile_budget_mb,
+            undo_budget_mb=undo_budget_mb,
+        )
+        total_budget = tile_budget_mb * MIB_BYTES
+        main_budget = total_budget * LARGE_CANVAS_CACHE_PERCENTAGES["main_tiles"] // 100
+        stamp_budget = total_budget * LARGE_CANVAS_CACHE_PERCENTAGES["brush_stamps"] // 100
+        material_budget = total_budget * LARGE_CANVAS_CACHE_PERCENTAGES["material_maps"] // 100
+        wet_budget = total_budget - main_budget - stamp_budget - material_budget
+        self.configured_tile_budget_bytes = total_budget
+        self.cache_budget_bytes = {
+            "main_tiles": main_budget,
+            "brush_stamps": stamp_budget,
+            "material_maps": material_budget,
+            "wet_canvas": wet_budget,
+        }
+        self.tiles = RetainedTileCache(tile_size=tile_size, budget_bytes=main_budget, gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
+        self.brush_stamps = RetainedTileCache(tile_size=tile_size, budget_bytes=stamp_budget, gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
+        self.material_maps = RetainedTileCache(tile_size=tile_size, budget_bytes=material_budget, gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
+        self.wet_canvas = RetainedTileCache(tile_size=tile_size, budget_bytes=wet_budget, gpu_uploader=gpu_uploader, gpu_deleter=gpu_deleter)
+        self.material_tasks = DirtyMaterialTileQueue(); self.undo = UndoMemoryBudget(undo_budget_mb * MIB_BYTES)
         self.material_executor = MaterialTileExecutor()
         self.last_update: dict[str, Any] = {}
         self.gpu_owner = gpu_uploader if hasattr(gpu_uploader, "telemetry") else getattr(gpu_uploader, "__self__", None)
@@ -515,7 +685,9 @@ class LargeCanvasRuntime:
         }
 
     def budget_plan(self, width: int, height: int, layer_count: int) -> dict[str, Any]:
-        width = max(1, int(width)); height = max(1, int(height)); layers = max(0, int(layer_count))
+        width = _strict_positive_integer(width, field="budget plan width")
+        height = _strict_positive_integer(height, field="budget plan height")
+        layers = _strict_nonnegative_integer(layer_count, field="budget plan layer_count")
         required = width * height * 4 * layers
         configured = int(self.tiles.budget_bytes)
         minimum_total = int(math.ceil(required / 0.60)) if required else 0
@@ -533,14 +705,20 @@ class LargeCanvasRuntime:
         }
 
     def composite_normal_layers(self, layers: list[tuple[QImage, float]], width: int, height: int) -> tuple[QImage, dict[str, Any]]:
+        width = _strict_positive_integer(width, field="compositor width")
+        height = _strict_positive_integer(height, field="compositor height")
+        resolved_layers = [
+            (image, _strict_unit_real(opacity, field=f"layer {index} opacity"))
+            for index, (image, opacity) in enumerate(layers)
+        ]
         if self.gpu_owner is not None and hasattr(self.gpu_owner, "composite_normal_layers"):
             try:
-                image, report = self.gpu_owner.composite_normal_layers(layers, width, height)
+                image, report = self.gpu_owner.composite_normal_layers(resolved_layers, width, height)
                 if (
                     not isinstance(image, QImage)
                     or image.isNull()
-                    or image.width() != max(1, int(width))
-                    or image.height() != max(1, int(height))
+                    or image.width() != width
+                    or image.height() != height
                 ):
                     raise RuntimeError(
                         "retained GL normal compositor returned an invalid image"
@@ -558,10 +736,10 @@ class LargeCanvasRuntime:
         else:
             fallback_reason = "retained GL compositor unavailable"
         from PySide6.QtGui import QPainter
-        result = QImage(max(1, int(width)), max(1, int(height)), QImage.Format.Format_ARGB32_Premultiplied); result.fill(0)
+        result = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied); result.fill(0)
         painter = QPainter(result)
-        for image, opacity in layers:
-            painter.setOpacity(max(0.0, min(1.0, float(opacity)))); painter.drawImage(0, 0, image)
+        for image, opacity in resolved_layers:
+            painter.setOpacity(opacity); painter.drawImage(0, 0, image)
         painter.end()
         return result, {"renderer": "painter_qpainter_normal_compositor_v1", "fallback": True, "reason": fallback_reason, "mask_policy": "preapplied_alpha", "remote_safe": True}
 
@@ -583,7 +761,7 @@ class LargeCanvasRuntime:
             if self.gpu_owner is not None and hasattr(self.gpu_owner, "telemetry")
             else {"active": self.tiles.gpu_uploader is not None, "telemetry": "callback_only" if self.tiles.gpu_uploader is not None else "unavailable"}
         )
-        return {"schema": "tigerstudio.painter.large-canvas.runtime.v1", "resource_policy_contract": dict(LARGE_CANVAS_RESOURCE_POLICY_CONTRACT), "tiles": self.tiles.telemetry(), "brush_stamp_atlas": self.brush_stamps.telemetry(), "material_map_tiles": self.material_maps.telemetry(), "wet_canvas_tiles": self.wet_canvas.telemetry(), "material_tasks": self.material_tasks.telemetry(), "material_executor": self.material_executor.telemetry(), "undo": self.undo.telemetry(), "last_update": dict(self.last_update), "display": {"render_calls": self.display_render_calls, "gpu_tile_calls": self.display_gpu_calls, "cpu_tile_calls": self.display_cpu_tile_calls, "source_fallbacks": self.display_source_fallbacks, "last": dict(self.last_display)}, "gpu": {**gpu_status, "creation_error": self.gpu_creation_error, "cleanup_error": self.gpu_cleanup_error}, "cpu_fallback": self.tiles.gpu_uploader is None, "compositor": {"gpu_normal_source_over": self.gpu_owner is not None and hasattr(self.gpu_owner, "composite_normal_layers"), "gpu_tile_display": self.gpu_owner is not None and hasattr(self.gpu_owner, "composite_tile_records"), "advanced_blend_and_mask": "qpainter_parity_fallback", "mask_policy": "preapplied_alpha", "silent_fallback": False}, "remote_safe": True}
+        return {"schema": "tigerstudio.painter.large-canvas.runtime.v1", "resource_policy_contract": dict(LARGE_CANVAS_RESOURCE_POLICY_CONTRACT), "resource_budget": {"configured_tile_budget_bytes": self.configured_tile_budget_bytes, "cache_budget_bytes": dict(self.cache_budget_bytes), "allocated_tile_budget_bytes": sum(self.cache_budget_bytes.values()), "allocation_exact": sum(self.cache_budget_bytes.values()) == self.configured_tile_budget_bytes}, "tiles": self.tiles.telemetry(), "brush_stamp_atlas": self.brush_stamps.telemetry(), "material_map_tiles": self.material_maps.telemetry(), "wet_canvas_tiles": self.wet_canvas.telemetry(), "material_tasks": self.material_tasks.telemetry(), "material_executor": self.material_executor.telemetry(), "undo": self.undo.telemetry(), "last_update": dict(self.last_update), "display": {"render_calls": self.display_render_calls, "gpu_tile_calls": self.display_gpu_calls, "cpu_tile_calls": self.display_cpu_tile_calls, "source_fallbacks": self.display_source_fallbacks, "last": dict(self.last_display)}, "gpu": {**gpu_status, "creation_error": self.gpu_creation_error, "cleanup_error": self.gpu_cleanup_error}, "cpu_fallback": self.tiles.gpu_uploader is None, "compositor": {"gpu_normal_source_over": self.gpu_owner is not None and hasattr(self.gpu_owner, "composite_normal_layers"), "gpu_tile_display": self.gpu_owner is not None and hasattr(self.gpu_owner, "composite_tile_records"), "advanced_blend_and_mask": "qpainter_parity_fallback", "mask_policy": "preapplied_alpha", "silent_fallback": False}, "remote_safe": True}
 
 
 __all__ = [
@@ -593,5 +771,6 @@ __all__ = [
     "LARGE_CANVAS_RESOURCE_POLICY_CONTRACT", "RetainedTileCache",
     "DirtyMaterialTileQueue", "MaterialTileExecutor", "UndoMemoryBudget",
     "LargeCanvasRuntime", "tile_coordinates", "estimate_history_bytes",
-    "measure_history_payload_bytes",
+    "measure_history_payload_bytes", "validate_large_canvas_configuration",
+    "minimum_tile_budget_mb_for_tile_size",
 ]
