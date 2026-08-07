@@ -1097,12 +1097,22 @@ def inspect_ui_component_set(
     value: Mapping[str, Any],
     *,
     component_id: str,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    """Report Figma-style multidimensional Variant combinations and conflicts."""
+    """Report Figma-style multidimensional Variant combinations and conflicts.
+
+    Read-only, so callers holding a canonical document can pass
+    ``normalize=False`` and skip re-deriving every row just to inspect one
+    component family.
+    """
 
     from app.painter_ui_document import normalize_ui_document
 
-    document = normalize_ui_document(value)
+    document = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
     family, members = _component_family_members(document, component_id)
     member_properties = {
         row["id"]: component_variant_properties(row) for row in members

@@ -33,6 +33,8 @@ def _normalized_panel_mode(value: Any) -> str:
 def _classification(
     document: Mapping[str, Any] | None,
     row: Mapping[str, Any] | None,
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
     """Read the adapter-owned panel decision without duplicating its policy."""
 
@@ -56,7 +58,7 @@ def _classification(
             painter_umg_auto_layout_contract,
         )
 
-        contract = painter_umg_auto_layout_contract(document)
+        contract = painter_umg_auto_layout_contract(document, normalize=normalize)
         rows = contract.get("classification_by_id")
         if isinstance(rows, Mapping):
             candidate = rows.get(object_id)
@@ -213,13 +215,14 @@ class PainterUIUMGPanelSelector(QFrame):
         row: Mapping[str, Any] | None,
         *,
         editable: bool = True,
+        normalize: bool = True,
     ) -> None:
         self._row = copy.deepcopy(dict(row or {}))
         is_container = str(self._row.get("kind") or "") in {
             "frame",
             "group",
         }
-        self._decision = _classification(document, row)
+        self._decision = _classification(document, row, normalize=normalize)
         requested = str(self._decision["requested"])
         layout_mode = str(self._decision["layout_mode"])
         self._syncing = True

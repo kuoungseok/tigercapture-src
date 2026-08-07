@@ -1403,11 +1403,31 @@ def validate_ui_document(
     }
 
 
-def inspect_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+def inspect_ui_document(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    """Report a document's canonical form plus its validation result.
+
+    ``normalize=False`` promises the caller already holds canonical output.
+    Inspection only reads, so the report then publishes that document instead
+    of cloning it - the clone alone cost half a second per action on a
+    9k-object import.
+    """
+    document = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
+    # ``normalize_ui_document`` already hands back a private document that
+    # shares nothing with ``value``, and ``validate_ui_document`` only reads it,
+    # so publishing it directly is safe. Deep-copying here cost a second full
+    # clone of the document on every action state query - 0.8s on a
+    # 9k-object import - for no isolation the caller did not already have.
     return {
         "schema": "tigerstudio.painter.ui.inspect.v1",
-        "document": copy.deepcopy(document),
+        "document": document,
         "validation": validate_ui_document(document, normalize=False),
         "active_page_id": document["active_page_id"],
         "active_artboard_id": document["active_artboard_id"],
@@ -1535,15 +1555,25 @@ def _remove_dangling_records(
     }
 
 
-def active_ui_page_document(value: Mapping[str, Any]) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+def active_ui_page_document(
+    value: Mapping[str, Any],
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    """Scope a document down to its active page.
+
+    ``normalize=False`` promises the caller already holds a canonical document.
+    Scoping then reuses the surviving artboard and object rows instead of
+    cloning every row just to discard most of them, which is what made a single
+    canvas refresh copy a 9k-object document.
+    """
+    document = normalize_ui_document(value) if normalize else value
     page_id = document["active_page_id"]
     artboards = [
         row for row in document["artboards"] if row["page_id"] == page_id
     ]
     artboard_ids = {row["id"] for row in artboards}
-    document["artboards"] = artboards
-    document["objects"] = [
+    objects = [
         row
         for row in document["objects"]
         if row["artboard_id"] in artboard_ids
@@ -1551,10 +1581,25 @@ def active_ui_page_document(value: Mapping[str, Any]) -> dict[str, Any]:
     # Other pages lost their artboards, so their remembered active artboard
     # would dangle.  Clearing it keeps the scoped document canonical, which
     # also lets the canvas reuse it without another normalization pass.
-    for page in document["pages"]:
-        if page["id"] != page_id:
-            page["active_artboard_id"] = ""
-    return document
+    if normalize:
+        document["artboards"] = artboards
+        document["objects"] = objects
+        for page in document["pages"]:
+            if page["id"] != page_id:
+                page["active_artboard_id"] = ""
+        return document
+    scoped = dict(document)
+    scoped["artboards"] = artboards
+    scoped["objects"] = objects
+    # Only the page rows need rewriting, so they are the only rows copied; the
+    # shared artboard and object rows stay untouched.
+    scoped["pages"] = [
+        page
+        if page["id"] == page_id
+        else {**page, "active_artboard_id": ""}
+        for page in document["pages"]
+    ]
+    return scoped
 
 
 def add_ui_page(
@@ -2118,8 +2163,22 @@ def select_ui_object(
     object_id: str = "",
     *,
     mode: str = "replace",
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+    """Change which objects are selected.
+
+    Selection is view state, not document structure, so ``normalize=False``
+    lets a caller with a canonical document skip re-deriving every row. The
+    result is still a new document with its own ``selection`` mapping; only the
+    untouched rows are shared.
+    """
+    source = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
+    document = dict(source)
+    document["selection"] = dict(source["selection"])
     if object_id and object_id not in {row["id"] for row in document["objects"]}:
         raise PainterUIDocumentError(f"UI object not found: {object_id}")
     selected = list(document["selection"]["object_ids"])
@@ -2149,8 +2208,16 @@ def select_ui_objects(
     object_ids: list[str] | tuple[str, ...],
     *,
     primary_object_id: str = "",
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+    # Same contract as ``select_ui_object``: only the selection mapping is
+    # rebuilt, so a canonical caller can share the rest of the document.
+    source = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
+    document = dict(source)
     active = document["active_artboard_id"]
     valid_by_id = {
         row["id"]: row

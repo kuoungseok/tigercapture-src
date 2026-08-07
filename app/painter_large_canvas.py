@@ -522,14 +522,30 @@ class UndoMemoryBudget:
         if self.budget_bytes < MIB_BYTES:
             raise ValueError("Painter undo budget_bytes must be at least one MiB")
         self.evicted_states = 0; self.last_bytes = 0; self.last_count = 0
+        # History entries never change after they are pushed, so their measured
+        # size can be remembered. Re-measuring the whole stack on every push
+        # made each successive edit slower than the last on large documents.
+        self._measured: dict[int, int] = {}
+
+    def _measure(self, row: Any) -> int:
+        key = id(row)
+        size = self._measured.get(key)
+        if size is None:
+            size = measure_history_payload_bytes(row)
+            self._measured[key] = size
+        return size
 
     def enforce(self, stack: list[Any], labels: list[str]) -> dict[str, Any]:
-        sizes = [measure_history_payload_bytes(row) for row in stack]; total = sum(sizes)
+        sizes = [self._measure(row) for row in stack]; total = sum(sizes)
         while total > self.budget_bytes and len(stack) > 1:
             stack.pop(0); sizes.pop(0); total = sum(sizes); self.evicted_states += 1
             if labels: labels.pop(0)
         self.last_bytes = total
         self.last_count = len(stack)
+        # Rebuilding from the live stack drops evicted entries and keeps every
+        # remembered id backed by an object that is still alive, so ids cannot
+        # be recycled behind the cache.
+        self._measured = dict(zip((id(row) for row in stack), sizes))
         return self.telemetry()
 
     def telemetry(self, count: int | None = None) -> dict[str, Any]:

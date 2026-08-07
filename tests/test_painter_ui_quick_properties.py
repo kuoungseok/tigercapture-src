@@ -150,9 +150,9 @@ def test_hidden_inspector_defers_large_document_sync_until_needed() -> None:
     original = inspector.set_document
     calls: list[str] = []
 
-    def record(value) -> None:
+    def record(value, **kwargs) -> None:
         calls.append(str((value or {}).get("active_artboard_id") or ""))
-        original(value)
+        original(value, **kwargs)
 
     inspector.set_document = record
     dialog._refresh_painter_ui_overlay()

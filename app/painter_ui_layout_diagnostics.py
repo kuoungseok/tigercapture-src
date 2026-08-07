@@ -9,6 +9,14 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_constraints import normalize_ui_constraints
 from app.painter_ui_scroll import inspect_ui_scroll, normalize_ui_scroll
 
+# Several panels each ask for the whole document's diagnostics and then filter
+# the result down to one artboard or object, so a single canvas refresh solved
+# the same report more than once. The resolved theme document is itself cached
+# and shared, so its identity is a sound key: the same resolved object always
+# yields the same diagnostics. Strong references keep the ids from being reused.
+_LAST_RESOLVED: dict[str, Any] | None = None
+_LAST_REPORT: dict[str, Any] | None = None
+
 
 def _diagnostic(
     severity: str,
@@ -36,7 +44,16 @@ def diagnose_ui_layout(
 ) -> dict[str, Any]:
     from app.painter_ui_themes import resolve_ui_theme_document
 
-    document = resolve_ui_theme_document(document, normalize=normalize)
+    # Diagnostics only read the resolved document and never touch selection or
+    # revision, so they can share the cached resolution instead of cloning it.
+    document = resolve_ui_theme_document(
+        document,
+        normalize=normalize,
+        shared=True,
+    )
+    global _LAST_RESOLVED, _LAST_REPORT
+    if document is _LAST_RESOLVED and _LAST_REPORT is not None:
+        return _LAST_REPORT
     diagnostics: list[dict[str, str]] = []
     objects = {
         str(row["id"]): row
@@ -284,13 +301,16 @@ def diagnose_ui_layout(
         for row in diagnostics
         if row["severity"] == "warning"
     ]
-    return {
+    report = {
         "schema": "tigerstudio.painter.ui.layout_diagnostics.v1",
         "ok": not errors,
         "errors": errors,
         "warnings": warnings,
         "diagnostics": diagnostics,
     }
+    _LAST_RESOLVED = document
+    _LAST_REPORT = report
+    return report
 
 
 __all__ = ["diagnose_ui_layout"]

@@ -121,8 +121,16 @@ def classify_ui_object_delivery(
 def ui_object_delivery_statuses(
     value: Mapping[str, Any],
     object_id: str,
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    document = normalize_ui_document(value)
+    # Read-only report: a caller that already holds canonical output should not
+    # pay to re-derive the whole document for one object's statuses.
+    document = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
     selected_id = str(object_id or "")
     obj = next(
         (row for row in document["objects"] if row["id"] == selected_id),

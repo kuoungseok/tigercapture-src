@@ -263,7 +263,16 @@ def resolve_ui_theme_document(
     value: Mapping[str, Any],
     *,
     normalize: bool = True,
+    shared: bool = False,
 ) -> dict[str, Any]:
+    """Resolve components, responsive overrides and theme tokens.
+
+    ``shared=True`` is for callers that only read the result - they get the
+    cached document itself rather than a clone, and they must not mutate it or
+    rely on ``selection``/``revision``, which the cache deliberately ignores.
+    Cloning the resolved document was the single largest cost of a click on a
+    large imported file, and it happened even when the cache hit.
+    """
     from app.painter_ui_components import resolve_ui_component_document
     from app.painter_ui_document import normalize_ui_document
     from app.painter_ui_responsive import resolve_ui_responsive_document
@@ -272,6 +281,8 @@ def resolve_ui_theme_document(
     if cache_key is not None:
         cached = _RESOLVED_CACHE.get(cache_key)
         if cached is not None:
+            if shared:
+                return cached
             resolved = json_deepcopy(cached)
             resolved["selection"] = json_deepcopy(
                 dict(value.get("selection") or {})
@@ -305,7 +316,10 @@ def resolve_ui_theme_document(
     document["resolved_themes"] = artboard_themes
     document["resolved_variable_modes"] = artboard_variable_modes
     if cache_key is not None:
-        _RESOLVED_CACHE[cache_key] = json_deepcopy(document)
+        # A shared caller promised not to mutate what it gets back, so the
+        # cache can hold the very document being returned instead of paying
+        # for a second full clone on every miss.
+        _RESOLVED_CACHE[cache_key] = document if shared else json_deepcopy(document)
         while len(_RESOLVED_CACHE) > _RESOLVED_CACHE_LIMIT:
             _RESOLVED_CACHE.pop(next(iter(_RESOLVED_CACHE)))
     return document

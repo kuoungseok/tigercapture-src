@@ -1186,6 +1186,13 @@ class PainterUIInspector(QWidget):
             self.dev_panel,
             painter_text("Inspect / Dev"),
         )
+        # Building the handoff report walks the whole document and renders UMG
+        # snippets, which dominated a single click on a large imported file.
+        # It is one tab among many, so it is rebuilt when shown instead.
+        self._dev_report_stale = False
+        self.production_panel.tabs.currentChanged.connect(
+            lambda _index: self._sync_dev_panel_report()
+        )
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -2997,6 +3004,9 @@ class PainterUIInspector(QWidget):
         self.title_label.setVisible(not value)
         self.dock_button.setVisible(not value)
         self._sync_collapse_button()
+        # Expanding can put the dev tab back on screen, so flush any report
+        # that was skipped while it was hidden.
+        self._sync_dev_panel_report()
         self.collapsed_changed.emit(value)
 
     def set_auto_hide(self, auto_hide: bool) -> None:
@@ -3207,9 +3217,17 @@ class PainterUIInspector(QWidget):
     def set_hierarchy_document(
         self,
         value: Mapping[str, Any] | None,
+        *,
+        normalize: bool = True,
     ) -> None:
         """Update only the layer hierarchy during repeated canvas creation."""
-        self._document = normalize_ui_document(value)
+        # The hierarchy sync only reads, so an already-canonical caller can
+        # share its document instead of paying for another full copy.
+        self._document = (
+            value
+            if not normalize and isinstance(value, Mapping)
+            else normalize_ui_document(value)
+        )
         self._syncing = True
         try:
             self._sync_layer_hierarchy_lists()
@@ -3221,8 +3239,17 @@ class PainterUIInspector(QWidget):
         finally:
             self._syncing = False
 
-    def set_document(self, value: Mapping[str, Any] | None) -> None:
-        self._document = normalize_ui_document(value)
+    def set_document(
+        self,
+        value: Mapping[str, Any] | None,
+        *,
+        normalize: bool = True,
+    ) -> None:
+        self._document = (
+            value
+            if not normalize and isinstance(value, Mapping)
+            else normalize_ui_document(value)
+        )
         # Every panel below is read-only, so they share this one canonical
         # document instead of each deep copying it.  On a large imported Figma
         # file those defensive copies were most of the cost of a single click.
@@ -3234,11 +3261,8 @@ class PainterUIInspector(QWidget):
         self.token_library.set_document(self._document, normalize=False)
         self.prototype_panel.set_document(self._document, normalize=False)
         self.production_panel.set_document(self._document, normalize=False)
-        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
-
-        self.dev_panel.set_report(
-            inspect_ui_dev_handoff(self._document, normalize=False)
-        )
+        self._dev_report_stale = True
+        self._sync_dev_panel_report()
         active_page = self._document["active_page_id"]
         active = self._document["active_artboard_id"]
         self._syncing = True
@@ -3266,6 +3290,26 @@ class PainterUIInspector(QWidget):
             self._sync_selected_fields()
         finally:
             self._syncing = False
+
+    def _sync_dev_panel_report(self) -> None:
+        """Rebuild the dev handoff report, but only once it is on screen.
+
+        The report renders UMG snippets for the whole document, so doing it on
+        every edit made a single click cost tens of seconds on a large imported
+        file. ``isVisible`` is false while the tab, the panel or the whole
+        inspector is hidden, which is the common case during editing.
+        """
+        document = getattr(self, "_document", None)
+        if not self._dev_report_stale or not isinstance(document, Mapping):
+            return
+        if not self.dev_panel.isVisible():
+            return
+        from app.painter_ui_dev_handoff import inspect_ui_dev_handoff
+
+        self._dev_report_stale = False
+        self.dev_panel.set_report(
+            inspect_ui_dev_handoff(self._document, normalize=False)
+        )
 
     def set_motion_delivery_report(
         self,
@@ -3481,6 +3525,7 @@ class PainterUIInspector(QWidget):
                 self._document,
                 None,
                 editable=False,
+                normalize=False,
             )
             self.component_state_combo.setCurrentIndex(0)
             self.component_variant_combo.clear()
@@ -3578,6 +3623,7 @@ class PainterUIInspector(QWidget):
             variant_inspection = inspect_ui_component_set(
                 self._document,
                 component_id=component_id,
+                normalize=False,
             )
         self._rebuild_component_variant_property_controls(
             variant_inspection,
@@ -3842,6 +3888,7 @@ class PainterUIInspector(QWidget):
             self._document,
             base_row,
             editable=not bool(base_row.get("locked", False)),
+            normalize=False,
         )
         self.auto_layout_grid_columns_spin.setValue(int(layout["grid_columns"]))
         self.auto_layout_grid_column_span_spin.setValue(
@@ -3908,7 +3955,11 @@ class PainterUIInspector(QWidget):
         self.focus_order_spin.setValue(accessibility["focus_order"])
         from app.painter_ui_delivery import ui_object_delivery_statuses
 
-        statuses = ui_object_delivery_statuses(self._document, row["id"])
+        statuses = ui_object_delivery_statuses(
+            self._document,
+            row["id"],
+            normalize=False,
+        )
         for status in statuses["targets"]:
             target = status["target"]
             label = self.delivery_status_labels[target]

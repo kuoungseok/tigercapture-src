@@ -388,7 +388,11 @@ def test_region_and_shape_tools_create_real_document_rows() -> None:
     dialog._set_painter_ui_tool("frame")
     assert not dialog._paint_ui_inspector.frame_presets_panel.isHidden()
     inspector_syncs: list[object] = []
-    dialog._paint_ui_inspector.set_document = inspector_syncs.append
+    # The overlay refresh passes normalize=False for already-canonical
+    # documents, so the spy has to tolerate keyword arguments.
+    dialog._paint_ui_inspector.set_document = (
+        lambda value, **_kwargs: inspector_syncs.append(value)
+    )
 
     dialog._create_painter_ui_frame_preset("iPhone 17", 402, 874)
     frame = dialog._painter_ui_document["objects"][-1]

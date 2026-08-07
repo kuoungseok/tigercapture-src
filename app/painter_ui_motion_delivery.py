@@ -181,7 +181,9 @@ def motion_delivery_report(
     composition_id = (
         motion_actor_composition_id(obj)
         if obj["kind"] == MOTION_ACTOR_KIND
-        else linked_motion_composition_id(document, selected_id)
+        # ``document`` is canonical by this point either way, so the lookup
+        # must not re-derive it.
+        else linked_motion_composition_id(document, selected_id, normalize=False)
     )
     raw_composition = compositions.get(composition_id)
     composition = (

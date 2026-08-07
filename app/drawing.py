@@ -15225,10 +15225,14 @@ class PaintDialog(QDialog):
     ) -> None:
         from app.painter_ui_document import select_ui_object
 
+        # Clicking is the hottest interaction there is, and the stored document
+        # is always normalizer output, so selection changes must not re-derive
+        # every row.
         self._painter_ui_document = select_ui_object(
             getattr(self, "_painter_ui_document", None),
             str(object_id or ""),
             mode=str(mode or "replace"),
+            normalize=False,
         )
         self._refresh_painter_ui_overlay()
 
@@ -15248,6 +15252,7 @@ class PaintDialog(QDialog):
             getattr(self, "_painter_ui_document", None),
             values,
             primary_object_id=str(primary_object_id or ""),
+            normalize=False,
         )
         self._refresh_painter_ui_overlay()
 
@@ -20554,6 +20559,10 @@ class PaintDialog(QDialog):
                 canonical,
                 object_id,
                 preset,
+                # ``_painter_ui_document`` is always normalizer output, and the
+                # preview only reads it (every active preset deep copies before
+                # editing), so the defensive clone here is pure cost.
+                normalize=False,
             )
         except ValueError as exc:
             self._painter_ui_stress_preview_preset = "none"
@@ -20630,7 +20639,12 @@ class PaintDialog(QDialog):
             )
         from app.painter_ui_document import active_ui_page_document
 
-        canvas_document = active_ui_page_document(preview_document)
+        # ``preview_document`` is canonical here, so page scoping can share its
+        # rows instead of cloning the whole document to throw most of it away.
+        canvas_document = active_ui_page_document(
+            preview_document,
+            normalize=False,
+        )
         valid_artboard_ids = {
             str(row.get("id") or "")
             for row in preview_document.get("artboards", [])
@@ -20649,7 +20663,10 @@ class PaintDialog(QDialog):
             active_artboard_id
             != str(getattr(self, "_painter_ui_view_artboard_id", "") or "")
         )
-        overlay.set_document(canvas_document)
+        # ``active_ui_page_document`` already returned a private canonical
+        # document that nothing else touches, so the overlay can adopt it
+        # directly instead of deep copying a 9k-object page on every refresh.
+        overlay.set_document(canvas_document, normalize=False)
         self._refresh_painter_umg_widget_view()
         overlay.set_empty_page_mode(
             bool(getattr(self, "_painter_ui_empty_page_mode", False))
@@ -20719,14 +20736,18 @@ class PaintDialog(QDialog):
             )
         )
         if inspector_needs_sync:
-            inspector.set_document(getattr(self, "_painter_ui_document", None))
+            inspector.set_document(
+                getattr(self, "_painter_ui_document", None),
+                normalize=False,
+            )
             inspector.set_stress_preview_report(stress_report)
         elif inspector is not None:
             # Repeated frame/shape drawing intentionally avoids rebuilding the
             # full property/library inspector, but the left Layers hierarchy
             # must still reflect each object immediately.
             inspector.set_hierarchy_document(
-                getattr(self, "_painter_ui_document", None)
+                getattr(self, "_painter_ui_document", None),
+                normalize=False,
             )
         if inspector is not None:
             inspector.set_prototype_preview_state(
@@ -26936,7 +26957,12 @@ class PaintDialog(QDialog):
             copy.deepcopy(getattr(self, "_painter_3d_blockout_scene", None)),
             str(getattr(self, "_painter_3d_blockout_selected_id", "")),
             self.canvas.path_snapshot() if hasattr(self, "canvas") else [],
-            copy.deepcopy(getattr(self, "_painter_ui_document", None)),
+            # The UI document is an immutable value: every edit funnels through
+            # the normalizer and rebinds ``_painter_ui_document`` to a fresh
+            # object, and no production path mutates one in place. Holding the
+            # reference is therefore a faithful snapshot, and it avoids cloning
+            # a 9k-object document on every single edit.
+            getattr(self, "_painter_ui_document", None),
             str(getattr(self, "_canvas_workspace_mode", "paint") or "paint"),
             {
                 str(composition_id): (
@@ -36439,8 +36465,12 @@ class PaintDialog(QDialog):
             }
         from app.painter_ui_document import inspect_ui_document
 
+        # ``_painter_ui_document`` is always normalizer output and nothing
+        # mutates a committed document, so the state query can inspect it in
+        # place rather than cloning every row first.
         ui_design_state = inspect_ui_document(
-            getattr(self, "_painter_ui_document", None)
+            getattr(self, "_painter_ui_document", None),
+            normalize=False,
         )
         from app.painter_selection_mask import selection_mask_bounds
 

@@ -66,9 +66,21 @@ def build_ui_stress_preview(
     value: Mapping[str, Any] | None,
     object_id: str = "",
     preset: str = "none",
+    *,
+    normalize: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return an ephemeral preview document and a compact inspection report."""
-    canonical = normalize_ui_document(value)
+    """Return an ephemeral preview document and a compact inspection report.
+
+    ``normalize=False`` skips the defensive copy for callers that already hold a
+    canonical document. The active ``none`` preset returns that document
+    untouched, and every other preset deep copies before editing, so nothing
+    here writes through to the caller either way.
+    """
+    canonical = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
     requested = str(preset or "none").strip().casefold()
     if requested not in STRESS_PREVIEW_PRESETS:
         raise PainterUIStressPreviewError(

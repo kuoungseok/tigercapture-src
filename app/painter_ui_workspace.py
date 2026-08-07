@@ -306,8 +306,21 @@ class PainterUIDesignOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
-    def set_document(self, value: Mapping[str, Any] | None) -> None:
-        document = normalize_ui_document(value)
+    def set_document(
+        self,
+        value: Mapping[str, Any] | None,
+        *,
+        normalize: bool = True,
+    ) -> None:
+        # Read-only with respect to the incoming document: everything mutated
+        # below lives on ``_effective_document`` or on overlay state, so an
+        # already-canonical caller can skip a full copy that costs seconds on a
+        # large imported file.
+        document = (
+            value
+            if not normalize and isinstance(value, Mapping)
+            else normalize_ui_document(value)
+        )
         signature = (
             str(document.get("document_id") or ""),
             int(document.get("revision") or 0),

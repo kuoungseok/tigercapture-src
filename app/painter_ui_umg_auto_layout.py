@@ -228,9 +228,19 @@ def _overlay_slots(
 
 def painter_umg_auto_layout_contract(
     value: Mapping[str, Any] | None,
+    *,
+    normalize: bool = True,
 ) -> dict[str, Any]:
-    """Return panel types, flow slots, and explicit conversion blockers."""
-    document = normalize_ui_document(value)
+    """Return panel types, flow slots, and explicit conversion blockers.
+
+    Read-only, so ``normalize=False`` lets a caller with a canonical document
+    skip re-deriving every row on each selection change.
+    """
+    document = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
     rows = list(document["objects"])
     by_id = {str(row["id"]): row for row in rows}
     children: dict[str, list[dict[str, Any]]] = {}
