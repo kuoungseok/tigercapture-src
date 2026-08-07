@@ -39,6 +39,11 @@ docs/motion-user-guide.pdf
 # Claude Code local state
 .claude/
 
+# Other agent / linter local state
+.agents/
+.codex/
+.ruff_cache/
+
 # Local agent-to-agent mailbox state
 .agent_mailbox/
 
