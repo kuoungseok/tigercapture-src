@@ -68,6 +68,9 @@ _WM_ENTERSIZEMOVE = 0x0231
 _WM_EXITSIZEMOVE = 0x0232
 
 
+_NO_SOURCE_HINT = "Paste a source image with Ctrl+V or the Paste Image button."
+
+
 _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
     ("Input", "base_color_source"),
     ("Base", "base_color"),
@@ -609,13 +612,17 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def __init__(
         self,
-        image_path: str | Path,
+        image_path: str | Path | None = None,
         parent: QWidget | None = None,
         *,
         allow_cpu: bool | None = None,
     ) -> None:
         super().__init__(parent)
-        self.image_path = Path(image_path).expanduser()
+        self.image_path = (
+            Path(image_path).expanduser()
+            if image_path is not None and str(image_path).strip()
+            else None
+        )
         self._allow_cpu_fallback = (
             texture_lab_cpu_fallback_allowed(False)
             if allow_cpu is None
@@ -654,11 +661,21 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._generated_maps_cache: dict[str, Any] | None = None
         self._backend_selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
         self.setObjectName("ArPbrTextureMapLabWindow")
-        self.setWindowTitle(f"AR/PBR Texture Lab - {self.image_path.name}")
+        self.setWindowTitle(self._window_title_text())
         self.resize(1120, 720)
         self.setStyleSheet(studio_chrome_qss(_TEXTURE_LAB_QSS))
         self._build_ui()
         self.refresh_preview()
+
+    def _window_title_text(self) -> str:
+        if self.image_path is None:
+            return "AR/PBR Texture Lab"
+        return f"AR/PBR Texture Lab - {self.image_path.name}"
+
+    def _subtitle_text(self) -> str:
+        if self.image_path is None:
+            return _NO_SOURCE_HINT
+        return str(self.image_path)
 
     def settings(self) -> dict[str, Any]:
         values = dict(self._settings)
@@ -774,10 +791,10 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self.image_path = Path(path).expanduser()
         self._last_preview_path = None
         self._generated_maps_cache = None
-        self.setWindowTitle(f"AR/PBR Texture Lab - {self.image_path.name}")
+        self.setWindowTitle(self._window_title_text())
         if hasattr(self, "_subtitle"):
-            self._subtitle.setText(str(self.image_path))
-            self._subtitle.setToolTip(str(self.image_path))
+            self._subtitle.setText(self._subtitle_text())
+            self._subtitle.setToolTip(self._subtitle_text())
 
     def _show_source_fallback_preview(self, message: str) -> None:
         pix = QPixmap()
@@ -968,9 +985,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         top.setSpacing(6)
         title = QLabel("AR/PBR Texture Lab", central)
         title.setObjectName("TextureLabTitle")
-        subtitle = QLabel(str(self.image_path), central)
+        subtitle = QLabel(self._subtitle_text(), central)
         subtitle.setObjectName("TextureLabSubtitle")
-        subtitle.setToolTip(str(self.image_path))
+        subtitle.setToolTip(self._subtitle_text())
         subtitle.setMinimumWidth(0)
         subtitle.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._subtitle = subtitle
@@ -1371,6 +1388,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview_timer.start(120)
 
     def _source_cache_identity(self) -> str:
+        if self.image_path is None:
+            return ""
         try:
             stat = self.image_path.stat()
             return f"{self.image_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
@@ -1399,6 +1418,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
     def refresh_preview(self) -> None:
         if self._window_motion_active or self._window_updates_frozen:
             self._preview_refresh_deferred = True
+            return
+        if self.image_path is None:
+            self._status.setText(_NO_SOURCE_HINT)
             return
         if not self.image_path.exists():
             self._status.setText(f"Missing source image: {self.image_path}")
@@ -1563,6 +1585,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._export_with_layouts(list(PACKED_LAYOUTS))
 
     def _export_with_layouts(self, packed_layouts: list[str]) -> None:
+        if self.image_path is None:
+            QMessageBox.information(self, "Texture Lab", _NO_SOURCE_HINT)
+            return
         default_dir = self.image_path.with_name(f"{self.image_path.stem}_pbr_maps")
         selected = QFileDialog.getExistingDirectory(self, "Export AR/PBR textures", str(default_dir.parent))
         if not selected:

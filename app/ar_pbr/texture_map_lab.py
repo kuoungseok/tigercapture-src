@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 import math
 import os
+import subprocess
 import sys
 from typing import Any, Mapping, Sequence
 
@@ -282,20 +283,56 @@ def texture_lab_gpu_install_plan(python_executable: str | None = None) -> dict[s
     }
 
 
+_TORCH_CUDA_PROBE_CACHE: dict[str, Any] | None = None
+_TORCH_CUDA_PROBE_TIMEOUT_S = 60.0
+
+
+def _torch_cuda_probe() -> dict[str, Any]:
+    """Report torch CUDA availability from a child process.
+
+    ``import torch`` aborts the process once the Studio host has already loaded
+    other native extensions (live2d, the OpenGL viewer), so the probe runs out
+    of process. The result is cached for the lifetime of this process because
+    the answer cannot change while the app is running.
+    """
+    global _TORCH_CUDA_PROBE_CACHE
+    if _TORCH_CUDA_PROBE_CACHE is not None:
+        return _TORCH_CUDA_PROBE_CACHE
+
+    probe: dict[str, Any] = {"cuda_available": False, "device": ""}
+    if not _module_available("torch"):
+        _TORCH_CUDA_PROBE_CACHE = probe
+        return probe
+
+    plan = texture_lab_gpu_install_plan()
+    try:
+        completed = subprocess.run(
+            [str(plan["verify_program"]), *[str(arg) for arg in plan["verify_args"]]],
+            capture_output=True,
+            text=True,
+            timeout=_TORCH_CUDA_PROBE_TIMEOUT_S,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        payload = json.loads((completed.stdout or "").strip().splitlines()[-1])
+        probe["cuda_available"] = bool(payload.get("cuda_available"))
+        if probe["cuda_available"]:
+            probe["device"] = str(payload.get("device") or "")
+    except Exception as exc:
+        probe["device"] = f"torch probe failed: {type(exc).__name__}"
+
+    _TORCH_CUDA_PROBE_CACHE = probe
+    return probe
+
+
 def texture_map_backend_status() -> dict[str, Any]:
     """Return optional accelerator availability without importing heavy modules at startup."""
     torch_available = _module_available("torch")
     torch_cuda_available = False
     torch_device = ""
     if torch_available:
-        try:
-            import torch  # type: ignore
-
-            torch_cuda_available = bool(torch.cuda.is_available())
-            if torch_cuda_available:
-                torch_device = str(torch.cuda.get_device_name(0))
-        except Exception as exc:
-            torch_device = f"torch probe failed: {type(exc).__name__}"
+        probe = _torch_cuda_probe()
+        torch_cuda_available = bool(probe["cuda_available"])
+        torch_device = str(probe["device"])
 
     cupy_available = _module_available("cupy")
     cupy_cuda_available = False

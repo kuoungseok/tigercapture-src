@@ -928,6 +928,34 @@ def test_texture_map_lab_paste_keeps_source_visible_without_gpu(tmp_path, monkey
     window.close()
 
 
+def test_texture_map_lab_opens_without_a_source_image_and_accepts_a_paste(monkeypatch) -> None:
+    app = _qt_app()
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    monkeypatch.setenv("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "cpu")
+    monkeypatch.delenv("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU", raising=False)
+    window = ArPbrTextureMapLabWindow()
+
+    assert window.image_path is None
+    assert window.windowTitle() == "AR/PBR Texture Lab"
+    assert "Ctrl+V" in window._subtitle.text()
+    assert "Ctrl+V" in window._status.text()
+
+    pasted_image = QImage(24, 16, QImage.Format.Format_ARGB32)
+    pasted_image.fill(QColor("#AA7733"))
+    QApplication.clipboard().setImage(pasted_image)
+    pasted = window.paste_image_from_clipboard()
+    app.processEvents()
+
+    assert pasted["pasted"] is True
+    assert window.image_path is not None
+    assert window._preview.preview_pixmap().isNull() is False
+    window.close()
+
+
 def test_texture_map_lab_sphere_source_preview_works_without_gpu(tmp_path, monkeypatch) -> None:
     app = _qt_app()
     from PySide6.QtGui import QColor, QImage

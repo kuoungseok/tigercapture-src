@@ -1231,19 +1231,14 @@ class WorkbenchPanel(QWidget):
 
     def _open_pbr_texture_program(self, image_path: str | Path | None = None) -> None:
         selected = str(image_path or "").strip()
-        if not selected:
-            selected, _filter = QFileDialog.getOpenFileName(
-                self,
-                "Open image for 3D PBR Texture",
-                "",
-                "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;All files (*.*)",
-            )
-        if not selected:
-            return
-        path = Path(selected).expanduser()
-        if not path.is_file():
-            QMessageBox.warning(self, "3D PBR Texture", f"Image file was not found:\n{path}")
-            return
+        # The lab takes its source from a clipboard paste, so it opens without
+        # demanding an image up front.
+        path: Path | None = None
+        if selected:
+            path = Path(selected).expanduser()
+            if not path.is_file():
+                QMessageBox.warning(self, "3D PBR Texture", f"Image file was not found:\n{path}")
+                return
         try:
             from app.ar_pbr.texture_lab_entry import open_texture_lab_window
 

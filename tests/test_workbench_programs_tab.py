@@ -75,21 +75,19 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
     panel.close()
 
 
-def test_3d_pbr_texture_launcher_prompts_for_image_and_opens_lab(tmp_path, monkeypatch) -> None:
+def test_3d_pbr_texture_launcher_opens_lab_without_asking_for_an_image(monkeypatch) -> None:
     app = _app()
     from PySide6.QtWidgets import QFileDialog
 
     import app.ar_pbr.texture_lab_entry as entry
     from app.workbench_panel import WorkbenchPanel
 
-    image_path = tmp_path / "material-source.png"
-    image_path.write_bytes(b"source")
     opened = []
-    monkeypatch.setattr(
-        QFileDialog,
-        "getOpenFileName",
-        staticmethod(lambda *args, **kwargs: (str(image_path), "Images")),
-    )
+
+    def _no_dialog(*_args, **_kwargs):
+        raise AssertionError("the launcher must not prompt for a source image")
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(_no_dialog))
     monkeypatch.setattr(entry, "open_texture_lab_window", lambda owner, path: opened.append((owner, path)))
 
     panel = WorkbenchPanel()
@@ -98,5 +96,25 @@ def test_3d_pbr_texture_launcher_prompts_for_image_and_opens_lab(tmp_path, monke
 
     assert len(opened) == 1
     assert opened[0][0] is panel.window()
+    assert opened[0][1] is None
+    panel.close()
+
+
+def test_3d_pbr_texture_launcher_uses_an_explicit_image_path(tmp_path, monkeypatch) -> None:
+    app = _app()
+
+    import app.ar_pbr.texture_lab_entry as entry
+    from app.workbench_panel import WorkbenchPanel
+
+    image_path = tmp_path / "material-source.png"
+    image_path.write_bytes(b"source")
+    opened = []
+    monkeypatch.setattr(entry, "open_texture_lab_window", lambda owner, path: opened.append((owner, path)))
+
+    panel = WorkbenchPanel()
+    panel._open_pbr_texture_program(image_path)
+    app.processEvents()
+
+    assert len(opened) == 1
     assert opened[0][1] == image_path
     panel.close()

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any
 
 
-def open_texture_lab_window(owner: Any, image_path: str | Path):
-    path = Path(image_path).expanduser().resolve()
-    if not path.is_file():
-        raise FileNotFoundError(str(path))
+def open_texture_lab_window(owner: Any, image_path: str | Path | None = None):
+    path: Path | None = None
+    if image_path is not None and str(image_path).strip():
+        path = Path(image_path).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(str(path))
 
     from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
 
@@ -18,7 +20,8 @@ def open_texture_lab_window(owner: Any, image_path: str | Path):
         setattr(owner, "_ar_pbr_texture_lab_windows", windows)
     for window in reversed(windows):
         try:
-            existing = Path(str(window.image_path)).expanduser().resolve()
+            current = getattr(window, "image_path", None)
+            existing = Path(str(current)).expanduser().resolve() if current else None
             if existing != path:
                 continue
             window.show()
