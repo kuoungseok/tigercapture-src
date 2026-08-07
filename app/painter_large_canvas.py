@@ -523,29 +523,50 @@ class UndoMemoryBudget:
             raise ValueError("Painter undo budget_bytes must be at least one MiB")
         self.evicted_states = 0; self.last_bytes = 0; self.last_count = 0
         # History entries never change after they are pushed, so their measured
-        # size can be remembered. Re-measuring the whole stack on every push
-        # made each successive edit slower than the last on large documents.
+        # size is remembered instead of re-walking the whole stack on every
+        # push. ``_seen`` is shared across entries as well: consecutive UI
+        # document snapshots share every row an edit did not touch, so charging
+        # that structure once is both the "owned bytes" the telemetry claims and
+        # the difference between walking one changed row and walking 9k of them.
         self._measured: dict[int, int] = {}
+        self._pinned: dict[int, Any] = {}
+        self._seen: set[int] = set()
+
+    def _reset_accounting(self) -> None:
+        self._measured.clear()
+        self._pinned.clear()
+        self._seen.clear()
 
     def _measure(self, row: Any) -> int:
         key = id(row)
         size = self._measured.get(key)
         if size is None:
-            size = measure_history_payload_bytes(row)
+            size = measure_history_payload_bytes(row, self._seen)
             self._measured[key] = size
+            # Pinning keeps the id valid so it cannot be recycled behind the key.
+            self._pinned[key] = row
         return size
 
     def enforce(self, stack: list[Any], labels: list[str]) -> dict[str, Any]:
         sizes = [self._measure(row) for row in stack]; total = sum(sizes)
+        evicted = False
         while total > self.budget_bytes and len(stack) > 1:
             stack.pop(0); sizes.pop(0); total = sum(sizes); self.evicted_states += 1
+            evicted = True
             if labels: labels.pop(0)
+        if evicted:
+            # Evicted entries may have owned structure the survivors still
+            # reference, so the shared tally is rebuilt from what is left.
+            self._reset_accounting()
+            sizes = [self._measure(row) for row in stack]
+            total = sum(sizes)
+        else:
+            live = {id(row) for row in stack}
+            for key in [key for key in self._measured if key not in live]:
+                self._measured.pop(key, None)
+                self._pinned.pop(key, None)
         self.last_bytes = total
         self.last_count = len(stack)
-        # Rebuilding from the live stack drops evicted entries and keeps every
-        # remembered id backed by an object that is still alive, so ids cannot
-        # be recycled behind the cache.
-        self._measured = dict(zip((id(row) for row in stack), sizes))
         return self.telemetry()
 
     def telemetry(self, count: int | None = None) -> dict[str, Any]:

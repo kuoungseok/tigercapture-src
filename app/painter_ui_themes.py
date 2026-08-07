@@ -241,6 +241,22 @@ _RESOLVED_CACHE: dict[bytes, dict[str, Any]] = {}
 _RESOLVED_CACHE_LIMIT = 4
 _RESOLVED_CACHE_MIN_OBJECTS = 400
 
+# Per-row theme resolution memo, keyed by input-row identity. Rebuilt from the
+# live rows on every pass so it never outgrows the document, and discarded
+# whenever the token table changes because that would invalidate every entry.
+_THEME_ROW_CACHE: dict[int, tuple[Any, str, str, dict[str, Any]]] = {}
+_THEME_ROW_CACHE_TOKENS: bytes | None = None
+
+
+def _canonical_digest_of(value: Any) -> bytes | None:
+    from app.painter_ui_document import canonical_payload_digest
+
+    return canonical_payload_digest({"rows": value})
+
+
+def _variable_modes_key(modes: Mapping[str, str]) -> str:
+    return "|".join(f"{key}={modes[key]}" for key in sorted(modes))
+
 
 def _resolved_cache_key(document: Mapping[str, Any]) -> bytes | None:
     if type(document) is not dict:
@@ -294,7 +310,10 @@ def resolve_ui_theme_document(
         normalize_ui_document(value) if normalize else value,
         normalize=False,
     )
-    document = resolve_ui_responsive_document(document)
+    # The component pass above already handed back a private envelope, and the
+    # theme pass below rebuilds the object list itself, so responsive resolution
+    # can share every row it does not actually override.
+    document = resolve_ui_responsive_document(document, share=True)
     tokens = {row["id"]: row for row in document["tokens"]}
     artboard_themes = {
         row["id"]: ui_theme_for_artboard(row)
@@ -304,15 +323,45 @@ def resolve_ui_theme_document(
         row["id"]: dict(row.get("variable_modes") or {})
         for row in document["artboards"]
     }
-    document["objects"] = [
-        resolve_ui_theme_object(
-            row,
-            theme=artboard_themes.get(row["artboard_id"], "light"),
-            variable_modes=artboard_variable_modes.get(row["artboard_id"], {}),
-            tokens=tokens,
-        )
-        for row in document["objects"]
-    ]
+    # Theme resolution is a pure function of a row plus its artboard's theme,
+    # variable modes and the token table. Everything upstream now preserves the
+    # object identity of rows an edit did not touch, so an unchanged row can
+    # reuse the row it resolved to last time instead of being solved again.
+    global _THEME_ROW_CACHE, _THEME_ROW_CACHE_TOKENS
+    tokens_fingerprint = _canonical_digest_of(document["tokens"])
+    previous = (
+        _THEME_ROW_CACHE
+        if tokens_fingerprint is not None
+        and tokens_fingerprint == _THEME_ROW_CACHE_TOKENS
+        else {}
+    )
+    current: dict[int, tuple[Any, str, str, dict[str, Any]]] = {}
+    resolved_rows: list[dict[str, Any]] = []
+    for row in document["objects"]:
+        theme = artboard_themes.get(row["artboard_id"], "light")
+        modes = artboard_variable_modes.get(row["artboard_id"], {})
+        modes_key = _variable_modes_key(modes)
+        cached = previous.get(id(row))
+        if (
+            cached is not None
+            and cached[0] is row
+            and cached[1] == theme
+            and cached[2] == modes_key
+        ):
+            resolved_row = cached[3]
+        else:
+            resolved_row = resolve_ui_theme_object(
+                row,
+                theme=theme,
+                variable_modes=modes,
+                tokens=tokens,
+            )
+        # Holding the input row keeps its id from being recycled behind the key.
+        current[id(row)] = (row, theme, modes_key, resolved_row)
+        resolved_rows.append(resolved_row)
+    _THEME_ROW_CACHE = current
+    _THEME_ROW_CACHE_TOKENS = tokens_fingerprint
+    document["objects"] = resolved_rows
     document["resolved_themes"] = artboard_themes
     document["resolved_variable_modes"] = artboard_variable_modes
     if cache_key is not None:

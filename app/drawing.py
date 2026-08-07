@@ -17311,10 +17311,13 @@ class PaintDialog(QDialog):
         ):
             return
         self._push_undo_state(label)
+        # ``current`` is normalizer output, and dragging calls this on every
+        # mouse move, so the update must touch only the row it changes.
         updated, _row = update_ui_object(
             current,
             object_id,
             effective_changes,
+            normalize=False,
         )
         self._painter_ui_document = updated
         self._painter_document_dirty = True

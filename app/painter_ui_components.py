@@ -2362,11 +2362,16 @@ def resolve_ui_component_document(
 ) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
-    document = (
-        normalize_ui_document(value)
-        if normalize
-        else copy.deepcopy(dict(value))
-    )
+    if normalize:
+        document = normalize_ui_document(value)
+    else:
+        # Only rows inside an instance subtree are rewritten below, and each of
+        # those is deep copied individually before being edited. Cloning the
+        # whole document here cost seconds per edit on a large file, and it
+        # destroyed the object identity of untouched rows that later resolvers
+        # need in order to reuse their own results.
+        document = dict(value)
+        document["objects"] = list(value["objects"])
     components = {row["id"]: row for row in document["components"]}
     objects = {row["id"]: row for row in document["objects"]}
     instance_roots = []

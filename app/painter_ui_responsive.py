@@ -139,15 +139,23 @@ def resolve_ui_responsive_object(
     *,
     breakpoint: str,
     orientation: str,
+    share: bool = False,
 ) -> dict[str, Any]:
-    result = json_deepcopy(dict(row))
+    """Apply the responsive overrides that match one breakpoint.
+
+    ``share=True`` returns the row itself when it has no override for this
+    context. Most rows in a document have none, so copying them produced a
+    document identical to the input at the cost of cloning every row - and it
+    broke the object identity that lets later passes reuse their own results.
+    """
     overrides = _responsive_overrides_for_context(
         row,
         breakpoint=breakpoint,
         orientation=orientation,
     )
     if not overrides:
-        return result
+        return row if share else json_deepcopy(dict(row))
+    result = json_deepcopy(dict(row))
     for override in overrides:
         for key, value in normalize_ui_responsive_changes(
             override.get("changes")
@@ -165,8 +173,16 @@ def resolve_ui_responsive_object(
 
 def resolve_ui_responsive_document(
     document: Mapping[str, Any],
+    *,
+    share: bool = False,
 ) -> dict[str, Any]:
-    result = json_deepcopy(dict(document))
+    """Resolve responsive overrides for every object.
+
+    ``share=True`` is for read-only consumers: the envelope is a shallow copy
+    and rows without an override for their artboard's context are passed through
+    untouched, so nothing but the genuinely overridden rows is rebuilt.
+    """
+    result = dict(document) if share else json_deepcopy(dict(document))
     artboards = {
         str(row["id"]): row
         for row in result.get("artboards", [])
@@ -176,7 +192,7 @@ def resolve_ui_responsive_document(
     for row in result.get("objects", []):
         artboard = artboards.get(str(row.get("artboard_id") or ""))
         if artboard is None:
-            resolved.append(dict(row))
+            resolved.append(row if share else dict(row))
             continue
         breakpoint, orientation = responsive_context(artboard)
         resolved.append(
@@ -184,6 +200,7 @@ def resolve_ui_responsive_document(
                 row,
                 breakpoint=breakpoint,
                 orientation=orientation,
+                share=share,
             )
         )
     result["objects"] = resolved

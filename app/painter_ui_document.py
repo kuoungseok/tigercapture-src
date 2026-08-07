@@ -1451,6 +1451,21 @@ def _revised(document: Mapping[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _revised_canonical(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Bump the revision of a document whose rows are already canonical.
+
+    Only for callers that replaced individual rows with normalizer output and
+    left everything else untouched - re-deriving the whole document there is
+    redundant, and on a large file it is the bulk of a drag frame. The digest is
+    registered exactly as ``_revised`` would, so downstream fast paths still
+    recognize the result as canonical instead of all missing.
+    """
+    updated = dict(document)
+    updated["revision"] = int(document.get("revision") or 0) + 1
+    _remember_canonical_digest(_canonical_fast_path_digest(updated))
+    return updated
+
+
 def _remove_dangling_records(
     document: dict[str, Any],
     *,
@@ -2037,8 +2052,25 @@ def update_ui_object(
     value: Mapping[str, Any],
     object_id: str,
     changes: Mapping[str, Any],
+    *,
+    normalize: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    document = normalize_ui_document(value)
+    """Apply field changes to one object.
+
+    ``normalize=False`` promises canonical input. Only the containers this
+    function writes to are copied - the object list, the selection mapping and
+    the one replaced row - so a drag no longer clones every other row just to
+    move a single one.
+    """
+    if not normalize and isinstance(value, Mapping):
+        document = dict(value)
+        document["objects"] = list(value["objects"])
+        document["selection"] = {
+            "object_id": value["selection"]["object_id"],
+            "object_ids": list(value["selection"]["object_ids"]),
+        }
+    else:
+        document = normalize_ui_document(value)
     for index, row in enumerate(document["objects"]):
         if row["id"] != object_id:
             continue
@@ -2083,7 +2115,14 @@ def update_ui_object(
         document["selection"]["object_id"] = object_id
         if object_id not in document["selection"]["object_ids"]:
             document["selection"]["object_ids"].append(object_id)
-        return _revised(document), copy.deepcopy(updated_row)
+        # Component syncing rewrites rows this function did not normalize, so
+        # only the plain single-row path can skip the re-derivation.
+        revise = (
+            _revised_canonical
+            if not normalize and not sync_component_ids
+            else _revised
+        )
+        return revise(document), copy.deepcopy(updated_row)
     raise PainterUIDocumentError(f"UI object not found: {object_id}")
 
 
