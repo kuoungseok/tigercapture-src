@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.painter_ui_figma import (
+    import_fig_file,
     import_figma_file,
     import_figma_json,
     inspect_figma_compatibility,
@@ -29,15 +30,17 @@ class _FigmaImportThread(QThread):
     completed = Signal(object, object)
     failed = Signal(str)
 
-    def __init__(self, source: str, token: str, *, json_snapshot: bool) -> None:
+    def __init__(self, source: str, token: str, *, kind: str = "remote") -> None:
         super().__init__()
         self._source = str(source)
         self._token = str(token)
-        self._json_snapshot = bool(json_snapshot)
+        self._kind = str(kind)
 
     def run(self) -> None:
         try:
-            if self._json_snapshot:
+            if self._kind == "fig":
+                document, report = import_fig_file(self._source)
+            elif self._kind == "json":
                 document, report = import_figma_json(self._source)
             else:
                 document, report = import_figma_file(
@@ -101,6 +104,19 @@ class PainterUIFigmaPanel(QWidget):
         self.snapshot_button = QPushButton("Import Figma REST JSON...")
         self.snapshot_button.clicked.connect(self._choose_snapshot)
         root.addWidget(self.snapshot_button)
+
+        self.fig_button = QPushButton("Import Local .fig File...")
+        self.fig_button.clicked.connect(self._choose_fig_archive)
+        root.addWidget(self.fig_button)
+
+        fig_note = QLabel(
+            "Reads a .fig saved from Figma (File > Save local copy) without a token. "
+            "The container is reverse engineered, so coverage is narrower than the "
+            "REST import and unmapped nodes are listed as warnings."
+        )
+        fig_note.setWordWrap(True)
+        fig_note.setObjectName("painterMutedLabel")
+        root.addWidget(fig_note)
 
         divider = QLabel("EXPORT TO FIGMA")
         divider.setObjectName("painterPanelSectionTitle")
@@ -185,23 +201,24 @@ class PainterUIFigmaPanel(QWidget):
     def set_busy(self, busy: bool) -> None:
         self.import_button.setEnabled(not busy)
         self.snapshot_button.setEnabled(not busy)
+        self.fig_button.setEnabled(not busy)
         self.source_edit.setEnabled(not busy)
         self.token_edit.setEnabled(not busy)
         if busy:
             self.compatibility_label.setText("Importing Figma document...")
 
-    def _start_import(self, source: str, *, json_snapshot: bool) -> None:
+    def _start_import(self, source: str, *, kind: str = "remote") -> None:
         if self._worker is not None and self._worker.isRunning():
             return
         source = str(source or "").strip()
         if not source:
-            self.compatibility_label.setText("Enter a Figma URL or choose JSON.")
+            self.compatibility_label.setText("Enter a Figma URL or choose a file.")
             return
         self.set_busy(True)
         worker = _FigmaImportThread(
             source,
             self.token_edit.text().strip(),
-            json_snapshot=json_snapshot,
+            kind=kind,
         )
         self._worker = worker
         worker.completed.connect(self._import_completed)
@@ -210,7 +227,7 @@ class PainterUIFigmaPanel(QWidget):
         worker.start()
 
     def _import_remote(self) -> None:
-        self._start_import(self.source_edit.text(), json_snapshot=False)
+        self._start_import(self.source_edit.text(), kind="remote")
 
     def _choose_snapshot(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -220,7 +237,17 @@ class PainterUIFigmaPanel(QWidget):
             "Figma REST JSON (*.json);;JSON files (*.json)",
         )
         if path:
-            self._start_import(path, json_snapshot=True)
+            self._start_import(path, kind="json")
+
+    def _choose_fig_archive(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Local .fig File",
+            "",
+            "Figma design (*.fig);;FigJam board (*.jam);;All files (*)",
+        )
+        if path:
+            self._start_import(path, kind="fig")
 
     def _import_completed(self, document: object, report: object) -> None:
         mode = str(self.mode_combo.currentData() or "replace")

@@ -92,16 +92,21 @@ class PaintUIFigmaAdapterMixin:
         token: str = "",
         mode: str = "replace",
         json_snapshot: bool = False,
+        fig_archive: bool = False,
+        image_dir: str = "",
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_figma import (
+            import_fig_file,
             import_figma_file,
             import_figma_json,
             merge_figma_document,
         )
 
-        if json_snapshot:
-            imported, report = import_figma_json(source)
+        if fig_archive:
+            imported, report = import_fig_file(source)
+        elif json_snapshot:
+            imported, report = import_figma_json(source, image_dir=image_dir or None)
         else:
             imported, report = import_figma_file(source, token=token)
         document = merge_figma_document(

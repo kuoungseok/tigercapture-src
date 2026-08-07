@@ -222,7 +222,36 @@ render 승인값은 아래 exact100 release 기준선에서 별도로 관리한�
 
 ## 현재 경계
 
-`.fig` 바이너리는 REST JSON과 다른 Kiwi 기반 컨테이너다. 현재 코퍼스는 REST payload와 REST archive를 검증하며 `.fig` parser 지원을 주장하지 않는다. `.fig` 파일은 별도 parser 단계가 구현될 때 전용 manifest와 golden 비교로 추가한다.
+`.fig` 바이너리는 REST JSON과 다른 Kiwi 기반 컨테이너다. 현재 코퍼스는 REST payload와 REST archive만 검증한다.
+
+`.fig` 리더는 실험적으로 구현되어 있다(`app/painter_ui_figma_kiwi.py`, `app/painter_ui_figma_fig.py`, `app/painter_ui_figma_fig_rest.py`). 동작 범위는 다음과 같다.
+
+- 컨테이너: ZIP(`canvas.fig` + `images/` + `meta.json`)과 bare `fig-kiwi` / `fig-jam.` payload 모두 처리한다.
+- 압축: schema chunk는 raw deflate, message chunk는 deflate 또는 zstd다. zstd는 Python 3.14의 `compression.zstd`(PEP 784)를 우선 사용하고 이전 버전에서는 `zstandard`로 폴백한다.
+- 변환: 평면 `nodeChanges` 배열을 `parentIndex`로 트리로 복원하고, parent-relative affine transform을 합성해 `absoluteBoundingBox`를 만든 뒤 REST node shape로 이름을 맞춘다. 결과는 기존 `import_figma_payload`가 그대로 소비한다.
+- 벡터: REST는 평탄화된 `fillGeometry` path 문자열을 주지만 `.fig`는 편집 가능한 vector network를 `Message.blobs`에 따로 담는다. `app/painter_ui_figma_fig_vector.py`가 vertex/segment/region 블롭을 SVG path로 복원해 `fillGeometry`를 채운다. 이게 없으면 모든 VECTOR 노드가 `missing_geometry_paths`로 blocked 된다.
+
+### 검증 상태 (2026-08-07)
+
+실제 Figma가 생성한 `.fig` payload(version 65)와 실제 Figma Kiwi 스키마(350 definitions)로 오프라인 검증을 마쳤다.
+
+- 임베드된 스키마 350개 정의를 자체 디코더로 완전 파싱했다.
+- 매핑에 쓰는 `NodeChange` 필드명 53개가 실제 스키마에 모두 존재함을 확인했다.
+- `GUID`/`ParentIndex`/`Matrix`/`Vector`/`Color`/`Paint`/`Effect`/`TextData`/`FontName`/`Number`/`SymbolData`/`Image`/`ColorStop` 구조가 전부 일치했다.
+- enum 대조에서 버그 1건을 잡았다: `StackSize`는 `FIXED`/`RESIZE_TO_FIT`/`RESIZE_TO_FIT_WITH_IMPLICIT_SIZE` 3개이며, 두 hug 변형 모두 REST `AUTO`로 가야 한다.
+- 실제 파일 임포트 결과 아트보드 6·오브젝트 22, vector network 복원 후 blocked 경고 0건.
+
+검증에 쓴 스키마·샘플은 **라이선스가 명시되지 않은 제3자 저장소** 출처라 레포에 포함하지 않았다. 커밋된 테스트는 자체 Kiwi 인코더로 합성 바이너리를 만들어 검증한다.
+
+경계는 그대로 유지한다.
+
+- 포맷은 공개 계약이 아니라 리버스 엔지니어링 결과다. Figma가 스키마 의미를 바꾸면 깨질 수 있으므로 REST import가 계속 지원 경로다.
+- 매핑 범위는 importer가 실제로 읽는 필드로 한정한다. 매핑되지 않은 node type은 조용히 버리지 않고 report의 `fig_unmapped_node_types`와 warning으로 노출한다.
+- import report는 항상 `fig_native_import`를 포함하며, 사용자향 문구는 계속 native `.fig` 호환이 아님을 명시한다.
+- 라이선스가 명확한 `.fig` 샘플(Figma Community 무료 파일은 CC BY 4.0)을 확보하기 전까지 코퍼스 case로 등록하지 않는다. 등록 시에는 전용 manifest와 golden 비교를 사용한다.
+
+로컬 `.fig`를 코퍼스에 넣기 전 확인하려면 `python tools/inspect_fig_archive.py <file>.fig`로 요약을,
+`--dump-rest`로 변환된 REST payload를 얻는다.
 
 ## M6 릴리스 100-case 게이트 (2026-08-05)
 

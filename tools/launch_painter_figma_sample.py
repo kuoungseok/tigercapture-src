@@ -1,4 +1,8 @@
-"""Open Painter UI Designer with a local Figma REST JSON snapshot."""
+"""Open Painter UI Designer with a local Figma REST JSON snapshot or ``.fig``.
+
+The import path is chosen from the file suffix: ``.fig``/``.jam`` go through the
+native archive reader, anything else is treated as a REST JSON snapshot.
+"""
 from __future__ import annotations
 
 import argparse
@@ -14,10 +18,16 @@ if str(ROOT) not in sys.path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source")
+    parser.add_argument(
+        "--images",
+        default="",
+        help="folder of archive image blobs named after their imageRef",
+    )
     args = parser.parse_args()
     source = Path(args.source).expanduser().resolve()
     if not source.is_file():
-        parser.error(f"Figma REST JSON not found: {source}")
+        parser.error(f"Figma source not found: {source}")
+    fig_archive = source.suffix.casefold() in {".fig", ".jam"}
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
@@ -46,12 +56,21 @@ def main() -> int:
         "paint.ui.figma.import",
         {
             "source": str(source),
-            "json_snapshot": True,
+            "json_snapshot": not fig_archive,
+            "fig_archive": fig_archive,
+            "image_dir": str(Path(args.images).expanduser()) if args.images else "",
             "mode": "replace",
         },
     )
     if not import_result.ok:
         raise RuntimeError(import_result.message)
+    report = dict(import_result.result or {}).get("figma_import") or {}
+    print(
+        f"Imported {report.get('artboard_count', 0)} artboards and "
+        f"{report.get('object_count', 0)} objects from {source.name}"
+    )
+    for warning in report.get("warnings", []):
+        print(f"  warning  {warning}")
 
     dialog.show()
     dialog.raise_()

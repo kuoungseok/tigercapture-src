@@ -501,12 +501,14 @@ def register_paint_ui_production_actions(registry: Any) -> None:
     )
     undo_action(
         "paint.ui.figma.import",
-        "Import a Figma URL or REST JSON snapshot as editable Painter UI",
+        "Import a Figma URL, REST JSON snapshot, or local .fig archive as editable Painter UI",
         "paint_ui_figma_import",
         {
             "source": {"type": "string"},
             "mode": {"type": "string", "enum": ["replace", "append"]},
             "json_snapshot": {"type": "boolean"},
+            "fig_archive": {"type": "boolean"},
+            "image_dir": {"type": "string"},
         },
         required=("source",),
         undo_label="Import Figma UI",

@@ -4568,12 +4568,139 @@ def import_figma_file(
     return document, report
 
 
-def import_figma_json(path: str | Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def figma_image_paths_from_dir(image_dir: str | Path) -> dict[str, str]:
+    """Map ``imageRef`` values onto files in a bundled archive image folder.
+
+    Archive exports name each blob after the ``imageRef`` it satisfies, so the
+    file stem is the lookup key.
+    """
+
+    root = Path(image_dir).expanduser()
+    if not root.is_dir():
+        raise PainterUIFigmaError(f"Figma image directory not found: {root}")
+    paths: dict[str, str] = {}
+    for entry in sorted(root.iterdir()):
+        if entry.is_file() and entry.stem:
+            paths.setdefault(entry.stem, str(entry))
+    return paths
+
+
+def import_figma_json(
+    path: str | Path,
+    *,
+    image_dir: str | Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     source = Path(path).expanduser().resolve()
     payload = json.loads(source.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
         raise PainterUIFigmaError("Figma JSON snapshot must contain an object")
-    return import_figma_payload(payload, source=str(source))
+    image_paths = figma_image_paths_from_dir(image_dir) if image_dir else None
+    return import_figma_payload(
+        payload,
+        source=str(source),
+        image_paths=image_paths,
+    )
+
+
+def _write_fig_images(
+    images: Mapping[str, bytes],
+    *,
+    root: Path,
+) -> tuple[dict[str, str], list[str]]:
+    """Persist ``.fig`` image blobs so imported fills can reference real files."""
+
+    if not images:
+        return {}, []
+    warnings: list[str] = []
+    written: dict[str, str] = {}
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {}, [f"fig_image_root_unavailable:{exc}"]
+    for name, blob in images.items():
+        if not isinstance(blob, (bytes, bytearray)) or not blob:
+            continue
+        # Archive entries are named by the same hash the paints reference, so
+        # the entry name is already the imageRef the importer looks up.
+        suffix = _fig_image_suffix(bytes(blob))
+        target = root / f"{name}{suffix}"
+        try:
+            target.write_bytes(bytes(blob))
+        except OSError as exc:
+            warnings.append(f"fig_image_write_failed:{name}:{exc}")
+            continue
+        written[name] = str(target)
+    return written, warnings
+
+
+def _fig_image_suffix(blob: bytes) -> str:
+    if blob[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if blob[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if blob[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return ".webp"
+    return ".bin"
+
+
+def import_fig_file(
+    path: str | Path,
+    *,
+    asset_root: str | Path | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Import a local Figma ``.fig`` archive without contacting the REST API.
+
+    The ``.fig`` container is reverse engineered rather than a published Figma
+    contract, so coverage is narrower than the REST path and the resulting
+    report always carries ``fig_native_import`` plus any translation warnings.
+    Callers must not present this as native Figma compatibility.
+    """
+
+    from app.painter_ui_figma_fig import PainterUIFigError, read_fig_archive
+    from app.painter_ui_figma_fig_rest import fig_archive_to_rest_payload
+
+    source = Path(path).expanduser()
+    try:
+        archive = read_fig_archive(source)
+    except PainterUIFigError as exc:
+        raise PainterUIFigmaError(f"Could not read {source.name}: {exc}") from exc
+
+    try:
+        payload, fig_report = fig_archive_to_rest_payload(archive)
+    except ValueError as exc:
+        raise PainterUIFigmaError(f"Could not translate {source.name}: {exc}") from exc
+
+    resolved_asset_root = (
+        Path(asset_root).expanduser().resolve()
+        if asset_root
+        else default_figma_asset_root(f"fig:{source.name}")
+    )
+    image_paths, image_warnings = _write_fig_images(
+        archive.images,
+        root=resolved_asset_root / "fig-images",
+    )
+
+    document, report = import_figma_payload(
+        payload,
+        source=str(source),
+        image_paths=image_paths,
+        variables_payload=None,
+    )
+    report["fig_native_import"] = True
+    report["fig_version"] = fig_report["fig_version"]
+    report["fig_node_count"] = fig_report["node_count"]
+    report["fig_unmapped_node_types"] = fig_report["unmapped_node_types"]
+    report["asset_root"] = str(resolved_asset_root)
+    report["downloaded_image_count"] = len(image_paths)
+    report["warnings"].extend(
+        [
+            *(f"fig_translation:{warning}" for warning in fig_report["warnings"]),
+            *image_warnings,
+        ]
+    )
+    return document, report
 
 
 def merge_figma_document(
@@ -5850,6 +5977,8 @@ __all__ = [
     "default_figma_asset_root",
     "export_figma_plugin_package",
     "figma_file_key",
+    "figma_image_paths_from_dir",
+    "import_fig_file",
     "import_figma_file",
     "import_figma_json",
     "import_figma_payload",
