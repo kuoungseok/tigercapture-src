@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 from PySide6.QtCore import QPoint, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.capture import pil_to_qimage
+from app.exporter import lossy_to_tolerance
 from app.drawing import (
     DrawingCanvas,
     PaintDialog,
@@ -89,13 +91,19 @@ LOSSY_CHOICES = [
 ]
 
 
-# File-size estimate correction factors. The legacy 0.45 byte/pixel
-# heuristic in :meth:`GifEditorWindow._refresh_estimate` was anchored to
-# the historical defaults (256 colours, gifsicle --lossy=60). These
-# tables rescale the estimate when the user picks different settings.
-# Numbers come from sampling typical screen-capture GIFs across the
-# combinations and aren't analytically exact — good enough for "is this
-# going to be 800 KB or 4 MB" decisions.
+# File-size estimate constants. The 0.45 byte/pixel figure is the cost of
+# a whole encoded frame at 256 colours; _COLOR_SIZE_FACTORS rescales it for
+# smaller palettes. Numbers come from sampling typical screen-capture GIFs
+# and aren't analytically exact — good enough for "is this going to be
+# 800 KB or 4 MB" decisions.
+_BYTES_PER_PIXEL = 0.45
+# A frame that is entirely transparent still costs LZW codes for every
+# pixel. Measured at roughly this share of a full frame.
+_TRANSPARENT_FRAME_BYTES_PER_PIXEL = 0.006
+# Above this share of moving pixels the exporter gives up on delta encoding,
+# so the estimate has to switch models too. Mirrors the 0.15 unchanged-pixel
+# threshold in app.exporter.GifExportThread._delta_is_worth_it.
+_DELTA_MAX_CHANGED_FRACTION = 0.85
 _COLOR_SIZE_FACTORS = {
     256: 1.00,
     128: 0.85,
@@ -103,21 +111,14 @@ _COLOR_SIZE_FACTORS = {
     32:  0.50,
     16:  0.35,
 }
-_LOSSY_SIZE_FACTORS = {
-    0:   1.65,    # lossless — bigger than the lossy=60 baseline
-    30:  1.30,
-    60:  1.00,    # baseline (legacy default)
-    80:  0.75,
-    120: 0.50,
-}
+# There is no _LOSSY_SIZE_FACTORS table any more. Lossy no longer scales the
+# result by a fixed guess: it widens the encoder's "unchanged pixel" test, so
+# its effect depends entirely on how much of the actual clip holds still.
+# _refresh_estimate measures that directly instead.
 
 
 def _color_size_factor(max_colors: int) -> float:
     return _COLOR_SIZE_FACTORS.get(int(max_colors), 1.0)
-
-
-def _lossy_size_factor(lossy: int) -> float:
-    return _LOSSY_SIZE_FACTORS.get(int(lossy), 1.0)
 THUMB_W = 96
 THUMB_H = 54
 THUMB_GAP = 4
@@ -373,6 +374,9 @@ class GifEditorWindow(QWidget):
     ) -> None:
         super().__init__()
         self._frames: list[Image.Image] = list(frames)
+        # Measured moving-pixel share per tolerance; invalidated whenever
+        # the frame list changes.
+        self._changed_cache: dict[int, float] = {}
         self._fps = int(fps) if fps > 0 else 15
         self._save_dir = save_dir
         self._mode = mode
@@ -994,17 +998,56 @@ class GifEditorWindow(QWidget):
         ratio = self._get_scale()
         scaled_w = int(w * ratio)
         scaled_h = int(h * ratio)
-        # The 0.45 byte/pixel constant was calibrated against pre-1.4
-        # output (256 colours + gifsicle --lossy=60). Apply correction
-        # factors when the user picks a different palette cap or lossy
-        # level so the estimate tracks real file size.
-        per_frame_bytes = (scaled_w * scaled_h) * 0.45
-        total = per_frame_bytes * n
-        total *= _color_size_factor(self._get_max_colors())
-        total *= _lossy_size_factor(self._get_lossy())
+        pixels = scaled_w * scaled_h
+        color_factor = _color_size_factor(self._get_max_colors())
+        full_frame = pixels * _BYTES_PER_PIXEL * color_factor
+
+        changed = self._changed_fraction(lossy_to_tolerance(self._get_lossy()))
+        if changed is None or changed > _DELTA_MAX_CHANGED_FRACTION:
+            # Exporter will fall back to whole-frame encoding, so every
+            # frame costs full price.
+            total = full_frame * n
+        else:
+            # Delta encoding: the first frame is whole, the rest cost only
+            # their changed area plus the transparent-frame floor.
+            floor = pixels * _TRANSPARENT_FRAME_BYTES_PER_PIXEL * color_factor
+            total = full_frame + (n - 1) * (full_frame * changed + floor)
+
         self.estimate_label.setText(
             tr("editor.info.estimate", size=self._format_size(int(total)))
         )
+
+    def _changed_fraction(self, tolerance: int) -> float | None:
+        """Average share of pixels that move between adjacent frames.
+
+        This is what actually drives delta-encoded output size, so the
+        estimate measures it rather than guessing from the lossy setting.
+        Sampled and cached per tolerance — the combo boxes re-run this on
+        every change and the full scan would be far too slow.
+        """
+        cached = self._changed_cache.get(tolerance)
+        if cached is not None:
+            return cached
+
+        n = len(self._frames)
+        if n < 2:
+            return None
+
+        step = max(1, (n - 1) // 8)
+        starts = list(range(0, n - 1, step))[:8]
+        ratios: list[float] = []
+        for i in starts:
+            prev = np.asarray(self._frames[i].convert("RGB"), dtype=np.int16)
+            cur = np.asarray(self._frames[i + 1].convert("RGB"), dtype=np.int16)
+            if cur.shape != prev.shape:
+                return None
+            ratios.append(float((np.abs(cur - prev).max(axis=2) > tolerance).mean()))
+
+        if not ratios:
+            return None
+        value = sum(ratios) / len(ratios)
+        self._changed_cache[tolerance] = value
+        return value
 
     @staticmethod
     def _format_size(n: int) -> str:
@@ -1046,6 +1089,7 @@ class GifEditorWindow(QWidget):
         index_set = set(indices)
         self._stop_thumbnail_thread()
         self._frames = [f for i, f in enumerate(self._frames) if i not in index_set]
+        self._changed_cache.clear()
         self._timeline.remove_indices(indices)
         if self._frames:
             new_idx = min(self._current_index, len(self._frames) - 1)

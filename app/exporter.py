@@ -31,6 +31,19 @@ def find_gifski() -> Path | None:
     return Path(found) if found else None
 
 
+def lossy_to_tolerance(lossy: int) -> int:
+    """Map the gifsicle ``--lossy`` scale onto a pixel-difference tolerance.
+
+    gifsicle spends its lossy budget on palette error. The built-in encoder
+    has no external optimiser to hand that budget to, so it spends it on the
+    "did this pixel actually change?" test instead: a higher tolerance keeps
+    more of the frame transparent and therefore out of the file. For screen
+    recordings — static background, small moving region — that is the same
+    trade in practice.
+    """
+    return max(0, min(48, int(round(int(lossy) / 5.0))))
+
+
 def find_gifsicle() -> Path | None:
     candidates = [
         BUNDLED_DIR / "gifsicle.exe",
@@ -166,7 +179,147 @@ class GifExportThread(QThread):
                 )
             self.progress.emit(total_steps, total_steps)
 
+    def _build_global_palette(
+        self, frames: list[Image.Image], colors: int
+    ) -> Image.Image:
+        """Derive one shared palette from a downscaled montage of sampled frames.
+
+        The delta encoder needs every frame to index the same palette, so a
+        per-frame adaptive palette is not usable. Sampling a dozen frames
+        keeps the palette representative without quantizing the whole clip.
+        """
+        step = max(1, len(frames) // 12)
+        picks = frames[::step][:12] or [frames[0]]
+
+        thumbs: list[Image.Image] = []
+        for f in picks:
+            if f.width > 480:
+                ratio = 480 / f.width
+                f = f.resize(
+                    (480, max(1, int(f.height * ratio))),
+                    Image.Resampling.NEAREST,
+                )
+            thumbs.append(f)
+
+        w = max(t.width for t in thumbs)
+        montage = Image.new("RGB", (w, sum(t.height for t in thumbs)))
+        y = 0
+        for t in thumbs:
+            montage.paste(t, (0, y))
+            y += t.height
+        return montage.quantize(colors=colors, method=Image.Quantize.MEDIANCUT)
+
     def _encode_with_pillow(
+        self, frames: list[Image.Image], total_steps: int
+    ) -> None:
+        """Encode with inter-frame delta transparency.
+
+        Every pixel that has not changed since the last frame the viewer
+        actually saw is written as the transparent index and left in place
+        (``disposal=1``), so only the moving region costs bytes. On screen
+        recordings this is worth roughly an order of magnitude versus
+        writing every frame whole.
+
+        Falls back to whole-frame encoding if anything here fails — a larger
+        file is a much better outcome than a broken one.
+        """
+        if not self._delta_is_worth_it(frames):
+            self._encode_whole_frames(frames, total_steps)
+            return
+        try:
+            self._encode_delta(frames, total_steps)
+        except Exception:  # noqa: BLE001
+            self._encode_whole_frames(frames, total_steps)
+
+    def _delta_is_worth_it(self, frames: list[Image.Image]) -> bool:
+        """Cheap pre-check on sampled frames before committing to delta.
+
+        Sensor/compression noise makes almost every pixel differ slightly, and
+        at a low tolerance that leaves nothing transparent. The delta encoder
+        would then pay for a shared palette (worse than a per-frame adaptive
+        one) and get nothing back, producing a *larger* file than whole-frame
+        encoding. When there is little to hold still, don't take that trade.
+        """
+        if len(frames) < 2:
+            return False
+
+        tolerance = lossy_to_tolerance(self._lossy)
+        n = len(frames)
+        # Sample *adjacent* pairs spread across the clip. Comparing frames far
+        # apart in time would overstate motion and bail out on clips the delta
+        # encoder actually handles well.
+        step = max(1, (n - 1) // 8)
+        starts = list(range(0, n - 1, step))[:8]
+
+        ratios: list[float] = []
+        for i in starts:
+            prev = np.asarray(frames[i].convert("RGB"), dtype=np.int16)
+            cur = np.asarray(frames[i + 1].convert("RGB"), dtype=np.int16)
+            if cur.shape != prev.shape:
+                return False
+            unchanged = np.abs(cur - prev).max(axis=2) <= tolerance
+            ratios.append(float(unchanged.mean()))
+
+        # Below this, the shared palette costs more than the transparency saves.
+        return bool(ratios) and (sum(ratios) / len(ratios)) >= 0.15
+
+    def _encode_delta(
+        self, frames: list[Image.Image], total_steps: int
+    ) -> None:
+        n = len(frames)
+        duration_ms = max(10, int(round(1000 / self._fps)))
+
+        # One index has to be reserved for transparency, so the palette
+        # itself gets one fewer colour than the user asked for.
+        pal_colors = max(2, min(255, self._max_colors - 1))
+        transparent_idx = pal_colors
+        tolerance = lossy_to_tolerance(self._lossy)
+
+        pal_img = self._build_global_palette(frames, pal_colors)
+        palette = pal_img.getpalette() or []
+        # Give the reserved index a defined entry; the colour is never shown.
+        palette = palette[: pal_colors * 3] + [0, 0, 0]
+
+        emitted: list[Image.Image] = []
+        # ``shown`` tracks the source colour behind each pixel currently on
+        # screen, not the previous source frame. Comparing against it bounds
+        # drift to the tolerance in total rather than per frame.
+        shown: np.ndarray | None = None
+
+        for i, frame in enumerate(frames):
+            rgb = np.asarray(frame.convert("RGB"), dtype=np.int16)
+            indexed = np.asarray(
+                frame.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG),
+                dtype=np.uint8,
+            ).copy()
+
+            if shown is None:
+                shown = rgb.copy()
+            else:
+                unchanged = np.abs(rgb - shown).max(axis=2) <= tolerance
+                indexed[unchanged] = transparent_idx
+                shown = np.where(unchanged[..., None], shown, rgb)
+
+            out_img = Image.fromarray(indexed, mode="P")
+            out_img.putpalette(palette)
+            emitted.append(out_img)
+            self.progress.emit(n + i + 1, total_steps)
+
+        self.stage.emit(tr("editor.stage.gif_write"))
+        emitted[0].save(
+            self._out,
+            save_all=True,
+            append_images=emitted[1:],
+            duration=duration_ms,
+            loop=0,
+            disposal=1,
+            transparency=transparent_idx,
+            optimize=False,
+        )
+        for i in range(n):
+            self.progress.emit(n * 2 + i + 1, total_steps)
+
+    def _encode_whole_frames(
         self, frames: list[Image.Image], total_steps: int
     ) -> None:
         n = len(frames)
