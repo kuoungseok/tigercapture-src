@@ -584,6 +584,80 @@ def _derived_symbol_data(raw: Mapping[str, Any]) -> dict[tuple[str, ...], dict[s
     return result
 
 
+def _library_guid_remap(
+    node: Mapping[str, Any],
+    symbol_subtree: list[str],
+    known: Mapping[str, Any],
+) -> dict[str, str]:
+    """Map a published component's own guids onto this file's renumbered copy.
+
+    A component published to a library keeps addressing its descendants by the
+    library's guids, which the local copy has renumbered, so the overrides that
+    carry the instance's text and colour name nodes this file has never heard
+    of.  Both sides are allocated in document order, so sorting the unknown
+    guids and zipping them against the component's subtree recovers the pairing.
+
+    Returns an empty map unless the two sides line up exactly, because a
+    misaligned guess would write an instance's text onto the wrong node.
+    """
+
+    unknown: set[str] = set()
+    for row in (node.get("symbolData") or {}).get("symbolOverrides") or []:
+        if not isinstance(row, Mapping):
+            continue
+        path = _guid_path_key(row.get("guidPath"))
+        if path and path[0] not in known:
+            unknown.add(path[0])
+    for row in node.get("derivedSymbolData") or []:
+        if not isinstance(row, Mapping):
+            continue
+        path = _guid_path_key(row.get("guidPath"))
+        if path and path[0] not in known:
+            unknown.add(path[0])
+    if not unknown:
+        return {}
+
+    def order(guid: str) -> tuple[int, ...]:
+        try:
+            return tuple(int(part) for part in guid.split(":"))
+        except ValueError:
+            return (0, 0)
+
+    ordered = sorted(unknown, key=order)
+    if len(ordered) != len(symbol_subtree):
+        # Anything but an exact match is ambiguous: with one guid too few there
+        # is no way to tell whether the missing one is the component root or a
+        # leaf, and guessing shifts every override onto its neighbour.
+        return {}
+    return dict(zip(ordered, symbol_subtree))
+
+
+# Fields that only make sense on a particular node type.  A positional remap is
+# sound but not certain, so an override that would land somewhere impossible is
+# dropped rather than applied.
+_OVERRIDE_TYPE_GUARDS: Mapping[str, frozenset[str]] = {
+    "textData": frozenset({"TEXT"}),
+    "derivedTextData": frozenset({"TEXT"}),
+    "fontName": frozenset({"TEXT"}),
+    "fontSize": frozenset({"TEXT"}),
+    "textDecoration": frozenset({"TEXT"}),
+    "textAlignHorizontal": frozenset({"TEXT"}),
+    "textAlignVertical": frozenset({"TEXT"}),
+}
+
+
+def _guarded_override(
+    fields: Mapping[str, Any],
+    node_type: str,
+) -> dict[str, Any]:
+    kind = str(node_type or "").upper()
+    return {
+        name: value
+        for name, value in fields.items()
+        if kind in _OVERRIDE_TYPE_GUARDS.get(name, frozenset({kind}))
+    }
+
+
 def _expand_instances(
     nodes: Mapping[str, "_FigNode"],
     warnings: list[str],
@@ -602,7 +676,31 @@ def _expand_instances(
         if str(node.raw.get("type") or "").upper() == "SYMBOL"
     }
     budget = [_MAX_EXPANDED_INSTANCE_NODES]
-    report = {"instances": 0, "nodes": 0, "unresolved": 0, "truncated": 0}
+    report = {
+        "instances": 0,
+        "nodes": 0,
+        "unresolved": 0,
+        "truncated": 0,
+        "remapped": 0,
+    }
+
+    def _symbol_subtree(root: "_FigNode") -> list[str]:
+        out = [root.node_id]
+        for child in root.children:
+            out.extend(_symbol_subtree(child))
+        return out
+
+    def _remapped(
+        table: Mapping[tuple[str, ...], Mapping[str, Any]],
+        remap: Mapping[str, str],
+    ) -> dict[tuple[str, ...], dict[str, Any]]:
+        if not remap:
+            return {key: dict(value) for key, value in table.items()}
+        result: dict[tuple[str, ...], dict[str, Any]] = {}
+        for key, value in table.items():
+            moved = tuple(remap.get(item, item) for item in key)
+            result.setdefault(moved, {}).update(value)
+        return result
 
     def clone(
         source: "_FigNode",
@@ -626,7 +724,12 @@ def _expand_instances(
         # with a colour Figma never renders.  Its own nested overrides still
         # apply, one level down.
         if str(source.raw.get("type") or "").upper() != "INSTANCE":
-            raw.update(overrides.get(step) or {})
+            raw.update(
+                _guarded_override(
+                    overrides.get(step) or {},
+                    str(source.raw.get("type") or ""),
+                )
+            )
         # REST spells an instance child ``I<instance>;<component child>``.
         node_id = "I" + ";".join((instance_id, *step))
         copy_node = _FigNode(raw, node_id, instance_id, source.position)
@@ -672,8 +775,12 @@ def _expand_instances(
             # A component that contains itself would expand forever.
             warnings.append(f"fig_instance_recursive_component:{symbol_id}")
             return
-        overrides = dict(_symbol_overrides(data))
-        derived = dict(_derived_symbol_data(node.raw))
+        subtree = _symbol_subtree(symbol)
+        remap = _library_guid_remap(node.raw, subtree, nodes)
+        overrides = _remapped(_symbol_overrides(data), remap)
+        derived = _remapped(_derived_symbol_data(node.raw), remap)
+        if remap:
+            report["remapped"] += 1
         if outer is not None:
             # A nested instance also inherits the outer instance's overrides
             # that address through it, rebased onto this symbol.

@@ -1342,3 +1342,129 @@ def test_a_subtract_boolean_reaches_the_document_as_subtract() -> None:
     assert boolean.get("enabled") is True
     assert boolean.get("operation") == "subtract"
     assert len(boolean.get("operand_ids") or []) == 2
+
+
+def _library_component_rows(*, extra_local_child: bool = False) -> list[dict]:
+    """A component published to a library, whose local copy was renumbered.
+
+    Its overrides address descendants by the library's guids (session 41),
+    which this file has never heard of; the local copy carries session 0.
+    """
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(30),
+            "type": "SYMBOL",
+            "name": "button",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 108.0, "y": 48.0},
+            "sharedSymbolVersion": "474:281",
+        },
+        {
+            "guid": _guid(31),
+            "type": "TEXT",
+            "name": "CTA",
+            "parentIndex": {"guid": _guid(30), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 101.0, "y": 32.0},
+            "textData": {"characters": "Get started"},
+        },
+        {
+            "guid": _guid(32),
+            "type": "TEXT",
+            "name": "arrow",
+            "parentIndex": {"guid": _guid(30), "position": '"'},
+            "transform": _matrix(),
+            "size": {"x": 23.0, "y": 1.0},
+            "textData": {"characters": "->"},
+        },
+    ]
+    if extra_local_child:
+        rows.append(
+            {
+                "guid": _guid(33),
+                "type": "RECTANGLE",
+                "name": "extra",
+                "parentIndex": {"guid": _guid(30), "position": "#"},
+                "transform": _matrix(),
+                "size": {"x": 8.0, "y": 8.0},
+            }
+        )
+    rows.append(
+        {
+            "guid": _guid(40),
+            "type": "INSTANCE",
+            "name": "button instance",
+            "parentIndex": {"guid": _guid(1), "position": '"'},
+            "transform": _matrix(200.0, 0.0),
+            "size": {"x": 108.0, "y": 48.0},
+            "symbolData": {
+                "symbolID": _guid(30),
+                "symbolOverrides": [
+                    {"guidPath": {"guids": [_guid(25, 41)]}, "size": {"x": 108.0, "y": 48.0}},
+                    {
+                        "guidPath": {"guids": [_guid(26, 41)]},
+                        "textData": {"characters": "Start"},
+                    },
+                ],
+            },
+            "derivedSymbolData": [
+                {"guidPath": {"guids": [_guid(25, 41)]}, "size": {"x": 108.0, "y": 48.0}},
+                {"guidPath": {"guids": [_guid(26, 41)]}, "size": {"x": 45.0, "y": 32.0}},
+                {"guidPath": {"guids": [_guid(27, 41)]}, "size": {"x": 23.0, "y": 0.0}},
+            ],
+        }
+    )
+    return rows
+
+
+def test_library_guids_are_remapped_onto_the_local_copy() -> None:
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    nodes, warnings = _collect_nodes(_library_component_rows())
+    _link_tree(nodes)
+    report = _expand_instances(nodes, warnings)
+
+    assert report["remapped"] == 1
+    children = {child.raw["name"]: child for child in nodes["0:40"].children}
+    assert children["CTA"].raw["textData"]["characters"] == "Start"
+    # The component itself is untouched.
+    assert nodes["0:31"].raw["textData"]["characters"] == "Get started"
+
+
+def test_a_remap_that_does_not_line_up_is_refused() -> None:
+    """A misaligned guess would write the text onto the wrong node."""
+
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    nodes, warnings = _collect_nodes(
+        _library_component_rows(extra_local_child=True)
+    )
+    _link_tree(nodes)
+    report = _expand_instances(nodes, warnings)
+
+    # 3 unknown guids against a 4-node subtree is neither an exact match nor a
+    # root-less one, so nothing is remapped and the default text stands.
+    assert report["remapped"] == 0
+    children = {child.raw["name"]: child for child in nodes["0:40"].children}
+    assert children["CTA"].raw["textData"]["characters"] == "Get started"
+
+
+def test_text_overrides_never_land_on_a_non_text_node() -> None:
+    from app.painter_ui_figma_fig_rest import _guarded_override
+
+    fields = {"textData": {"characters": "x"}, "fillPaints": [], "size": {}}
+    assert _guarded_override(fields, "TEXT") == fields
+    kept = _guarded_override(fields, "RECTANGLE")
+    assert "textData" not in kept
+    assert set(kept) == {"fillPaints", "size"}
