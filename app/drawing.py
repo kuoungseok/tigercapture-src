@@ -20641,13 +20641,31 @@ class PaintDialog(QDialog):
                 getattr(self, "_painter_ui_prototype_state", {}),
             )
         from app.painter_ui_document import active_ui_page_document
+        from app.painter_ui_themes import resolve_ui_theme_document
 
-        # ``preview_document`` is canonical here, so page scoping can share its
-        # rows instead of cloning the whole document to throw most of it away.
-        canvas_document = active_ui_page_document(
+        # Resolve the theme on the FULL document, then scope to the page.
+        # Scoping first is what the canvas used to do, and it forced a second
+        # cold resolve: a page-scoped document has its own cache key, so it
+        # could never reuse the full-document resolve this edit already paid
+        # for in its validate pass. Resolving first turns that into a cache
+        # hit, and page scoping preserves the resolved rows because it shares
+        # them.
+        #
+        # ``shared=True`` hands back the cached document itself, so nothing
+        # here may mutate it. Page scoping only builds a new envelope, and
+        # ``selection``/``revision`` -- which the resolver cache deliberately
+        # ignores -- are restored onto that private envelope below.
+        resolved_document = resolve_ui_theme_document(
             preview_document,
             normalize=False,
+            shared=True,
         )
+        canvas_document = active_ui_page_document(
+            resolved_document,
+            normalize=False,
+        )
+        canvas_document["selection"] = preview_document.get("selection") or {}
+        canvas_document["revision"] = preview_document.get("revision", 0)
         valid_artboard_ids = {
             str(row.get("id") or "")
             for row in preview_document.get("artboards", [])

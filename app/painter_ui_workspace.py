@@ -398,10 +398,22 @@ class PainterUIDesignOverlay(QWidget):
                 source,
                 self._prototype_preview_state,
             )
-        self._effective_document = resolve_ui_theme_document(
-            source,
-            normalize=False,
-        )
+        if "resolved_themes" in source:
+            # Already theme-resolved upstream -- see
+            # drawing._refresh_painter_ui_overlay, which resolves the full
+            # document and scopes the result. Resolving again here would
+            # repeat the component and responsive passes on a page-scoped
+            # copy whose cache key can never match the full document's, so
+            # it was always a cold miss. Copy the envelope so mutating
+            # ``selection`` below cannot reach the caller's document or the
+            # resolver cache; the rows stay shared, as everywhere else in
+            # this chain.
+            self._effective_document = dict(source)
+        else:
+            self._effective_document = resolve_ui_theme_document(
+                source,
+                normalize=False,
+            )
         self._resolved_geometry = resolve_ui_constraints(
             self._effective_document,
             resolved_ui_geometry(

@@ -258,21 +258,68 @@ def _variable_modes_key(modes: Mapping[str, str]) -> str:
     return "|".join(f"{key}={modes[key]}" for key in sorted(modes))
 
 
+_CACHE_KEY_MEMO: dict[int, tuple[Any, tuple[Any, ...], bytes | None]] = {}
+_CACHE_KEY_MEMO_LIMIT = 8
+
+
+def _cache_key_identity(
+    document: Mapping[str, Any], objects: list[Any]
+) -> tuple[Any, ...]:
+    """Cheap witness that ``document``'s digested content is unchanged.
+
+    Holds the identity and length of every collection the digest covers, so
+    replacing or resizing any of them invalidates the memo. Rewriting a row
+    in place would slip through -- the same invariant ``_THEME_ROW_CACHE``
+    already relies on, and the resolver chain upholds it by rebuilding rows
+    rather than editing them.
+    """
+    artboards = document.get("artboards")
+    pages = document.get("pages")
+    tokens = document.get("tokens")
+    return (
+        id(objects),
+        len(objects),
+        id(artboards),
+        len(artboards) if isinstance(artboards, list) else -1,
+        id(pages),
+        len(pages) if isinstance(pages, list) else -1,
+        id(tokens),
+        len(tokens) if isinstance(tokens, list) else -1,
+        document.get("active_page_id"),
+        document.get("active_artboard_id"),
+    )
+
+
 def _resolved_cache_key(document: Mapping[str, Any]) -> bytes | None:
     if type(document) is not dict:
         return None
     objects = document.get("objects")
     if not isinstance(objects, list) or len(objects) < _RESOLVED_CACHE_MIN_OBJECTS:
         return None
+
+    # Digesting the key marshals the whole document, which on a large import
+    # costs about as much as a cache hit saves -- and one edit asks for the
+    # key several times over the same document object (validate, canvas, and
+    # two inspector passes). Memoise per document instead of re-digesting.
+    identity = _cache_key_identity(document, objects)
+    memo = _CACHE_KEY_MEMO.get(id(document))
+    if memo is not None and memo[0] is document and memo[1] == identity:
+        return memo[2]
+
     from app.painter_ui_document import canonical_payload_digest
 
-    return canonical_payload_digest(
+    key = canonical_payload_digest(
         {
-            key: item
-            for key, item in document.items()
-            if key not in {"selection", "revision"}
+            key_name: item
+            for key_name, item in document.items()
+            if key_name not in {"selection", "revision"}
         }
     )
+    # Keeping the document alive stops its id being recycled behind the memo.
+    _CACHE_KEY_MEMO[id(document)] = (document, identity, key)
+    while len(_CACHE_KEY_MEMO) > _CACHE_KEY_MEMO_LIMIT:
+        _CACHE_KEY_MEMO.pop(next(iter(_CACHE_KEY_MEMO)))
+    return key
 
 
 def resolve_ui_theme_document(

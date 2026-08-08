@@ -82,7 +82,7 @@ def _child_stroke_outsets(
 ) -> dict[str, float]:
     if not include_strokes:
         return _zero_edges()
-    layout = normalize_ui_auto_layout(child.get("layout"))
+    layout = ui_auto_layout_view(child.get("layout"))
     return _padding(layout.get("stroke_outsets"))
 
 
@@ -273,6 +273,73 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
     return source
 
 
+_CANONICAL_LAYOUT_KEYS = frozenset(
+    {
+        "mode",
+        "padding",
+        "gap",
+        "cross_gap",
+        "main_alignment",
+        "cross_alignment",
+        "positioning",
+        "wrap",
+        "width_sizing",
+        "height_sizing",
+        "umg_panel_mode",
+        "umg_spacing_strategy",
+        "umg_spacer_size_rule",
+        "umg_spacer_fill_coefficient",
+        "grid_columns",
+        "grid_column_span",
+        "grid_row_span",
+        "cell_horizontal_alignment",
+        "cell_vertical_alignment",
+    }
+)
+_LEGACY_LAYOUT_KEYS = frozenset(
+    {
+        "direction",
+        "type",
+        "justify",
+        "align",
+        "position",
+        "horizontal_sizing",
+        "vertical_sizing",
+    }
+)
+
+
+def ui_auto_layout_view(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return a read-only canonical view of a layout mapping.
+
+    ``normalize_ui_auto_layout`` deep copies its input and re-derives every
+    field. For rows that came out of ``_normalize_object`` the layout is
+    already canonical, so all of that is pure overhead — and on a large
+    imported document it is most of the per-edit cost. This returns such
+    mappings untouched and only falls back to normalizing when the input is
+    not already canonical.
+
+    The returned mapping MUST NOT be mutated: for canonical input it *is* the
+    row's own layout mapping. Callers that mutate the result have to keep
+    using ``normalize_ui_auto_layout``.
+    """
+    if type(value) is dict:
+        keys = value.keys()
+        if (
+            keys >= _CANONICAL_LAYOUT_KEYS
+            and keys.isdisjoint(_LEGACY_LAYOUT_KEYS)
+            and value["mode"] in _MODES
+            and value["positioning"] in _POSITIONING
+            and value["main_alignment"] in _MAIN_ALIGNMENTS
+            and value["cross_alignment"] in _CROSS_ALIGNMENTS
+            and value["width_sizing"] in _SIZING_MODES
+            and value["height_sizing"] in _SIZING_MODES
+            and type(value["padding"]) is dict
+        ):
+            return value
+    return normalize_ui_auto_layout(value)
+
+
 def grid_auto_layout_placements(
     rows: list[Mapping[str, Any]],
     columns: int,
@@ -283,7 +350,7 @@ def grid_auto_layout_placements(
     cursor_row = 0
     cursor_column = 0
     for child in rows:
-        layout = normalize_ui_auto_layout(child.get("layout"))
+        layout = ui_auto_layout_view(child.get("layout"))
         column_span = min(columns, max(1, int(layout["grid_column_span"])))
         row_span = max(1, int(layout["grid_row_span"]))
         while True:
@@ -390,7 +457,7 @@ def _baseline_line_plan(
             include_strokes=include_strokes,
         )
         footprint = leading + float(rect[cross_axis]) + trailing
-        child_layout = normalize_ui_auto_layout(child.get("layout"))
+        child_layout = ui_auto_layout_view(child.get("layout"))
         baseline = leading + _number(
             child_layout.get("baseline_offset"),
             float(rect[cross_axis]),
@@ -578,7 +645,7 @@ def resolve_ui_auto_layout(
             child
             for child in children.get(parent_id, [])
             if bool(child.get("visible", True))
-            and normalize_ui_auto_layout(child.get("layout"))["positioning"]
+            and ui_auto_layout_view(child.get("layout"))["positioning"]
             != "absolute"
         ]
 
@@ -597,7 +664,7 @@ def resolve_ui_auto_layout(
             return
         for child in children.get(object_id, []):
             measure(str(child["id"]), (*stack, object_id))
-        layout = normalize_ui_auto_layout(row.get("layout"))
+        layout = ui_auto_layout_view(row.get("layout"))
         mode = layout["mode"]
         rows = flow_children(object_id)
         if mode == "grid" and rows:
@@ -700,7 +767,7 @@ def resolve_ui_auto_layout(
         if not is_effectively_visible(parent_id):
             placed.add(parent_id)
             return
-        layout = normalize_ui_auto_layout(parent.get("layout"))
+        layout = ui_auto_layout_view(parent.get("layout"))
         mode = layout["mode"]
         rows = flow_children(parent_id)
         if mode == "grid" and rows:
@@ -729,7 +796,7 @@ def resolve_ui_auto_layout(
             for child in rows:
                 child_id = str(child["id"])
                 rect = resolved[child_id]
-                child_layout = normalize_ui_auto_layout(child.get("layout"))
+                child_layout = ui_auto_layout_view(child.get("layout"))
                 row_index, column_index, row_span, column_span = placements[child_id]
                 cell_x = content_x + column_index * (column_width + layout["gap"])
                 cell_y = content_y + row_index * (row_height + layout["cross_gap"])
@@ -786,7 +853,7 @@ def resolve_ui_auto_layout(
                 fill_rows = [
                     row
                     for row in line
-                    if normalize_ui_auto_layout(row.get("layout"))[
+                    if ui_auto_layout_view(row.get("layout"))[
                         f"{main_axis}_sizing"
                     ]
                     == "fill"
@@ -867,7 +934,7 @@ def resolve_ui_auto_layout(
                 for child in line:
                     child_id = str(child["id"])
                     rect = resolved[child_id]
-                    child_layout = normalize_ui_auto_layout(child.get("layout"))
+                    child_layout = ui_auto_layout_view(child.get("layout"))
                     fill_cross = (
                         child_layout[f"{cross_axis}_sizing"] == "fill"
                         or layout["cross_alignment"] == "stretch"
