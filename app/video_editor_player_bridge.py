@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtWidgets import QMessageBox
@@ -9,6 +10,7 @@ from app.i18n import tr
 
 
 NESTED_AUDIO_PREVIEW_TRACK_ID = -9001
+VIDEO_EMBEDDED_AUDIO_PREVIEW_TRACK_ID = -9002
 
 
 def _on_player_error(self, msg: str) -> None:
@@ -114,6 +116,190 @@ def collect_nested_audio_preview_clips(owner: Any) -> list[Any]:
     return collected
 
 
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _path_key(path: Any) -> str:
+    if path in (None, ""):
+        return ""
+    try:
+        return str(Path(path).resolve()).casefold()
+    except Exception:
+        return str(path).casefold()
+
+
+def _audio_clip_signature(clip: Any) -> tuple[str, int, int, int]:
+    return (
+        _path_key(getattr(clip, "source_path", None)),
+        _int(getattr(clip, "offset_ms", 0)),
+        _int(getattr(clip, "trim_start_ms", 0)),
+        _int(getattr(clip, "effective_trim_end_ms", getattr(clip, "trim_end_ms", 0))),
+    )
+
+
+def _existing_audio_preview_signatures(owner: Any) -> tuple[set[int], set[tuple[str, int, int, int]]]:
+    clip_ids: set[int] = set()
+    signatures: set[tuple[str, int, int, int]] = set()
+    for track in getattr(owner, "_audio_tracks", []) or []:
+        for clip in getattr(track, "clips", []) or []:
+            cid = getattr(clip, "id", None)
+            if cid is not None:
+                clip_ids.add(_int(cid))
+            sig = _audio_clip_signature(clip)
+            if sig[0]:
+                signatures.add(sig)
+    return clip_ids, signatures
+
+
+def _video_clip_audio_fields(track: Any, clip: Any) -> tuple[Path | None, int, int, int, int]:
+    source = getattr(clip, "source_path", None)
+    if source in (None, ""):
+        source = getattr(track, "source_path", None)
+    if source in (None, ""):
+        return None, 0, 0, 0, 0
+    try:
+        source_path = Path(source)
+    except Exception:
+        return None, 0, 0, 0, 0
+    timeline_in = _int(
+        getattr(clip, "timeline_in_ms", getattr(track, "offset_ms", 0)),
+        _int(getattr(track, "offset_ms", 0)),
+    )
+    source_in = max(0, _int(getattr(clip, "source_in_ms", 0)))
+    source_duration = max(
+        0,
+        _int(
+            getattr(
+                clip,
+                "source_duration_ms",
+                getattr(track, "duration_ms", 0),
+            )
+        ),
+    )
+    source_out = _int(
+        getattr(clip, "effective_source_out_ms", getattr(clip, "source_out_ms", 0)),
+        0,
+    )
+    if source_out <= 0:
+        source_out = source_duration
+    if source_out <= source_in:
+        length = _int(getattr(clip, "effective_length_ms", 0), 0)
+        if length <= 0:
+            length = max(0, _int(getattr(track, "duration_ms", 0), 0))
+        source_out = source_in + length
+    duration = max(source_duration, source_out)
+    return source_path, timeline_in, source_in, source_out, duration
+
+
+def _copy_embedded_audio_edit_state(audio_clip: Any, video_clip: Any) -> None:
+    proxy = getattr(video_clip, "_embedded_audio_proxy_clip", None)
+    if proxy is None:
+        return
+    for attr in (
+        "gain",
+        "fade_in_ms",
+        "fade_out_ms",
+        "fades",
+        "cuts",
+        "volume_points",
+        "effects",
+        "_se_speed",
+        "_se_pitch",
+        "_se_reverse",
+    ):
+        if hasattr(proxy, attr):
+            try:
+                setattr(audio_clip, attr, copy.deepcopy(getattr(proxy, attr)))
+            except Exception:
+                setattr(audio_clip, attr, getattr(proxy, attr))
+    for attr in ("waveform", "spectrum_bins"):
+        if hasattr(proxy, attr):
+            setattr(audio_clip, attr, getattr(proxy, attr))
+    raw_markers = getattr(proxy, "_picture_sync_markers", None)
+    if raw_markers:
+        markers: list[dict[str, Any]] = []
+        trim_start = _int(getattr(audio_clip, "trim_start_ms", 0))
+        offset_ms = _int(getattr(audio_clip, "offset_ms", 0))
+        trim_end = _int(getattr(audio_clip, "effective_trim_end_ms", getattr(audio_clip, "trim_end_ms", 0)))
+        for marker in list(raw_markers or []):
+            if not isinstance(marker, dict):
+                continue
+            copied = copy.deepcopy(marker)
+            source_ms = _int(copied.get("source_ms", 0))
+            if trim_end > trim_start and not (trim_start <= source_ms <= trim_end):
+                continue
+            local_ms = max(0, source_ms - trim_start)
+            copied["local_ms"] = local_ms
+            copied["project_ms"] = offset_ms + local_ms
+            markers.append(copied)
+        setattr(audio_clip, "_picture_sync_markers", markers)
+
+
+def collect_video_embedded_audio_preview_clips(owner: Any) -> list[Any]:
+    from app.audio_tracks import AudioClip
+
+    linked_audio_ids, existing_signatures = _existing_audio_preview_signatures(owner)
+    collected: list[Any] = []
+    next_id = -200000
+    for track in getattr(owner, "_tracks", []) or []:
+        clips = list(getattr(track, "clips", []) or [])
+        if not clips and getattr(track, "source_path", None) is not None:
+            clips = [track]
+        for clip in clips:
+            linked_id = getattr(clip, "linked_audio_id", None)
+            if linked_id is not None and _int(linked_id, -1) in linked_audio_ids:
+                continue
+            source_path, timeline_in, source_in, source_out, duration = _video_clip_audio_fields(track, clip)
+            if source_path is None or duration <= 0 or source_out <= source_in:
+                continue
+            signature = (_path_key(source_path), timeline_in, source_in, source_out)
+            if signature in existing_signatures:
+                continue
+            audio_clip = AudioClip(
+                id=next_id,
+                source_path=source_path,
+                duration_ms=duration,
+                offset_ms=timeline_in,
+                trim_start_ms=source_in,
+                trim_end_ms=source_out,
+            )
+            _copy_embedded_audio_edit_state(audio_clip, clip)
+            setattr(audio_clip, "preview_embedded_video_audio", True)
+            collected.append(audio_clip)
+            next_id -= 1
+    return collected
+
+
+def sync_video_embedded_audio_preview_track(
+    owner: Any,
+    *,
+    preview_track_id: int = VIDEO_EMBEDDED_AUDIO_PREVIEW_TRACK_ID,
+    audio_track_factory: Callable[..., Any] | None = None,
+) -> int:
+    clips = collect_video_embedded_audio_preview_clips(owner)
+    mixer = getattr(owner, "_audio_mixer", None)
+    if mixer is None:
+        return max((_clip_extent_ms(clip) for clip in clips), default=0)
+    if not clips:
+        _call(mixer, "remove_track", preview_track_id)
+        return 0
+    if audio_track_factory is None:
+        from app.audio_tracks import AudioTrack
+
+        audio_track_factory = AudioTrack
+    track = audio_track_factory(
+        id=preview_track_id,
+        clips=clips,
+        label="Embedded video audio preview",
+    )
+    _call(mixer, "update_track", track)
+    return _audio_track_extent_ms(track)
+
+
 def sync_nested_audio_preview_track(
     owner: Any,
     *,
@@ -152,6 +338,13 @@ def sync_mmd_tracks_to_player(owner: Any) -> None:
         player.set_mmd_tracks(getattr(owner, "_mmd_tracks", []) or [])
 
 
+def sync_motion_state_to_player(owner: Any) -> None:
+    player = getattr(owner, "_player", None)
+    if player is not None and hasattr(player, "set_motion_state"):
+        player.set_motion_state(getattr(owner, "_motion_compositions", {}) or {},
+                                getattr(owner, "_motion_clips", []) or [])
+
+
 def sync_actor_tracks_to_player(owner: Any) -> None:
     player = getattr(owner, "_player", None)
     if player is None:
@@ -183,6 +376,8 @@ def repaint_timeline_rows(owner: Any) -> None:
         _call(row, "update")
     for row in getattr(owner, "_mmd_lane_rows", []) or []:
         _call(row, "update")
+    for row in getattr(owner, "_motion_lane_rows", []) or []:
+        _call(row, "update")
 
 
 def refresh_player_tracks(
@@ -192,6 +387,7 @@ def refresh_player_tracks(
     sync_actor_tracks: bool | None = None,
 ) -> None:
     nested_audio_end = sync_nested_audio_preview_track(owner)
+    embedded_audio_end = sync_video_embedded_audio_preview_track(owner)
     extra = max(
         (_audio_track_extent_ms(track) for track in getattr(owner, "_audio_tracks", []) or []),
         default=0,
@@ -200,13 +396,19 @@ def refresh_player_tracks(
     live2d_end = _actor_tracks_extent_ms(getattr(owner, "_live2d_actor_tracks", []) or [])
     ar_pbr_end = _dict_track_extent_ms(getattr(owner, "_ar_pbr_tracks", []) or [])
     mmd_end = _dict_track_extent_ms(getattr(owner, "_mmd_tracks", []) or [])
-    extra = max(extra, nested_audio_end, spine_end, live2d_end, ar_pbr_end, mmd_end)
+    try:
+        from app.motion_designer.timeline_bridge import motion_timeline_extent
+        motion_end = motion_timeline_extent(getattr(owner, "_motion_clips", []) or [])
+    except Exception:
+        motion_end = 0
+    extra = max(extra, nested_audio_end, embedded_audio_end, spine_end, live2d_end, ar_pbr_end, mmd_end, motion_end)
 
     player = getattr(owner, "_player", None)
     if player is not None and hasattr(player, "set_project_settings"):
         player.set_project_settings(getattr(owner, "_project_settings", {}) or {})
     _call_owner_sync(owner, "_sync_ar_pbr_tracks_to_player", sync_ar_pbr_tracks_to_player)
     _call_owner_sync(owner, "_sync_mmd_tracks_to_player", sync_mmd_tracks_to_player)
+    _call_owner_sync(owner, "_sync_motion_state_to_player", sync_motion_state_to_player)
     actor_hook = getattr(owner, "_sync_actor_tracks_to_player", None)
     if sync_actor_tracks is True or (sync_actor_tracks is None and callable(actor_hook)):
         if callable(actor_hook):
@@ -326,6 +528,8 @@ def on_position_changed(owner: Any, pos: int) -> None:
         _call(row, "set_playhead", pos)
     for row in getattr(owner, "_mmd_lane_rows", []) or []:
         _call(row, "set_playhead", pos)
+    for row in getattr(owner, "_motion_lane_rows", []) or []:
+        _call(row, "set_playhead", pos)
     _call(getattr(owner, "_timeline_ruler", None), "set_playhead", pos)
     _call(owner, "_push_snap_targets_to_rows")
     update_audio_level_meters(owner, pos)
@@ -431,8 +635,11 @@ def on_duration_changed(owner: Any, dur: int) -> None:
 
 __all__ = [
     "NESTED_AUDIO_PREVIEW_TRACK_ID",
+    "VIDEO_EMBEDDED_AUDIO_PREVIEW_TRACK_ID",
     "collect_nested_audio_preview_clips",
+    "collect_video_embedded_audio_preview_clips",
     "sync_nested_audio_preview_track",
+    "sync_video_embedded_audio_preview_track",
     "sync_ar_pbr_tracks_to_player",
     "sync_mmd_tracks_to_player",
     "sync_actor_tracks_to_player",

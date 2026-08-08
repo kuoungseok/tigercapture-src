@@ -81,7 +81,8 @@ def test_project_io_persists_music_lab_compositions_and_track_links(tmp_path: Pa
 
     composition = compose_music(prompt="project save bgm", duration_ms=5000, genre="lofi", mood="chill")
     render_preview(composition, output_dir=tmp_path)
-    stem_path = Path(composition.rendered_stems["drums"])
+    music_role = "percussion"
+    stem_path = Path(composition.rendered_stems[music_role])
 
     clip = AudioClip(
         id=20,
@@ -92,10 +93,10 @@ def test_project_io_persists_music_lab_compositions_and_track_links(tmp_path: Pa
         trim_end_ms=composition.duration_ms,
     )
     clip.music_composition_id = composition.id
-    clip.music_role = "drums"
-    track = AudioTrack(id=2, clips=[clip], label="Music Drums", bus_id="music", track_type="music")
+    clip.music_role = music_role
+    track = AudioTrack(id=2, clips=[clip], label="Music Percussion", bus_id="music", track_type="music")
     track.music_composition_id = composition.id
-    track.music_role = "drums"
+    track.music_role = music_role
 
     editor = _ProjectIoEditor()
     editor._audio_tracks = [track]
@@ -110,10 +111,10 @@ def test_project_io_persists_music_lab_compositions_and_track_links(tmp_path: Pa
     assert composition.id in loaded._music_compositions
     loaded_composition = loaded._music_compositions[composition.id]
     assert loaded_composition.prompt == "project save bgm"
-    assert loaded_composition.rendered_stems["drums"] == str(stem_path)
+    assert loaded_composition.rendered_stems[music_role] == str(stem_path)
     assert len(loaded._audio_tracks) == 1
     loaded_track = loaded._audio_tracks[0]
     assert loaded_track.music_composition_id == composition.id
-    assert loaded_track.music_role == "drums"
+    assert loaded_track.music_role == music_role
     assert loaded_track.clips[0].music_composition_id == composition.id
-    assert loaded_track.clips[0].music_role == "drums"
+    assert loaded_track.clips[0].music_role == music_role

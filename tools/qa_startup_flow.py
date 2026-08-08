@@ -60,6 +60,7 @@ def run_startup_flow_qa(out_dir: Path | str | None = None) -> dict[str, Any]:
         artifacts["startup_launcher"] = str(startup_path)
         mini_cards = launcher.findChildren(QPushButton, "LauncherMiniCard")
         start_cards = launcher.findChildren(QPushButton, "LauncherStartCard")
+        visible_start_cards = [card for card in start_cards if card.isVisible()]
         template_panels = launcher.findChildren(QFrame, "LauncherTemplatePanel")
         checks["launcher_templates_collapsed"] = (
             hasattr(launcher, "templates_btn")
@@ -68,18 +69,19 @@ def run_startup_flow_qa(out_dir: Path | str | None = None) -> dict[str, Any]:
         )
         checks["launcher_no_recent_cards"] = len(mini_cards) == 0
         checks["launcher_quick_start_cards"] = (
-            len(start_cards) == 2
-            and all(card.isVisible() for card in start_cards)
+            len(visible_start_cards) == 1
+            and all(card.isVisible() for card in visible_start_cards)
             and all("템플릿" not in card.text() and "Template" not in card.text() for card in start_cards)
         )
         checks["launcher_quick_start_label"] = (
             hasattr(launcher, "_pro_editor_label")
             and launcher._pro_editor_label.text() == launcher._quick_start_title_text()
         )
-        checks["launcher_direct_editor_card"] = (
+        checks["launcher_studio_entry_hidden_by_default"] = (
             hasattr(launcher, "pro_editor_btn")
-            and launcher.pro_editor_btn.isVisible()
-            and bool(str(launcher.pro_editor_btn.text()).strip())
+            and hasattr(launcher, "templates_btn")
+            and not launcher.pro_editor_btn.isVisible()
+            and not launcher.templates_btn.isVisible()
         )
         checks["launcher_workspace_default_standard"] = (
             hasattr(launcher, "launcher_workspace_standard_btn")
@@ -100,6 +102,7 @@ def run_startup_flow_qa(out_dir: Path | str | None = None) -> dict[str, Any]:
         metrics = {
             "mini_card_count": len(mini_cards),
             "start_card_count": len(start_cards),
+            "visible_start_card_count": len(visible_start_cards),
             "start_card_texts": [card.text() for card in start_cards],
             "template_panel_count": len(template_panels),
             "has_templates_button": hasattr(launcher, "templates_btn"),
@@ -119,6 +122,40 @@ def run_startup_flow_qa(out_dir: Path | str | None = None) -> dict[str, Any]:
         launcher.clear_startup_busy()
     finally:
         launcher.close()
+
+    old_studio_env = os.environ.get("TIGERCAPTURE_CAPTURE_TO_STUDIO")
+    os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = "1"
+    studio_launcher = MainWindow()
+    try:
+        studio_launcher.open_video_editor_requested.connect(
+            lambda payload: events.append({
+                "event": "open_video_editor",
+                "payload": payload if isinstance(payload, dict) else {"source_path": str(payload) if payload is not None else "", "workspace_mode": "standard"},
+            })
+        )
+        studio_launcher.show()
+        app.processEvents()
+        checks["launcher_direct_editor_card"] = (
+            hasattr(studio_launcher, "pro_editor_btn")
+            and studio_launcher.pro_editor_btn.isVisible()
+            and bool(str(studio_launcher.pro_editor_btn.text()).strip())
+        )
+        QTest.mouseClick(studio_launcher.pro_editor_btn, Qt.MouseButton.LeftButton)
+        QTest.qWait(90)
+        app.processEvents()
+        checks["launcher_direct_editor_signal"] = any(event.get("event") == "open_video_editor" for event in events)
+        checks["launcher_direct_editor_standard_payload"] = any(
+            event.get("event") == "open_video_editor"
+            and isinstance(event.get("payload"), dict)
+            and event["payload"].get("workspace_mode") == "standard"
+            for event in events
+        )
+    finally:
+        studio_launcher.close()
+        if old_studio_env is None:
+            os.environ.pop("TIGERCAPTURE_CAPTURE_TO_STUDIO", None)
+        else:
+            os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = old_studio_env
 
     editor = VideoEditorWindow()
     try:

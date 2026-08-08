@@ -176,8 +176,11 @@ Current implementation status:
 - `app.depth.cache` stores frame `.npy` files plus a manifest with provider,
   source path, source mtime, frame count, stale-cache status, and nearest-frame
   lookup support.
-- `app.depth.refinement` and `app.depth.temporal` provide lightweight
-  compositor-oriented edge cleanup and temporal stabilization hooks.
+- `app.depth.refinement` provides compositor-oriented depth cleanup:
+  robust normalization, invalid edge-band masking, RGB-guided edge-aware
+  smoothing, foreground bias, and a separate layered depth-matte path for
+  viewer diagnostics. `app.depth.temporal` provides scene-cut-aware temporal
+  stabilization.
 - `ProjectPlayer` and `VideoExporter` already pass depth frames into AR/PBR
   preview/export when `depth_source_id`, scene-anchor depth, or runtime depth is
   available. Cached depth is loaded first, including nearby cached frames for
@@ -194,9 +197,9 @@ Product implication:
 - TigerCapture must not claim high-quality photo/video depth generation while
   the runtime depth backend is `synthetic_luma_depth`.
 - The current fallback is sufficient for QA, simple road-plane smoke tests, and
-  proof that preview/export consume depth, but it cannot produce the
-  foreground/person-aware depth maps shown in high-quality monocular depth
-  examples.
+  proof that preview/export consume depth. The refinement pass can make viewer
+  diagnostics look like stable layered mattes, but synthetic fallback depth is
+  still not a substitute for a high-quality monocular/video depth model.
 
 Production response plan:
 
@@ -219,8 +222,10 @@ Production response plan:
    - CLI/manual QA entry point:
      `python tools/generate_depth_cache.py clip.mp4 --interval-ms 200 --max-frames 60`.
 4. PARTIAL: Edge/refinement passes before AR/PBR occlusion:
-   - lightweight RGB-aware blur and optional mask foreground bias exists.
-   - remaining work: SAM/object-mask integration and manual brush correction UI.
+   - robust normalize, invalid border masking, RGB-guided edge-aware smoothing,
+     optional foreground bias, and layered viewer matte are implemented.
+   - remaining work: SAM/object-mask integration, manual brush correction UI,
+     and a production monocular/video depth backend.
 5. PARTIAL: Video temporal stabilization:
    - lightweight temporal smoothing with scene-cut reset exists.
    - remaining work: optical-flow-guided propagation and Video Depth Anything or
@@ -620,15 +625,29 @@ Current implemented behavior as of 2026-07-03:
 - `app.ar_pbr.depth_view.depth_frame_to_rgb(...)` is the viewer-only depth map
   display path. The main ProjectPlayer preview can be switched to
   depth-map-only via `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Python
-  Actions `ar_pbr.preview.depth_view.get/set`. Default display is grayscale
-  with near camera = white; `heat` and `inverted_grayscale` are debug options.
-  This mode is diagnostic only and must not change export/composite output.
+  Actions `ar_pbr.preview.depth_view.get/set`. The UI `Depth` button cycles
+  `off -> matte -> distance -> plane -> off`: `matte` uses
+  `app.depth.refinement.layered_depth_matte_for_viewer(...)` for cleaner object
+  bands and sharper visual edges, `distance` keeps a smoother depth gradient
+  with contour lines for distance/slope checking, and `plane` overlays rough
+  road/floor candidate regions for placement inspection. `heat` and
+  `inverted_grayscale` remain debug options. These modes are diagnostic only
+  and must not change export/composite output.
 - Depth-map-only preview is user-controlled and must stay off by default. Normal
   playback must not estimate depth unless an active AR/PBR track explicitly
   needs depth for occlusion, scene/plane anchoring, or the user has enabled the
   Depth viewer toggle. If no depth cache is available, live depth estimation may
   be slower and should be treated as an intentional diagnostic/placement cost,
   not part of the baseline video playback path.
+- AR/PBR track status is separate from the Depth viewer. Timeline AR/PBR lanes
+  expose a compact metadata badge: `3D` for manual placement, `ANCH` for
+  depth/plane anchored placement, and `TRK` when the anchored track also has
+  template tracking metadata. This badge must not run depth estimation or scene
+  solving by itself.
+- Encoded letterbox/pillarbox mattes are detected from the RGB video frame
+  before depth refinement. Detected matte bands are treated as invalid scene
+  area for depth normalization and diagnostic matte/plane inspection; they are
+  not valid road/floor or occlusion evidence.
 - Optional depth-boundary glow is configured through
   `depth_edge_glow_enabled`, `depth_edge_glow_strength`,
   `depth_edge_glow_radius_px`, and `depth_edge_glow_color`. This is a visible
@@ -664,6 +683,166 @@ export correctness gap where depth was previously dropped, but it is not yet a
 native helper-side model-depth-buffer compare. True per-fragment helper
 occlusion should compare video depth against the helper's rendered object depth
 buffer once that buffer is exposed in the service path.
+
+## Image Texture Map Lab
+
+As of 2026-07-24, AR/PBR also includes an image-to-material texture lab for
+turning a source image into Unreal-friendly PBR texture maps. This is separate
+from 3D model preview: it maps the generated material onto a renderer plane so
+users can inspect normals, AO, roughness, metallic response, and packed maps
+before export.
+
+Implementation ownership:
+
+- Core generation/export: `app.ar_pbr.texture_map_lab`
+- Qt plane-preview/sliders: `app.ar_pbr.texture_map_lab_window`
+- Shared file-to-window entry: `app.ar_pbr.texture_lab_entry`
+- Python Actions: `ar_pbr.texture_lab.*`
+- Regression tests: `tests/test_ar_pbr_texture_map_lab.py`
+
+The lab must provide:
+
+- Plane material preview rendered from the generated maps.
+- Slider controls for normal strength/radius, height contrast/blur, AO
+  strength/radius, cavity/curvature, roughness bias/contrast/detail,
+  metallic value, optional heuristic Base Color de-light estimate, optional
+  Substrate reflectance/F90 mask strength, Substrate Slab mode, preview
+  light/environment, and animated-light preview.
+- `Generate De-lit / IID Estimate` offers two deliberately separate methods.
+  `Fast Heuristic` is an optional photographic-lighting
+  cleanup for sources such as grass, asphalt, fabric, or walls. It estimates a
+  low-frequency lighting field from input luminance and exposes separate
+  `base_color_source`, `base_color_estimate`, and `delight_shading` diagnostics.
+  It is not a measured albedo, a calibrated intrinsic-image solve, or a result
+  with a physical confidence score. Enabling generation must not replace
+  exported Base Color. A second explicit `Apply Estimate to Base Color` control
+  is required for that destructive interpretation and remains off by default.
+  Height, Normal, AO, Roughness, and Metallic must always use the adjusted input
+  RGB rather than the optional estimate. The manifest records method,
+  validation status, confidence=`null`, export provenance, and whether the
+  estimate was explicitly applied. The Analysis view labels the panels
+  `Input / De-lit Estimate / Normal / Roughness / Estimated Light`; Compare
+  remains source/estimate/difference inspection.
+
+Research audit and implementation boundary:
+
+- The fast estimate is not the Jobson/Rahman/Woodell Multiscale Retinex
+  reference algorithm: it does not use the paper's log-domain per-channel
+  center/surround sum or color-restoration stage.
+- It is not Marigold IID or IntrinsicDiffusion and must not claim their learned
+  albedo/shading benchmark results.
+- Its limited operation is two-scale low-frequency luminance division in
+  IEC 61966-2-1 linear-light sRGB. CPU and CUDA share a discrete 3-sigma
+  Gaussian, replicate boundary condition, median normalization, and sRGB
+  encode/decode contract.
+- Primary references: NASA NTRS `19990005051` (Multiscale Retinex), ICC IEC
+  61966-2-1 sRGB registry, `prs-eth/Marigold` IID v1.1, and the SIGGRAPH 2024
+  IntrinsicDiffusion project. These references classify and constrain the
+  feature; they do not validate its output as measured reflectance.
+- `AI High Quality · Marigold IID` uses the official Diffusers
+  `MarigoldIntrinsicsPipeline` with
+  `prs-eth/marigold-iid-lighting-v1-1`. It predicts Albedo `A`, diffuse
+  Shading `S`, and non-diffuse Residual `R` under `I=A*S+R`; output conversion
+  must use `visualize_intrinsics(prediction, target_properties)` rather than
+  guessing channel order or color space. Defaults are 4 steps, ensemble 1,
+  processing resolution 768, seed 0. The output remains a learned prediction,
+  not measured reflectance, and cannot silently replace Base Color or feed
+  Height/Normal/AO/Roughness/Metallic inference.
+- Diffusers and the OpenRAIL++ checkpoint are lazy optional dependencies.
+  Normal startup performs no network access. `Install AI IID` is the explicit
+  dependency/checkpoint action; it stores only fp16 safetensors (about 2.6 GB,
+  excluding duplicate fp32 and pickle weights) under
+  `external/models/marigold-iid-lighting-v1-1`. Actions expose the same offline
+  readiness/install contract through `ar_pbr.texture_lab.iid_status`.
+- Individual export for `base_color`, `normal`, `ao`, `roughness`,
+  `metallic`, `height`, `cavity`, and `curvature`.
+- Height export includes both the compatibility 8-bit PNG and a 16-bit
+  grayscale PNG for Normal/POM workflows. The manifest records the precision
+  file and whether a user-selected export-size policy resampled the source.
+- Optional advanced Substrate export for `f0` and `f90_mask`; these are
+  disabled by default and must be requested explicitly through the UI checkboxes
+  or the `maps` parameter in normal Default Lit workflow. When Texture Lab
+  `Substrate Slab` mode is enabled, `f0` and `f90_mask` become default
+  separate-map exports and `metallic` is removed from the default separate
+  export. Metallic remains generated internally as a helper input for
+  `Substrate Metalness-To-DiffuseAlbedo-F0`, so the UI must show Metallic as a
+  disabled/locked direct input rather than as a direct Substrate socket.
+- The `Animate Light` preview option orbits the preview point light in XY so
+  normal, AO, roughness, F0, and F90 response can be inspected without
+  regenerating texture maps.
+- Channel-packed export layouts:
+  - `unreal_orm` / `orm` / `arm`: R=AO, G=Roughness, B=Metallic.
+  - `rma`: R=Roughness, G=Metallic, B=AO.
+  - `gltf_mr`: R=Unused/white, G=Roughness, B=Metallic.
+- Manifest output with Unreal import settings: Base Color uses sRGB/default
+  compression; normal maps use `TC_Normalmap`; scalar and packed maps use
+  non-sRGB mask/grayscale compression.
+
+Automation surface:
+
+- `ar_pbr.texture_lab.open`: opens the image texture lab window for an image.
+- `ar_pbr.texture_lab.preview`: writes a plane preview or map preview PNG.
+- `ar_pbr.texture_lab.iid_status`: reports Marigold IID dependency, CUDA,
+  checkpoint, license, durable path, and explicit install commands.
+- `ar_pbr.texture_lab.export`: writes separate and packed texture maps plus a
+  JSON manifest.
+- `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
+  Substrate material-wiring guidance for generated maps.
+
+Product UI entry points:
+
+- Tiger Studio `Programs` exposes a `3D PBR Texture` icon. It asks for a source
+  image and opens the shared Texture Lab directly; it does not require creating
+  a Painter document first.
+- Painter retains `Image > PBR Texture Lab...` and
+  `Window > PBR Texture Lab...`; these render the current visible Painter
+  document into the source image before opening the same lab.
+- Painter's right inspector remains reserved for the color palette and the
+  standalone `Layers / Channels / Paths` tab set. Automation continues through
+  `paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`. The
+  lower-level `ar_pbr.texture_lab.*` actions remain useful for file-based
+  automation and review tooling.
+
+Unreal/Substrate research outcome:
+
+- Existing Default Lit PBR maps remain the practical interchange baseline.
+  BaseColor, Normal, Roughness, Metallic, and AO are still useful inputs for
+  Unreal material creation.
+- Substrate changes the material graph target, not the image-lab source maps.
+  Unreal 5.8 engine source shows `Substrate Slab BSDF` inputs such as
+  `DiffuseAlbedo`, `F0`, `F90`, `Roughness`, `Normal`, `Anisotropy`,
+  `SecondRoughness`, `Fuzz`, and `Glint`.
+- Unreal 5.8 engine source also exposes
+  `Substrate Metalness-To-DiffuseAlbedo-F0`, which converts legacy
+  BaseColor/Specular/Metallic into Slab `DiffuseAlbedo` and `F0`. The texture
+  lab manifest therefore emits this wiring plan instead of pretending
+  Substrate has the same direct `Metallic` input as Default Lit.
+- TigerCapture's renderer implements a Substrate Slab output-match path, not a
+  full Unreal renderer clone. The packet and software renderers convert
+  BaseColor/Metallic/Reflectance to `DiffuseAlbedo/F0`, optionally sample
+  `diffuse_albedo`, `f0`, `f90`, and `f90_mask` maps, and shade with an
+  F90-aware Slab approximation. Existing metal/rough PBR remains the default
+  path unless Substrate settings or maps are present.
+- The lab defaults to Unreal/DirectX normal-map orientation. If an OpenGL-style
+  normal is requested, the manifest marks that Unreal should flip the green
+  channel.
+- Advanced Substrate-specific `f0` and `f90_mask` maps are available as
+  optional exports. `f0` is derived from BaseColor/Metallic/reflectance and
+  `f90_mask` is a heuristic grazing-response mask. They become default
+  separate exports only when the user explicitly enables Texture Lab
+  `Substrate Slab` mode. Second roughness, anisotropy plus tangent direction,
+  fuzz, and glint remain future optional generators.
+
+Research references used for this contract:
+
+- Unreal Engine Substrate overview:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine
+- Unreal Engine PBR material inputs:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/physically-based-materials-in-unreal-engine
+- Unreal Engine texture masks/channel packing:
+  https://dev.epicgames.com/documentation/unreal-engine/using-texture-masks-in-unreal-engine
+- MaterialX/OpenPBR specification:
+  https://github.com/AcademySoftwareFoundation/MaterialX/blob/main/documents/Specification/MaterialX.PBRSpec.md
 
 Skeletal meshes are supported in the descriptor pipeline and the full GPU helper
 now bakes animation before building the model-view vertex buffer. The current
@@ -749,6 +928,125 @@ Asset support regression over the local sample corpus:
 The matrix checks representative static FBX, skeletal GLB, and unsupported
 compressed GLB samples and writes
 `debugCapture/ar_pbr_asset_support_matrix_qa.json`.
+
+## Texture Lab Backend Contract
+
+`app.ar_pbr.texture_map_lab` owns the image-to-PBR map generator used by the
+AR/PBR Texture Lab window, Painter PBR panel, and Python Actions.
+
+- File-based actions: `ar_pbr.texture_lab.open`, `ar_pbr.texture_lab.preview`,
+  `ar_pbr.texture_lab.backend_status`, `ar_pbr.texture_lab.export`, and
+  `ar_pbr.texture_lab.substrate_plan`.
+- Painter actions: `paint.pbr.preview`, `paint.pbr.backend_status`,
+  `paint.pbr.export`, and `paint.pbr.substrate_plan`.
+- Preview generation should use in-memory images where possible and cache maps
+  by source/settings fingerprint. Preview-only light changes must re-shade from
+  cached maps instead of regenerating height, normal, AO, roughness, and packed
+  outputs.
+- Backend selector: `TIGERCAPTURE_TEXTURE_LAB_BACKEND=auto|cpu|torch_cuda|cupy|
+  opencv_cuda`. Implemented backends are `cpu` and optional `torch_cuda`.
+  `cupy` and `opencv_cuda` are reserved/planned statuses until their kernels are
+  implemented.
+- If PyTorch CUDA is not installed, installed without CUDA, or fails at runtime,
+  Texture Lab must keep working on CPU and surface an explicit fallback reason
+  plus install/verify commands in the UI and action payloads.
+
+## Environment Visibility and Hardware RT Milestones
+
+The AR/PBR renderer has one renderer-neutral environment contract in
+`app.ar_pbr.render_environment`. An HDRI is not required to be visible to the
+camera in order to remain available to lighting rays. The normalized settings
+are serialized under `render.lighting.environment_visibility`:
+
+- `camera_visible` controls only the viewer/export background.
+- `reflection_visible`, `diffuse_visible`, and `refraction_visible` control
+  independent environment contributions.
+- `diffuse_strength`, `reflection_strength`, and `refraction_strength` are
+  independent 0..8 energy multipliers. The current UI exposes visibility; the
+  Action/schema contract also preserves the strengths.
+- `background_output` is `environment`, `transparent`, or `solid`.
+- `camera_visible=false` with `reflection_visible=true` is the supported
+  invisible-HDRI/reflection-studio setup. It must not clear the IBL probe.
+- Realtime OpenGL and packet export both apply diffuse and reflection
+  visibility independently. `studio_lights_only` disables both environment
+  contributions without deleting the selected HDRI.
+
+Render mode requests are `ibl_realtime`, `hybrid_rt`, `path_traced`, and
+`studio_lights_only`. `hybrid_rt` and `path_traced` are capability-gated:
+
+- CUDA availability is never evidence of DXR or Vulkan ray-tracing support.
+- Native RT is active only when the bundled/built or explicitly configured,
+  separate-process helper responds to `--capabilities-json` with
+  `hardware_ray_tracing=true` and `api=dxr|vulkan_rt`.
+- Helper capability is cached by executable path and modification time. Scene
+  normalization and Painter rendering must never launch a subprocess per
+  object, dab, or frame.
+- Without that native helper, requested hardware modes remain persisted but
+  the active mode is honestly reported as `ibl_realtime` with
+  `fallback_reason=native_rt_backend_unavailable`.
+- `ar_pbr.preview.rt_status` reports the requested/active mode, native device,
+  API, helper state, and fallback. It is ownerless and does not open a window.
+- The helper boundary must not import Painter or drawing modules. This keeps
+  acceleration-structure creation, shader compilation, denoising, and future
+  path-trace accumulation outside the brush-input latency path.
+
+Milestone state for this revision:
+
+1. **M0 · Shared contract — complete.** Preview, track schema, Actions, GPU
+   packets, and export share environment visibility and render-mode policy.
+2. **M1 · Invisible reflection HDRI — complete.** Camera background can be
+   hidden while diffuse/specular environment lighting remains active.
+3. **M2 · Native DXR backend — complete on supported Windows hardware.**
+   `TigerStudioDxrHelper` builds BLAS/TLAS with Direct3D 12, requires DXR Tier
+   1.1 plus Shader Model 6.5, compiles an inline-RayQuery compute shader, and
+   reports the selected adapter/API. The helper and shader can be rebuilt with
+   `tools/build_ar_pbr_dxr_helper.py`; unsupported/missing builds retain the
+   honest IBL fallback.
+4. **M3 · Hybrid RT v1 — complete.** Static normalized Tiger geometry is sent
+   through a compact per-vertex base-color/metallic/roughness ABI. Primary
+   visibility, ray-traced hard shadows, one reflected ray, triangle hits, and
+   HDRI/procedural environment misses are evaluated by DXR. The selected HDRI
+   rotation is honored, and `camera_visible=false` produces transparent output
+   without removing that HDRI from reflections.
+5. **M4 · Extended RT materials — partial.** Hard shadows and reflection hits
+   are real ray queries. AO, refraction/transmission, normal/height texture
+   evaluation, soft-shadow sampling, and a production denoiser remain future
+   work and must not be claimed as complete.
+6. **M5 · Path-traced frame export v1 — complete.** The helper performs
+   multi-sample, multi-bounce diffuse/specular ray integration and saves PNG
+   frames. This is an explicit frame render, not the realtime editor viewport.
+   Temporal accumulation, animation-camera parity, texture-complete materials,
+   and denoising remain follow-up quality milestones.
+7. **M6 · Painter isolation — complete.** Capability probes are cached; mesh
+   conversion and DXR rendering run outside the Painter/drawing modules and the
+   UI render request runs on a worker thread. No BLAS/TLAS build, subprocess,
+   or path-trace accumulation enters the brush-input hot path.
+
+The editor exposes `Render RT Frame...` when Hybrid RT or Path Traced is
+selected and the native probe succeeds. Automation uses
+`ar_pbr.preview.rt_render`; both paths use the latest preview descriptor,
+animation time, environment visibility, HDRI, and environment rotation.
+
+Verified development hardware for this revision: NVIDIA GeForce RTX 4080
+SUPER, DXR Tier 1.1, Shader Model 6.5. The proof suite rendered hybrid,
+transparent-background/invisible-HDRI, path-traced, HDRI-backed, and external
+Tiger descriptor frames. This is evidence for the backend path, not a minimum
+product GPU requirement.
+
+This split follows the renderer semantics rather than tying visibility to a
+skybox mesh. DXR invokes a miss shader when no intersection is accepted, which
+is the appropriate place to sample a reflection environment. Unreal likewise
+separates Sky Light contribution, ray-tracing reflection contribution, and
+camera/path-tracer visibility:
+
+- Microsoft DXR miss shader:
+  https://learn.microsoft.com/en-us/windows/win32/direct3d12/miss-shader
+- Unreal Engine 5.8 hardware ray tracing:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/hardware-ray-tracing-in-unreal-engine
+- Unreal Engine 5.8 ray/path-tracer light properties:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/ray-tracing-and-path-tracer-features-properties-in-unreal-engine
+- Unreal Engine 5.8 Path Tracer skylighting and visible lights:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/path-tracer-in-unreal-engine
 
 ## First QA Targets
 

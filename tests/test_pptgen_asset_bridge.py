@@ -10,6 +10,7 @@ def test_asset_bridge_classifies_editor_assets():
     assert asset_kind_for_path("model.pmx") == "mmd_actor"
     assert asset_kind_for_path("avatar.vrm") == "vrm_actor"
     assert asset_kind_for_path("still.png") == "image"
+    assert asset_kind_for_path("photo.jfif") == "image"
 
 
 def test_media_asset_becomes_editable_ppt_actor():

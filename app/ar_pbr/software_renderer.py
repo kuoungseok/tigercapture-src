@@ -18,14 +18,20 @@ from app.ar_pbr.depth_occlusion import (
 )
 from app.ar_pbr.pbr_math import (
     cook_torrance_direct,
+    cook_torrance_substrate_slab_direct,
     energy_conserving_diffuse_weight,
     fresnel_schlick,
+    fresnel_schlick_f90,
     material_f0,
     srgb_to_linear,
+    substrate_f90,
+    substrate_metalness_to_diffuse_albedo_f0,
 )
+from app.ar_pbr.substrate import normalize_substrate_settings
 from app.ar_pbr.tone_mapping import apply_display_transform, normalize_color_management_settings
 from app.ar_pbr.placement import resolve_track_placement
 from app.ar_pbr.texture_plan import (
+    apply_material_base_color_factor,
     material_base_texture_color,
     material_base_texture_path,
     resolve_material_texture_plan,
@@ -531,7 +537,7 @@ def _sample_material_texture_color(
         x = max(0, min(image.width - 1, int(round(u * (image.width - 1)))))
         y = max(0, min(image.height - 1, int(round((1.0 - v) * (image.height - 1)))))
         r, g, b = image.getpixel((x, y))
-        return (int(r), int(g), int(b), max(0, min(255, int(alpha))))
+        return apply_material_base_color_factor((int(r), int(g), int(b)), material, alpha=alpha)
     except Exception:
         return None
 
@@ -563,22 +569,52 @@ def _shade_color(
     rough = np.asarray([[roughness]], dtype=np.float32)
     metal = np.asarray([[metallic]], dtype=np.float32)
     refl = np.asarray([[reflectance]], dtype=np.float32)
-    f0 = material_f0(albedo, metal, refl)
-    fresnel = fresnel_schlick(np.asarray([[ndotv]], dtype=np.float32), f0)
-    kd = energy_conserving_diffuse_weight(fresnel, metal)
-    ambient = albedo * kd * (0.16 + rough[:, :, None] * 0.10) * max(0.0, float(ibl_exposure))
-    direct = cook_torrance_direct(
-        albedo=albedo,
-        f0=f0,
-        roughness=rough,
-        metallic=metal,
-        ndotl=np.asarray([[ndotl]], dtype=np.float32),
-        ndotv=np.asarray([[ndotv]], dtype=np.float32),
-        ndoth=np.asarray([[ndoth]], dtype=np.float32),
-        vdoth=np.asarray([[vdoth]], dtype=np.float32),
-        light_strength=max(0.0, float(direct_strength)),
-        ao=np.asarray([[1.0]], dtype=np.float32),
-    )
+    substrate = normalize_substrate_settings(material)
+    if bool(substrate["enabled"]):
+        diffuse_albedo, f0 = substrate_metalness_to_diffuse_albedo_f0(
+            albedo=albedo,
+            metallic=metal,
+            reflectance=refl,
+            f0_override=material.get("f0") if isinstance(material.get("f0"), (list, tuple)) else None,
+        )
+        f90 = substrate_f90(
+            f0=f0,
+            f90_color=substrate["f90_color"],
+            f90_mask=1.0,
+            strength=substrate["f90_strength"],
+        )
+        fresnel = fresnel_schlick_f90(np.asarray([[ndotv]], dtype=np.float32), f0, f90)
+        kd = np.clip(1.0 - fresnel, 0.0, 1.0)
+        ambient = diffuse_albedo * kd * (0.16 + rough[:, :, None] * 0.10) * max(0.0, float(ibl_exposure))
+        direct = cook_torrance_substrate_slab_direct(
+            diffuse_albedo=diffuse_albedo,
+            f0=f0,
+            f90=f90,
+            roughness=rough,
+            ndotl=np.asarray([[ndotl]], dtype=np.float32),
+            ndotv=np.asarray([[ndotv]], dtype=np.float32),
+            ndoth=np.asarray([[ndoth]], dtype=np.float32),
+            vdoth=np.asarray([[vdoth]], dtype=np.float32),
+            light_strength=max(0.0, float(direct_strength)),
+            ao=np.asarray([[1.0]], dtype=np.float32),
+        )
+    else:
+        f0 = material_f0(albedo, metal, refl)
+        fresnel = fresnel_schlick(np.asarray([[ndotv]], dtype=np.float32), f0)
+        kd = energy_conserving_diffuse_weight(fresnel, metal)
+        ambient = albedo * kd * (0.16 + rough[:, :, None] * 0.10) * max(0.0, float(ibl_exposure))
+        direct = cook_torrance_direct(
+            albedo=albedo,
+            f0=f0,
+            roughness=rough,
+            metallic=metal,
+            ndotl=np.asarray([[ndotl]], dtype=np.float32),
+            ndotv=np.asarray([[ndotv]], dtype=np.float32),
+            ndoth=np.asarray([[ndoth]], dtype=np.float32),
+            vdoth=np.asarray([[vdoth]], dtype=np.float32),
+            light_strength=max(0.0, float(direct_strength)),
+            ao=np.asarray([[1.0]], dtype=np.float32),
+        )
     rgb_linear = np.maximum(ambient + direct, 0.0)
     srgb = apply_display_transform(rgb_linear, color_management or {})[0, 0]
     rgb = [max(0, min(255, int(round(float(channel) * 255.0)))) for channel in srgb[:3]]

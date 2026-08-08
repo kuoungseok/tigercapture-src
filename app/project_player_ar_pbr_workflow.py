@@ -453,6 +453,24 @@ def _ar_pbr_depth_frame_for_tracks(self, rgb: np.ndarray, pos_ms: int, active: l
     except Exception:
         return None
 
+def _ar_pbr_depth_view_context_for_frame(self, rgb: np.ndarray, pos_ms: int) -> dict | None:
+    if self._ar_pbr_depth_view_mode() == "off":
+        return None
+    try:
+        h, w = rgb.shape[:2]
+    except Exception:
+        return None
+    depth_frame = self._ar_pbr_depth_frame_for_tracks(rgb, pos_ms, [])
+    return {
+        "tracks": [],
+        "active_tracks": [],
+        "camera_solution": None,
+        "depth_frame": depth_frame,
+        "runtime_diagnostics": [],
+        "width": int(w),
+        "height": int(h),
+    }
+
 def _ar_pbr_gpu_preview_enabled() -> bool:
     try:
         from app.ar_pbr.preview_pipeline import gpu_preview_enabled
@@ -570,6 +588,7 @@ def _ar_pbr_depth_view_frame(self, rgb: np.ndarray, context: Mapping, pos_ms: in
             int(context.get("width") or rgb.shape[1]),
             int(context.get("height") or rgb.shape[0]),
             mode=mode,
+            reference_frame=rgb,
         )
         merged = {
             "ok": bool(diagnostics.get("ok")),
@@ -698,6 +717,11 @@ def _composite_ar_pbr_tracks(
 def _apply_or_defer_ar_pbr_overlay(self, rgb: np.ndarray, pos_ms: int) -> tuple[np.ndarray, dict | None]:
     context = self._ar_pbr_preview_context(rgb, pos_ms)
     if context is None:
+        depth_context = self._ar_pbr_depth_view_context_for_frame(rgb, pos_ms)
+        if depth_context is not None:
+            depth_view_rgb = self._ar_pbr_depth_view_frame(rgb, depth_context, pos_ms)
+            if depth_view_rgb is not None:
+                return depth_view_rgb, None
         return rgb, None
     depth_view_rgb = self._ar_pbr_depth_view_frame(rgb, context, pos_ms)
     if depth_view_rgb is not None:
@@ -721,6 +745,7 @@ def _apply_or_defer_ar_pbr_overlay(self, rgb: np.ndarray, pos_ms: int) -> tuple[
             settings = {
                 **self._ar_pbr_software_settings(active_runtime),
                 "gpu_triangle_limit": triangle_limit,
+                "preview_disable_bloom": True,
             }
             cache_key = self._ar_pbr_gpu_packet_cache_key(
                 context,

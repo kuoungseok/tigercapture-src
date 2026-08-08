@@ -101,8 +101,8 @@ QWidget#CollapsibleSectionHeader {{
     border-bottom: 1px solid {COLOR_BORDER_SUBTLE};
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
-    min-height: 30px;
-    max-height: 30px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QPushButton#SectionDisclosure {{
@@ -111,7 +111,7 @@ QPushButton#SectionDisclosure {{
     border: 1px solid transparent;
     border-radius: 4px;
     padding: 2px 8px;
-    min-height: 20px;
+    min-height: 30px;
     font-size: 10px;
     font-weight: 700;
 }}
@@ -130,7 +130,7 @@ QToolButton#CommandMenuButton {{
     border: 1px solid {COLOR_BORDER_DEFAULT};
     border-radius: 6px;
     padding: 5px 24px 5px 10px;
-    min-height: 24px;
+    min-height: 36px;
     font-size: 11px;
     font-weight: 600;
 }}
@@ -176,7 +176,7 @@ QPushButton#ToolButton {{
     border: 1px solid {COLOR_BORDER_DEFAULT};
     border-radius: 6px;
     padding: 5px 9px;
-    min-height: 24px;
+    min-height: 36px;
     font-size: 11px;
     font-weight: 500;
 }}
@@ -207,7 +207,7 @@ QPushButton#PrimaryToolButton {{
     border: 1px solid {COLOR_ACCENT_BLUE};
     border-radius: 6px;
     padding: 5px 16px;
-    min-height: 24px;
+    min-height: 36px;
     font-size: 11px;
     font-weight: 700;
 }}
@@ -1149,16 +1149,16 @@ QWidget#AppCommandBar QToolButton#CommandMenuButton {{
     border-radius: 6px;
     padding: 0px;
     min-width: 24px;
-    min-height: 24px;
+    min-height: 36px;
     max-width: 24px;
-    max-height: 24px;
+    max-height: 36px;
 }}
 
 QWidget#AppCommandBar[railMode="true"] QToolButton#CommandMenuButton {{
     min-width: 26px;
-    min-height: 26px;
+    min-height: 39px;
     max-width: 26px;
-    max-height: 26px;
+    max-height: 39px;
     border-radius: 8px;
 }}
 
@@ -1190,9 +1190,9 @@ QWidget#AppCommandBar QPushButton#PrimaryToolButton {{
 
 QWidget#AppCommandBar[railMode="true"] QPushButton#PrimaryToolButton {{
     min-width: 28px;
-    min-height: 28px;
+    min-height: 42px;
     max-width: 28px;
-    max-height: 28px;
+    max-height: 42px;
     border-radius: 10px;
     padding: 0px;
 }}
@@ -1225,8 +1225,8 @@ QWidget#ActorLibraryPanel {{
 QWidget#PreviewSectionHeader {{
     background-color: transparent;
     border: none;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QLabel#ViewerProjectBreadcrumb {{
@@ -1237,8 +1237,8 @@ QLabel#ViewerProjectBreadcrumb {{
     font-weight: 500;
     letter-spacing: 0px;
     padding: 0px 0px 0px 10px;
-    min-height: 20px;
-    max-height: 20px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 
 QLabel#PreviewSectionTitle {{
@@ -1249,8 +1249,8 @@ QLabel#PreviewSectionTitle {{
     letter-spacing: 0px;
     text-transform: none;
     padding-left: 10px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QWidget#PreviewHost {{
@@ -1413,16 +1413,16 @@ QWidget#PreviewSectionHeader {{
     border-bottom: 1px solid #242424;
     border-top-left-radius: 7px;
     border-top-right-radius: 7px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QWidget#WorkbenchHeader {{
     background-color: #101112;
     border: none;
     border-bottom: 1px solid #202225;
-    min-height: 15px;
-    max-height: 15px;
+    min-height: 23px;
+    max-height: 23px;
 }}
 
 QWidget#WorkbenchHeader QLabel[sectionHeader="true"] {{
@@ -1434,9 +1434,9 @@ QWidget#WorkbenchHeader QLabel[sectionHeader="true"] {{
 
 QWidget#WorkbenchHeader QPushButton#PreviewPopoutIcon {{
     min-width: 15px;
-    min-height: 13px;
+    min-height: 20px;
     max-width: 15px;
-    max-height: 13px;
+    max-height: 20px;
 }}
 
 QWidget#WorkbenchHeader QPushButton#WorkbenchPptEntryButton {{
@@ -1446,9 +1446,9 @@ QWidget#WorkbenchHeader QPushButton#WorkbenchPptEntryButton {{
     border-radius: 4px;
     padding: 0px 4px;
     min-width: 32px;
-    min-height: 13px;
+    min-height: 20px;
     max-width: 32px;
-    max-height: 13px;
+    max-height: 20px;
     font-size: 8px;
     font-weight: 700;
 }}
@@ -1493,8 +1493,8 @@ QLabel#ViewerProjectBreadcrumb {{
     font-weight: 500;
     letter-spacing: 0px;
     padding: 0px 0px 0px 8px;
-    min-height: 20px;
-    max-height: 20px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 
 QWidget#TopWorkArea {{
@@ -1510,8 +1510,8 @@ QWidget#ViewerColumn {{
 QWidget#PreviewSectionHeader {{
     background-color: transparent;
     border: none;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QLabel#PreviewSectionTitle {{
@@ -1522,8 +1522,8 @@ QLabel#PreviewSectionTitle {{
     letter-spacing: 0px;
     text-transform: none;
     padding: 0px 10px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }}
 
 QLabel[sectionHeader="true"] {{
@@ -1542,9 +1542,9 @@ QPushButton#SectionDisclosure {{
     border: none;
     border-radius: 5px;
     min-width: 18px;
-    min-height: 18px;
+    min-height: 27px;
     max-width: 18px;
-    max-height: 18px;
+    max-height: 27px;
     padding: 0px;
 }}
 
@@ -1556,9 +1556,16 @@ QPushButton#PreviewPopoutIcon {{
     background-color: transparent;
     border: none;
     min-width: 18px;
-    min-height: 18px;
+    min-height: 27px;
     max-width: 18px;
-    max-height: 18px;
+    max-height: 27px;
+}}
+
+QWidget#TimelineSectionHeader QPushButton#PreviewPopoutIcon {{
+    min-width: 28px;
+    min-height: 36px;
+    max-width: 28px;
+    max-height: 36px;
 }}
 
 QLabel#TopBrandLabel {{
@@ -1589,9 +1596,9 @@ QWidget#AppCommandBar QPushButton#ToolButton {{
     border-radius: 7px;
     padding: 0px;
     min-width: 32px;
-    min-height: 32px;
+    min-height: 48px;
     max-width: 32px;
-    max-height: 32px;
+    max-height: 48px;
     font-size: 0px;
     font-weight: 700;
 }}
@@ -1614,8 +1621,9 @@ QWidget#AppCommandBar QPushButton#PrimaryToolButton {{
     border-radius: 7px;
     padding: 0px;
     min-width: 42px;
-    min-height: 38px;
+    min-height: 57px;
     max-width: 42px;
+    max-height: 57px;
     font-size: 0px;
     font-weight: 800;
 }}
@@ -1692,9 +1700,9 @@ QPushButton#PlayButton {{
     border: 1px solid rgba(180,190,210,30);
     border-radius: 4px;
     min-width: 20px;
-    min-height: 20px;
+    min-height: 30px;
     max-width: 20px;
-    max-height: 20px;
+    max-height: 30px;
     padding: 0px;
     font-size: 0px;
 }}
@@ -1719,8 +1727,8 @@ QWidget#PlayBar QPushButton#SpeedLabel {{
     font-size: 10px;
     font-weight: 650;
     padding: 0px 6px;
-    min-height: 20px;
-    max-height: 20px;
+    min-height: 30px;
+    max-height: 30px;
 }}
 
 QPushButton#ViewerDropdownButton:hover {{
@@ -1873,8 +1881,8 @@ QWidget#MediaPoolCollapsibleSectionHeader {
     background: transparent;
     border: none;
     border-radius: 0px;
-    min-height: 24px;
-    max-height: 24px;
+    min-height: 36px;
+    max-height: 36px;
 }
 
 QWidget#MediaPoolCollapsibleSectionHeader QLabel[sectionHeader="true"] {
@@ -1893,8 +1901,8 @@ QWidget#MediaPoolCollapsibleSectionHeader QPushButton#SectionDisclosure {
     padding: 0px;
     min-width: 18px;
     max-width: 18px;
-    min-height: 18px;
-    max-height: 18px;
+    min-height: 27px;
+    max-height: 27px;
 }
 
 QWidget#MediaPoolCollapsibleSectionHeader QPushButton#SectionDisclosure:hover {

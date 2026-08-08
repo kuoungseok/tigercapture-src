@@ -21,16 +21,88 @@ from app.actions.editor_adapter_mmd import MmdAdapterMixin
 from app.actions.editor_adapter_music import MusicAdapterMixin
 from app.actions.editor_adapter_ar_pbr import ArPbrAdapterMixin
 from app.actions.editor_adapter_ppt import PptAdapterMixin
+from app.actions.editor_adapter_tts import TtsAdapterMixin
+from app.actions.editor_adapter_paint import PaintAdapterMixin
+from app.actions.editor_adapter_motion import MotionAdapterMixin
+from app.actions.editor_adapter_motion_rig import MotionRigAdapterMixin
+from app.actions.editor_adapter_motion_puppet import MotionPuppetAdapterMixin
+from app.actions.editor_adapter_motion_precomp import MotionPrecompAdapterMixin
+from app.actions.editor_adapter_motion_time import MotionTimeAdapterMixin
+from app.actions.editor_adapter_motion_advanced import MotionAdvancedAdapterMixin
+from app.actions.editor_adapter_motion_tracking import MotionTrackingAdapterMixin
+from app.actions.editor_adapter_motion_audio import MotionAudioAdapterMixin
+from app.actions.editor_adapter_motion_ar_pbr import MotionArPbrAdapterMixin
+from app.actions.editor_adapter_motion_actor import MotionActorAdapterMixin
+from app.actions.editor_adapter_motion_mmd import MotionMMDAdapterMixin
+from app.actions.editor_adapter_motion_vrm import MotionVRMAdapterMixin
+from app.actions.editor_adapter_motion_expression import MotionExpressionAdapterMixin
+from app.actions.editor_adapter_motion_particle import MotionParticleAdapterMixin
+from app.actions.editor_adapter_motion_template import MotionTemplateAdapterMixin
+from app.actions.editor_adapter_motion_broadcast import MotionBroadcastAdapterMixin
+from app.actions.editor_adapter_motion_export import MotionExportAdapterMixin
+from app.actions.editor_adapter_motion_umg import MotionUMGAdapterMixin
+from app.actions.editor_adapter_motion_interchange import MotionInterchangeAdapterMixin
+from app.actions.editor_adapter_motion_aep import MotionAepAdapterMixin
+from app.actions.editor_adapter_motion_release import MotionReleaseAdapterMixin
+from app.actions.editor_adapter_motion_relink import MotionRelinkAdapterMixin
+from app.actions.editor_adapter_motion_recovery import MotionRecoveryAdapterMixin
+from app.actions.editor_adapter_motion_plugin import MotionPluginAdapterMixin
+from app.actions.editor_adapter_motion_ai_generation import MotionAIGenerationAdapterMixin
+from app.actions.editor_adapter_motion_craft import MotionCraftAdapterMixin
+from app.actions.editor_adapter_motion_lookdev import MotionLookdevAdapterMixin
+from app.actions.editor_adapter_motion_glass import MotionGlassAdapterMixin
+from app.actions.editor_adapter_motion_collage import MotionCollageAdapterMixin
+from app.actions.editor_adapter_motion_story import MotionStoryAdapterMixin
+from app.actions.editor_adapter_motion_stop_motion import MotionStopMotionAdapterMixin
+from app.actions.editor_adapter_motion_remotion_tsx import MotionRemotionTsxAdapterMixin
+from app.actions.editor_adapter_motion_style_director import MotionStyleDirectorAdapterMixin
+from app.actions.editor_adapter_color import ColorManagementAdapterMixin
 
 
 class EditorAdapter(
+    MotionRemotionTsxAdapterMixin,
+    ColorManagementAdapterMixin,
+    MotionStyleDirectorAdapterMixin,
+    MotionStopMotionAdapterMixin,
+    MotionStoryAdapterMixin,
+    MotionCollageAdapterMixin,
+    MotionGlassAdapterMixin,
+    MotionLookdevAdapterMixin,
+    MotionCraftAdapterMixin,
+    MotionUMGAdapterMixin,
+    MotionAIGenerationAdapterMixin,
+    MotionPluginAdapterMixin,
+    MotionRecoveryAdapterMixin,
+    MotionRelinkAdapterMixin,
+    MotionReleaseAdapterMixin,
+    MotionAepAdapterMixin,
+    MotionInterchangeAdapterMixin,
+    MotionExportAdapterMixin,
+    MotionBroadcastAdapterMixin,
+    MotionTemplateAdapterMixin,
+    MotionParticleAdapterMixin,
+    MotionExpressionAdapterMixin,
+    MotionVRMAdapterMixin,
+    MotionMMDAdapterMixin,
+    MotionActorAdapterMixin,
+    MotionArPbrAdapterMixin,
+    MotionAudioAdapterMixin,
+    MotionTrackingAdapterMixin,
+    MotionAdvancedAdapterMixin,
+    MotionTimeAdapterMixin,
+    MotionPrecompAdapterMixin,
+    MotionPuppetAdapterMixin,
+    MotionRigAdapterMixin,
+    MotionAdapterMixin,
     EditingAdapterMixin,
     TimelineAdapterMixin,
     VtuberBroadcastAdapterMixin,
     MmdAdapterMixin,
     ArPbrAdapterMixin,
     PptAdapterMixin,
+    PaintAdapterMixin,
     MusicAdapterMixin,
+    TtsAdapterMixin,
     NleAdapterMixin,
     UiAdapterMixin,
     CoreHelperMixin,

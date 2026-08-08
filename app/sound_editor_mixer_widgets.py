@@ -102,7 +102,7 @@ class _SoundMixerMeter(QWidget):
         self._r = 0.0
         self._peak = 0.0
         self._clipped = False
-        self.setFixedSize(22, 88)
+        self.setFixedSize(18, 70)
 
     def set_levels(self, left: float, right: float, *, peak: float | None = None, clipped: bool = False) -> None:
         self._l = max(0.0, min(1.0, float(left or 0.0)))
@@ -159,7 +159,7 @@ class _SoundMixerStereoVu(QWidget):
         self._l = 0.0
         self._r = 0.0
         self._clipped = False
-        self.setFixedSize(130, 72)
+        self.setFixedSize(112, 56)
 
     def set_levels(self, left: float, right: float, *, clipped: bool = False) -> None:
         self._l = max(0.0, min(1.0, float(left or 0.0)))
@@ -247,7 +247,7 @@ class _SoundMixerPanSlider(QSlider):
         self.setObjectName("SoundMixerPanSlider")
         self._accent = QColor(148, 126, 196, 170)
         self.setRange(-100, 100)
-        self.setFixedSize(66, 22)
+        self.setFixedSize(58, 18)
         self.setMouseTracking(True)
 
     def set_accent_color(self, color: QColor) -> None:
@@ -351,7 +351,7 @@ class _SoundMixerFader(QSlider):
         self._accent = QColor(151, 143, 104, 170) if self._master else QColor(148, 126, 196, 178)
         self.setObjectName("SoundMixerFader")
         self.setRange(0, 150)
-        self.setFixedSize(32, 94)
+        self.setFixedSize(28, 74)
         self.setMouseTracking(True)
 
     def set_accent_color(self, color: QColor) -> None:
@@ -487,12 +487,12 @@ class _SoundMixerStrip(QWidget):
         self._accent = QColor(148, 126, 196, 170)
         self.setObjectName("SoundMixerStrip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(86)
-        self.setFixedHeight(286)
+        self.setFixedWidth(74)
+        self.setFixedHeight(226)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(4)
+        root.setContentsMargins(5, 5, 5, 5)
+        root.setSpacing(3)
 
         title_row = QWidget(self)
         title_row.setStyleSheet("background: transparent;")
@@ -506,7 +506,7 @@ class _SoundMixerStrip(QWidget):
         title_layout.addWidget(self._title, 1)
         self._type = QPushButton("DIA", title_row)
         self._type.setObjectName("SoundMixerType")
-        self._type.setFixedSize(28, 16)
+        self._type.setFixedSize(25, 15)
         self._type.clicked.connect(self._on_type_clicked)
         title_layout.addWidget(self._type, 0)
         root.addWidget(title_row)
@@ -525,7 +525,7 @@ class _SoundMixerStrip(QWidget):
             button = QPushButton(label, inserts)
             button.setObjectName("SoundMixerInsert")
             button.setCheckable(True)
-            button.setFixedSize(22, 15)
+            button.setFixedSize(19, 14)
             button.toggled.connect(lambda checked, sid=slot_id: self._on_insert_toggled(sid, checked))
             self._insert_buttons[slot_id] = button
             inserts_layout.addWidget(button)
@@ -535,7 +535,7 @@ class _SoundMixerStrip(QWidget):
         body.setStyleSheet("background: transparent;")
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(6)
+        body_layout.setSpacing(4)
         self._meter = _SoundMixerMeter(body)
         body_layout.addWidget(self._meter)
         self._fader = _SoundMixerFader(body)
@@ -558,28 +558,28 @@ class _SoundMixerStrip(QWidget):
         self._mute.setObjectName("SoundMixerToggle")
         self._mute.setProperty("kind", "mute")
         self._mute.setCheckable(True)
-        self._mute.setFixedSize(16, 17)
+        self._mute.setFixedSize(14, 15)
         self._mute.toggled.connect(self._on_mute_changed)
         buttons_layout.addWidget(self._mute)
         self._solo = QPushButton("S", buttons)
         self._solo.setObjectName("SoundMixerToggle")
         self._solo.setProperty("kind", "solo")
         self._solo.setCheckable(True)
-        self._solo.setFixedSize(16, 17)
+        self._solo.setFixedSize(14, 15)
         self._solo.toggled.connect(self._on_solo_changed)
         buttons_layout.addWidget(self._solo)
         self._auto_read = QPushButton("R", buttons)
         self._auto_read.setObjectName("SoundMixerToggle")
         self._auto_read.setProperty("kind", "read")
         self._auto_read.setCheckable(True)
-        self._auto_read.setFixedSize(16, 17)
+        self._auto_read.setFixedSize(14, 15)
         self._auto_read.toggled.connect(self._on_automation_changed)
         buttons_layout.addWidget(self._auto_read)
         self._auto_write = QPushButton("W", buttons)
         self._auto_write.setObjectName("SoundMixerToggle")
         self._auto_write.setProperty("kind", "write")
         self._auto_write.setCheckable(True)
-        self._auto_write.setFixedSize(16, 17)
+        self._auto_write.setFixedSize(14, 15)
         self._auto_write.toggled.connect(self._on_automation_changed)
         buttons_layout.addWidget(self._auto_write)
         root.addWidget(buttons)
@@ -593,7 +593,7 @@ class _SoundMixerStrip(QWidget):
         for send_id, label in (("reverb", "RV"), ("delay", "DL")):
             button = QPushButton(f"{label} 0", sends)
             button.setObjectName("SoundMixerSend")
-            button.setFixedSize(33, 16)
+            button.setFixedSize(29, 15)
             button.clicked.connect(lambda _checked=False, sid=send_id: self._on_send_clicked(sid))
             self._send_buttons[send_id] = button
             sends_layout.addWidget(button)
@@ -732,11 +732,11 @@ class _SoundMixerMasterStrip(QWidget):
         super().__init__(parent)
         self.setObjectName("SoundMixerMasterStrip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(146)
-        self.setFixedHeight(286)
+        self.setFixedWidth(128)
+        self.setFixedHeight(226)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(5, 5, 5, 5)
         root.setSpacing(2)
 
         title = QLabel("MASTER", self)
@@ -748,7 +748,7 @@ class _SoundMixerMasterStrip(QWidget):
         bus = QLabel("mix bus", self)
         bus.setObjectName("SoundMixerName")
         bus.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bus.setFixedHeight(18)
+        bus.setFixedHeight(14)
         root.addWidget(bus)
 
         self._vu = _SoundMixerStereoVu(self)
@@ -762,12 +762,12 @@ class _SoundMixerMasterStrip(QWidget):
         self._snapshot_a = QLabel("S1", snap)
         self._snapshot_a.setObjectName("SoundMixerSnapshot")
         self._snapshot_a.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._snapshot_a.setFixedSize(29, 16)
+        self._snapshot_a.setFixedSize(27, 15)
         snap_layout.addWidget(self._snapshot_a)
         self._snapshot_b = QLabel("A/B", snap)
         self._snapshot_b.setObjectName("SoundMixerSnapshot")
         self._snapshot_b.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._snapshot_b.setFixedSize(32, 16)
+        self._snapshot_b.setFixedSize(30, 15)
         snap_layout.addWidget(self._snapshot_b)
         root.addWidget(snap)
 
@@ -775,7 +775,7 @@ class _SoundMixerMasterStrip(QWidget):
         body.setStyleSheet("background: transparent;")
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(6)
+        body_layout.setSpacing(4)
         body_layout.addStretch(1)
         self._meter = _SoundMixerMeter(body)
         body_layout.addWidget(self._meter)
@@ -796,7 +796,7 @@ class _SoundMixerMasterStrip(QWidget):
         self._name = QLabel("master", self)
         self._name.setObjectName("SoundMixerName")
         self._name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._name.setFixedHeight(34)
+        self._name.setFixedHeight(24)
         root.addWidget(self._name)
 
     def paintEvent(self, event) -> None:  # pragma: no cover - visual QA

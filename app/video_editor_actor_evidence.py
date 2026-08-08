@@ -88,6 +88,34 @@ class Live2DActorEvidenceCard(QWidget):
 
         model_path = str(getattr(clip, "model_path", "") or "")
         track_label = str(getattr(track, "label", "") or "Live2D")
+        try:
+            from app.actor_loading_status import actor_clip_status, actor_loading_diagnostic_card
+
+            status = actor_clip_status(clip)
+            if str(status.get("status") or "") in {"error", "timeout", "cancelled"}:
+                card = actor_loading_diagnostic_card(
+                    "live2d",
+                    str(status.get("path") or model_path),
+                    status=str(status.get("status") or ""),
+                    stage=str(status.get("status") or ""),
+                    message=str(status.get("message") or ""),
+                )
+                painter.setFont(body_font)
+                painter.setPen(QColor("#AEB5BF"))
+                painter.drawText(x, y + 18, str(card.get("title") or "Live2D load diagnostic"))
+                summary_rect = QRect(x, y + 29, max(120, rect.width() - 24), 34)
+                painter.setPen(QColor("#D2B78A") if card.get("tone") == "warning" else QColor("#E08A96"))
+                painter.drawText(summary_rect, Qt.TextFlag.TextWordWrap, str(card.get("summary") or "Actor load did not complete."))
+                actions = [str(row) for row in list(card.get("actions") or []) if str(row)]
+                painter.setPen(QColor("#8A929D"))
+                action_y = y + 76
+                for row in actions[:3]:
+                    painter.drawText(QRect(x, action_y, max(120, rect.width() - 24), 18), Qt.TextFlag.TextWordWrap, f"- {row}")
+                    action_y += 18
+                painter.end()
+                return
+        except Exception:
+            pass
         start_ms = int(getattr(clip, "start_ms", 0) or 0)
         duration_ms = max(1, int(getattr(clip, "duration_ms", 1) or 1))
         pos_x = float(getattr(clip, "pos_x", 0.5) or 0.0)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QTimer, Qt, QVariantAnimation
-from PySide6.QtWidgets import QLabel, QToolButton, QWidget
+from PySide6.QtWidgets import QLabel, QSplitter, QToolButton, QWidget
 
 from app.i18n import tr
 from app.icons import app_icon, icon_size
@@ -238,6 +238,11 @@ def _toggle_timeline_popout(self) -> None:
     if splitter is not None:
         self._timeline_root_index = splitter.indexOf(self._timeline_section_host)
         self._timeline_section_host.setParent(self)
+    elif isinstance(self._timeline_root_layout, QSplitter):
+        self._timeline_root_index = self._timeline_root_layout.indexOf(
+            self._timeline_section_host,
+        )
+        self._timeline_section_host.setParent(self)
     else:
         self._timeline_root_layout.removeWidget(self._timeline_section_host)
     self._timeline_placeholder = QLabel(tr("veditor.timeline_popout.placeholder"))
@@ -250,6 +255,11 @@ def _toggle_timeline_popout(self) -> None:
     )
     if splitter is not None:
         splitter.insertWidget(self._timeline_root_index, self._timeline_placeholder)
+    elif isinstance(self._timeline_root_layout, QSplitter):
+        self._timeline_root_layout.insertWidget(
+            self._timeline_root_index,
+            self._timeline_placeholder,
+        )
     else:
         self._timeline_root_layout.insertWidget(
             self._timeline_root_index,
@@ -268,6 +278,9 @@ def _on_timeline_popout_closed(self) -> None:
         if splitter is not None:
             idx = splitter.indexOf(self._timeline_placeholder)
             self._timeline_placeholder.setParent(None)
+        elif isinstance(self._timeline_root_layout, QSplitter):
+            idx = self._timeline_root_layout.indexOf(self._timeline_placeholder)
+            self._timeline_placeholder.setParent(None)
         else:
             idx = self._timeline_root_layout.indexOf(self._timeline_placeholder)
             self._timeline_root_layout.removeWidget(self._timeline_placeholder)
@@ -278,6 +291,11 @@ def _on_timeline_popout_closed(self) -> None:
     self._timeline_section_host.setParent(self)
     if splitter is not None:
         splitter.insertWidget(max(0, idx), self._timeline_section_host)
+    elif isinstance(self._timeline_root_layout, QSplitter):
+        self._timeline_root_layout.insertWidget(
+            max(0, idx),
+            self._timeline_section_host,
+        )
     else:
         self._timeline_root_layout.insertWidget(
             max(0, idx),

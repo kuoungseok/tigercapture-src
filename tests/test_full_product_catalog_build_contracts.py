@@ -7,8 +7,32 @@ from PIL import Image
 from tools import build_full_product_catalog_decks as catalog
 
 
+COLOR_COMPARE_REQUIRED_CHECKS = {
+    "viewer_frame_visible": True,
+    "color_dock_viewer_reforced": True,
+    "viewer_compare_split": True,
+    "compare_viewer_and_controls_same_frame": True,
+    "color_controls_visible": True,
+    "strong_researched_color_preset_applied": True,
+    "cinematic_teal_orange_preset_applied": True,
+    "color_before_after_visual_delta": True,
+}
+
+NODE_COMPARE_REQUIRED_CHECKS = {
+    "node_graph_action_ok": True,
+    "viewer_frame_visible": True,
+    "viewer_compare_split": True,
+    "compare_viewer_and_node_controls_same_frame": True,
+    "node_or_effect_controls_visible": True,
+    "strong_blur_effect_applied": True,
+    "workbench_screenshot": True,
+    "visible_node_count": True,
+    "node_before_after_visual_delta": True,
+}
+
+
 def test_full_product_catalog_locked_slide_order_includes_ppt_maker():
-    assert len(catalog.PAGES) == 22
+    assert len(catalog.PAGES) == 23
     assert catalog.PAGES[0].key == "studio_overview"
     assert catalog.PAGES[2].key == "ai_workflow"
     assert catalog.PAGES[3].key == "ppt_maker"
@@ -32,7 +56,7 @@ def test_spec_closing_page_uses_locked_blue_pot_contract(tmp_path):
     assert catalog.SPEC_INDEX_SOURCE.name == "spec_index_groups.json"
 
     out_path = tmp_path / "spec_closing.png"
-    catalog._make_spec_closing_slide(catalog.PAGES[-1], "en", 22, 22, out_path)
+    catalog._make_spec_closing_slide(catalog.PAGES[-1], "en", 23, 23, out_path)
 
     assert out_path.exists()
     with Image.open(out_path) as img:
@@ -627,12 +651,7 @@ def test_compare_capture_contract_accepts_visible_non_neutral_delta_with_actions
         json.dumps(
             {
                 "ok": True,
-                "checks": {
-                    "viewer_frame_visible": True,
-                    "color_dock_viewer_reforced": True,
-                    "viewer_compare_split": True,
-                    "color_before_after_visual_delta": True,
-                },
+                "checks": dict(COLOR_COMPARE_REQUIRED_CHECKS),
                 "before_after_visual_delta_scores": {"color": 8.5},
                 "steps": [
                     {"action": "media.import_to_timeline", "ok": True},
@@ -674,10 +693,7 @@ def test_compare_capture_contract_accepts_required_checks_when_nonessential_repo
             {
                 "ok": False,
                 "checks": {
-                    "viewer_frame_visible": True,
-                    "color_dock_viewer_reforced": True,
-                    "viewer_compare_split": True,
-                    "color_before_after_visual_delta": True,
+                    **COLOR_COMPARE_REQUIRED_CHECKS,
                     "ai_command_open_screenshot": False,
                 },
                 "before_after_visual_delta_scores": {"color": 8.5},
@@ -719,12 +735,7 @@ def test_compare_capture_contract_rejects_missing_visual_delta_score(tmp_path):
         json.dumps(
             {
                 "ok": True,
-                "checks": {
-                    "viewer_frame_visible": True,
-                    "color_dock_viewer_reforced": True,
-                    "viewer_compare_split": True,
-                    "color_before_after_visual_delta": True,
-                },
+                "checks": dict(COLOR_COMPARE_REQUIRED_CHECKS),
                 "steps": [
                     {"action": "clip.set_color_grade", "ok": True},
                     {"action": "ui.viewer.compare.set", "ok": True},
@@ -763,12 +774,7 @@ def test_compare_capture_contract_rejects_low_visual_delta_score(tmp_path):
         json.dumps(
             {
                 "ok": True,
-                "checks": {
-                    "viewer_frame_visible": True,
-                    "color_dock_viewer_reforced": True,
-                    "viewer_compare_split": True,
-                    "color_before_after_visual_delta": True,
-                },
+                "checks": dict(COLOR_COMPARE_REQUIRED_CHECKS),
                 "before_after_visual_delta_scores": {"color": 0.7},
                 "steps": [
                     {"action": "clip.set_color_grade", "ok": True},
@@ -810,10 +816,9 @@ def test_color_compare_contract_rejects_failed_viewer_checks(tmp_path):
             {
                 "ok": True,
                 "checks": {
-                    "viewer_frame_visible": True,
+                    **COLOR_COMPARE_REQUIRED_CHECKS,
                     "color_dock_viewer_reforced": False,
-                    "viewer_compare_split": True,
-                    "color_before_after_visual_delta": True,
+                    "compare_viewer_and_controls_same_frame": False,
                 },
                 "before_after_visual_delta_scores": {"color": 8.5},
                 "steps": [
@@ -853,14 +858,7 @@ def test_node_compare_contract_rejects_missing_compare_action(tmp_path):
         json.dumps(
             {
                 "ok": True,
-                "checks": {
-                    "node_graph_action_ok": True,
-                    "viewer_frame_visible": True,
-                    "viewer_compare_split": True,
-                    "workbench_screenshot": True,
-                    "visible_node_count": True,
-                    "node_before_after_visual_delta": True,
-                },
+                "checks": dict(NODE_COMPARE_REQUIRED_CHECKS),
                 "before_after_visual_delta_scores": {"node_effect": 8.5},
                 "steps": [{"action": "node.graph.set", "ok": True}],
             }

@@ -1,0 +1,93 @@
+{
+  "version": "1.1",
+  "app": "TigerCapture",
+  "saved_at": "2026-07-12T11:32:56.747938+00:00",
+  "px_per_sec": 46.0,
+  "playhead_ms": 0,
+  "global_in_ms": 0,
+  "global_out_ms": 34000,
+  "project_settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "aspect": "16:9",
+    "title": "Tiger Studio AI Full Process Demo",
+    "demo_mode": "ai_full_process"
+  },
+  "video_tracks": [],
+  "audio_tracks": [],
+  "subtitles": [],
+  "media_pool": [
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4"
+  ],
+  "media_pool_metadata": [
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+      "kind": "video",
+      "name": "01_seoul_sunset_bridge.mp4",
+      "badge": "opening",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+      "kind": "video",
+      "name": "02_lamborghini_moody_detail.mp4",
+      "badge": "car_detail",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+      "kind": "video",
+      "name": "03_bugatti_white_car.mp4",
+      "badge": "luxury_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\The BUGATTI W16 MISTRAL ‘BLANC ÉTERNEL’： Celebrating perpetual beauty [dsPHQmSxtFg].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+      "kind": "video",
+      "name": "04_oled_color_macro.mp4",
+      "badge": "color_fx",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\SAMSUNG QD-OLED 4K 120FPS Demo ｜ UNREAL 1 Billion Colors 🌈 HDR Test (AI TV) [rjwPj0dD9wQ].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+      "kind": "video",
+      "name": "05_tokyo_night_city.mp4",
+      "badge": "night_city",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【4K HDR】東京空撮 Tokyo Night View 2025｜Helicopter Aerial Twilight Skyline Japan [Ui4UpsZH4Jw].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+      "kind": "video",
+      "name": "06_lemans_race_cut.mp4",
+      "badge": "speed_rhythm",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Extended Highlights ｜ 24 Hours of Le Mans 2026 ｜ FIA WEC [cE0Vw-ZQpM4].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+      "kind": "video",
+      "name": "07_hdr_color_wheel.mp4",
+      "badge": "hdr_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\8k HDR Best Mix 2022 Dolby Vision [CrIzscDUaZo].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "kind": "video",
+      "name": "08_seoul_bridge_close.mp4",
+      "badge": "closing",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4"
+    }
+  ],
+  "ai_edit_demo": {
+    "schema": "tigerstudio.demo.ai_edit_full_process.v1",
+    "intent": "show process, not just final timeline",
+    "prompt": "Build a creator promo edit. Assemble clips, cut the timeline, add typography, open the node graph, tune effect parameters, and show Viewer Compare split."
+  }
+}

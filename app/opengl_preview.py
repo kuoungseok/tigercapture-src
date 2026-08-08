@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +49,7 @@ from app.ar_pbr.post_effects import normalize_post_effects_settings
 from app.ar_pbr.preview_diagnostics import overlay_diagnostics_payload
 from app.ar_pbr.shadow import normalize_shadow_settings
 from app.ar_pbr.hybrid_rendering import normalize_hybrid_render_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.material_layering import normalize_material_layering_settings
 from app.ar_pbr.subsurface import normalize_subsurface_settings
 from app.ar_pbr.surface import normalize_surface_settings
@@ -941,26 +943,57 @@ uniform float u_ground_shadow_strength;
 vec3 bloom_sample(vec2 uv) {
     vec4 src = texture2D(u_bloom_tex, clamp(uv, vec2(0.0), vec2(1.0)));
     float lum = dot(src.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float gate = smoothstep(u_bloom_threshold, u_bloom_threshold + 0.20, lum);
-    return src.rgb * gate;
+    float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
+    float excess = max(lum - threshold, 0.0);
+    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 1.0);
+    float gate = smoothstep(0.0, 0.18, excess) * contribution;
+    return src.rgb * gate * clamp(src.a, 0.0, 1.0);
+}
+
+vec3 convolution_tap(vec2 uv, vec2 offset_px, float weight) {
+    return bloom_sample(uv + u_texel_size * offset_px) * weight;
+}
+
+vec3 convolution_axis(vec2 uv, vec2 dir, float radius, float weight, inout float weight_sum) {
+    vec2 axis = normalize(dir);
+    vec3 bloom = vec3(0.0);
+    float w0 = 0.070 * weight;
+    float w1 = 0.040 * weight;
+    float w2 = 0.018 * weight;
+    bloom += convolution_tap(uv,  axis * radius * 0.72, w0);
+    bloom += convolution_tap(uv, -axis * radius * 0.72, w0);
+    bloom += convolution_tap(uv,  axis * radius * 1.45, w1);
+    bloom += convolution_tap(uv, -axis * radius * 1.45, w1);
+    bloom += convolution_tap(uv,  axis * radius * 2.35, w2);
+    bloom += convolution_tap(uv, -axis * radius * 2.35, w2);
+    weight_sum += (w0 + w1 + w2) * 2.0;
+    return bloom;
+}
+
+vec3 convolution_bloom(vec2 uv, float radius) {
+    vec3 bloom = bloom_sample(uv) * 0.090;
+    float weight_sum = 0.090;
+    for (int i = 0; i < 24; ++i) {
+        float fi = float(i) + 0.5;
+        float t = fi / 24.0;
+        float r = sqrt(t);
+        float angle = fi * 2.39996323;
+        vec2 dir = vec2(cos(angle), sin(angle));
+        float halo_weight = exp(-2.65 * t) * (0.036 + 0.024 * (1.0 - r));
+        bloom += convolution_tap(uv, dir * radius * r * 1.92, halo_weight);
+        weight_sum += halo_weight;
+    }
+    bloom += convolution_axis(uv, vec2(1.0, 0.0), radius * 1.65, 0.52, weight_sum);
+    bloom += convolution_axis(uv, vec2(0.0, 1.0), radius * 0.95, 0.18, weight_sum);
+    bloom += convolution_axis(uv, vec2(0.707, 0.707), radius * 1.22, 0.16, weight_sum);
+    bloom += convolution_axis(uv, vec2(-0.707, 0.707), radius * 1.22, 0.16, weight_sum);
+    return bloom / max(weight_sum, 0.0001) * 1.42;
 }
 
 void main() {
     vec4 layer = texture2D(u_layer_tex, v_uv);
-    vec2 px = u_texel_size * max(0.5, u_bloom_radius);
-    vec3 bloom = bloom_sample(v_uv) * 0.20416;
-    bloom += (bloom_sample(v_uv + vec2( px.x, 0.0)) +
-              bloom_sample(v_uv - vec2( px.x, 0.0)) +
-              bloom_sample(v_uv + vec2(0.0,  px.y)) +
-              bloom_sample(v_uv - vec2(0.0,  px.y))) * 0.12384;
-    bloom += (bloom_sample(v_uv + vec2( px.x,  px.y)) +
-              bloom_sample(v_uv + vec2(-px.x,  px.y)) +
-              bloom_sample(v_uv + vec2( px.x, -px.y)) +
-              bloom_sample(v_uv + vec2(-px.x, -px.y))) * 0.07785;
-    bloom += (bloom_sample(v_uv + vec2( px.x * 2.0, 0.0)) +
-              bloom_sample(v_uv - vec2( px.x * 2.0, 0.0)) +
-              bloom_sample(v_uv + vec2(0.0,  px.y * 2.0)) +
-              bloom_sample(v_uv - vec2(0.0,  px.y * 2.0))) * 0.03766;
+    float radius = max(0.5, u_bloom_radius);
+    vec3 bloom = convolution_bloom(v_uv, radius);
     vec2 shadow_delta = (v_uv - u_ground_shadow_center) / max(u_ground_shadow_radius, vec2(0.0001));
     float oval = 1.0 - smoothstep(0.46, 1.0, dot(shadow_delta, shadow_delta));
     float ground_alpha = oval * clamp(u_ground_shadow_strength, 0.0, 0.75) * (1.0 - layer.a);
@@ -1065,9 +1098,30 @@ uniform int u_has_shadow_map;
 uniform int u_flip_uv_v;
 uniform float u_depth_enabled;
 uniform vec3 u_light_dir;
+uniform vec3 u_light_color;
+uniform int u_extra_light0_enabled;
+uniform int u_extra_light0_type;
+uniform vec3 u_extra_light0_direction;
+uniform vec3 u_extra_light0_position;
+uniform vec3 u_extra_light0_color;
+uniform float u_extra_light0_intensity;
+uniform float u_extra_light0_range;
+uniform float u_extra_light0_spot_inner_cos;
+uniform float u_extra_light0_spot_outer_cos;
+uniform int u_extra_light1_enabled;
+uniform int u_extra_light1_type;
+uniform vec3 u_extra_light1_direction;
+uniform vec3 u_extra_light1_position;
+uniform vec3 u_extra_light1_color;
+uniform float u_extra_light1_intensity;
+uniform float u_extra_light1_range;
+uniform float u_extra_light1_spot_inner_cos;
+uniform float u_extra_light1_spot_outer_cos;
 uniform vec3 u_shadow_center;
 uniform float u_direct_strength;
 uniform float u_ibl_exposure;
+uniform float u_diffuse_environment_strength;
+uniform float u_reflection_environment_strength;
 uniform float u_ibl_rotation;
 uniform float u_object_depth;
 uniform float u_occlusion_tolerance;
@@ -1117,6 +1171,7 @@ uniform vec3 u_clearcoat_tint;
 uniform float u_parallax_strength;
 uniform float u_parallax_depth;
 uniform float u_parallax_center;
+uniform int u_parallax_steps;
 uniform float u_bevel_strength;
 uniform float u_bevel_radius;
 uniform float u_bevel_edge_width;
@@ -1194,9 +1249,9 @@ vec3 sample_env(vec3 dir) {
 
 vec3 sample_irradiance(vec3 dir) {
     if (u_has_ibl_probe == 1) {
-        return pow(max(texture2D(u_irradiance_tex, dir_to_equirect(dir)).rgb, vec3(0.0)), vec3(2.2)) * u_ibl_exposure;
+        return pow(max(texture2D(u_irradiance_tex, dir_to_equirect(dir)).rgb, vec3(0.0)), vec3(2.2)) * u_ibl_exposure * u_diffuse_environment_strength;
     }
-    return sample_env(dir);
+    return sample_env(dir) * u_diffuse_environment_strength;
 }
 
 vec3 sample_prefiltered_env(vec3 dir, float roughness) {
@@ -1209,11 +1264,11 @@ vec3 sample_prefiltered_env(vec3 dir, float roughness) {
         vec2 uv = dir_to_equirect(dir);
         vec3 low = pow(max(texture2D(u_prefilter_tex, vec2(uv.x, (uv.y + lo) / levels)).rgb, vec3(0.0)), vec3(2.2));
         vec3 high = pow(max(texture2D(u_prefilter_tex, vec2(uv.x, (uv.y + hi) / levels)).rgb, vec3(0.0)), vec3(2.2));
-        return mix(low, high, mix_value) * u_ibl_exposure;
+        return mix(low, high, mix_value) * u_ibl_exposure * u_reflection_environment_strength;
     }
     vec3 env = sample_env(dir);
     vec3 blur = sample_env(vec3(0.0, 1.0, 0.0));
-    return mix(env, blur, clamp(roughness * 0.58, 0.0, 0.72));
+    return mix(env, blur, clamp(roughness * 0.58, 0.0, 0.72)) * u_reflection_environment_strength;
 }
 
 vec2 sample_brdf_lut(float ndotv, float roughness) {
@@ -1231,15 +1286,22 @@ float screen_space_ao_factor(vec3 normal, vec3 view_dir, vec3 world_pos) {
     vec3 n = normalize(normal);
     vec3 v = normalize(view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
-    float grazing = pow(1.0 - ndotv, 1.45);
-    float normal_variation = length(dFdx(n)) + length(dFdy(n));
-    float depth_variation = abs(dFdx(world_pos.z)) + abs(dFdy(world_pos.z));
     float radius = max(u_screen_ao_radius, 0.5);
     float distance = max(u_screen_ao_distance, 0.01);
-    float crease = clamp(normal_variation * radius * 0.34, 0.0, 1.0);
-    float depth_cavity = clamp(depth_variation * radius / distance * 0.18, 0.0, 1.0);
-    float underside = clamp((-n.y * 0.5 + 0.5) * 0.18, 0.0, 0.18);
-    float occlusion = clamp(crease * 0.60 + depth_cavity * 0.42 + grazing * 0.24 + underside, 0.0, 1.0);
+    vec3 dn_dx = dFdx(n);
+    vec3 dn_dy = dFdy(n);
+    vec3 dp_dx = dFdx(world_pos);
+    vec3 dp_dy = dFdy(world_pos);
+    float curvature = length(dn_dx) + length(dn_dy);
+    float depth_gradient = length(vec2(dFdx(world_pos.z), dFdy(world_pos.z)));
+    float footprint = max(max(length(dp_dx), length(dp_dy)), 0.0001);
+    float crease = smoothstep(0.015, 0.22, curvature * radius * 0.42);
+    float contact = smoothstep(0.005, max(0.006, distance * 0.34), depth_gradient * radius / max(footprint, 0.0001) * 0.025);
+    float horizon = smoothstep(0.18, 0.92, pow(1.0 - ndotv, 1.35));
+    float underside = smoothstep(0.10, 0.82, -n.y) * 0.22;
+    float micro = pow(clamp(curvature * radius * 0.22, 0.0, 1.0), 1.8) * 0.35;
+    float occlusion = clamp(crease * 0.46 + contact * 0.34 + horizon * 0.18 + underside + micro, 0.0, 1.0);
+    occlusion = smoothstep(0.02, 0.96, occlusion);
     return clamp(1.0 - occlusion * strength, 0.0, 1.0);
 }
 
@@ -1314,6 +1376,52 @@ vec2 apply_parallax_uv(vec2 uv, vec3 view_dir, vec3 tangent, vec3 bitangent, vec
     vec3 b = normalize(bitangent);
     vec3 n = normalize(normal);
     vec3 view_ts = vec3(dot(v, t), dot(v, b), max(abs(dot(v, n)), 0.08));
+    float step_count = clamp(float(u_parallax_steps), 1.0, 64.0);
+    if (step_count > 1.5) {
+        float layer_step = 1.0 / step_count;
+        vec2 ray = vec2(view_ts.x, -view_ts.y) / view_ts.z * u_parallax_depth * u_parallax_strength;
+        vec2 delta = ray / step_count;
+        vec2 current_uv = uv;
+        vec2 previous_uv = uv;
+        float current_layer = 0.0;
+        float previous_layer = 0.0;
+        float center_bias = clamp(u_parallax_center, 0.0, 1.0) - 0.5;
+        float surface_depth = clamp(
+            1.0 - dot(sample_material_rgba(u_height_tex, current_uv, world_pos, n), u_height_channel)
+                + center_bias,
+            0.0,
+            1.0
+        );
+        for (int i = 0; i < 64; ++i) {
+            if (float(i) >= step_count || current_layer >= surface_depth) {
+                break;
+            }
+            previous_uv = current_uv;
+            previous_layer = current_layer;
+            current_uv -= delta;
+            current_layer += layer_step;
+            surface_depth = clamp(
+                1.0 - dot(sample_material_rgba(u_height_tex, current_uv, world_pos, n), u_height_channel)
+                    + center_bias,
+                0.0,
+                1.0
+            );
+        }
+        float current_error = current_layer - surface_depth;
+        float previous_depth = clamp(
+            1.0 - dot(sample_material_rgba(u_height_tex, previous_uv, world_pos, n), u_height_channel)
+                + center_bias,
+            0.0,
+            1.0
+        );
+        float previous_error = previous_depth - previous_layer;
+        float blend = clamp(
+            previous_error / max(previous_error + current_error, 0.000001),
+            0.0,
+            1.0
+        );
+        return mix(previous_uv, current_uv, blend);
+    }
     float height = dot(sample_material_rgba(u_height_tex, uv, world_pos, n), u_height_channel);
     float amount = (height - clamp(u_parallax_center, 0.0, 1.0)) * u_parallax_depth * u_parallax_strength;
     return uv + view_ts.xy * amount;
@@ -1357,11 +1465,17 @@ float sample_channel(sampler2D tex, vec2 uv, vec4 channel) {
 }
 
 vec3 srgb_to_linear(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x / 12.92;
+    vec3 high = pow((x + vec3(0.055)) / 1.055, vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), x));
 }
 
 vec3 linear_to_srgb(vec3 c) {
-    return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x * 12.92;
+    vec3 high = 1.055 * pow(x, vec3(1.0 / 2.4)) - vec3(0.055);
+    return mix(low, high, step(vec3(0.0031308), x));
 }
 
 void apply_material_layer(inout vec3 albedo, inout float roughness, inout float metallic, inout float out_alpha, inout vec3 emissive) {
@@ -1641,6 +1755,66 @@ float pbr_shadow_visibility(vec3 world_pos, vec3 normal, vec3 light_dir) {
     return mix(1.0 - clamp(u_shadow_strength, 0.0, 1.0), 1.0, lit);
 }
 
+vec3 additional_light_direct(
+    int enabled,
+    int light_type,
+    vec3 direction,
+    vec3 position,
+    vec3 color,
+    float intensity,
+    float light_range,
+    float spot_inner_cos,
+    float spot_outer_cos,
+    vec3 world_pos,
+    vec3 normal,
+    vec3 view,
+    vec3 albedo,
+    vec3 f0,
+    float roughness,
+    float metallic,
+    float ndotv,
+    float ao
+) {
+    if (enabled != 1 || intensity <= 0.0001) {
+        return vec3(0.0);
+    }
+    vec3 to_light = normalize(-direction);
+    float attenuation = 1.0;
+    if (light_type != 0) {
+        vec3 delta = position - world_pos;
+        float distance_to_light = length(delta);
+        if (distance_to_light <= 0.0001 || distance_to_light >= light_range) {
+            return vec3(0.0);
+        }
+        to_light = delta / distance_to_light;
+        float range_factor = clamp(1.0 - distance_to_light / max(0.05, light_range), 0.0, 1.0);
+        attenuation = range_factor * range_factor;
+        if (light_type == 2) {
+            float cone_cos = dot(normalize(world_pos - position), normalize(direction));
+            attenuation *= smoothstep(spot_outer_cos, spot_inner_cos, cone_cos);
+        }
+    }
+    float ndotl = max(dot(normal, to_light), 0.0);
+    if (ndotl <= 0.0001 || attenuation <= 0.0001) {
+        return vec3(0.0);
+    }
+    vec3 half_vec = normalize(to_light + view);
+    float ndoth = max(dot(normal, half_vec), 0.0);
+    float vdoth = max(dot(view, half_vec), 0.0);
+    return cook_torrance_direct(
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotl,
+        ndotv,
+        ndoth,
+        vdoth,
+        intensity * attenuation,
+        ao
+    ) * max(color, vec3(0.0));
+}
+
 void main() {
     vec2 uv = maybe_flip_uv(v_uv);
     vec3 parallax_n = normalize(v_normal);
@@ -1737,6 +1911,9 @@ void main() {
     float wrapped_lambert = clamp((raw_lambert + 0.42) / 1.42, 0.0, 1.0);
     float ndotv = max(dot(n, view), 0.0);
     vec3 albedo = srgb_to_linear(tex.rgb);
+    if (u_has_base_tex == 1) {
+        albedo *= clamp(v_color.rgb, vec3(0.0), vec3(16.0));
+    }
     float ao = 1.0;
     if (u_has_occlusion_tex == 1) {
         ao = clamp(dot(sample_material_rgba(u_occlusion_tex, uv, v_world_pos, n), u_occlusion_channel), 0.0, 1.0);
@@ -1771,7 +1948,48 @@ void main() {
     float vdoth = max(dot(view, half_vec), 0.0);
     float preview_direct_lambert = max(lambert, wrapped_lambert * 0.62);
     vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, preview_direct_lambert, ndotv, ndoth, vdoth, direct_power, diffuse_ao);
+    direct *= max(u_light_color, vec3(0.0));
     direct *= shadow_visibility;
+    direct += additional_light_direct(
+        u_extra_light0_enabled,
+        u_extra_light0_type,
+        u_extra_light0_direction,
+        u_extra_light0_position,
+        u_extra_light0_color,
+        u_extra_light0_intensity,
+        u_extra_light0_range,
+        u_extra_light0_spot_inner_cos,
+        u_extra_light0_spot_outer_cos,
+        v_world_pos,
+        n,
+        view,
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotv,
+        diffuse_ao
+    );
+    direct += additional_light_direct(
+        u_extra_light1_enabled,
+        u_extra_light1_type,
+        u_extra_light1_direction,
+        u_extra_light1_position,
+        u_extra_light1_color,
+        u_extra_light1_intensity,
+        u_extra_light1_range,
+        u_extra_light1_spot_inner_cos,
+        u_extra_light1_spot_outer_cos,
+        v_world_pos,
+        n,
+        view,
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotv,
+        diffuse_ao
+    );
 
     vec3 fill = albedo * (0.045 + roughness * 0.03) * kd * mix(0.48, 1.0, ambient_ao);
     fill *= mix(1.0, self_shadow, 0.65);
@@ -1797,7 +2015,8 @@ void main() {
     rgb = apply_transmission_refraction(rgb, albedo, n, view, roughness, fresnel);
     rgb = apply_output_transform(rgb);
     if (u_has_base_tex == 1) {
-        vec3 preview_albedo = pow(clamp(tex.rgb, 0.0, 1.0), vec3(0.58));
+        vec3 preview_base = clamp(tex.rgb * clamp(v_color.rgb, vec3(0.0), vec3(1.0)), 0.0, 1.0);
+        vec3 preview_albedo = pow(preview_base, vec3(0.58));
         vec3 base_visibility = preview_albedo
             * (0.48 + roughness * 0.24 + (1.0 - metallic) * 0.10)
             * clamp(0.92 + u_ibl_exposure * 0.18, 0.92, 1.55)
@@ -4277,6 +4496,17 @@ class _ARPBRDirectGLPainter:
             direct = max(0.0, min(4.0, float(lighting.get("direct_strength", 0.85))))
         except Exception:
             direct = 0.85
+        raw_color = list(lighting.get("light_color") or [1.0, 1.0, 1.0])[:3]
+        while len(raw_color) < 3:
+            raw_color.append(1.0)
+        try:
+            light_color = QVector3D(
+                max(0.0, min(8.0, float(raw_color[0]))),
+                max(0.0, min(8.0, float(raw_color[1]))),
+                max(0.0, min(8.0, float(raw_color[2]))),
+            )
+        except Exception:
+            light_color = QVector3D(1.0, 1.0, 1.0)
         try:
             ibl = max(0.0, min(8.0, float(lighting.get("ibl_exposure", 1.0))))
         except Exception:
@@ -4300,11 +4530,69 @@ class _ARPBRDirectGLPainter:
         glint_sparkle_rendering = normalize_glint_sparkle_settings(lighting)
         depth_of_field_rendering = normalize_depth_of_field_settings(lighting)
         post_effects_rendering = normalize_post_effects_settings(lighting)
+        environment_visibility = normalize_environment_visibility(lighting)
+        render_mode_policy = resolve_render_mode(lighting)
         triplanar_rendering = normalize_triplanar_settings(lighting)
+        additional_lights = []
+        for raw in list(lighting.get("additional_lights") or [])[:2]:
+            if not isinstance(raw, dict):
+                continue
+            light_type = str(raw.get("light_type") or "directional").lower()
+            type_code = {
+                "directional": 0,
+                "point": 1,
+                "spot": 2,
+            }.get(light_type, 0)
+
+            def vector(key: str, fallback: tuple[float, float, float]) -> QVector3D:
+                values = raw.get(key)
+                try:
+                    return QVector3D(
+                        float(values[0]),
+                        float(values[1]),
+                        float(values[2]),
+                    )
+                except Exception:
+                    return QVector3D(*fallback)
+
+            direction = vector("direction", (-0.35, -0.65, -0.72))
+            if direction.length() <= 0.001:
+                direction = QVector3D(-0.35, -0.65, -0.72)
+            direction.normalize()
+            try:
+                inner = max(0.0, min(88.0, float(raw.get("spot_inner_angle", 24.0))))
+                outer = max(inner + 0.1, min(89.0, float(raw.get("spot_outer_angle", 36.0))))
+                extra_intensity = max(0.0, min(4.0, float(raw.get("intensity", 0.0))))
+                extra_range = max(0.05, min(100.0, float(raw.get("range", 6.0))))
+            except Exception:
+                inner, outer, extra_intensity, extra_range = 24.0, 36.0, 0.0, 6.0
+            additional_lights.append({
+                "type": type_code,
+                "direction": direction,
+                "position": vector("position", (0.0, 1.5, 2.0)),
+                "color": vector("color", (1.0, 1.0, 1.0)),
+                "intensity": extra_intensity,
+                "range": extra_range,
+                "spot_inner_cos": math.cos(math.radians(inner)),
+                "spot_outer_cos": math.cos(math.radians(outer)),
+            })
         return {
             "light": light,
+            "light_color": light_color,
             "direct": direct,
             "ibl": ibl,
+            "diffuse_environment_strength": (
+                float(environment_visibility["diffuse_strength"])
+                if environment_visibility["diffuse_visible"] and render_mode_policy["active"] != "studio_lights_only"
+                else 0.0
+            ),
+            "reflection_environment_strength": (
+                float(environment_visibility["reflection_strength"])
+                if environment_visibility["reflection_visible"] and render_mode_policy["active"] != "studio_lights_only"
+                else 0.0
+            ),
+            "environment_visibility": environment_visibility,
+            "render_mode_policy": render_mode_policy,
             "rotation": rotation,
             "hdri_path": str(lighting.get("hdri_path") or ""),
             "color_management": color_management,
@@ -4323,6 +4611,7 @@ class _ARPBRDirectGLPainter:
             "depth_of_field_rendering": depth_of_field_rendering,
             "post_effects_rendering": post_effects_rendering,
             "triplanar_rendering": triplanar_rendering,
+            "additional_lights": additional_lights,
         }
 
     @staticmethod
@@ -4552,9 +4841,63 @@ class _ARPBRDirectGLPainter:
             self._pbr_program.bind()
             lighting = self._lighting_for_item(item)
             self._set_pbr_uniform("u_light_dir", lighting["light"])
+            self._set_pbr_uniform("u_light_color", lighting["light_color"])
             self._set_pbr_uniform("u_direct_strength", float(lighting["direct"]))
             self._set_pbr_uniform("u_ibl_exposure", float(lighting["ibl"]))
+            self._set_pbr_uniform(
+                "u_diffuse_environment_strength",
+                float(lighting["diffuse_environment_strength"]),
+            )
+            self._set_pbr_uniform(
+                "u_reflection_environment_strength",
+                float(lighting["reflection_environment_strength"]),
+            )
             self._set_pbr_uniform("u_ibl_rotation", float(lighting["rotation"]))
+            additional_lights = list(lighting.get("additional_lights") or [])[:2]
+            for extra_index in range(2):
+                prefix = f"u_extra_light{extra_index}"
+                extra = (
+                    additional_lights[extra_index]
+                    if extra_index < len(additional_lights)
+                    else {}
+                )
+                enabled = bool(extra) and float(extra.get("intensity", 0.0)) > 0.0
+                self._set_pbr_uniform(
+                    f"{prefix}_enabled",
+                    1 if enabled else 0,
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_type",
+                    int(extra.get("type", 0) or 0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_direction",
+                    extra.get("direction", QVector3D(-0.35, -0.65, -0.72)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_position",
+                    extra.get("position", QVector3D(0.0, 1.5, 2.0)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_color",
+                    extra.get("color", QVector3D(1.0, 1.0, 1.0)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_intensity",
+                    float(extra.get("intensity", 0.0) or 0.0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_range",
+                    float(extra.get("range", 6.0) or 6.0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_spot_inner_cos",
+                    float(extra.get("spot_inner_cos", 0.9135) or 0.9135),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_spot_outer_cos",
+                    float(extra.get("spot_outer_cos", 0.8090) or 0.8090),
+                )
             color_management = lighting.get("color_management") if isinstance(lighting.get("color_management"), dict) else {}
             tone_wb = list(color_management.get("tone_white_balance_rgb") or [1.0, 1.0, 1.0])
             self._set_pbr_uniform("u_tone_mapping_mode", int(color_management.get("tone_mapping_mode", 0) or 0))
@@ -4583,6 +4926,12 @@ class _ARPBRDirectGLPainter:
             self._set_pbr_uniform("u_parallax_strength", float(parallax_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform("u_parallax_depth", float(parallax_rendering.get("depth", 0.0) or 0.0))
             self._set_pbr_uniform("u_parallax_center", float(parallax_rendering.get("center", 0.5) or 0.5))
+            self._set_pbr_uniform(
+                "u_parallax_steps",
+                int(parallax_rendering.get("steps", 24) or 24)
+                if str(parallax_rendering.get("mode") or "") == "pom"
+                else 1,
+            )
             bevel_rendering = lighting.get("bevel_rendering") if isinstance(lighting.get("bevel_rendering"), dict) else {}
             self._set_pbr_uniform("u_bevel_strength", float(bevel_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform("u_bevel_radius", float(bevel_rendering.get("radius", 0.0) or 0.0))
@@ -4744,6 +5093,13 @@ class _ARPBRDirectGLPainter:
             self._set_pbr_uniform1f_gl(gl, "u_parallax_strength", float(parallax_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_parallax_depth", float(parallax_rendering.get("depth", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_parallax_center", float(parallax_rendering.get("center", 0.5) or 0.5))
+            self._set_pbr_uniform1i_gl(
+                gl,
+                "u_parallax_steps",
+                int(parallax_rendering.get("steps", 24) or 24)
+                if str(parallax_rendering.get("mode") or "") == "pom"
+                else 1,
+            )
             self._set_pbr_uniform1f_gl(gl, "u_bevel_strength", float(bevel_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_bevel_radius", float(bevel_rendering.get("radius", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_bevel_edge_width", float(bevel_rendering.get("edge_width", 0.075) or 0.075))
@@ -5108,6 +5464,10 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         self._mmd_painter: _MMDDirectGLPainter | None = None
         self._mmd_failed = False
         self._mmd_debug_overlay_enabled = _env_flag("TIGERCAPTURE_MMD_DEBUG_OVERLAY")
+        self._upload_count = 0
+        self._last_upload_ms = 0.0
+        self._last_paint_ms = 0.0
+        self._last_upload_diag_s = 0.0
 
     def _surface_size_px(self) -> tuple[int, int]:
         """Return the backing OpenGL surface size in physical pixels."""
@@ -5134,6 +5494,52 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         self._pending_frame = rgb
         self._uniforms = grade_to_uniforms(grade)
         self.update()
+
+    def preview_gl_diagnostics(self) -> dict[str, object]:
+        return {
+            "frame_size": [int(self._frame_size[0]), int(self._frame_size[1])],
+            "upload_count": int(self._upload_count),
+            "last_upload_ms": round(float(self._last_upload_ms), 3),
+            "last_paint_ms": round(float(self._last_paint_ms), 3),
+        }
+
+    def _record_preview_gl_upload_event(
+        self,
+        *,
+        elapsed_ms: float,
+        width: int,
+        height: int,
+        mode: str,
+    ) -> None:
+        try:
+            threshold = float(os.environ.get("TIGERCAPTURE_PREVIEW_GL_UPLOAD_SLOW_MS", "6.0"))
+        except Exception:
+            threshold = 6.0
+        now = time.monotonic()
+        if float(elapsed_ms) < threshold and now - float(self._last_upload_diag_s or 0.0) < 5.0:
+            return
+        if now - float(self._last_upload_diag_s or 0.0) < 1.0:
+            return
+        self._last_upload_diag_s = now
+        try:
+            from app.loading_performance import record_loading_event
+
+            record_loading_event(
+                "preview.gl",
+                "texture_upload",
+                status="ok",
+                elapsed_ms=float(elapsed_ms),
+                detail=f"{mode} {int(width)}x{int(height)}",
+                metadata={
+                    "width": int(width),
+                    "height": int(height),
+                    "mode": str(mode),
+                    "upload_count": int(self._upload_count),
+                    "bytes": int(width) * int(height) * 3,
+                },
+            )
+        except Exception:
+            pass
 
     def set_spine_overlay_items(self, items) -> None:
         """Set Spine actor states to draw directly in the preview GL pass."""
@@ -5378,6 +5784,7 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         gl.glViewport(0, 0, max(1, w), max(1, h))
 
     def paintGL(self) -> None:
+        paint_started = time.perf_counter()
         gl = self.context().functions()
         surface_w, surface_h = self._surface_size_px()
         gl.glViewport(0, 0, surface_w, surface_h)
@@ -5391,6 +5798,8 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         # wrapper churns at 60 fps. The texture is destroyed/recreated
         # only when the frame dimensions actually change.
         if self._pending_frame is not None:
+            upload_started = time.perf_counter()
+            upload_mode = "subimage"
             rgb = self._pending_frame
             h, w = rgb.shape[:2]
             qimg = QImage(
@@ -5398,6 +5807,7 @@ class OpenGLPreviewWidget(QOpenGLWidget):
             )
             no_mip = QOpenGLTexture.MipMapGeneration.DontGenerateMipMaps
             if self._texture is None or self._frame_size != (w, h):
+                upload_mode = "create"
                 if self._texture is not None:
                     self._texture.destroy()
                     self._texture = None
@@ -5414,6 +5824,15 @@ class OpenGLPreviewWidget(QOpenGLWidget):
             else:
                 # Same size — re-upload pixels into existing storage.
                 self._texture.setData(qimg, no_mip)
+            upload_ms = (time.perf_counter() - upload_started) * 1000.0
+            self._upload_count += 1
+            self._last_upload_ms = upload_ms
+            self._record_preview_gl_upload_event(
+                elapsed_ms=upload_ms,
+                width=int(w),
+                height=int(h),
+                mode=upload_mode,
+            )
             # Drop the numpy reference now that the upload has landed.
             self._pending_frame = None
 
@@ -5570,3 +5989,4 @@ class OpenGLPreviewWidget(QOpenGLWidget):
                 self.spine_overlay_failed.emit("Spine direct GL overlay failed")
 
         self._draw_mmd_debug_overlay()
+        self._last_paint_ms = (time.perf_counter() - paint_started) * 1000.0

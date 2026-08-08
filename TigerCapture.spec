@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 project_root = Path(".").resolve()
 worker_exe_name = "tigercapture-worker.exe"
@@ -12,22 +12,39 @@ native_binaries = []
 if worker_release.exists():
     native_binaries.append((str(worker_release), "bundled/native"))
 
+umg_plugin_bundle = (
+    project_root / "bundled" / "unreal_plugins" / "UMG" / "TigerStudioUMG"
+)
+umg_plugin_datas = []
+if umg_plugin_bundle.exists():
+    umg_plugin_datas.append(
+        (
+            str(umg_plugin_bundle),
+            "bundled/unreal_plugins/UMG/TigerStudioUMG",
+        )
+    )
+
 # imageio_ffmpeg ships ffmpeg.exe as a wheel; modern imageio.v2.get_writer
 # probes the dist's metadata at runtime, so the .dist-info directory has
 # to land in the bundle. Without copy_metadata, MP4 export crashes with
 # 'No package metadata was found for imageio'.
 extra_datas = copy_metadata('imageio_ffmpeg')
+ocio_datas, ocio_binaries, ocio_hiddenimports = collect_all('PyOpenColorIO')
 
 a = Analysis(
-    ['main.py'],
+    ['main.py', 'studio_main.py', 'tools/tigercapture_updater.py'],
     pathex=[str(project_root)],
-    binaries=native_binaries,
+    binaries=native_binaries + ocio_binaries,
     datas=[
         ('app/locales/*.py', 'app/locales'),
         ('resources/tigercapture.ico', 'resources'),
+        ('resources/branding/*.png', 'resources/branding'),
+        ('resources/fonts/*.ttf', 'resources/fonts'),
+        ('resources/fonts/*.txt', 'resources/fonts'),
+        ('resources/fonts/*.md', 'resources/fonts'),
         ('resources/luts/*.cube', 'resources/luts'),
         ('resources/ui/sound_editor/*.png', 'resources/ui/sound_editor'),
-    ] + extra_datas,
+    ] + umg_plugin_datas + extra_datas + ocio_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each
         # one needs to be declared here for PyInstaller to bundle it.
@@ -50,6 +67,9 @@ a = Analysis(
         'app.batch_export_dialog',
         'app.clip_effects_dialog',
         'app.color_page_window',
+        # Imported defensively by app.color_ocio so frozen builds need an
+        # explicit entry for the compiled OCIO extension.
+        'PyOpenColorIO',
         'app.new_project_dialog',
         'app.video_filters',
         'app.chroma_key',
@@ -77,7 +97,7 @@ a = Analysis(
         'app.workbench.node_graph.items.port_item',
         'app.workbench.node_graph.items.io_node',
         'app.workbench.node_graph.items.parallel_mixer',
-    ],
+    ] + ocio_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -96,9 +116,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+capture_scripts = [script for script in a.scripts if Path(script[1]).name == 'main.py'] or [a.scripts[0]]
+studio_scripts = [script for script in a.scripts if Path(script[1]).name == 'studio_main.py'] or [a.scripts[-1]]
+updater_scripts = [script for script in a.scripts if Path(script[1]).name == 'tigercapture_updater.py'] or [a.scripts[-1]]
+
 exe = EXE(
     pyz,
-    a.scripts,
+    capture_scripts,
     [],
     exclude_binaries=True,
     name='TigerCapture',
@@ -116,8 +140,50 @@ exe = EXE(
     version='version_info.txt',
 )
 
+studio_exe = EXE(
+    pyz,
+    studio_scripts,
+    [],
+    exclude_binaries=True,
+    name='TigerStudio',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='resources/tigercapture.ico',
+    version='version_info.txt',
+)
+
+updater_exe = EXE(
+    pyz,
+    updater_scripts,
+    [],
+    exclude_binaries=True,
+    name='TigerCaptureUpdater',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='resources/tigercapture.ico',
+    version='version_info.txt',
+)
+
 coll = COLLECT(
     exe,
+    studio_exe,
+    updater_exe,
     a.binaries,
     a.datas,
     strip=False,

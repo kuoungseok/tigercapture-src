@@ -87,6 +87,7 @@ def _insert_mmd_actor_lane(self, track: dict) -> MMDActorLaneRow | None:
     if not hasattr(self, "_tracks_layout") or not hasattr(self, "_timeline_ruler"):
         return None
     row = MMDActorLaneRow(track)
+    row.installEventFilter(self)
     row.set_px_per_sec(getattr(self, "_px_per_sec", DEFAULT_PX_PER_SEC))
     row.set_lane_index(len(getattr(self, "_mmd_lane_rows", []) or []) + 1)
     row.track_selected.connect(self._select_mmd_track)

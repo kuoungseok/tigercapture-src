@@ -47,7 +47,7 @@ PPT screenshots, source notes, media-pool reference items, or overview pages.
 ## Deck Modes
 
 - `summary`: short product-catalog introduction.
-- `full-product-catalog`: locked 22-slide product catalog. Use
+- `full-product-catalog`: locked 23-slide product catalog. Use
   `FULL_PRODUCT_CATALOG_MANIFEST.md` as the slide-count, title, ordering, and
   consolidation contract. Do not add, remove, split, merge, or reorder slides
   unless that manifest is edited first.
@@ -61,12 +61,12 @@ The deck should feel like a studio tour:
 
 1. TigerCapture is more than a recorder.
 2. It imports or captures real media into a local editing session.
-3. It can polish, cut, grade, process audio, add typography, use actors, and
-   compose node/3D/VTuber workflows.
+3. It can polish, cut, grade, compose music, process audio, add typography,
+   use actors, and compose node/3D/VTuber workflows.
 4. Each feature is shown through a real automated editor state.
 5. The final output is a product catalog, not a QA report.
 
-For the current full catalog, the exact approved scenario is the 22-slide
+For the current full catalog, the exact approved scenario is the 23-slide
 manifest in:
 
 ```text

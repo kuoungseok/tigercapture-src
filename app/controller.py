@@ -14,9 +14,10 @@ from app.exporter import GifExportThread, Mp4ExportThread
 from app.foreground_tracker import ForegroundInfo, ForegroundTracker
 from app.gif_editor_window import GifEditorWindow
 from app.i18n import tr
+from app.launcher_studio_policy import capture_to_studio_enabled
 from app.main_window import MainWindow
 from app.modes import CaptureMode
-from app.paths import default_save_dir
+from app.paths import default_save_dir, open_in_explorer
 from app.recorder import FrameRecorder
 from app.recording_bar import RecordingControlBar
 from app.recording_border import RecordingBorderOverlay
@@ -24,11 +25,20 @@ from app.region_selector import RegionSelectorOverlay
 from app.donation_dialog import DonationDialog
 from app.screenshot_window import ScreenshotWindow
 from app.settings_dialog import SettingsDialog
-from app.video_editor_window import VideoEditorWindow
 
 
 DEFAULT_GIF_FPS = 15
 DEFAULT_VIDEO_FPS = 30
+VideoEditorWindow = None
+
+
+def _video_editor_window_class():
+    patched_cls = globals().get("VideoEditorWindow")
+    if patched_cls is not None:
+        return patched_cls
+    from app.video_editor_window_core import VideoEditorWindow
+
+    return VideoEditorWindow
 
 
 class AppController(QObject):
@@ -161,6 +171,24 @@ class AppController(QObject):
 
     def _open_video_editor(self, source_path: object = None) -> None:
         source_path, workspace_mode = self._parse_video_editor_payload(source_path)
+        if not capture_to_studio_enabled():
+            try:
+                from app.startup_trace import log_startup_trace
+
+                log_startup_trace(
+                    "controller.open_video_editor.blocked_capture_studio_boundary",
+                    source_path=str(source_path) if source_path is not None else None,
+                    workspace_mode=workspace_mode,
+                )
+            except Exception:
+                pass
+            if source_path is not None:
+                try:
+                    open_in_explorer(source_path)
+                except Exception:
+                    pass
+            self._clear_launcher_busy_later()
+            return
         now = time.monotonic()
         opening = bool(getattr(self, "_video_editor_opening", False))
         last_open_at = float(getattr(self, "_last_video_editor_open_at", 0.0) or 0.0)
@@ -194,6 +222,7 @@ class AppController(QObject):
             app = QApplication.instance()
             if app is not None:
                 app.processEvents()
+            VideoEditorWindow = _video_editor_window_class()
             editor = VideoEditorWindow(source_path=source_path)
         finally:
             self._video_editor_opening = False
@@ -255,9 +284,13 @@ class AppController(QObject):
         self._clear_launcher_busy_later()
 
     def _open_project_from_startup(self, source_path: Path) -> None:
+        if not capture_to_studio_enabled():
+            self._clear_launcher_busy_later()
+            return
         from PySide6.QtWidgets import QMessageBox
         from app.project_io import load_project, remember_last_project
 
+        VideoEditorWindow = _video_editor_window_class()
         editor = VideoEditorWindow(source_path=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()
@@ -283,7 +316,11 @@ class AppController(QObject):
         self._clear_launcher_busy_later()
 
     def _open_template_from_startup(self, payload: object) -> None:
+        if not capture_to_studio_enabled():
+            self._clear_launcher_busy_later()
+            return
         data = payload if isinstance(payload, dict) else {}
+        VideoEditorWindow = _video_editor_window_class()
         editor = VideoEditorWindow(source_path=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()

@@ -84,6 +84,7 @@ Section "Install"
     ; Start Menu
     CreateDirectory "$SMPROGRAMS\${APPNAME}"
     CreateShortCut  "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"       "$INSTDIR\TigerCapture.exe" "" "$INSTDIR\TigerCapture.exe"
+    CreateShortCut  "$SMPROGRAMS\${APPNAME}\Tiger Studio.lnk"     "$INSTDIR\TigerStudio.exe" "" "$INSTDIR\TigerStudio.exe"
     CreateShortCut  "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe"
 
     ; Desktop shortcut
@@ -117,6 +118,7 @@ SectionEnd
 Section "Uninstall"
     ; Remove shortcuts
     Delete "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"
+    Delete "$SMPROGRAMS\${APPNAME}\Tiger Studio.lnk"
     Delete "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk"
     RMDir  "$SMPROGRAMS\${APPNAME}"
     Delete "$DESKTOP\${APPNAME}.lnk"

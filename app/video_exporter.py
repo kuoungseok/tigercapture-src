@@ -107,7 +107,12 @@ class ExportFormat:
     feature_id: str          # tier-gating key
 
     def build_video_args(
-        self, q: QualityPreset, *, hdr_passthrough: bool = False,
+        self,
+        q: QualityPreset,
+        *,
+        hdr_passthrough: bool = False,
+        hdr_output: bool = False,
+        hdr_transfer: str = "pq",
     ) -> list[str]:
         """ffmpeg ``-c:v ...`` segment for this format paired with the
         given quality preset.
@@ -120,15 +125,21 @@ class ExportFormat:
         format codec choice and forces libx265 (the export dialog
         offers passthrough only for HEVC-friendly containers).
         """
-        if hdr_passthrough:
+        if hdr_passthrough or hdr_output:
             # ``-tag:v hvc1`` is what Apple Quicktime / iOS need to
             # play HEVC out of an .mp4 / .mov container; any other
             # tag (e.g. hev1) won't open on macOS Preview.
             # ``hdr-opt=1:repeat-headers=1`` makes every IDR carry
             # the colorimetry so any cut later still plays as HDR.
+            transfer = (
+                "arib-std-b67"
+                if str(hdr_transfer).strip().lower() == "hlg"
+                else "smpte2084"
+            )
             x265_params = (
-                "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
-                "hdr-opt=1:repeat-headers=1"
+                f"colorprim=bt2020:transfer={transfer}:colormatrix=bt2020nc:"
+                + ("hdr-opt=1:" if transfer == "smpte2084" else "")
+                + "repeat-headers=1"
             )
             return [
                 "-c:v", "libx265",
@@ -141,7 +152,7 @@ class ExportFormat:
                 # doesn't parse x265-params (e.g. some browsers) still
                 # honours HDR.
                 "-color_primaries", "bt2020",
-                "-color_trc", "smpte2084",
+                "-color_trc", transfer,
                 "-colorspace", "bt2020nc",
                 "-color_range", "tv",
             ]
@@ -669,6 +680,8 @@ class VideoExportThread(QThread):
         ar_pbr_asset_descriptors: dict | None = None,
         mmd_tracks: list | None = None,
         mmd_pre_rendered: list | None = None,
+        motion_compositions: list | dict | None = None,
+        motion_clips: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -730,6 +743,14 @@ class VideoExportThread(QThread):
         self._mmd_pre_rendered: list[tuple[str, float, float]] = (
             list(mmd_pre_rendered) if mmd_pre_rendered else []
         )
+        try:
+            from app.motion_designer.compositor import normalize_motion_state
+            self._motion_compositions, self._motion_clips = normalize_motion_state(
+                motion_compositions, motion_clips
+            )
+        except Exception:
+            self._motion_compositions, self._motion_clips = {}, []
+        self._motion_renderer = None
         self._ar_pbr_asset_descriptor_cache: dict[str, dict] = {
             str(key): dict(value)
             for key, value in (ar_pbr_asset_descriptors or {}).items()
@@ -781,6 +802,23 @@ class VideoExportThread(QThread):
                 i += 2
         return filtered
 
+    def _project_hdr_output(self) -> tuple[bool, str]:
+        if self._hdr_passthrough:
+            transfer = str(getattr(self._hdr_info, "transfer", "") or "").lower()
+            return True, "hlg" if transfer == "arib-std-b67" else "pq"
+        try:
+            from app.color_management import ColorManagementSettings
+
+            cm = ColorManagementSettings.from_dict(
+                (self._project_settings or {}).get("color_management")
+            )
+            return (
+                cm.output_space == "rec2020" and cm.output_transfer in {"pq", "hlg"},
+                cm.output_transfer,
+            )
+        except Exception:
+            return False, "pq"
+
     def _append_project_lut_filters(self, graph: str, input_label: str) -> tuple[str, str]:
         try:
             from app.color_management import append_lut_filter_graph
@@ -788,6 +826,47 @@ class VideoExportThread(QThread):
             cm = (self._project_settings or {}).get("color_management")
             return append_lut_filter_graph(graph, input_label, cm)
         except Exception:
+            return graph, input_label
+
+    def _append_project_color_transform_filters(
+        self,
+        graph: str,
+        input_label: str,
+    ) -> tuple[str, str]:
+        if self._hdr_passthrough:
+            return graph, input_label
+        try:
+            from app.color_management import ColorManagementSettings
+
+            cm_settings = ColorManagementSettings.from_dict(
+                (self._project_settings or {}).get("color_management")
+            )
+            if (
+                cm_settings.is_hdr()
+                and self._format.extension not in {".mp4", ".mov"}
+            ):
+                raise RuntimeError(
+                    "Project HDR output requires an MP4 or MOV H.265 target"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            cm_settings = None
+        try:
+            from app.color_runtime import append_project_output_transform_graph
+
+            graph, output_label, diagnostics = append_project_output_transform_graph(
+                graph,
+                input_label,
+                cm_settings
+                or (self._project_settings or {}).get("color_management"),
+            )
+            self._project_color_transform_diagnostics = diagnostics
+            return graph, output_label
+        except Exception as exc:
+            self._project_color_transform_diagnostics = {
+                "warnings": [str(exc)],
+            }
             return graph, input_label
 
     def _raise_if_canceled(self) -> None:
@@ -822,6 +901,36 @@ class VideoExportThread(QThread):
             pass
         return 30.0
 
+    def _legacy_color_grade_needs_letterbox_prerender(self) -> bool:
+        """Return True when FFmpeg-only grading would recolor encoded mattes."""
+        grade = self._color_grade
+        if self._node_item_chain or grade is None or grade.is_identity():
+            return False
+        try:
+            import cv2  # type: ignore
+            from app.video_letterbox import detect_letterbox_bands
+
+            cap = cv2.VideoCapture(str(self._source))
+            try:
+                positions = [0.0]
+                if self._segments:
+                    start, end, _speed = self._segments[0]
+                    positions.extend([max(0.0, float(start)), max(0.0, (float(start) + float(end)) * 0.5)])
+                for pos_ms in positions[:3]:
+                    if pos_ms > 0:
+                        cap.set(cv2.CAP_PROP_POS_MSEC, float(pos_ms))
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        continue
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if bool(detect_letterbox_bands(rgb).get("ok")):
+                        return True
+            finally:
+                cap.release()
+        except Exception:
+            return False
+        return False
+
     @staticmethod
     def _node_chain_needs_prerender(node_item_chain: list | None) -> bool:
         """Return True when the preview node chain cannot be represented
@@ -850,6 +959,8 @@ class VideoExportThread(QThread):
                 continue
             if getattr(effect, "cursor_events", None) or getattr(effect, "screenstudio_polish", None):
                 return True
+            if getattr(effect, "frame_repairs", None):
+                return True
             for attr in ("stabilizer", "video_filters", "chroma_key", "bg_removal"):
                 params = getattr(effect, attr, None)
                 if params is not None and not params.is_identity():
@@ -866,6 +977,8 @@ class VideoExportThread(QThread):
                     return True
             for track in self._render_clip_tracks or []:
                 for clip in track or []:
+                    if getattr(clip, "frame_repairs", None):
+                        return True
                     if screenstudio_fx_enabled(clip, self._project_settings):
                         return True
         except Exception:
@@ -941,12 +1054,42 @@ class VideoExportThread(QThread):
         src_w: int,
         src_h: int,
     ):
-        import cv2  # type: ignore
-
         sp = getattr(clip, "source_path", None)
         if sp is None:
             return None, 0
         sp = Path(sp)
+        source_ms = int(getattr(clip, "source_in_ms", 0)) + (
+            int(project_ms) - int(getattr(clip, "timeline_in_ms", 0))
+        )
+        try:
+            from app.image_media import is_image_path, load_image_rgb
+
+            if is_image_path(sp):
+                rgb = load_image_rgb(sp, src_w, src_h)
+                if rgb is None:
+                    return None, 0
+                frame_idx = 0
+                rgb = self._apply_clip_stabilizer_cpu(rgb, clip, id(clip), frame_idx)
+                rgb = self._apply_clip_zoom_cpu(rgb, clip, source_ms)
+                rgb = self._apply_clip_post_effects_cpu(rgb, clip)
+                rgb = self._apply_clip_node_graph_cpu(rgb, clip)
+                rgb = self._overlay_clip_typography_cpu(rgb, clip, source_ms)
+                try:
+                    from app.screenstudio_polish import apply_cursor_fx_rgb
+                    rgb = apply_cursor_fx_rgb(
+                        rgb,
+                        source_ms,
+                        owner=clip,
+                        project_settings=self._project_settings,
+                    )
+                except Exception:
+                    pass
+                return rgb, frame_idx
+        except Exception:
+            pass
+
+        import cv2  # type: ignore
+
         entry = caps.get(sp)
         if entry is None:
             cap = cv2.VideoCapture(str(sp))
@@ -958,9 +1101,6 @@ class VideoExportThread(QThread):
             entry = (cap, fps)
             caps[sp] = entry
         cap, fps = entry
-        source_ms = int(getattr(clip, "source_in_ms", 0)) + (
-            int(project_ms) - int(getattr(clip, "timeline_in_ms", 0))
-        )
         frame_idx = max(0, int(source_ms / 1000.0 * fps))
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ok, bgr = cap.read()
@@ -969,6 +1109,28 @@ class VideoExportThread(QThread):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         if rgb.shape[1] != src_w or rgb.shape[0] != src_h:
             rgb = cv2.resize(rgb, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+        try:
+            from app.frame_repair import apply_frame_repair_rgb
+
+            def _repair_reader(idx: int):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(idx)))
+                ok_next, bgr_next = cap.read()
+                if not ok_next or bgr_next is None:
+                    return None
+                rgb_next = cv2.cvtColor(bgr_next, cv2.COLOR_BGR2RGB)
+                if rgb_next.shape[1] != src_w or rgb_next.shape[0] != src_h:
+                    rgb_next = cv2.resize(rgb_next, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+                return rgb_next
+
+            rgb, _repair_applied = apply_frame_repair_rgb(
+                rgb,
+                clip=clip,
+                source_ms=source_ms,
+                fps=fps,
+                frame_reader=_repair_reader,
+            )
+        except Exception:
+            pass
         rgb = self._apply_clip_stabilizer_cpu(rgb, clip, id(clip), frame_idx)
         rgb = self._apply_clip_zoom_cpu(rgb, clip, source_ms)
         rgb = self._apply_clip_post_effects_cpu(rgb, clip)
@@ -1572,6 +1734,13 @@ class VideoExportThread(QThread):
             }
             return rgb
 
+    def _apply_motion_export_cpu(self, rgb, project_ms: int):
+        try:
+            from app.motion_designer.compositor import composite_motion_clips
+            return composite_motion_clips(self, rgb, int(project_ms), cache_capacity=30)
+        except Exception:
+            return rgb
+
     def _write_clip_track_base_frames(
         self,
         stdin,
@@ -1602,6 +1771,7 @@ class VideoExportThread(QThread):
                 rgb = self._apply_legacy_color_grade_cpu(rgb)
                 rgb = self._apply_ar_pbr_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_mmd_export_cpu(rgb, int(project_ms))
+                rgb = self._apply_motion_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_screen_frame_style_cpu(rgb)
                 stdin.write(np.ascontiguousarray(rgb).tobytes())
                 cur_ms = int(round((i + 1) * total_output_ms / total_frames))
@@ -1844,6 +2014,31 @@ class VideoExportThread(QThread):
                 else:
                     rgb = last_rgb.copy()
 
+                try:
+                    from app.frame_repair import apply_frame_repair_rgb
+
+                    def _repair_reader(idx: int):
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(idx)))
+                        ok_next, bgr_next = cap.read()
+                        if not ok_next or bgr_next is None:
+                            return None
+                        rgb_next = cv2.cvtColor(bgr_next, cv2.COLOR_BGR2RGB)
+                        if rgb_next.shape[1] != src_w or rgb_next.shape[0] != src_h:
+                            rgb_next = cv2.resize(rgb_next, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+                        return rgb_next
+
+                    rgb, _repair_applied = apply_frame_repair_rgb(
+                        rgb,
+                        clip=clip_effect,
+                        source_ms=source_ms,
+                        fps=source_fps,
+                        frame_reader=_repair_reader,
+                    )
+                    if _repair_applied:
+                        last_frame_idx = -1
+                except Exception:
+                    pass
+
                 rgb = self._apply_clip_stabilizer_cpu(
                     rgb, clip_effect, segment_idx, frame_idx
                 )
@@ -1854,6 +2049,7 @@ class VideoExportThread(QThread):
                 project_ms, _project_segment_idx = self._render_project_position_for_output_ms(out_ms)
                 rgb = self._apply_ar_pbr_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_mmd_export_cpu(rgb, int(project_ms))
+                rgb = self._apply_motion_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_screenstudio_effect_cpu(rgb, source_ms, clip_effect)
                 stdin.write(np.ascontiguousarray(rgb).tobytes())
                 cur_ms = int(round((i + 1) * total_output_ms / total_frames))
@@ -1889,7 +2085,17 @@ class VideoExportThread(QThread):
         input_idx = 1  # 0 is the source video
         total_out_s = sum((e - s) / sp for (s, e, sp) in self._segments) / 1000.0
 
-        for (start_ms, end_ms), group_strokes in groups.items():
+        def fail_overlay(kind: str, index: int, failed_path: str) -> None:
+            for candidate in [failed_path, *png_paths]:
+                try:
+                    os.unlink(candidate)
+                except OSError:
+                    pass
+            raise RuntimeError(
+                f"Painter {kind} overlay {index} could not be rendered"
+            )
+
+        for group_index, ((start_ms, end_ms), group_strokes) in enumerate(groups.items()):
             t_start = _map_source_to_output(start_ms, self._segments)
             if t_start < 0:
                 t_start = 0.0  # clamp strokes that would land in a cut
@@ -1904,11 +2110,7 @@ class VideoExportThread(QThread):
                 group_strokes, src_w, src_h, png_path, width_scale=width_scale
             )
             if not ok:
-                try:
-                    os.unlink(png_path)
-                except OSError:
-                    pass
-                continue
+                fail_overlay("stroke", group_index, png_path)
             png_paths.append(png_path)
             overlay_spec.append((input_idx, t_start, t_end))
             input_idx += 1
@@ -1917,7 +2119,7 @@ class VideoExportThread(QThread):
         # start_ms onward (no end; stays until end of video).
         if self._bubbles:
             from app.drawing import render_bubble_to_png
-            for bubble in self._bubbles:
+            for bubble_index, bubble in enumerate(self._bubbles):
                 t_start = _map_source_to_output(
                     int(bubble.start_ms), self._segments
                 )
@@ -1929,11 +2131,7 @@ class VideoExportThread(QThread):
                 os.close(fd)
                 ok = render_bubble_to_png(bubble, src_w, src_h, png_path)
                 if not ok:
-                    try:
-                        os.unlink(png_path)
-                    except OSError:
-                        pass
-                    continue
+                    fail_overlay("speech-bubble", bubble_index, png_path)
                 png_paths.append(png_path)
                 overlay_spec.append((input_idx, t_start, None))
                 input_idx += 1
@@ -1945,7 +2143,7 @@ class VideoExportThread(QThread):
         if self._stickers:
             from app.drawing import render_sticker_to_png
             ordered = sorted(self._stickers, key=lambda s: int(getattr(s, "z_index", 0)))
-            for sticker in ordered:
+            for sticker_index, sticker in enumerate(ordered):
                 t_start = _map_source_to_output(
                     int(sticker.start_ms), self._segments
                 )
@@ -1966,11 +2164,7 @@ class VideoExportThread(QThread):
                 os.close(fd)
                 ok = render_sticker_to_png(sticker, src_w, src_h, png_path)
                 if not ok:
-                    try:
-                        os.unlink(png_path)
-                    except OSError:
-                        pass
-                    continue
+                    fail_overlay("sticker", sticker_index, png_path)
                 png_paths.append(png_path)
                 overlay_spec.append((input_idx, t_start, t_end))
                 input_idx += 1
@@ -2408,10 +2602,12 @@ class VideoExportThread(QThread):
             use_prerendered_base = (
                 self._force_prerender_base
                 or self._node_chain_needs_prerender(self._node_item_chain)
+                or self._legacy_color_grade_needs_letterbox_prerender()
                 or self._clip_effects_need_prerender(self._clip_effects)
                 or bool(self._render_clip_tracks)
                 or bool(self._ar_pbr_tracks)
                 or bool(self._mmd_tracks)
+                or bool(self._motion_clips)
                 or self._screenstudio_fx_need_prerender()
             )
             typo_mov_paths, typo_overlays = self._prepare_typography_overlays(
@@ -2463,6 +2659,19 @@ class VideoExportThread(QThread):
             )
             video_out_label = "outv"
             graph, video_out_label = self._append_project_lut_filters(graph, video_out_label)
+            graph, video_out_label = self._append_project_color_transform_filters(
+                graph,
+                video_out_label,
+            )
+            if self._target_width and self._target_height:
+                tw, th = self._target_width, self._target_height
+                scaled_label = "outv_scaled"
+                graph = (
+                    f"{graph};[{video_out_label}]"
+                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2[{scaled_label}]"
+                )
+                video_out_label = scaled_label
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
             )
@@ -2532,8 +2741,12 @@ class VideoExportThread(QThread):
                 "-filter_complex", graph,
                 "-map", f"[{video_out_label}]",
             ])
+            project_hdr, project_transfer = self._project_hdr_output()
             video_args = self._format.build_video_args(
-                self._quality, hdr_passthrough=self._hdr_passthrough,
+                self._quality,
+                hdr_passthrough=self._hdr_passthrough,
+                hdr_output=project_hdr,
+                hdr_transfer=project_transfer,
             )
             video_args.extend(self._project_color_metadata_args())
             cmd.extend(video_args)
@@ -2554,14 +2767,6 @@ class VideoExportThread(QThread):
                 else:
                     cmd.extend(["-map", "0:a?"])
                 cmd.extend(self._format.build_audio_args())
-            # Resolution preset: scale + letterbox/pillarbox padding.
-            if self._target_width and self._target_height:
-                tw, th = self._target_width, self._target_height
-                scale_filter = (
-                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
-                )
-                cmd.extend(["-vf", scale_filter])
             # FPS preset.
             if self._target_fps:
                 cmd.extend(["-r", f"{self._target_fps:.3f}"])

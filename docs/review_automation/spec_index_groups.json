@@ -1,6 +1,6 @@
 {
   "schema": "tigercapture.review.spec_index.v1",
-  "last_reviewed_spec_date": "2026-07-08",
+  "last_reviewed_spec_date": "2026-07-11",
   "source_docs": [
     "SPEC.md",
     "TODO.md",
@@ -13,7 +13,6 @@
   ],
   "forbidden_visible_terms": [
     "MRQ",
-    "Unreal Bridge",
     "Marmoset",
     "QA readiness",
     "release_ready",
@@ -103,11 +102,11 @@
     {
       "key": "music_lab",
       "en": {
-        "heading": "Music Lab",
+        "heading": "Composition / Music Lab",
         "items": ["Prompt composition", "MIDI notes", "WAV stems", "Timeline render"]
       },
       "ko": {
-        "heading": "Music Lab",
+        "heading": "작곡 / Music Lab",
         "items": ["프롬프트 작곡", "MIDI 노트", "WAV 스템", "타임라인 렌더"]
       }
     },

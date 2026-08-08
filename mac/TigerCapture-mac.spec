@@ -8,7 +8,7 @@ Build:
     pyinstaller --noconfirm mac/TigerCapture-mac.spec
 """
 from pathlib import Path
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 project_root = Path(SPECPATH).resolve().parent  # = repo root
 worker_release = (
@@ -18,6 +18,7 @@ worker_release = (
 native_binaries = []
 if worker_release.exists():
     native_binaries.append((str(worker_release), 'bundled/native'))
+ocio_datas, ocio_binaries, ocio_hiddenimports = collect_all('PyOpenColorIO')
 
 a = Analysis(
     [str(project_root / 'mac' / 'main.py')],
@@ -25,15 +26,18 @@ a = Analysis(
         str(project_root),
         str(project_root / 'mac'),
     ],
-    binaries=native_binaries,
+    binaries=native_binaries + ocio_binaries,
     datas=[
         # Shared locales and resources ride along so the overlaid
         # `app` package can find them exactly as on Windows.
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
         (str(project_root / 'resources' / 'tigercapture.ico'), 'resources'),
+        (str(project_root / 'resources' / 'fonts' / '*.ttf'), 'resources/fonts'),
+        (str(project_root / 'resources' / 'fonts' / '*.txt'), 'resources/fonts'),
+        (str(project_root / 'resources' / 'fonts' / '*.md'), 'resources/fonts'),
         (str(project_root / 'resources' / 'luts' / '*.cube'), 'resources/luts'),
         (str(project_root / 'resources' / 'ui' / 'sound_editor' / '*.png'), 'resources/ui/sound_editor'),
-    ] + copy_metadata('imageio_ffmpeg'),
+    ] + copy_metadata('imageio_ffmpeg') + ocio_datas,
     hiddenimports=[
         'app.locales.ko',
         'app.locales.en',
@@ -42,6 +46,7 @@ a = Analysis(
         'app.locales.fr',
         'app.locales.zh',
         'app.color_grading',
+        'PyOpenColorIO',
         'app.tier',
         'app.typography',
         'app.typo_animations',
@@ -60,7 +65,7 @@ a = Analysis(
         'CoreMedia',
         'ApplicationServices',     # AX* accessibility API
         'ScreenCaptureKit',
-    ],
+    ] + ocio_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

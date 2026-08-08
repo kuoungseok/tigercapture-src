@@ -1,6 +1,6 @@
 # Current-Spec Presentation Scenario
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 Canonical review automation rule hub:
 
@@ -29,6 +29,7 @@ This scenario is based on the current local project state and these files:
 
 - `SPEC.md`
 - `README.md`
+- `docs/LANDING_COPY.md`
 - `TODO.md`
 - `docs/RELEASE_POSITIONING.md`
 - `docs/SPEC_REVIEW_AUTOMATION.md`
@@ -455,8 +456,9 @@ C:\Users\artmouse\Videos\TigerCapture\YouTube Imports
 
 ## Current Blockers And Notes
 
-- `README.md` contains mojibake in the Korean paragraph. Do not copy that text
-  into product-facing slides.
+- `README.md` Korean copy has been refreshed; product-facing slides should use
+  `README.md`, `docs/LANDING_COPY.md`, and `docs/RELEASE_POSITIONING.md` as the
+  current public-copy sources.
 - The existing review workspace still contains older assets such as
   `editor_empty.png`; public deck generation must reject those.
 - The current action registry has broad coverage, but some important visual

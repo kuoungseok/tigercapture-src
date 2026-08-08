@@ -17,6 +17,7 @@ REQUIRED_SPEC_TOKENS = {
         "resources/tigercapture.ico",
         "resources/luts/*.cube",
         "resources/ui/sound_editor/*.png",
+        "bundled/unreal_plugins/UMG/TigerStudioUMG",
         "copy_metadata('imageio_ffmpeg')",
     ],
     "mac/TigerCapture-mac.spec": [
@@ -36,6 +37,7 @@ REQUIRED_FILES = [
     "resources/luts/film_warm.cube",
     "resources/luts/cool_blue.cube",
     "resources/ui/sound_editor/jog_dial_metal_sparse_base.png",
+    "resources/unreal_plugins/UMG/TigerStudioUMG/TigerStudioUMG.uplugin",
 ]
 
 

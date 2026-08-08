@@ -1,169 +1,286 @@
-# TigerCapture Release Positioning Guardrails
+# Tiger Studio Release Positioning Guardrails
 
-Last updated: 2026-07-08
+Last updated: 2026-07-31
 
 This document is the public-claim guardrail for README, website, release notes,
 pricing copy, and store text. It separates implemented behavior from parity
-goals so product copy does not overclaim.
+goals so public copy can be ambitious without overclaiming.
+
+Tiger Studio is the current public product name. TigerCapture may still appear
+in repository paths, build scripts, package files, historical QA artifacts, and
+legacy release metadata until those surfaces are renamed deliberately.
 
 ## Safe Positioning
 
-- TigerCapture is a local-first Windows creator studio for polished screen
-  recordings, creator-assist planning, Live2D/Spine/MMD actor overlays, and
-  AR/PBR 3D compositing.
+- Tiger Studio is a local-first Windows creator studio for polished screen
+  recordings, timeline editing, 2.5D editorial motion graphics, reviewable AI
+  editing, production drawing, UI design/prototyping, actor workflows, AR/PBR
+  material workflows, Figma exchange, and Unreal UMG handoff.
+- The strongest current market position is not "another NLE" or "another
+  screen recorder". Use "local-first creator studio for screen videos,
+  anime/game actors, Motion Designer, Painter, UI design/prototyping, PBR
+  helper workflows, Figma exchange, and Unreal UI handoff".
+- The most defensible niche is a subculture/game-creator studio: screen video
+  polish, Live2D/Spine/MMD/VRM-style actors, production drawing, UI design,
+  texture/PBR support, Motion Designer, Figma/UMG handoff, and local
+  AI/automation in one Windows app.
 - Screen Studio comparison: "Screen Studio-style screen recording polish",
-  "Screen Studio-inspired Auto Polish", or a scoped local replacement claim is
-  acceptable for the current interaction corpus. Do not claim universal 100%
-  parity, perfect defaults, or human-customer validation beyond the measured
-  local corpus.
+  "Screen Studio-inspired Auto Polish", and scoped local replacement language
+  are acceptable for the measured interaction corpus. Do not claim universal
+  parity, perfect default results, or human-customer validation beyond the local
+  corpus.
 - CapCut comparison: "CapCut-style creator assist" is acceptable for captions,
-  Shorts planning, vertical reframe, publish package, and render handoff. Do not
-  claim CapCut-scale template/AI ecosystem depth.
-- Descript comparison: TigerCapture has a Descript-lite AI Script Edit workflow
-  for transcript planning, review, safe apply, local word-timestamp
-  transcription, cleanup, speech-enhance contracts, and sentence-level voice
-  replacement contracts. Descript-lite positioning and a $149+ AI value defense
-  are currently evidence-backed; do not claim full Descript replacement,
-  provider-direct coediting, hosted share links, comments, version history, or
-  team workspace parity.
+  Shorts planning, vertical reframe, prompt-to-edit planning, publish packages,
+  local asset packs, render handoff, and local/cloud-handoff package contracts.
+  Do not claim CapCut-scale mobile editing, template marketplace depth,
+  trend/social ecosystem, direct platform publishing, or full cloud sync.
+- Descript comparison: Tiger Studio has Descript-lite reviewed AI editing for
+  transcript planning, safe apply, local word-timestamp transcription, cleanup,
+  speech-enhance contracts, sentence-level voice replacement contracts, and
+  local prompt-to-edit routing. Do not claim full Descript replacement,
+  provider-direct agentic coediting, hosted comments, hosted share links, drive
+  version history, or team workspace parity.
+- After Effects / motion graphics comparison: Tiger Studio supports editable
+  2.5D editorial motion through Camera depth/FOV/roll/parallax controls,
+  procedural Generator layers, renderer-neutral Replicator metadata, per-layer
+  motion blur, alpha/luma track mattes, text animator automation, directional
+  blur, displacement, corner pin, mesh warp, paper fold, deterministic paper
+  crumple/unfold, paper paste composites, direction presets, 136 built-in
+  media-backed templates, and interactive button components. Safe wording is
+  "After Effects-lite editorial motion tools" or "2.5D motion graphics for
+  creator videos". Do not claim After Effects plugin, expression, scripting,
+  shader-only compositor, arbitrary displacement video-map, full 3D scene
+  graph, cloth/physics parity, or native Lottie/HTML runtime export for every
+  authored motion feature.
+- Unreal UMG comparison: Tiger Studio may claim a Tiger-owned Unreal UMG handoff
+  workflow for supported Motion Designer and Painter content. The safe claim is
+  that Tiger can package a provider-neutral UMG document, install/update the
+  TigerStudioUMG project plugin, generate a Widget Blueprint, compile it, and
+  validate the generated asset for supported widgets. Current Painter UI UMG
+  wording may mention verified UE 5.8 checkout-style Widget Blueprint output
+  when backed by local QA. Do not claim a general Unreal/Unity project importer,
+  game-engine replacement, arbitrary Blueprint generation, universal UI
+  conversion, or runtime plugin marketplace.
+- Painter comparison: Tiger Studio Painter is now a real production drawing
+  workspace for game concept art, character art, props, backgrounds, texture
+  paint-over, and video paint-over. It may be compared to Photoshop/Clip
+  Studio/Krita/Corel Painter as a scoped drawing workspace with Photoshop-style
+  layers, channels, paths, selections, masks, menus, brush controls, brush
+  library, reference board, 3D blockout guides, tablet pressure/tilt capture,
+  editable wet-canvas RGB exchange, native `.tspaint` persistence, PBR export
+  handoff, and action-driven painting. Do not call it a full Photoshop, Clip
+  Studio, Krita, Procreate, or Corel Painter replacement. Do not claim ABR
+  import, external Painter brush pack import, physical pigment simulation,
+  persistent GPU wet-fluid simulation, content-aware fill, clone/heal parity,
+  or print/prepress parity.
+- Painter AI comparison: Tiger Studio may claim provider-neutral AI study
+  workflows that analyze references, segment regions, build underpaint, create
+  editable strokes, compare renders, refine regions, and capture a real
+  Painter-window timelapse. Do not claim that the app trains a general image
+  model, silently copies a reference into output pixels, or provides autonomous
+  unreviewed artwork generation.
+- Painter UI Design / Figma comparison: Tiger Studio may claim a local UI
+  design workspace with artboards, pages, layers, components, instances,
+  variants, typed properties, tokens, variables, styles, layout grids, basic
+  Auto Layout, responsive overrides, themes, comments, checkpoints, local
+  HTML prototypes, UI asset export, `.tsuilib` libraries, and Figma exchange
+  through official REST/plugin boundaries. Do not claim Figma replacement,
+  real-time multiplayer collaboration, browser-native community platform,
+  hosted handoff, Dev Mode parity, proprietary `.fig` archive read/write, or
+  exact import of every Figma feature.
+- Rive / interactive runtime comparison: Tiger Studio may claim interactive
+  button states, prototype flows, Motion bindings, HTML preview packages, and
+  supported UMG interaction output. Do not claim Rive replacement, general
+  runtime state machines, universal app-embedded animation runtimes, or native
+  interactive vector export parity.
+- Texture Lab / Substance comparison: Tiger Studio can be positioned as a
+  lightweight image-to-PBR helper. It exports BaseColor, Normal, AO, Roughness,
+  Metallic, Height, Cavity, Curvature, packed ORM/ARM/Unreal ORM/glTF MR maps,
+  optional Substrate-oriented F0/F90 mask plans, and GPU material preview with
+  Height-driven parallax occlusion mapping. Do not claim Substance Painter,
+  Substance Designer, Substance Sampler, Marmoset, Blender, or game-engine
+  replacement. It is not full 3D mesh texturing, baking, UDIM painting,
+  smart-material authoring, or physically complete material lookdev.
 - Resolve/Fairlight/Fusion comparison: use "creator-grade professional
   foundations", "partial professional workflow", or "readiness diagnostics".
-  Do not call TigerCapture a replacement for full professional color, DAW, VFX,
-  collaboration, plugin, or hardware-console ecosystems.
-- Professional NLE comparison: use "core NLE workflow/action surface",
-  "NLE readiness diagnostics", or "Final Cut-style fast timeline foundations".
-  The current NLE readiness report is 91/100 with
-  `professional_nle_claim_ok=false`, so Premiere/Resolve-class professional NLE
-  claims remain blocked until the real-world long-project corpus is proven.
-  Register real projects with
-  `tools/register_nle_real_project.py` and validate them with
-  `tools/qa_nle_real_project_corpus.py`; generated stress fixtures must not
-  clear the real-world NLE corpus gate.
-- Live2D/Spine comparison: say "large-corpus QA and actor-track support", not
-  "all game resources compatible".
-- MMD comparison: say "PMX/PMD + VMD actor timeline, preview, and export
-  support" or "MMD actor workflow". Do not claim native MMD/Bullet parity,
-  universal PMX compatibility, or perfect physics until native reference
-  captures prove it.
+  Do not call Tiger Studio a replacement for full professional color, DAW, VFX,
+  collaboration, plugin, hardware-console, HDR delivery, or finishing
+  ecosystems.
+- Professional NLE comparison: use "core NLE workflow/action surface", "NLE
+  readiness diagnostics", or "Final Cut-style fast timeline foundations".
+  Premiere/Resolve/Final Cut-class professional NLE claims remain blocked until
+  real long-project corpus evidence clears the gate.
+- Live2D/Spine comparison: say "actor-track workflow, preview/export baking,
+  and large-corpus compatibility QA". Do not say every game export, encrypted
+  Unity bundle, custom runtime bundle, or all Live2D/Spine rigs are compatible.
+  Tiger Studio uses these assets as editable timeline actors; it is not Live2D
+  Cubism model authoring software.
+- 2D cutout rigging comparison: the Motion AI cutout rig can create editable
+  layered/FK cutout animation such as arm-wave rigs from reviewed separated
+  parts. It must not be described as Live2D mesh deformation, automatic full
+  body rigging, IK, hidden-joint texture synthesis, or universal limb
+  recognition.
+- MMD comparison: say "PMX/PMD + VMD actor timeline, toon preview, and export
+  workflow". Do not claim native MMD/Bullet parity, universal PMX support, or
+  perfect physics until native reference captures prove it.
 - Presentation comparison: say "timeline-native presentation authoring",
   "PPTX/PDF/MP4 presentation export", or "PowerPoint-compatible deck workflow".
   Do not claim full PowerPoint replacement, universal PPTX import fidelity, or
   enterprise presentation collaboration.
-- AR/PBR comparison: say "AR/PBR 3D object compositing" or "real-time 3D
-  overlay workflow". Do not claim Marmoset, Blender, game-engine, or full 3D
-  renderer replacement. Keep renderer claims tied to the current QA artifacts.
+- Voice Lab / TTS comparison: say "optional local Voice Lab sidecar",
+  "subtitle-to-voice generation when the sidecar is ready", "local
+  Style-Bert-VITS2 connection", or "Model Maker bridge for local voice models".
+  Do not claim a hosted TTS platform, bundled TTS engine, universal voice
+  cloning, guaranteed commercial voice rights, or a licensed voice marketplace.
+- Cloud/share comparison: Tiger Studio may claim local-first review packages,
+  share manifests, sync-folder packages, and dry-run provider contracts for
+  Google Drive, OneDrive, Dropbox, WebDAV, S3-compatible storage, and custom
+  providers. Do not claim real cloud upload, token storage, hosted review
+  links, comments, permissions, team workspaces, mobile sync, or collaboration
+  until those provider integrations actually upload and round-trip.
 - VTuber/Broadcast comparison: say "OBS-free Program Output recording/RTMP
   foundation with optional OBS bridge" only as an alpha/beta capability. Do not
   claim OBS replacement, production broadcast suite, or commercial live
   streaming readiness.
-- External engine bridge claims are out of scope for public positioning. Do not
-  mention unsupported game-engine project/asset import in README, website,
-  pricing, release notes, or store text.
+- Plugin/template claims: Tiger Studio now has manifest validation, registry
+  foundations, safe template-pack validation, Motion template gallery, 136
+  built-in media-backed Motion templates, Painter UI template/library packages,
+  and UMG-oriented button templates. Do not claim third-party runtime plugins,
+  hosted plugin marketplace, sandboxed extension execution, uninstall/safe-mode
+  parity, or arbitrary exporter/source/effect code loading until those runtime
+  paths are implemented and smoke-tested in an installed build.
 
 ## Current Evidence Snapshot
 
-Latest local QA evidence as of 2026-07-08:
+Latest local evidence observed on 2026-07-31:
 
 | Gate | Current Result | Public Meaning |
 |---|---:|---|
-| Final Product Readiness | 99/100, `release_ready=false` | Screen Studio interaction, scrub, Descript-lite workflow, and Qwen-backed smart AI edit corpus gates pass; commercial broadcast platform evidence still blocks full release-ready claims. |
-| Preview Performance | `preview_perf_report.json` present, preview/GPU score 100 | Measured steady preview work is claimable with caveats. |
-| Preview Scrub Readiness | 92/100, `release_scrub_claim_ready=true` | Current-corpus scrub readiness is claimable under strict clean-cache measurement; universal no-latency claims remain blocked. |
-| AI Edit Corpus Quality | 99/100 with 20/20 real corpus cases, Qwen direct successes 20/20, `safe_mvp_ready=true`, `smart_edit_claim_ready=true` | Smart-edit claim is locally evidence-backed for this corpus; do not imply human customer study or universal editing quality. |
-| Descript-Lite Readiness | 88/100, `descript_lite_claim_ready=true`, `price_149_plus_defense_ready=true` | Priorities 1-5 now pass for a gated Descript-style AI value defense; provider-direct coediting and collaboration remain outside the claim. |
-| Product Gap Push | 98/100, `implementation_ready=true`, `claim_ready=true` | The ordered 3,4,5,1,2,6 gap report is locally claim-ready; public copy still must remain scoped to the specific evidence reports. |
-| NLE Readiness | 91/100, `professional_nle_claim_ok=false` | Strong core NLE/action surface with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and bin contracts; still no Premiere/Resolve-class claim until real long-project corpus clears. |
-| CapCut Parity Next | 89.38/100, `parity_ready=false` | Strong CapCut-style workflow progress; not full parity. |
-| Broadcast Readiness | 95/100, `alpha_ready=true`, `commercial_ready=false` | Alpha-ready broadcast foundation; not sale/commercial broadcast-ready. |
-| Automation/MCP/NLE Action Surface | 100/100 automation evidence, NLE run observed `registered_action_count=387` | Strong structured action surface claim is acceptable; do not imply arbitrary third-party automation coverage. |
+| Spec currency | `SPEC.md` updated 2026-07-31 | Current spec includes Motion Generators/Replicators, deterministic paper crumple/unfold, 136 media-backed Motion templates, Painter UI Design, Auto Layout, components/tokens/variables/styles, local prototypes, Figma exchange, and Painter UI UMG delivery. |
+| Targeted current tests | 212 passed | Motion generators/templates/trend templates and Painter UI Auto Layout, Figma exchange, Unreal UMG QA, and prototype export tests pass for this documentation slice. |
+| Public positioning QA | passing after copy update | README and release-positioning copy are within current public-claim guardrails. |
+| Final Product Readiness | 99/100, `release_ready=false` | Broad local product evidence is strong; commercial release claims are still blocked by real-platform broadcast evidence. |
+| Screen Studio Interaction | local corpus threshold met in final readiness evidence | Scoped Screen Studio-style local replacement language is acceptable; do not imply human customer validation. |
+| Descript-Lite Readiness | 88/100, `descript_lite_claim_ready=true`, `price_149_plus_defense_ready=true` | Reviewed local AI-edit value is claimable; hosted agentic coeditor/collaboration parity is not. |
+| CapCut Parity Next | 89.38/100, `parity_ready=false` | CapCut-style creator workflow is strong, but mobile/cloud/template/social parity remains incomplete. |
+| NLE Readiness | 91/100, `professional_nle_claim_ok=false` | Core NLE/action surface is strong; professional NLE replacement language remains blocked. |
+| Broadcast Readiness | 95/100, `alpha_ready=true`, `commercial_ready=false` | Broadcast foundations are alpha-ready; sale/commercial broadcast claims require redacted real-platform evidence. |
+| Voice Lab Sidecar | latest `voice_lab_sidecar_qa.json`: `ok=false`, `ready=false` | Voice Lab must stay optional/sidecar-gated in public copy until a current reference run reports ready. |
+| Painter | covered by spec and focused tests | Production drawing, native document save/load, editable strokes, pressure/tilt capture, Wet Canvas v1, AI study workflows, and Painter UI Design are claimable within scoped limits. |
+| Motion Graphics / UMG | covered by spec and focused tests | 2.5D editorial motion, generators, replicators, paper crumple/unfold, media-backed templates, interactive button components, and supported Unreal UMG generation are claimable; AE/Unreal/Rive replacement language is not. |
+| Painter UI/Figma | covered by spec and focused tests | Local UI design, Auto Layout, components, variables/tokens/styles, prototypes, Figma REST/plugin exchange, and local review/export packages are claimable; Figma SaaS/collaboration/Dev Mode parity is not. |
+| Texture Lab/PBR | covered by spec and focused tests | Image-to-material, map export, GPU preview, and Height/POM preview are scoped helper claims, not Substance parity. |
 
 Current release-blocking evidence gaps are intentionally explicit:
-`debugCapture/screenstudio_real_recording_corpus_qa.json` reports
-interaction-ready cursor/click/drag/hotkey/auto-zoom evidence above the current
-claim threshold, and `debugCapture/ai_edit_corpus_quality_qa.json` reports
-real AI edit corpus coverage 20/20 with Qwen direct provider success 20/20 and
-fallback 0/20. Those evidence files are local QA evidence, not a human customer
-study or external market validation. `debugCapture/broadcast_release_readiness_qa.json`
-still needs two redacted real-platform checks. The generated collection aid
-`debugCapture/release_evidence_sprint_qa.json` remains useful for collecting
-human/operator evidence. The follow-up automation report
-`debugCapture/release_evidence_automation_qa.json` can promote filled
-sidecar/AI templates and refresh all release QA in one pass, but it still does
-not fabricate platform receipts.
+`debugCapture/broadcast_release_readiness_qa.json` still needs redacted
+real-platform checks before commercial broadcast wording. Voice Lab must be
+rechecked before public voice-generation readiness is claimed. Cloud/share
+providers remain dry-run/local-package contracts until real provider uploads,
+permissions, comments, and round-trip review links exist. Figma claims must stay
+inside REST/plugin exchange and must not imply `.fig` archive control. UMG
+claims must remain limited to supported generated widgets and must be backed by
+plugin compile, Widget Blueprint compile, asset validation, and real Unreal
+evidence for each strengthened public claim.
 
 ## Current Claim Status
 
 | Area | May Claim | Must Not Claim Yet |
 |---|---|---|
-| Screen Studio | Auto Polish path, cursor sidecars, click/drag/hotkey metadata support, manual zoom tools, export handoff, local 20/20 interaction QA corpus | 100% parity, perfect default results, human user recording corpus |
-| AI Script Edit | Bottom AI Command dock, Script Edit panel, SRT/VTT/local word-timestamp transcription path, rule-based prompt routing, Qwen direct provider corpus pass, reviewed safe apply, transcript deletion to reviewed video/audio ripple cuts, one-click filler/silence/retake cleanup, reviewed speech-enhance and sentence voice-replacement contracts | Full Descript replacement, autonomous story edit, hidden cloud AI, collaboration parity, universal magic one-click editing |
-| CapCut | Creator Assist recipes, Shorts planning, caption beat/publish package, vertical reframe, preset packs | CapCut-scale template marketplace, trend AI ecosystem, one-click magic for every video |
-| Resolve/Fairlight/Fusion | Color/audio/VFX foundations, scopes/LUT/HDR intent, routing payloads, repair payloads, readiness cards | Real-time Resolve Color page, Fairlight DAW, Fusion compositor replacement |
-| Professional NLE | Core timeline actions, 3-point edit foundations, NLE readiness diagnostics | Premiere/Resolve-class NLE, full multicam/conform/bin/proxy workflow, long-project proven stability |
-| Presentation / PPT | Timeline-native deck authoring, PPTX/PDF/MP4 export, basic slide animation lanes, media/3D actor poster fallbacks | Full PowerPoint replacement, universal PPTX import fidelity, cloud presentation collaboration |
-| Preview Performance | Measured preview/cache paths, current steady preview report, and current-corpus scrub readiness | Universal no-latency scrubbing on all codecs/resolutions/machines; always-smooth claims beyond the measured corpus |
-| Live2D/Spine | Dedicated actor tracks, preview/export baking, large compatibility QA | Universal compatibility with every Unity/game-exported rig |
-| MMD | PMX/PMD actor tracks, VMD motion workflow, Toon preview/export path, local corpus QA | Native MMD/Bullet parity, universal PMX support, perfect physics |
-| AR/PBR 3D | First-class 3D object tracks, GPU/packet/software preview-export paths, HDR environment/material/shadow/reflection QA | Marmoset/Blender/game-engine replacement, physically perfect renderer, universal 3D import |
-| VTuber/Broadcast | Program Output recording/RTMP foundation, optional OBS bridge, broadcast readiness diagnostics | OBS replacement, commercial live-production suite, platform-proven broadcast release |
-| Automation | Structured Python Action / MCP-style surface, broad editor/NLE/actor/broadcast action coverage | Arbitrary Python execution for users, complete third-party integration coverage |
-| Release Trust | Autosave/crash reports/relink/QA Dashboard exist | Signed installer, auto-update, privacy page, production crash pipeline complete |
+| Screen Studio | Auto Polish path, cursor sidecars, click/drag/hotkey metadata support, manual zoom tools, export handoff, local interaction QA corpus | 100% parity, perfect defaults, customer-study claims, macOS app parity |
+| Core Video/NLE | Timeline editing, media pool, transitions, subtitles, render queue, Source/Record and 3-point foundations, Final Cut-style fast timeline foundations | Premiere/Resolve/Final Cut-class professional NLE, long-project proven stability, enterprise editorial collaboration |
+| Motion Graphics | 2.5D camera/depth controls, Generators, Replicator, track mattes, motion blur, typography animator, directional blur, displacement, corner pin, mesh warp, paper fold, paper crumple/unfold, paper paste presets, media-backed templates, interactive button states | After Effects replacement, plugin/expression parity, shader-only compositor, arbitrary displacement video maps, full 3D/physics scene graph, universal Lottie/HTML runtime export |
+| Unreal UMG | Provider-neutral Tiger UMG document, Motion/Painter supported content package, project-plugin install/update, supported Widget Blueprint generation/compile/validation | General Unreal/Unity importer, arbitrary Blueprint generation, game-engine replacement, universal UI conversion, user graph ownership guarantees beyond generated boundaries |
+| Motion AI / Cutout | Multimodal AI Workspace, reviewed candidate generation, layered image planning, cutout quality validation, Basic/optional BiRefNet/SAM setup, editable 2D FK cutout arm rigs | One-click universal semantic segmentation, autonomous mutation without review, full body rigging, Live2D mesh deformation, hidden-joint synthesis |
+| Painter | Photoshop-style production drawing workspace, layers/channels/paths, selections/masks, reference board, 3D blockout guides, brush library, Pro Oils, designer brush catalog, tablet pressure/tilt channels, Wet Canvas v1, `.tspaint` save/load, action-driven strokes | Full Photoshop/Clip Studio/Krita/Corel replacement, ABR/Painter pack import, physical pigment simulation, persistent GPU wet-fluid simulation, content-aware/clone/heal parity |
+| Painter AI Study | Reference analysis, deterministic segmentation/underpaint/stroke generation, render comparison/refinement, editable output, real Painter-window timelapse capture | Model training, unreviewed autonomous art generation, hidden reference copying into final pixels, universal style transfer |
+| Painter UI Design | Artboards, pages/layers, components/instances/variants, tokens/variables/styles, Auto Layout, constraints, responsive overrides, themes, guides/safe areas, local prototypes, comments/checkpoints, asset export, `.tsuilib`, Figma exchange, HTML preview, supported UMG output | Figma replacement, real-time multiplayer, browser/community platform, Dev Mode parity, `.fig` archive read/write, exact universal Figma import, hosted review/collaboration |
+| Interactive Runtime | Button states, prototype flows, Smart Animate inspection, HTML preview packages, Motion bindings, supported UMG interactions | Rive replacement, general runtime state machine, universal app/runtime embedding, native interactive vector export parity |
+| Texture Lab / PBR | Image-to-PBR map generation, plane/sphere material preview, GPU-required interactive preview, Height/POM preview, packed ORM/ARM/Unreal/glTF maps, optional Substrate F0/F90 plans | Substance/Marmoset/Blender replacement, full mesh texturing, smart materials, baking, UDIM, physically complete lookdev |
+| CapCut | Creator Assist recipes, captions, Shorts planning, vertical reframe, prompt-to-edit planning, publish package, local asset packs, local/cloud-handoff package contracts | CapCut-scale mobile/cloud collaboration, direct social publishing, trend ecosystem, huge template marketplace, magic edit for every video |
+| Descript | Descript-lite reviewed AI script edit, transcript cleanup, safe apply, local transcription, speech-enhance contracts, sentence-level voice replacement contracts | Hosted Underlord-class coeditor, hosted comments/share links, team workspace, version history, provider-direct collaboration |
+| Voice Lab / TTS | Optional local Style-Bert-VITS2 sidecar connection, subtitle-to-voice when sidecar is ready, explicit local model selection, Model Maker bridge | Bundled TTS engine, hosted TTS platform, universal voice cloning, licensed voice marketplace, guaranteed commercial voice rights |
+| Live2D/Spine | Dedicated actor tracks, preview/export baking, large compatibility QA, Spine/NIKKE parser/render paths, Live2D runtime path handling | Universal game-resource compatibility, encrypted/custom bundle support, direct raw AssetBundle import, Live2D Cubism authoring replacement |
+| MMD | PMX/PMD actor tracks, VMD motion workflow, toon preview/export path, local corpus QA | Native MMD/Bullet parity, universal PMX support, perfect physics |
+| AR/PBR 3D | First-class 3D object tracks, material/environment payloads, shadow/reflection/depth diagnostics, preview/export helper process paths | Full DCC/game-engine replacement, universal 3D import, physically perfect renderer |
+| Cloud/Review | Local review package, share manifests, sync-folder package writer, provider dry-run contracts, no-token manifest rule | Real hosted links, comments, permissions, mobile sync, token storage, provider uploads, team collaboration |
+| VTuber/Broadcast | Program Output recording/RTMP foundation, optional OBS bridge, alpha broadcast diagnostics | OBS replacement, commercial broadcast suite, platform-proven live release |
+| Plugins/Templates | Manifest validation, dependency/capability checks, template pack validation, safe staging, template gallery, UMG button starter templates | Runtime plugin execution, hosted marketplace, sandbox isolation, uninstall/safe mode, arbitrary exporter/source/effect loading |
+| Automation | Structured Python Action / MCP-style surface, broad editor/NLE/actor/Painter/Motion/UMG action coverage | Arbitrary user Python execution, complete third-party integration coverage |
+| Release Trust | Autosave, crash reports, relink, QA Dashboard, packaging scripts | Fully signed installer, auto-update, privacy page, production crash telemetry pipeline |
 
 ## Pricing Guardrails
 
-- Safe early-access positioning: one-time USD $79-$99 or subscription USD
-  $9-$15/month, explicitly labeled early access or beta while final readiness is
-  below release-ready.
-- Current Pro target: one-time USD $149 or subscription USD $15-$19/month is
-  defensible with the current Screen Studio-style, Descript-lite, actor, PPT,
-  and local creator workflow evidence, but the copy must keep broadcast,
-  collaboration/cloud, and full professional NLE claims scoped.
-- A $149+ price may now be defended with the gated Descript-style AI workflow
-  value only while `tools/qa_descript_lite_readiness.py` reports priorities 1-5
-  claim-ready. Keep the copy tied to reviewed local workflow evidence, not
-  full Descript replacement or collaboration parity.
-- Do not price or describe TigerCapture as a Resolve/Premiere replacement.
-  Resolve Studio's one-time price anchors the professional-suite market, so
-  TigerCapture should be sold as a Windows creator capture/compositing tool with
-  actor and local workflow strengths.
-- Do not move to USD $199+ positioning until hosted share/review infrastructure,
-  real-platform broadcast evidence, and real long-project NLE corpus evidence
-  are present.
+- Early public/beta positioning: one-time USD $149-$199 or subscription USD
+  $15-$19/month remains safe if installer polish, website copy, and onboarding
+  are still catching up.
+- Current Pro target: one-time USD $229-$249 or subscription USD $19-$24/month is
+  now defensible because the product is no longer screen capture plus timeline
+  editing. Painter persistence, tablet-aware brushes, Wet Canvas v1, Motion AI,
+  2.5D editorial motion graphics, media-backed templates, actor tracks,
+  Texture Lab/PBR, Painter UI Design, Figma exchange, Unreal UMG handoff, and
+  local automation make the suite materially broader.
+- USD $279-$299 one-time is conditionally testable after the public website,
+  README, release notes, installer flow, sample projects, Painter UI/Figma
+  samples, UMG sample evidence, and share/cloud handoff copy explain the new
+  product clearly. Do not use $279+ copy while the public page still presents
+  the app like a plain screen recorder.
+- USD $349+ or premium pro-suite positioning should wait for hosted
+  review/share links, real provider uploads, hardened plugin/runtime safety,
+  current Voice Lab readiness, real long-project NLE corpus evidence,
+  commercial broadcast platform evidence, repeatable installed-build Unreal
+  UMG evidence, and clearer Figma/HTML/UMG production examples.
+- Do not price or describe Tiger Studio as a Resolve/Premiere/Photoshop/
+  Substance/After Effects/Figma/Rive replacement. Those tools anchor mature
+  professional markets. Tiger Studio should be sold as a differentiated local
+  creator suite with screen polish, anime/game actors, Painter, UI Design,
+  Motion AI, PBR helpers, Figma exchange, and Unreal UMG handoff in one Windows
+  app.
 
 ## Release Truth Gates
 
 Before public paid positioning, verify:
 
-1. `tools/qa_public_positioning.py` passes. It scans README, CHANGELOG,
-   RELEASE_POSITIONING, RELEASE_TRUST, and optional landing/pricing/release-note
-   copy for over-strong replacement, template-scale, suite-grade,
-   universal-compatibility, and no-latency claims before they ship.
-2. `tools/qa_screenstudio_real_recording_corpus.py` reports real interaction
-   readiness, not only valid file count. Use
-   `tools/register_screenstudio_real_recording.py --scan-root <folder>` with
-   `--require-sidecar` when building the claim-ready corpus, otherwise old
-   videos without cursor sidecars must stay positioned as intake candidates.
-3. Final Product Readiness reports `release_ready=true` without hiding Screen
-   Studio corpus, scrub/seek, Color/Audio, actor, or packaging advisories.
-4. `tools/qa_preview_perf.py --clean --include-hires --include-hires-proxy`
-   writes `debugCapture/preview_perf_report.json`, and
-   `tools/qa_preview_scrub_readiness.py --auto-hires` reports
-   `release_scrub_claim_ready=true` before any no-latency/smooth-scrubbing
-   claim ships.
-5. `tools/qa_nle_real_project_corpus.py` reports a claim-ready real corpus, and
-   `tools/qa_nle_readiness.py` still blocks any full professional NLE claim
-   unless `professional_nle_claim_ok=true`.
-6. `tools/qa_gpu_export_parity_matrix.py` reports `release_ready=true`. If a
-   future actor row regresses, public release notes must say actor
-   preview/export parity is blocked rather than ready.
-7. `tools/qa_ai_edit_corpus_quality.py --use-provider` exercises a wired local
-   or agent provider on a real AI edit corpus before smart/magic AI editing
-   claims ship.
-8. `tools/qa_descript_lite_readiness.py` reports
-   `descript_lite_claim_ready=true` before any Descript-lite copy ships, and
-   `price_149_plus_defense_ready=true` before $149+ Descript-style AI value
-   defense is used.
-9. README, website, pricing, and release notes use the safe terms above.
-10. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
-11. Public copy contains no unsupported external engine bridge or asset import
-   claims.
+1. `tools/qa_public_positioning.py` passes against README, CHANGELOG,
+   RELEASE_POSITIONING, RELEASE_TRUST, website copy, pricing copy, and release
+   notes. It must reject over-strong replacement, too-broad actor compatibility,
+   suite-grade, template-scale, and no-latency claims.
+2. Public copy uses "Tiger Studio" as the product name. "TigerCapture" should
+   remain only where legacy file names, package names, or release history
+   require it.
+3. Current-slice tests covering the newest product claims pass:
+   `tests/test_motion_generators_replicators.py`,
+   `tests/test_motion_templates.py`, `tests/test_motion_trend_templates.py`,
+   `tests/test_painter_ui_auto_layout.py`, `tests/test_painter_ui_figma.py`,
+   `tests/test_painter_ui_unreal_umg_qa.py`, and
+   `tests/test_painter_ui_prototype_export.py`.
+4. `tools/qa_screenstudio_real_recording_corpus.py` reports real interaction
+   readiness before scoped Screen Studio-inspired paid wording ships.
+5. `tools/qa_ai_edit_corpus_quality.py --use-provider` and
+   `tools/qa_descript_lite_readiness.py` still report claim-ready status before
+   any Descript-lite or AI-edit value copy ships.
+6. `tools/qa_capcut_cloud_handoff.py` passes before cloud-handoff copy ships,
+   and real provider upload/review claims remain blocked until provider API
+   integration exists.
+7. `tools/qa_nle_real_project_corpus.py` reports a claim-ready real corpus, and
+   `tools/qa_nle_readiness.py` must explicitly allow professional NLE claims
+   before any Premiere/Resolve/Final Cut-class wording appears.
+8. `tools/qa_gpu_export_parity_matrix.py` reports release-ready before preview/
+   export parity wording is strengthened. Actor regressions must be called out
+   instead of hidden.
+9. `tools/qa_tts_voice_lab.py --auto-start --wait-timeout 120` reports
+   `ready=true` before public copy says subtitle-to-voice generation is ready
+   on the reference build.
+10. `tools/qa_broadcast_release_readiness.py` reports commercial readiness with
+    redacted real-platform evidence before sale-ready broadcast claims ship.
+11. Unreal UMG public claims require plugin packaging/build evidence from
+    `tools/build_unreal_umg_plugin.py` or equivalent release packaging, plus
+    Widget Blueprint generation, compile, save, reload validation, and real
+    Unreal capture for the advertised sample.
+12. Figma public claims require REST/plugin boundary evidence and explicit
+    compatibility reports; copy must not imply proprietary `.fig` archive
+    support or exact universal import/export.
+13. New Motion/Painter/Texture Lab/plugin changes receive an installed-build
+    smoke test before they are included in public binary release notes.
+14. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
+15. Public copy contains no unsupported external engine bridge, encrypted bundle
+    extraction, or universal asset-import claims.

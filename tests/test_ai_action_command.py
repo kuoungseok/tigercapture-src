@@ -60,6 +60,22 @@ def test_ai_action_command_routes_media_pool_video_to_timeline(tmp_path):
     assert plan.steps[0]["params"]["track_id"] == 1
 
 
+def test_ai_action_command_routes_media_pool_image_to_timeline(tmp_path):
+    snapshot = _snapshot(tmp_path)
+    image = tmp_path / "poster.jpg"
+    image.write_bytes(b"fake")
+    snapshot["media_pool"].append(
+        {"path": str(image), "kind": "image", "name": "poster.jpg", "duration_ms": 5000}
+    )
+
+    plan = build_ai_action_command_plan("add image to timeline", snapshot)
+
+    assert plan is not None
+    assert plan.steps[0]["action"] == "media.import_to_timeline"
+    assert plan.steps[0]["params"]["kind"] == "image"
+    assert plan.steps[0]["params"]["path"] == str(image)
+
+
 def test_ai_action_command_routes_split_marker_and_speed(tmp_path):
     snapshot = _snapshot(tmp_path)
 
@@ -191,12 +207,41 @@ def test_ai_action_command_routes_music_generation_to_music_lab(tmp_path):
     assert korean.steps[0]["params"]["genre"] == "electronic"
     assert korean.steps[0]["params"]["at_ms"] == 0
     assert korean.steps[0]["params"]["auto_balance"] is True
+    assert korean.steps[0]["params"]["backend"] == "sample_production"
+    assert korean.steps[0]["params"]["sample_library_policy"] == "auto"
+    assert "studio master" in korean.summary
+    assert "articulation/expression" in korean.summary
     assert english is not None
     assert english.steps[0]["action"] == "music.compose_to_timeline"
     assert english.steps[0]["params"]["duration_ms"] == 12000
     assert english.steps[0]["params"]["genre"] == "lofi"
     assert english.steps[0]["params"]["at_ms"] == 2000
     assert english.steps[0]["params"]["update_existing"] is True
+    assert english.steps[0]["params"]["backend"] == "sample_production"
+    assert english.steps[0]["params"]["sample_library_policy"] == "auto"
+    assert "studio master" in english.summary
+    assert "articulation/expression" in english.summary
+
+
+def test_ai_action_command_routes_music_generation_render_choices(tmp_path):
+    snapshot = _snapshot(tmp_path)
+
+    stable = build_ai_action_command_plan("use Stable Audio 3.0 to compose a 30s cinematic soundtrack", snapshot)
+    internal = build_ai_action_command_plan("make 10s music with internal synth and no samples", snapshot)
+    sample_kit = build_ai_action_command_plan("compose BGM with sample kit first", snapshot)
+
+    assert stable is not None
+    assert stable.steps[0]["action"] == "music.compose_to_timeline"
+    assert stable.steps[0]["params"]["backend"] == "production"
+    assert stable.steps[0]["params"]["ai_provider"] == "stable_audio_3"
+    assert stable.steps[0]["params"]["create_mix"] is True
+    assert stable.warnings
+    assert internal is not None
+    assert internal.steps[0]["params"]["backend"] == "sample_production"
+    assert internal.steps[0]["params"]["sample_library_policy"] == "procedural_only"
+    assert sample_kit is not None
+    assert sample_kit.steps[0]["params"]["backend"] == "sample_production"
+    assert sample_kit.steps[0]["params"]["sample_library_policy"] == "sample_kit_first"
 
 
 def test_ai_action_command_routes_music_lab_edit_commands(tmp_path):
@@ -208,6 +253,10 @@ def test_ai_action_command_routes_music_lab_edit_commands(tmp_path):
             "genre": "electronic",
             "mood": "confident",
             "duration_ms": 30000,
+            "render_backend": {
+                "backend": "sample_production",
+                "sample_library_policy": "sample_kit_first",
+            },
         }
     ]
     snapshot["audio_tracks"] = [
@@ -239,7 +288,11 @@ def test_ai_action_command_routes_music_lab_edit_commands(tmp_path):
     assert stronger.steps[0]["params"]["composition_id"] == "music_demo"
     assert stronger.steps[0]["params"]["section_name"] == "main"
     assert stronger.steps[0]["params"]["intensity"] == 0.95
+    assert stronger.steps[0]["params"]["backend"] == "sample_production"
+    assert stronger.steps[0]["params"]["sample_library_policy"] == "sample_kit_first"
     assert stronger.steps[1]["params"]["update_existing"] is True
+    assert stronger.steps[1]["params"]["backend"] == "sample_production"
+    assert stronger.steps[1]["params"]["sample_library_policy"] == "sample_kit_first"
     assert selected_stronger is not None
     assert selected_stronger.steps[0]["action"] == "music.regenerate_section"
     assert selected_stronger.steps[0]["params"]["section_name"] == "build"

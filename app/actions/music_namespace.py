@@ -1,4 +1,4 @@
-"""Music Lab and MIDI action registrations."""
+"""Music Lab action registrations."""
 from __future__ import annotations
 
 from typing import Any
@@ -7,7 +7,7 @@ from app.actions.schema import schema_object
 
 
 def register_music_actions(registry: Any) -> None:
-    """Register AI-facing Music Lab composition and MIDI edit actions."""
+    """Register AI-facing Music Lab composition and render actions."""
     composition_id = {"composition_id": {"type": "string"}}
     prompt_schema = {
         "prompt": {"type": "string"},
@@ -20,7 +20,7 @@ def register_music_actions(registry: Any) -> None:
     }
     registry.register_adapter_action(
         "music.compose",
-        "Create a MIDI-first music composition from a prompt.",
+        "Create a structured Music Lab composition from a prompt.",
         "music",
         "music_compose",
         params_schema=schema_object(prompt_schema),
@@ -54,7 +54,13 @@ def register_music_actions(registry: Any) -> None:
                 "intensity": {"type": "number", "minimum": 0, "maximum": 1},
                 "chord_progression": {"type": "array", "items": {"type": "string"}},
                 "backend": {"type": "string"},
+                "ai_provider": {"type": "string"},
                 "soundfont_path": {"type": "string"},
+                "drum_kit_path": {"type": "string"},
+                "sample_library_policy": {
+                    "type": "string",
+                    "enum": ["auto", "sample_kit_first", "soundfont_only", "procedural_only"],
+                },
             },
             required=("composition_id",),
         ),
@@ -185,7 +191,13 @@ def register_music_actions(registry: Any) -> None:
                 **composition_id,
                 "output_dir": {"type": "string"},
                 "backend": {"type": "string"},
+                "ai_provider": {"type": "string"},
                 "soundfont_path": {"type": "string"},
+                "drum_kit_path": {"type": "string"},
+                "sample_library_policy": {
+                    "type": "string",
+                    "enum": ["auto", "sample_kit_first", "soundfont_only", "procedural_only"],
+                },
                 "render_stems": {"type": "boolean"},
             },
         ),
@@ -234,7 +246,13 @@ def register_music_actions(registry: Any) -> None:
                 "create_mix": {"type": "boolean"},
                 "update_existing": {"type": "boolean"},
                 "backend": {"type": "string"},
+                "ai_provider": {"type": "string"},
                 "soundfont_path": {"type": "string"},
+                "drum_kit_path": {"type": "string"},
+                "sample_library_policy": {
+                    "type": "string",
+                    "enum": ["auto", "sample_kit_first", "soundfont_only", "procedural_only"],
+                },
             },
         ),
         undo_label="Render music to timeline",
@@ -256,7 +274,13 @@ def register_music_actions(registry: Any) -> None:
                 "auto_balance": {"type": "boolean"},
                 "update_existing": {"type": "boolean"},
                 "backend": {"type": "string"},
+                "ai_provider": {"type": "string"},
                 "soundfont_path": {"type": "string"},
+                "drum_kit_path": {"type": "string"},
+                "sample_library_policy": {
+                    "type": "string",
+                    "enum": ["auto", "sample_kit_first", "soundfont_only", "procedural_only"],
+                },
             }
         ),
         undo_label="Compose music to timeline",
@@ -275,7 +299,13 @@ def register_music_actions(registry: Any) -> None:
                 "mood": {"type": "string"},
                 "intensity": {"type": "number", "minimum": 0, "maximum": 1},
                 "backend": {"type": "string"},
+                "ai_provider": {"type": "string"},
                 "soundfont_path": {"type": "string"},
+                "drum_kit_path": {"type": "string"},
+                "sample_library_policy": {
+                    "type": "string",
+                    "enum": ["auto", "sample_kit_first", "soundfont_only", "procedural_only"],
+                },
             },
             required=("composition_id", "section_name"),
         ),
@@ -297,6 +327,25 @@ def register_music_actions(registry: Any) -> None:
         ),
         undo_label="Auto-balance music mixer",
         dry_summary="music mixer faders would be balanced",
+    )
+    registry.register_adapter_action(
+        "music.apply_master_fx",
+        "Apply Sound Editor EQ/Dynamics/FX/AI Master state to rendered Music Lab mix or stem clips.",
+        "music",
+        "music_apply_master_fx",
+        params_schema=schema_object(
+            {
+                "composition_id": {"type": "string"},
+                "role": {"type": "string"},
+                "effects": {"type": "object"},
+                "merge": {"type": "boolean"},
+                "focus_workbench": {"type": "boolean"},
+            },
+            required=("effects",),
+        ),
+        required=("effects",),
+        undo_label="Apply Composer master FX",
+        dry_summary="Sound Editor effects would be applied to rendered Composer audio",
     )
     registry.register_adapter_action(
         "music.state",

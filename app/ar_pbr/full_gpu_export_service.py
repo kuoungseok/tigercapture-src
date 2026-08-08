@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -23,6 +26,11 @@ FULL_GPU_EXPORT_SERVICE_COMMAND_ENV = "TIGERCAPTURE_AR_PBR_FULL_GPU_SERVICE_COMM
 FULL_GPU_EXPORT_SERVICE_TIMEOUT_ENV = "TIGERCAPTURE_AR_PBR_FULL_GPU_SERVICE_TIMEOUT"
 FULL_GPU_EXPORT_SERVICE_QPA_ENV = "TIGERCAPTURE_AR_PBR_FULL_GPU_SERVICE_QPA_PLATFORM"
 FULL_GPU_EXPORT_SERVICE_QT_OPENGL_ENV = "TIGERCAPTURE_AR_PBR_FULL_GPU_SERVICE_QT_OPENGL"
+FULL_GPU_EXPORT_SERVICE_PERSISTENT_ENV = "TIGERCAPTURE_AR_PBR_FULL_GPU_SERVICE_PERSISTENT"
+
+
+_PERSISTENT_CLIENTS: dict[tuple[str, str, str, str], "_PersistentFullGpuServiceClient"] = {}
+_PERSISTENT_CLIENTS_LOCK = threading.Lock()
 
 
 def _quote(value: str | Path) -> str:
@@ -120,6 +128,144 @@ def _probe_service(command: str, *, timeout_seconds: int, env: Mapping[str, str]
     }
 
 
+class _PersistentFullGpuServiceClient:
+    def __init__(self, command: str, *, env: Mapping[str, str] | None = None) -> None:
+        self.command = str(command)
+        self.env = _service_process_env(env)
+        self.parts = _command_parts(self.command)
+        self._lock = threading.Lock()
+        self._stdout: "queue.Queue[str]" = queue.Queue()
+        self._stderr_tail: list[str] = []
+        self._proc = self._start()
+
+    def _start(self) -> subprocess.Popen[str]:
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(
+            [*self.parts, "--stdio"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creationflags,
+            env=self.env,
+        )
+        threading.Thread(target=self._read_stdout, args=(proc,), daemon=True).start()
+        threading.Thread(target=self._read_stderr, args=(proc,), daemon=True).start()
+        return proc
+
+    def _read_stdout(self, proc: subprocess.Popen[str]) -> None:
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                self._stdout.put(str(line).strip())
+        except Exception:
+            pass
+
+    def _read_stderr(self, proc: subprocess.Popen[str]) -> None:
+        try:
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                text = str(line).strip()
+                if text:
+                    self._stderr_tail.append(text)
+                    del self._stderr_tail[:-8]
+        except Exception:
+            pass
+
+    def request(self, request_path: Path, *, timeout_seconds: int) -> dict[str, Any]:
+        with self._lock:
+            if self._proc.poll() is not None:
+                raise RuntimeError(f"persistent_service_exited:{self._proc.returncode}")
+            if self._proc.stdin is None:
+                raise RuntimeError("persistent_service_stdin_missing")
+            payload = {"request_path": str(request_path)}
+            self._proc.stdin.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+            self._proc.stdin.flush()
+            deadline = time.monotonic() + max(1.0, float(timeout_seconds or 1))
+            line = ""
+            while time.monotonic() < deadline:
+                if self._proc.poll() is not None and self._stdout.empty():
+                    detail = " | ".join(self._stderr_tail[-3:])
+                    raise RuntimeError(f"persistent_service_exited:{self._proc.returncode}:{detail}")
+                try:
+                    line = self._stdout.get(timeout=0.1)
+                    break
+                except queue.Empty:
+                    continue
+            if not line:
+                self.close()
+                detail = " | ".join(self._stderr_tail[-3:])
+                raise TimeoutError(f"persistent_service_timeout:{detail}")
+            if not line:
+                raise RuntimeError("persistent_service_empty_response")
+            try:
+                data = json.loads(line)
+            except Exception as exc:
+                raise RuntimeError(f"persistent_service_bad_json:{line[:500]}") from exc
+            return data if isinstance(data, dict) else {}
+
+    def close(self) -> None:
+        proc = self._proc
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except Exception:
+            pass
+
+
+def _persistent_service_enabled(env: Mapping[str, str] | None = None) -> bool:
+    value = str(_env(env).get(FULL_GPU_EXPORT_SERVICE_PERSISTENT_ENV, "1") or "1").strip().casefold()
+    return value not in {"0", "false", "no", "off", "disabled"}
+
+
+def _persistent_client_key(command: str, env: Mapping[str, str] | None = None) -> tuple[str, str, str, str]:
+    e = _env(env)
+    return (
+        str(command),
+        str(e.get(FULL_GPU_EXPORT_SERVICE_QPA_ENV) or ""),
+        str(e.get(FULL_GPU_EXPORT_SERVICE_QT_OPENGL_ENV) or ""),
+        str(e.get("QT_OPENGL") or ""),
+    )
+
+
+def _persistent_client(command: str, env: Mapping[str, str] | None = None) -> _PersistentFullGpuServiceClient:
+    key = _persistent_client_key(command, env)
+    with _PERSISTENT_CLIENTS_LOCK:
+        client = _PERSISTENT_CLIENTS.get(key)
+        if client is None or client._proc.poll() is not None:
+            client = _PersistentFullGpuServiceClient(command, env=env)
+            _PERSISTENT_CLIENTS[key] = client
+        return client
+
+
+def _render_via_persistent_service(
+    *,
+    command: str,
+    request_path: Path,
+    out_path: Path,
+    timeout_seconds: int,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    client = _persistent_client(command, env)
+    diag = client.request(request_path, timeout_seconds=timeout_seconds)
+    diag = dict(diag or {})
+    diag["service_command"] = command
+    diag["persistent_service"] = True
+    if not out_path.is_file():
+        diag["ok"] = False
+        diag.setdefault("errors", []).append("service_output_frame_missing")
+    return diag
+
+
 def full_gpu_export_service_contract() -> dict[str, Any]:
     return {
         "input": {
@@ -215,6 +361,7 @@ def build_full_gpu_export_service_report(
         "worker_safe": full_available,
         "service_command_env": FULL_GPU_EXPORT_SERVICE_COMMAND_ENV,
         "qt_opengl_env": FULL_GPU_EXPORT_SERVICE_QT_OPENGL_ENV,
+        "persistent_service_env": FULL_GPU_EXPORT_SERVICE_PERSISTENT_ENV,
         "service_command": command,
         "configured": configured,
         "default_command": default_full_gpu_export_service_command(),
@@ -225,6 +372,7 @@ def build_full_gpu_export_service_report(
         "contract": full_gpu_export_service_contract(),
         "next_actions": [
             f"Set {FULL_GPU_EXPORT_SERVICE_COMMAND_ENV} to override the default helper process if needed.",
+            f"Set {FULL_GPU_EXPORT_SERVICE_PERSISTENT_ENV}=0 only for diagnosing one-shot helper startup.",
             "Run probe+smoke QA before claiming full GPU export parity on a machine.",
             "Tune material/IBL/shadow parity against real FBX/GLB samples; keep packet fallback on every failure.",
         ],
@@ -382,6 +530,36 @@ def render_frame_via_full_gpu_export_service(
         }
         request_path.write_text(json.dumps(request, ensure_ascii=False, default=str), encoding="utf-8")
         parts = _command_parts(command)
+        persistent_diag: dict[str, Any] = {}
+        if _persistent_service_enabled(e):
+            try:
+                persistent_diag = _render_via_persistent_service(
+                    command=command,
+                    request_path=request_path,
+                    out_path=out_path,
+                    timeout_seconds=timeout,
+                    env=e,
+                )
+                if bool(persistent_diag.get("ok")) and out_path.is_file():
+                    from PIL import Image
+
+                    out = Image.open(out_path).convert("RGBA")
+                    final = _pil_to_original_kind(out, kind, base_frame)
+                    persistent_diag["ok"] = True
+                    persistent_diag["full_gpu_export_available"] = True
+                    persistent_diag["worker_safe"] = True
+                    persistent_diag["service_command"] = command
+                    persistent_diag["persistent_service"] = True
+                    return final, persistent_diag
+            except Exception as exc:
+                persistent_diag = {
+                    "ok": False,
+                    "mode": "full_model_view_gpu_export_service",
+                    "fallback": True,
+                    "persistent_service": True,
+                    "service_command": command,
+                    "errors": [f"{type(exc).__name__}: {exc}"],
+                }
         try:
             creationflags = 0
             if os.name == "nt":
@@ -403,6 +581,7 @@ def render_frame_via_full_gpu_export_service(
                 "mode": "full_model_view_gpu_export_service",
                 "fallback": True,
                 "service_command": command,
+                "persistent_service_attempt": persistent_diag,
                 "errors": [f"{type(exc).__name__}: {exc}"],
             }
         raw = (completed.stdout or completed.stderr or "").strip()
@@ -417,6 +596,7 @@ def render_frame_via_full_gpu_export_service(
                 "mode": "full_model_view_gpu_export_service",
                 "fallback": True,
                 "service_command": command,
+                "persistent_service_attempt": persistent_diag,
                 "returncode": int(completed.returncode or 0),
             })
             diag.setdefault("errors", [])
@@ -436,11 +616,14 @@ def render_frame_via_full_gpu_export_service(
                 "mode": "full_model_view_gpu_export_service",
                 "fallback": True,
                 "service_command": command,
+                "persistent_service_attempt": persistent_diag,
                 "errors": [f"service_output_decode_failed: {type(exc).__name__}: {exc}"],
             }
         diag = dict(diag or {})
         diag["ok"] = True
         diag["service_command"] = command
+        diag["persistent_service_attempt"] = persistent_diag
+        diag["persistent_service"] = False
         diag["full_gpu_export_available"] = True
         diag["worker_safe"] = True
         return final, diag

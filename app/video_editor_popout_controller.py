@@ -35,18 +35,46 @@ def toggle_actor_library_popout(self) -> None:
 
 
 def toggle_effects_library_popout(self) -> None:
+    ensure = getattr(self, "_ensure_effects_preset_panel", None)
+    if callable(ensure):
+        try:
+            ensure()
+            self._set_collapsible_host_open(getattr(self, "_effects_library_section_host", None), True)
+        except Exception:
+            pass
     self._toggle_section_popout("effects_library", "_effects_library_section_host", "Effect Library", width=620, height=620)
 
 
 def toggle_title_presets_popout(self) -> None:
+    ensure = getattr(self, "_ensure_title_presets_panel", None)
+    if callable(ensure):
+        try:
+            ensure()
+            self._set_collapsible_host_open(getattr(self, "_title_presets_section_host", None), True)
+        except Exception:
+            pass
     self._toggle_section_popout("title_presets", "_title_presets_section_host", "Title Presets", width=620, height=520)
 
 
 def toggle_transitions_popout(self) -> None:
+    ensure = getattr(self, "_ensure_transitions_panel", None)
+    if callable(ensure):
+        try:
+            ensure()
+            self._set_collapsible_host_open(getattr(self, "_transitions_section_host", None), True)
+        except Exception:
+            pass
     self._toggle_section_popout("transitions", "_transitions_section_host", "Transitions", width=620, height=520)
 
 
 def toggle_workflow_presets_popout(self) -> None:
+    ensure = getattr(self, "_ensure_workflow_presets_panel", None)
+    if callable(ensure):
+        try:
+            ensure()
+            self._set_collapsible_host_open(getattr(self, "_workflow_presets_section_host", None), True)
+        except Exception:
+            pass
     self._toggle_section_popout("workflow_presets", "_workflow_presets_section_host", "Workflow Presets", width=620, height=520)
 
 

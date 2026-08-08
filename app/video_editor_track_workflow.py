@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMessageBox
 
 from app.audio_tracks import (
@@ -18,14 +19,10 @@ from app.audio_tracks import (
 )
 from app.editor_observability import probe_track_hdr_info as _probe_track_hdr_info
 from app.i18n import tr
-from app.timeline_track_row import TrackRow
+from app.timeline_track_row import TRACK_V_PADDING, TrackRow
 from app.video_editor_audio_widgets import AudioTrackRow, SpectrumExtractor
-from app.video_editor_media_proxy import _is_high_resolution, _probe_video_dimensions
 from app.video_editor_thumbnailing import probe_video_duration_ms
 from app.video_track_legacy import VideoTrack, _ensure_video_clips
-
-TRACK_V_PADDING = 2
-
 
 def _find_track(self, track_id: int) -> VideoTrack | None:
     for track in self._tracks:
@@ -195,6 +192,12 @@ def _on_track_zoom_changed(self, track_id: int) -> None:
 
 
 def _add_track_with_source(self, path: Path) -> None:
+    from app.image_media import is_image_path
+    if is_image_path(path):
+        from app.video_editor_media_import_controller import add_image_track_with_source
+
+        add_image_track_with_source(self, path)
+        return
     self._register_screenstudio_real_recording_candidate(path, reason="track import")
     tid = self._next_track_id
     self._next_track_id += 1
@@ -205,7 +208,11 @@ def _add_track_with_source(self, path: Path) -> None:
     track.hdr_info = _probe_track_hdr_info(path)
     self._tracks.append(track)
     self._insert_track_widget(track)
-    self._start_thumbnail_extraction(track)
+    def _start_import_thumbnails() -> None:
+        if any(existing is track for existing in getattr(self, "_tracks", []) or []):
+            self._start_thumbnail_extraction(track)
+
+    QTimer.singleShot(120, _start_import_thumbnails)
     self._set_active_track(tid)
     # ``_refresh_player_tracks`` opens the cap and sets duration_ms,
     # then rebuilds clips so the new track has the single covering
@@ -234,8 +241,14 @@ def _add_track_with_source(self, path: Path) -> None:
     row = self._track_rows.get(tid)
     if row is not None:
         row.update()
-    self._refresh_player_tracks(render_immediately=False)
     self._refresh_visual_preview_after_timeline_change()
+    try:
+        queue_auto_proxy = getattr(self, "_queue_auto_proxy_generation", None)
+        if callable(queue_auto_proxy):
+            queue_auto_proxy(paths=[Path(path)])
+    except Exception:
+        pass
+    _is_high_resolution = lambda *_args, **_kwargs: False
 
     # Proxy: if the source is high-resolution, ask the user once
     # whether to generate a proxy for smoother editing.
@@ -282,6 +295,7 @@ def _add_track_with_source(self, path: Path) -> None:
 
 def _insert_track_widget(self, track: VideoTrack) -> None:
     row = TrackRow(track)
+    row.installEventFilter(self)
     row.set_px_per_sec(self._px_per_sec)
     row.clicked.connect(self._set_active_track)
     row.position_requested.connect(self._on_track_position_requested)
@@ -684,8 +698,10 @@ def _populate_video_track(self, track_id: int, path: Path) -> None:
 
 def _insert_audio_track_widget(self, track: AudioTrack) -> None:
     row = AudioTrackRow(track)
+    row.installEventFilter(self)
     row.set_px_per_sec(self._px_per_sec)
     row.clicked.connect(self._set_active_track)
+    row.position_requested.connect(self._on_track_position_requested)
     row.volume_changed.connect(self._on_audio_volume_changed)
     row.row_context_menu.connect(self._on_audio_row_context_menu)
     row.clip_context_menu.connect(self._on_audio_clip_context_menu)
@@ -722,6 +738,12 @@ def _append_clip_to_track(self, track: "VideoTrack", path: Path) -> None:
     - Calls ``_refresh_player_tracks`` so the player opens a decoder for
       the new source and recomputes project duration.
     """
+    from app.image_media import is_image_path
+    if is_image_path(path):
+        from app.video_editor_media_import_controller import append_image_clip_to_track
+
+        append_image_clip_to_track(self, track, path)
+        return
     from app.timeline_model import VideoClip as _VC, NodeGraph as _NG
     duration_ms = probe_video_duration_ms(path)
     if duration_ms <= 0:

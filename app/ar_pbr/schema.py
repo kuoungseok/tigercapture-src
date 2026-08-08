@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.ar_pbr.animation import normalize_animation_settings
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.ambient_occlusion import (
     DEFAULT_AMBIENT_OCCLUSION_MODE,
     DEFAULT_AO_AMBIENT,
@@ -127,7 +128,14 @@ from app.ar_pbr.depth_occlusion import (
     flatten_depth_edge_glow_settings,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+    DEFAULT_BLOOM_BOOST,
+    DEFAULT_BLOOM_CONVOLUTION_SCALE,
+    DEFAULT_BLOOM_KERNEL,
     DEFAULT_BLOOM_RADIUS,
+    DEFAULT_BLOOM_SCATTER,
     DEFAULT_BLOOM_STRENGTH,
     DEFAULT_BLOOM_THRESHOLD,
     DEFAULT_GRAIN_SCALE,
@@ -317,6 +325,7 @@ SUPPORTED_ASSET_EXTS = frozenset({
     ".obj",
     ".usd",
     ".usdz",
+    ".arpbr",
 })
 
 DEFAULT_TRANSFORM = {
@@ -347,9 +356,23 @@ DEFAULT_RENDER = {
         "hdri_path": "",
         "ibl_exposure": 1.1,
         "ibl_rotation": 0.0,
+        "render_mode": "ibl_realtime",
+        "show_environment_background": True,
+        "environment_visibility": {
+            "camera_visible": True,
+            "reflection_visible": True,
+            "diffuse_visible": True,
+            "refraction_visible": True,
+            "background_output": "environment",
+            "diffuse_strength": 1.0,
+            "reflection_strength": 1.0,
+            "refraction_strength": 1.0,
+        },
         "light_azimuth": 45.0,
         "light_elevation": 45.0,
+        "light_color": [1.0, 1.0, 1.0],
         "direct_strength": 0.42,
+        "additional_lights": [],
         "shadow_strength": DEFAULT_SHADOW_STRENGTH,
         "shadow_light_type": DEFAULT_SHADOW_LIGHT_TYPE,
         "shadow_filter": DEFAULT_SHADOW_FILTER,
@@ -557,6 +580,14 @@ DEFAULT_RENDER = {
         "bloom_strength": DEFAULT_BLOOM_STRENGTH,
         "bloom_radius": DEFAULT_BLOOM_RADIUS,
         "bloom_threshold": DEFAULT_BLOOM_THRESHOLD,
+        "bloom_method": "convolution",
+        "bloom_kernel": DEFAULT_BLOOM_KERNEL,
+        "bloom_convolution_scale": DEFAULT_BLOOM_CONVOLUTION_SCALE,
+        "bloom_scatter": DEFAULT_BLOOM_SCATTER,
+        "bloom_boost": DEFAULT_BLOOM_BOOST,
+        "bloom_anamorphic_strength": DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+        "bloom_anamorphic_threshold": DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+        "bloom_anamorphic_ratio": DEFAULT_BLOOM_ANAMORPHIC_RATIO,
         "vignette_enabled": False,
         "vignette_strength": DEFAULT_VIGNETTE_STRENGTH,
         "vignette_radius": DEFAULT_VIGNETTE_RADIUS,
@@ -743,7 +774,51 @@ def normalize_lighting_settings(value: Any) -> dict[str, Any]:
         "ibl_rotation": _clamp(_coerce_float(data.get("ibl_rotation"), defaults["ibl_rotation"]), -1.0, 1.0),
         "light_azimuth": _clamp(_coerce_float(data.get("light_azimuth"), defaults["light_azimuth"]), -180.0, 180.0),
         "light_elevation": _clamp(_coerce_float(data.get("light_elevation"), defaults["light_elevation"]), -20.0, 89.0),
+        "light_color": [
+            _clamp(value, 0.0, 8.0)
+            for value in _coerce_vector(data.get("light_color"), 3, defaults["light_color"])
+        ],
         "direct_strength": _clamp(_coerce_float(data.get("direct_strength"), defaults["direct_strength"]), 0.0, 4.0),
+        "additional_lights": [
+            {
+                "light_type": (
+                    str(row.get("light_type") or "directional").strip().lower()
+                    if str(row.get("light_type") or "directional").strip().lower()
+                    in {"directional", "point", "spot"}
+                    else "directional"
+                ),
+                "direction": _coerce_vector(
+                    row.get("direction"), 3, [-0.35, -0.65, -0.72]
+                ),
+                "position": _coerce_vector(
+                    row.get("position"), 3, [0.0, 1.5, 2.0]
+                ),
+                "color": [
+                    _clamp(channel, 0.0, 8.0)
+                    for channel in _coerce_vector(
+                        row.get("color"), 3, [1.0, 1.0, 1.0]
+                    )
+                ],
+                "intensity": _clamp(
+                    _coerce_float(row.get("intensity"), 0.0), 0.0, 4.0
+                ),
+                "range": _clamp(
+                    _coerce_float(row.get("range"), 6.0), 0.05, 100.0
+                ),
+                "spot_inner_angle": _clamp(
+                    _coerce_float(row.get("spot_inner_angle"), 24.0),
+                    0.0,
+                    88.0,
+                ),
+                "spot_outer_angle": _clamp(
+                    _coerce_float(row.get("spot_outer_angle"), 36.0),
+                    1.0,
+                    89.0,
+                ),
+            }
+            for row in list(data.get("additional_lights") or [])[:2]
+            if isinstance(row, Mapping)
+        ],
         "shadow_strength": _clamp(_coerce_float(data.get("shadow_strength"), defaults["shadow_strength"]), 0.0, 1.0),
         "shadow_light_type": normalize_shadow_light_type(
             data.get("shadow_light_type", data.get("light_type", defaults["shadow_light_type"]))
@@ -827,6 +902,12 @@ def normalize_lighting_settings(value: Any) -> dict[str, Any]:
     out.update(flatten_render_pass_settings(data))
     out.update(flatten_motion_blur_settings(data))
     out.update(flatten_triplanar_settings(data))
+    environment = normalize_environment_visibility(data)
+    render_mode = resolve_render_mode(data)
+    out["show_environment_background"] = bool(environment["camera_visible"])
+    out["environment_visibility"] = environment
+    out["render_mode"] = str(render_mode["requested"])
+    out["render_mode_policy"] = render_mode
     return out
 
 

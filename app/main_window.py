@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 
 from app.i18n import current_language, tr
 from app.icons import app_icon, icon_size
+from app.launcher_studio_policy import capture_to_studio_enabled
+from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
 from app.modes import CaptureMode, mode_label
 from app.paths import default_save_dir, open_in_explorer, runtime_data_dir
 from app.recent_captures import format_size, list_recent
@@ -296,6 +298,10 @@ class MainWindow(QMainWindow):
     def _copy(ko: str, en: str) -> str:
         return ko if current_language() == "ko" else en
 
+    @staticmethod
+    def _studio_entry_enabled() -> bool:
+        return capture_to_studio_enabled()
+
     def _new_capture_text(self) -> str:
         return self._copy("녹화 시작", "Start recording")
 
@@ -315,6 +321,8 @@ class MainWindow(QMainWindow):
         return self._copy("추천 시작", "Suggested start")
 
     def _quick_start_title_text(self) -> str:
+        if not self._studio_entry_enabled():
+            return self._copy("가벼운 캡처", "Light Capture")
         return self._copy("스튜디오 진입", "Open Studio")
 
     def _record_card_text(self) -> str:
@@ -325,28 +333,52 @@ class MainWindow(QMainWindow):
 
     def _apply_launcher_microcopy(self) -> None:
         if hasattr(self, "_hero_subtitle"):
-            self._hero_subtitle.setText(
-                self._copy(
-                    "한 번 녹화하면 커서, 클릭, 자동 줌까지 보기 좋게 정리합니다.",
-                    "Record once; cursor, clicks, and auto zoom are polished by default.",
+            if self._studio_entry_enabled():
+                self._hero_subtitle.setText(
+                    self._copy(
+                        "한 번 녹화하면 커서, 클릭, 자동 줌까지 보기 좋게 정리합니다.",
+                        "Record once; cursor, clicks, and auto zoom are polished by default.",
+                    )
                 )
-            )
+            else:
+                self._hero_subtitle.setText(
+                    self._copy(
+                        "빠르게 캡처하고 저장 폴더에 남깁니다. Studio 편집은 별도 앱에서 시작합니다.",
+                        "Capture quickly and save locally. Studio editing starts in the separate app.",
+                    )
+                )
         if hasattr(self, "_startup_busy_label"):
             self._startup_busy_label.setText(self._copy("여는 중...", "Opening..."))
         if hasattr(self, "_drop_title"):
-            self._drop_title.setText(
-                self._copy(
-                    "화면 녹화 파일을 드롭하면 편집을 시작합니다",
-                    "Drop a screen recording to open the editor",
+            if self._studio_entry_enabled():
+                self._drop_title.setText(
+                    self._copy(
+                        "화면 녹화 파일을 드롭하면 편집을 시작합니다",
+                        "Drop a screen recording to open the editor",
+                    )
                 )
-            )
+            else:
+                self._drop_title.setText(
+                    self._copy(
+                        "캡처 파일은 저장 폴더에서 관리합니다",
+                        "Captured files stay in the save folder",
+                    )
+                )
         if hasattr(self, "_drop_body"):
-            self._drop_body.setText(
-                self._copy(
-                    "커서 메타데이터가 있으면 배경, 클릭, 자동 줌을 자동 적용합니다",
-                    "Cursor metadata enables wallpaper, click, and auto-zoom defaults",
+            if self._studio_entry_enabled():
+                self._drop_body.setText(
+                    self._copy(
+                        "커서 메타데이터가 있으면 배경, 클릭, 자동 줌을 자동 적용합니다",
+                        "Cursor metadata enables wallpaper, click, and auto-zoom defaults",
+                    )
                 )
-            )
+            else:
+                self._drop_body.setText(
+                    self._copy(
+                        "Studio 이동은 기본 차단되어 있습니다. 편집은 Tiger Studio 앱에서 여세요.",
+                        "Studio handoff is blocked by default. Open Tiger Studio for editing.",
+                    )
+                )
         if hasattr(self, "templates_btn"):
             self.templates_btn.setText(self._copy("스튜디오 열기", "Open Studio"))
             self.templates_btn.setToolTip(
@@ -394,7 +426,11 @@ class MainWindow(QMainWindow):
         copy.setContentsMargins(0, 0, 0, 0)
         copy.setSpacing(6)
 
-        self._hero_eyebrow = QLabel(self._copy("CAPTURE  /  EDIT  /  PUBLISH", "CAPTURE  /  EDIT  /  PUBLISH"))
+        self._hero_eyebrow = QLabel(
+            self._copy("CAPTURE  /  EDIT  /  PUBLISH", "CAPTURE  /  EDIT  /  PUBLISH")
+            if self._studio_entry_enabled()
+            else self._copy("CAPTURE", "CAPTURE")
+        )
         self._hero_eyebrow.setObjectName("LauncherEyebrow")
         self._hero_eyebrow.setMinimumHeight(15)
         copy.addWidget(self._hero_eyebrow)
@@ -408,6 +444,11 @@ class MainWindow(QMainWindow):
             self._copy(
                 "녹화하면 커서, 클릭, 자동 줌까지 보기 좋게 준비되는 작은 스튜디오.",
                 "Record once; cursor, clicks, and auto zoom are polished by default.",
+            )
+            if self._studio_entry_enabled()
+            else self._copy(
+                "빠르게 캡처하고 저장합니다. 편집은 Tiger Studio 앱에서 시작합니다.",
+                "Capture quickly and save locally. Editing starts in Tiger Studio.",
             )
         )
         self._hero_subtitle.setObjectName("LauncherSubtitle")
@@ -661,6 +702,17 @@ class MainWindow(QMainWindow):
 
     def _rebuild_template_cards(self) -> None:
         self._clear_button_row(self._template_row_layout)
+        if not self._studio_entry_enabled():
+            card = self._make_launcher_card(
+                self._copy("Studio 별도 앱", "Studio is separate"),
+                self._copy("캡처 앱에서는 편집으로 이동하지 않습니다", "The capture app does not open editing"),
+                icon_name="video",
+                tone="empty",
+                compact=True,
+            )
+            card.setEnabled(False)
+            self._template_row_layout.addWidget(card, stretch=1)
+            return
         try:
             from app.preset_library import presets_by_kind
             templates = presets_by_kind("template")
@@ -708,10 +760,14 @@ class MainWindow(QMainWindow):
             self._template_row_layout.addWidget(card, stretch=1)
 
     def _open_recent_project(self, path: Path) -> None:
+        if not self._studio_entry_enabled():
+            return
         self.show_startup_busy(self._copy("프로젝트 여는 중...", "Opening project..."))
         self.open_project_requested.emit(path)
 
     def _open_template(self, payload: dict) -> None:
+        if not self._studio_entry_enabled():
+            return
         self.show_startup_busy(self._copy("템플릿 워크벤치 여는 중...", "Opening template workspace..."))
         self.open_template_requested.emit(payload)
 
@@ -721,7 +777,10 @@ class MainWindow(QMainWindow):
         if ext in self._AUDIO_DROP_EXTS:
             self.open_sound_editor_requested.emit(path)
         elif ext in self._VIDEO_DROP_EXTS:
-            self.open_video_editor_requested.emit(self._video_editor_payload(path))
+            if self._studio_entry_enabled():
+                self.open_video_editor_requested.emit(self._video_editor_payload(path))
+            else:
+                open_in_explorer(path)
         else:
             self.open_gif_file_requested.emit(path)
 
@@ -1031,6 +1090,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(7)
+        studio_enabled = self._studio_entry_enabled()
 
         self._pro_editor_section_label = self._quick_start_title_text()
         self._pro_editor_label = QLabel(self._pro_editor_section_label)
@@ -1048,6 +1108,8 @@ class MainWindow(QMainWindow):
         self.templates_btn.setToolTip(self._copy("빈 타이거 스튜디오 작업공간을 엽니다", "Open a blank Tiger Studio workspace"))
         self.templates_btn.clicked.connect(self._open_video_editor_clicked)
         header_layout.addWidget(self.templates_btn)
+        if not studio_enabled:
+            self.templates_btn.hide()
         layout.addWidget(header)
 
         workspace_row = QFrame()
@@ -1097,6 +1159,8 @@ class MainWindow(QMainWindow):
         self._set_launcher_workspace_simple(saved_mode == "simple", persist=False)
         self._launcher_workspace_state_ready = True
         layout.addWidget(workspace_row)
+        if not studio_enabled:
+            workspace_row.hide()
 
         pe_row = QWidget()
         pe_layout = QHBoxLayout(pe_row)
@@ -1125,6 +1189,8 @@ class MainWindow(QMainWindow):
         )
         self.pro_editor_btn.clicked.connect(self._open_video_editor_clicked)
         pe_layout.addWidget(self.pro_editor_btn, stretch=1)
+        if not studio_enabled:
+            self.pro_editor_btn.hide()
 
         layout.addWidget(pe_row)
 
@@ -1150,6 +1216,8 @@ class MainWindow(QMainWindow):
         return
 
     def _open_video_editor_clicked(self) -> None:
+        if not self._studio_entry_enabled():
+            return
         try:
             from app.startup_trace import (
                 log_startup_trace,
@@ -1191,12 +1259,19 @@ class MainWindow(QMainWindow):
         layout.setSpacing(1)
         self._drop_title = QLabel(
             self._copy("화면 녹화 파일을 드롭하면 편집을 시작합니다", "Drop a screen recording to open the editor")
+            if self._studio_entry_enabled()
+            else self._copy("캡처 파일은 저장 폴더에서 관리합니다", "Captured files stay in the save folder")
         )
         self._drop_title.setObjectName("LauncherDropTitle")
         self._drop_body = QLabel(
             self._copy(
                 "커서 메타데이터가 있으면 배경, 클릭, 자동 줌을 자동 적용",
                 "Cursor metadata enables wallpaper, click, and auto-zoom",
+            )
+            if self._studio_entry_enabled()
+            else self._copy(
+                "Studio 이동은 기본 차단되어 있습니다. 편집은 Tiger Studio 앱에서 여세요.",
+                "Studio handoff is blocked by default. Open Tiger Studio for editing.",
             )
         )
         self._drop_body.setObjectName("LauncherDropBody")
@@ -1209,11 +1284,20 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(tr("app.name"))
         self._brand_label.setText("TigerCapture")
         self._title_label.setText(tr("app.name"))
-        self._hero_eyebrow.setText(self._copy("CAPTURE  /  EDIT  /  PUBLISH", "CAPTURE  /  EDIT  /  PUBLISH"))
+        self._hero_eyebrow.setText(
+            self._copy("CAPTURE  /  EDIT  /  PUBLISH", "CAPTURE  /  EDIT  /  PUBLISH")
+            if self._studio_entry_enabled()
+            else self._copy("CAPTURE", "CAPTURE")
+        )
         self._hero_subtitle.setText(
             self._copy(
                 "녹화하면 커서, 클릭, 자동 줌까지 보기 좋게 준비되는 작은 스튜디오.",
                 "Record once; cursor, clicks, and auto zoom are polished by default.",
+            )
+            if self._studio_entry_enabled()
+            else self._copy(
+                "빠르게 캡처하고 저장합니다. 편집은 Tiger Studio 앱에서 시작합니다.",
+                "Capture quickly and save locally. Editing starts in Tiger Studio.",
             )
         )
         self._credit_label.setText(tr("app.credit"))
@@ -1233,7 +1317,8 @@ class MainWindow(QMainWindow):
             self.templates_btn.setToolTip(self._copy("빈 타이거 스튜디오 작업공간을 엽니다", "Open a blank Tiger Studio workspace"))
         if hasattr(self, "quick_record_btn"):
             self.quick_record_btn.setText(self._record_card_text())
-        self.pro_editor_btn.setText(self._edit_card_text())
+        if hasattr(self, "pro_editor_btn"):
+            self.pro_editor_btn.setText(self._edit_card_text())
         self.sound_editor_btn.setText(self._sound_editor_text())
         self.sound_editor_btn.setToolTip(tr("main.sound_editor.tooltip"))
         self.new_capture_btn.setText(self._new_capture_text())
@@ -1241,11 +1326,20 @@ class MainWindow(QMainWindow):
         self._timer_label.setText(self._timer_text())
         self.cursor_check.setText(self._copy("커서", "Cursor"))
         self.cursor_check.setToolTip(tr("main.option.include_cursor"))
-        self._drop_title.setText(self._copy("화면 녹화 파일을 드롭하면 편집을 시작합니다", "Drop a screen recording to open the editor"))
+        self._drop_title.setText(
+            self._copy("화면 녹화 파일을 드롭하면 편집을 시작합니다", "Drop a screen recording to open the editor")
+            if self._studio_entry_enabled()
+            else self._copy("캡처 파일은 저장 폴더에서 관리합니다", "Captured files stay in the save folder")
+        )
         self._drop_body.setText(
             self._copy(
                 "커서 메타데이터가 있으면 배경, 클릭, 자동 줌을 자동 적용",
                 "Cursor metadata enables wallpaper, click, and auto-zoom defaults",
+            )
+            if self._studio_entry_enabled()
+            else self._copy(
+                "Studio 이동은 기본 차단되어 있습니다. 편집은 Tiger Studio 앱에서 여세요.",
+                "Studio handoff is blocked by default. Open Tiger Studio for editing.",
             )
         )
 
@@ -1310,8 +1404,17 @@ class MainWindow(QMainWindow):
                 return ("audio", p)
         return None
 
+    def _is_internal_media_pool_drop(self, mime_data) -> bool:
+        try:
+            return bool(mime_data.hasFormat(MEDIA_POOL_ITEM_MIME_TYPE))
+        except Exception:
+            return False
+
     def dragEnterEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls() and self._classify_drop(md.urls()) is not None:
             event.acceptProposedAction()
             return
@@ -1319,6 +1422,9 @@ class MainWindow(QMainWindow):
 
     def dragMoveEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls() and self._classify_drop(md.urls()) is not None:
             event.acceptProposedAction()
             return
@@ -1326,6 +1432,9 @@ class MainWindow(QMainWindow):
 
     def dropEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls():
             routed = self._classify_drop(md.urls())
             if routed is not None:
@@ -1333,7 +1442,10 @@ class MainWindow(QMainWindow):
                 if kind == "audio":
                     self.open_sound_editor_requested.emit(path)
                 elif kind == "video":
-                    self.open_video_editor_requested.emit(self._video_editor_payload(path))
+                    if self._studio_entry_enabled():
+                        self.open_video_editor_requested.emit(self._video_editor_payload(path))
+                    else:
+                        open_in_explorer(path)
                 elif kind == "gif":
                     self.open_gif_file_requested.emit(path)
                 event.acceptProposedAction()

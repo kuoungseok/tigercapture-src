@@ -1,0 +1,722 @@
+{
+  "version": "1.1",
+  "app": "TigerCapture",
+  "saved_at": "2026-07-12T01:08:13.545205+00:00",
+  "px_per_sec": 58.0,
+  "playhead_ms": 0,
+  "global_in_ms": 0,
+  "global_out_ms": 20774,
+  "project_settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "aspect": "16:9",
+    "title": "Tiger Studio AI Edit Demo"
+  },
+  "video_tracks": [
+    {
+      "id": 1,
+      "label": "AI Edit Main Cut",
+      "track_type": "video",
+      "program_output": true,
+      "clips": [
+        {
+          "id": 1,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+          "source_duration_ms": 4200,
+          "timeline_in_ms": 0,
+          "source_in_ms": 0,
+          "source_out_ms": 4200,
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 1,
+              "start_ms": 120,
+              "end_ms": 4020,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        },
+        {
+          "id": 2,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+          "source_duration_ms": 3600,
+          "timeline_in_ms": 3940,
+          "source_in_ms": 0,
+          "source_out_ms": 3600,
+          "transition_out_type": "fade_white",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-fade_white",
+            "name": "Fade White",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 2,
+              "start_ms": 120,
+              "end_ms": 3420,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        },
+        {
+          "id": 3,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+          "source_duration_ms": 3200,
+          "timeline_in_ms": 7280,
+          "source_in_ms": 0,
+          "source_out_ms": 3200,
+          "transition_out_type": "zoom_in",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-zoom_in",
+            "name": "Zoom In",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 3,
+              "start_ms": 120,
+              "end_ms": 3020,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+          "source_duration_ms": 3967,
+          "timeline_in_ms": 10220,
+          "source_in_ms": 0,
+          "source_out_ms": 3967,
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 5,
+              "start_ms": 120,
+              "end_ms": 3787,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        },
+        {
+          "id": 6,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+          "source_duration_ms": 3400,
+          "timeline_in_ms": 13927,
+          "source_in_ms": 0,
+          "source_out_ms": 3400,
+          "transition_out_type": "fade_black",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-fade_black",
+            "name": "Fade Black",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 6,
+              "start_ms": 120,
+              "end_ms": 3220,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        },
+        {
+          "id": 8,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+          "source_duration_ms": 3967,
+          "timeline_in_ms": 17067,
+          "source_in_ms": 0,
+          "source_out_ms": 3967,
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 8,
+              "start_ms": 120,
+              "end_ms": 3787,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          }
+        }
+      ],
+      "preview_color_compare_mode": "split",
+      "preview_compare_labels_enabled": true
+    },
+    {
+      "id": 2,
+      "label": "AI FX Inserts",
+      "track_type": "video",
+      "program_output": true,
+      "clips": [
+        {
+          "id": 4,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+          "source_duration_ms": 3200,
+          "timeline_in_ms": 9320,
+          "source_in_ms": 0,
+          "source_out_ms": 3200,
+          "transition_out_type": "wipe_left",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-wipe_left",
+            "name": "Wipe Left",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 4,
+              "start_ms": 120,
+              "end_ms": 3020,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "connected_parent_track_id": 1,
+          "connected_offset_ms": -900
+        },
+        {
+          "id": 7,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+          "source_duration_ms": 3000,
+          "timeline_in_ms": 16167,
+          "source_in_ms": 0,
+          "source_out_ms": 3000,
+          "transition_out_type": "",
+          "transition_out_ms": 0,
+          "transition_preset_meta": {
+            "id": "ai-demo-cut",
+            "name": "Cut",
+            "source": "ai_edit_demo"
+          },
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "zoom_actors": [
+            {
+              "id": 7,
+              "start_ms": 120,
+              "end_ms": 2820,
+              "target_x": 0,
+              "target_y": 0,
+              "target_w": 0,
+              "target_h": 0,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "connected_parent_track_id": 1,
+          "connected_offset_ms": -900
+        }
+      ],
+      "pip_enabled": true,
+      "pip_x": 0.76,
+      "pip_y": 0.28,
+      "pip_scale": 0.34,
+      "pip_opacity": 0.94
+    }
+  ],
+  "audio_tracks": [],
+  "subtitles": [
+    {
+      "start_ms": 900,
+      "end_ms": 3300,
+      "text": "AI builds the first cut",
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    },
+    {
+      "start_ms": 5200,
+      "end_ms": 8200,
+      "text": "Transitions, speed ramps, and color",
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    },
+    {
+      "start_ms": 11200,
+      "end_ms": 14500,
+      "text": "Editable timeline. Local-first workflow.",
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    }
+  ],
+  "media_pool": [
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4"
+  ],
+  "media_pool_metadata": [
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+      "kind": "video",
+      "name": "01_seoul_sunset_bridge.mp4",
+      "badge": "opening",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+      "kind": "video",
+      "name": "02_lamborghini_moody_detail.mp4",
+      "badge": "car_detail",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+      "kind": "video",
+      "name": "03_bugatti_white_car.mp4",
+      "badge": "luxury_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\The BUGATTI W16 MISTRAL ‘BLANC ÉTERNEL’： Celebrating perpetual beauty [dsPHQmSxtFg].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+      "kind": "video",
+      "name": "04_oled_color_macro.mp4",
+      "badge": "color_fx",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\SAMSUNG QD-OLED 4K 120FPS Demo ｜ UNREAL 1 Billion Colors 🌈 HDR Test (AI TV) [rjwPj0dD9wQ].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+      "kind": "video",
+      "name": "05_tokyo_night_city.mp4",
+      "badge": "night_city",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【4K HDR】東京空撮 Tokyo Night View 2025｜Helicopter Aerial Twilight Skyline Japan [Ui4UpsZH4Jw].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+      "kind": "video",
+      "name": "06_lemans_race_cut.mp4",
+      "badge": "speed_rhythm",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Extended Highlights ｜ 24 Hours of Le Mans 2026 ｜ FIA WEC [cE0Vw-ZQpM4].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+      "kind": "video",
+      "name": "07_hdr_color_wheel.mp4",
+      "badge": "hdr_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\8k HDR Best Mix 2022 Dolby Vision [CrIzscDUaZo].mp4"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "kind": "video",
+      "name": "08_seoul_bridge_close.mp4",
+      "badge": "closing",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4"
+    }
+  ],
+  "ai_edit_demo": {
+    "schema": "tigerstudio.demo.ai_edit_multi_clip.v1",
+    "prompt": "Create a 45-second high-energy promo edit from these clips. Cut on rhythm, add short transitions, speed ramps, cinematic color, and punchy captions.",
+    "working_clip_count": 8,
+    "capture_target": "Tiger Studio"
+  }
+}

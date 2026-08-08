@@ -450,6 +450,8 @@ def _animation_effect_xml(index: int, shape_id: int, element: SlideElement) -> s
     payload = animation_payload(element.animation)
     effect = str(payload["in_animation"])
     if effect == "none":
+        effect = str(payload.get("out_animation") or "none")
+    if effect == "none":
         return ""
     effect_filter = {
         "appear": "",

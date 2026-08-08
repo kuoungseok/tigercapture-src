@@ -175,9 +175,12 @@ class SpineEditorWindow(QWidget):
 
         self._extra_dirs: list[str] = []   # user-added directories
         self._current_folder: Optional[str] = None
+        self._suppress_single_folder_autoload = True
 
         self._build_ui()
+        self._sync_output_aspect_ratio_from_parent()
         self._refresh_folder_tree()
+        self._suppress_single_folder_autoload = False
 
         initial_spine = self._initial_spine_path()
         if autoload_sample and initial_spine:
@@ -188,6 +191,14 @@ class SpineEditorWindow(QWidget):
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_output_aspect_ratio_from_parent()
+
+    def _sync_output_aspect_ratio_from_parent(self) -> None:
+        if hasattr(self, "_viewport") and hasattr(self._viewport, "set_output_aspect_ratio"):
+            self._viewport.set_output_aspect_ratio(_editor_output_aspect_ratio(self.parent()))
 
     # ── UI build ──────────────────────────────────────────────────────────────
 
@@ -672,7 +683,32 @@ class SpineEditorWindow(QWidget):
                 QApplication.processEvents()
 
         count = len(candidates)
-        self._status_lbl.setText(f"{count}개" if count else "Spine 파일 없음")
+        if count == 1:
+            self._status_lbl.setText("1개 - 자동 선택")
+            if not self._suppress_single_folder_autoload:
+                QTimer.singleShot(
+                    0,
+                    lambda path=candidates[0], folder=directory: self._auto_load_single_grid_item(path, folder),
+                )
+        else:
+            self._status_lbl.setText(f"{count}개" if count else "Spine 파일 없음")
+
+    def _auto_load_single_grid_item(self, path: str, directory: str) -> None:
+        if directory != self._current_folder:
+            return
+        if self._char_grid.count() != 1:
+            return
+        item = self._char_grid.item(0)
+        if item is None or item.data(Qt.ItemDataRole.UserRole) != path:
+            return
+        self._char_grid.blockSignals(True)
+        self._char_grid.setCurrentItem(item)
+        self._char_grid.blockSignals(False)
+        if path and os.path.exists(path):
+            if path != self._current_json:
+                self._load_character(path)
+            if self._target_clip is not None:
+                self._assign_to_target(skel_path=path)
 
     def _add_search_dir(self):
         directory = QFileDialog.getExistingDirectory(
@@ -1233,6 +1269,7 @@ class SpineEditorWindow(QWidget):
     def set_target_clip(self, clip, lane_row) -> None:
         self._target_clip     = clip
         self._target_lane_row = lane_row
+        self._sync_output_aspect_ratio_from_parent()
         self._sync_placement_controls_from_clip(clip)
         if clip and not clip.skel_path and self._current_json:
             self._assign_to_target(skel_path=self._current_json)
@@ -1292,6 +1329,29 @@ def _get_pages(atlas_path: str) -> list[str]:
         return load_atlas_pages(atlas_path)
     except Exception:
         return []
+
+
+def _editor_output_aspect_ratio(owner) -> float:
+    """Resolve the active editor canvas ratio, with a standalone 16:9 fallback."""
+    settings = getattr(owner, "_project_settings", None) if owner is not None else None
+    if isinstance(settings, dict):
+        try:
+            width = float(settings.get("canvas_width") or 0)
+            height = float(settings.get("canvas_height") or 0)
+            if width > 0 and height > 0:
+                return width / height
+        except (TypeError, ValueError):
+            pass
+    for attr in ("_export_resolution", "_preview_gl_frame_size"):
+        value = getattr(owner, attr, None) if owner is not None else None
+        if isinstance(value, (tuple, list)) and len(value) >= 2:
+            try:
+                width, height = float(value[0]), float(value[1])
+                if width > 0 and height > 0:
+                    return width / height
+            except (TypeError, ValueError):
+                pass
+    return 16.0 / 9.0
 
 
 def _section(text: str) -> QLabel:

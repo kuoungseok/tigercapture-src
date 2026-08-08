@@ -7,7 +7,7 @@ from PySide6.QtGui import (
     QPainter, QPainterPath, QPen,
 )
 
-from app.workbench.node_graph.items.node_item import NodeItem
+from app.workbench.node_graph.items.node_item import NodeItem, paint_node_track_context_strip
 from app.workbench.node_graph.theme import (
     NODE_GRAPH_COLORS as C,
     NODE_GRAPH_SIZES as S,
@@ -85,6 +85,7 @@ class EffectNodeItem(NodeItem):
         painter.setBrush(QBrush(gradient))
         painter.setPen(QPen(border_color, border_w))
         painter.drawRoundedRect(rect, radius, radius)
+        paint_node_track_context_strip(self, painter, rect, radius)
 
         painter.setPen(QPen(QColor(255, 255, 255, 8), 1))
         painter.drawLine(6, 1, int(rect.width()) - 7, 1)

@@ -1,0 +1,1224 @@
+{
+  "version": "1.1",
+  "app": "TigerCapture",
+  "saved_at": "2026-07-12T01:11:42.074447+00:00",
+  "px_per_sec": 58.0,
+  "playhead_ms": 0,
+  "global_in_ms": 0,
+  "global_out_ms": 20774,
+  "project_settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "aspect": "16:9",
+    "title": "Tiger Studio AI Edit Demo",
+    "color_management": {
+      "input_space": "rec709",
+      "input_transfer": "bt709",
+      "working_space": "rec709",
+      "output_space": "rec709",
+      "output_transfer": "bt709",
+      "view_transform": "rec709",
+      "hdr_mode": false,
+      "ocio_config_path": "",
+      "input_lut": {
+        "path": "",
+        "strength": 1.0,
+        "enabled": true
+      },
+      "creative_lut": {
+        "path": "",
+        "strength": 1.0,
+        "enabled": true
+      },
+      "output_lut": {
+        "path": "",
+        "strength": 1.0,
+        "enabled": true
+      },
+      "preview_transform_enabled": true
+    },
+    "screenstudio_real_corpus_last_register": {
+      "ok": true,
+      "registered": true,
+      "manifest_path": "qa_corpus\\screenstudio_real_recordings\\manifest.json",
+      "recordings": 109,
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "size_bytes": 6092921,
+      "slot_id": "screenstudio-real-72",
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "auto_zoom_count": 0,
+      "warning": ""
+    }
+  },
+  "video_tracks": [
+    {
+      "id": 1,
+      "source_path": null,
+      "label": "AI Edit Main Cut",
+      "track_type": "video",
+      "performance_source": false,
+      "vtuber_performance_source": false,
+      "program_output": true,
+      "display_name": "AI Edit Main Cut",
+      "offset_ms": 0,
+      "clips": [
+        {
+          "id": 1,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 4200,
+          "timeline_in_ms": 0,
+          "source_in_ms": 0,
+          "source_out_ms": 4200,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 1,
+              "start_ms": 120,
+              "end_ms": 4020,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 2,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3600,
+          "timeline_in_ms": 3940,
+          "source_in_ms": 0,
+          "source_out_ms": 3600,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 2,
+              "start_ms": 120,
+              "end_ms": 3420,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "fade_white",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-fade_white",
+            "name": "Fade White",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 3,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3200,
+          "timeline_in_ms": 7280,
+          "source_in_ms": 0,
+          "source_out_ms": 3200,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 3,
+              "start_ms": 120,
+              "end_ms": 3020,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "zoom_in",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-zoom_in",
+            "name": "Zoom In",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 5,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3967,
+          "timeline_in_ms": 10220,
+          "source_in_ms": 0,
+          "source_out_ms": 3967,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 5,
+              "start_ms": 120,
+              "end_ms": 3787,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 6,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3400,
+          "timeline_in_ms": 13927,
+          "source_in_ms": 0,
+          "source_out_ms": 3400,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 6,
+              "start_ms": 120,
+              "end_ms": 3220,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "fade_black",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-fade_black",
+            "name": "Fade Black",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 8,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3967,
+          "timeline_in_ms": 17067,
+          "source_in_ms": 0,
+          "source_out_ms": 3967,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 8,
+              "start_ms": 120,
+              "end_ms": 3787,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "dissolve",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-dissolve",
+            "name": "Dissolve",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": null,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": 0,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        }
+      ],
+      "fades": [],
+      "zoom_actors": [],
+      "speed_segments": [],
+      "typography_actors": [],
+      "node_graph_view_data": {
+        "nodes": [
+          {
+            "id": "N1",
+            "kind": "serial",
+            "label": "Node 1",
+            "x": -246.0,
+            "y": -28.0,
+            "bypassed": false,
+            "user_color": null,
+            "masks": []
+          }
+        ],
+        "connections": [
+          {
+            "src_node": "IN",
+            "src_port": "rgb_out",
+            "dst_node": "N1",
+            "dst_port": "rgb_in"
+          },
+          {
+            "src_node": "N1",
+            "src_port": "rgb_out",
+            "dst_node": "OUT",
+            "dst_port": "rgb_in"
+          }
+        ],
+        "next_id": 2,
+        "io_positions": {
+          "IN": [
+            -360.0,
+            -13.0
+          ],
+          "OUT": [
+            320.0,
+            -13.0
+          ]
+        }
+      },
+      "preview_color_compare_mode": "split",
+      "preview_compare_labels_enabled": true,
+      "cursor_events": [],
+      "screenstudio_polish": {},
+      "pip_enabled": false,
+      "pip_x": 0.5,
+      "pip_y": 0.5,
+      "pip_scale": 0.3,
+      "pip_opacity": 1.0,
+      "pip_keyframes": []
+    },
+    {
+      "id": 2,
+      "source_path": null,
+      "label": "AI FX Inserts",
+      "track_type": "video",
+      "performance_source": false,
+      "vtuber_performance_source": false,
+      "program_output": true,
+      "display_name": "AI FX Inserts",
+      "offset_ms": 0,
+      "clips": [
+        {
+          "id": 4,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3200,
+          "timeline_in_ms": 9320,
+          "source_in_ms": 0,
+          "source_out_ms": 3200,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 4,
+              "start_ms": 120,
+              "end_ms": 3020,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 0.88,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "wipe_left",
+          "transition_out_ms": 320,
+          "transition_preset_meta": {
+            "id": "ai-demo-wipe_left",
+            "name": "Wipe Left",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": 1,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": -900,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        },
+        {
+          "id": 7,
+          "source_path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+          "performance_source": false,
+          "vtuber_performance_source": false,
+          "track_type": "",
+          "program_output": true,
+          "source_duration_ms": 3000,
+          "timeline_in_ms": 16167,
+          "source_in_ms": 0,
+          "source_out_ms": 3000,
+          "fades": [],
+          "zoom_actors": [
+            {
+              "id": 7,
+              "start_ms": 120,
+              "end_ms": 2820,
+              "zoom_in_ms": 420,
+              "zoom_out_ms": 360,
+              "target_x": 0.0,
+              "target_y": 0.0,
+              "target_w": 0.0,
+              "target_h": 0.0,
+              "easing": "smooth_pop",
+              "motion_blur": 0.32
+            }
+          ],
+          "typography_actors": [],
+          "speed_segments": [
+            {
+              "start_ms": 0,
+              "end_ms": 1200,
+              "speed": 1.18,
+              "frame_blend": true,
+              "blend_mode": "linear",
+              "ease_in": 0.35,
+              "ease_out": 0.45
+            }
+          ],
+          "masks": [],
+          "node_graph": {
+            "color": {
+              "grade": {
+                "brightness": 2,
+                "contrast": 18,
+                "saturation": 8,
+                "shadows_x": -18,
+                "shadows_y": -4,
+                "midtones_x": 4,
+                "midtones_y": 0,
+                "highlights_x": 18,
+                "highlights_y": 6,
+                "offset_x": 0,
+                "offset_y": 0,
+                "shadows_l": -4,
+                "midtones_l": 0,
+                "highlights_l": 5,
+                "offset_l": 0,
+                "hue_vs_hue": [],
+                "color_workflow": {},
+                "advanced_color_toolset": {},
+                "input_lut_path": "",
+                "input_lut_strength": 1.0,
+                "creative_lut_path": "",
+                "creative_lut_strength": 1.0,
+                "output_lut_path": "",
+                "output_lut_strength": 1.0,
+                "preset_id": "ai_demo_cinematic"
+              }
+            }
+          },
+          "transition_out_type": "",
+          "transition_out_ms": 0,
+          "transition_preset_meta": {
+            "id": "ai-demo-cut",
+            "name": "Cut",
+            "source": "ai_edit_demo"
+          },
+          "cursor_events": [],
+          "screenstudio_polish": {},
+          "frame_repairs": [],
+          "video_filters": null,
+          "chroma_key": null,
+          "stabilizer": null,
+          "bg_removal": null,
+          "disabled_video_filters": null,
+          "disabled_chroma_key": null,
+          "disabled_bg_removal": null,
+          "linked_audio_id": null,
+          "compound_group_id": null,
+          "timecode_ms": null,
+          "waveform_sync_peak_ms": null,
+          "audio_sync_offset_ms": null,
+          "compound_group_name": "",
+          "connected_parent_track_id": 1,
+          "connected_parent_clip_id": null,
+          "connected_offset_ms": -900,
+          "clip_role": "",
+          "role_color": "",
+          "audition_group_id": null,
+          "audition_name": "",
+          "audition_active_take_id": "",
+          "audition_takes": [],
+          "nested_sequence_id": null,
+          "nested_sequence_name": "",
+          "nested_child_clips": [],
+          "nested_child_tracks": [],
+          "nested_audio_tracks": [],
+          "nested_spine_actor_tracks": [],
+          "nested_live2d_actor_tracks": []
+        }
+      ],
+      "fades": [],
+      "zoom_actors": [],
+      "speed_segments": [],
+      "typography_actors": [],
+      "node_graph_view_data": {
+        "nodes": [
+          {
+            "id": "N1",
+            "kind": "serial",
+            "label": "Node 1",
+            "x": -246.0,
+            "y": -28.0,
+            "bypassed": false,
+            "user_color": null,
+            "masks": []
+          }
+        ],
+        "connections": [
+          {
+            "src_node": "IN",
+            "src_port": "rgb_out",
+            "dst_node": "N1",
+            "dst_port": "rgb_in"
+          },
+          {
+            "src_node": "N1",
+            "src_port": "rgb_out",
+            "dst_node": "OUT",
+            "dst_port": "rgb_in"
+          }
+        ],
+        "next_id": 2,
+        "io_positions": {
+          "IN": [
+            -360.0,
+            -13.0
+          ],
+          "OUT": [
+            320.0,
+            -13.0
+          ]
+        }
+      },
+      "preview_color_compare_mode": "",
+      "preview_compare_labels_enabled": true,
+      "cursor_events": [],
+      "screenstudio_polish": {},
+      "pip_enabled": true,
+      "pip_x": 0.76,
+      "pip_y": 0.28,
+      "pip_scale": 0.34,
+      "pip_opacity": 0.94,
+      "pip_keyframes": []
+    }
+  ],
+  "audio_tracks": [],
+  "subtitles": [
+    {
+      "text": "AI builds the first cut",
+      "start_ms": 900,
+      "end_ms": 3300,
+      "show_box": true,
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    },
+    {
+      "text": "Transitions, speed ramps, and color",
+      "start_ms": 5200,
+      "end_ms": 8200,
+      "show_box": true,
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    },
+    {
+      "text": "Editable timeline. Local-first workflow.",
+      "start_ms": 11200,
+      "end_ms": 14500,
+      "show_box": true,
+      "style": {
+        "preset_id": "shorts-bold"
+      }
+    }
+  ],
+  "audio_mixer_snapshots": [],
+  "music_compositions": [],
+  "media_pool": [
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+    "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4"
+  ],
+  "media_pool_metadata": [
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "kind": "V",
+      "performance_source": false,
+      "avatar_target": false,
+      "vrm_avatar": false,
+      "mmd_asset": false,
+      "mmd_badge": ""
+    }
+  ],
+  "strokes": [],
+  "bubbles": [],
+  "stickers": [],
+  "timeline_markers": [],
+  "creator_assist_bundle": {},
+  "capcut_creator_package": {},
+  "capcut_short_ranges": [],
+  "render_queue_jobs": [],
+  "lut": {
+    "path": "",
+    "strength": 1.0
+  },
+  "export": {
+    "quality_id": "high",
+    "format_id": "mp4",
+    "audio_quality_id": "",
+    "resolution": null,
+    "fps": 30.0
+  },
+  "proxy": {
+    "enabled": false,
+    "dir": null
+  },
+  "spine_actor_tracks": [],
+  "live2d_actor_tracks": [],
+  "ar_pbr_tracks": [],
+  "mmd_tracks": [],
+  "next_actor_id": 1,
+  "next_live2d_id": 1,
+  "next_ar_pbr_id": 1,
+  "next_mmd_id": 1
+}

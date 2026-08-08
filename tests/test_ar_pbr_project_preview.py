@@ -1,6 +1,6 @@
 import numpy as np
 
-from app.ar_pbr.animation import animated_vertices_for_geometry
+from app.ar_pbr.animation import animated_vertices_for_geometry, skin_matrices_for_clip
 from app.ar_pbr.gpu_preview import build_gpu_preview_items
 from app.ar_pbr.project_tracks import DEFAULT_PREVIEW_SCALE, create_preview_ar_track, transform_position_from_frame_point
 from app.ar_pbr.schema import normalize_ar_tracks
@@ -75,6 +75,7 @@ def test_project_player_reuses_static_ar_pbr_gpu_packet_during_playback(tmp_path
 
     def fake_build_gpu_preview_items(**kwargs):
         calls.append(int(kwargs["time_ms"]))
+        assert kwargs["settings"]["preview_disable_bloom"] is True
         return [
             {
                 "track_id": "ar_pbr_static_cache",
@@ -636,6 +637,117 @@ def test_animation_helper_applies_skeletal_rotation_and_parent_hierarchy():
     assert out != geometry["vertices"]
     assert out[0][0] < 0.1
     assert out[0][1] > 0.9
+
+
+def test_animation_helper_does_not_double_scale_unreal_skeletal_bones():
+    geometry = {
+        "model_id": "mesh_model",
+        "vertices": [[2, 0, 0], [2, 1, 0], [2, 0, 1]],
+        "triangles": [[0, 1, 2]],
+        "skin_weights": [
+            [{"bone_id": "bone_1", "weight": 1.0}],
+            [{"bone_id": "bone_1", "weight": 1.0}],
+            [{"bone_id": "bone_1", "weight": 1.0}],
+        ],
+    }
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        "source_format": "unreal_skeletal_mesh",
+        "units": {"scale_to_meters": 0.01, "source": "unreal_centimeters"},
+        "models": [{"id": "mesh_model", "translation": [0, 0, 0], "scale": [1, 1, 1]}],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+            {"id": "bone_1", "index": 1, "name": "hand", "parent_id": "bone_0", "translation": [1, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+        ],
+        "animation_clips": [{
+            "id": "clip_001",
+            "name": "MoveHand",
+            "duration_ms": 1000.0,
+            "model_curves": {
+                "bone_1": {
+                    "translation": {
+                        "x": [[0.0, 1.0], [1000.0, 2.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    },
+                    "rotation_quat": {
+                        "x": [[0.0, 0.0], [1000.0, 0.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                        "w": [[0.0, 1.0], [1000.0, 1.0]],
+                    },
+                }
+            },
+        }],
+    }
+    track = {
+        "id": "unreal_skeletal",
+        "start_ms": 0,
+        "animation": {"auto_play": True, "loop": False, "speed": 1.0},
+    }
+
+    out = animated_vertices_for_geometry(
+        geometry["vertices"],
+        geometry=geometry,
+        descriptor=descriptor,
+        track=track,
+        time_ms=1000,
+    )
+
+    assert np.allclose(out[0], [3.0, 0.0, 0.0], atol=1.0e-5)
+
+
+def test_gpu_skin_matrix_palette_uses_bone_indices_without_rebuilding_vertices():
+    descriptor = {
+        "bounds": {"center": [0, 0, 0], "size": [4, 4, 4]},
+        "models": [{"id": "mesh_model", "translation": [0, 0, 0], "scale": [1, 1, 1]}],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+            {"id": "bone_1", "index": 1, "name": "hand", "parent_id": "bone_0", "translation": [1, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+        ],
+        "geometries": [{
+            "model_id": "mesh_model",
+            "vertices": [[2, 0, 0], [2, 1, 0], [2, 0, 1]],
+            "triangles": [[0, 1, 2]],
+            "skin_weights": [
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+            ],
+        }],
+        "animation_clips": [{
+            "id": "clip_001",
+            "name": "MoveHand",
+            "duration_ms": 1000.0,
+            "model_curves": {
+                "bone_1": {
+                    "translation": {
+                        "x": [[0.0, 1.0], [1000.0, 2.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    },
+                    "rotation_quat": {
+                        "x": [[0.0, 0.0], [1000.0, 0.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                        "w": [[0.0, 1.0], [1000.0, 1.0]],
+                    },
+                }
+            },
+        }],
+    }
+    track = {
+        "id": "gpu_skin",
+        "start_ms": 0,
+        "animation": {"auto_play": True, "loop": False, "clip": "clip_001", "speed": 1.0},
+    }
+
+    skinning = skin_matrices_for_clip({"descriptor": descriptor}, track, 1000)
+
+    assert skinning is not None
+    assert skinning["bone_count"] == 2
+    assert skinning["animated_bone_count"] == 1
+    assert np.allclose(skinning["matrices"][1] @ np.asarray([2.0, 0.0, 0.0, 1.0]), [3.0, 0.0, 0.0, 1.0])
 
 
 def test_gpu_preview_reports_texture_plan_and_tints_packet_colors(tmp_path):
@@ -1376,8 +1488,34 @@ def test_project_player_depth_view_mode_shows_depth_map_without_compositing(tmp_
     assert not np.array_equal(out, base)
     diagnostics = player._ar_pbr_last_diagnostics
     assert diagnostics["preview_renderer_selected"] == "depth_map_only"
-    assert diagnostics["depth_view"]["mode"] == "grayscale"
+    assert diagnostics["depth_view"]["mode"] == "matte"
     assert diagnostics["depth_view"]["near_is_white"] is True
+
+
+def test_project_player_depth_view_mode_works_without_ar_pbr_tracks(monkeypatch):
+    import app.depth.estimator as estimator
+
+    def fake_estimate(frame, *, source_id="", time_ms=0, **_kwargs):
+        h, w = frame.shape[:2]
+        depth = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :].repeat(h, axis=0)
+        return depth, {"provider": "fake", "source_id": source_id, "time_ms": time_ms}
+
+    monkeypatch.setattr(estimator, "estimate_depth", fake_estimate)
+    player = ProjectPlayer()
+    player._state = PlayerState.PAUSED
+    player.set_ar_pbr_depth_view_mode("depth_map")
+    base = np.zeros((18, 24, 3), dtype=np.uint8)
+
+    out, meta = player._apply_or_defer_ar_pbr_overlay(base, 33)
+
+    assert meta is None
+    assert out.shape == base.shape
+    assert out.dtype == np.uint8
+    assert not np.array_equal(out, base)
+    diagnostics = player._ar_pbr_last_diagnostics
+    assert diagnostics["preview_renderer_selected"] == "depth_map_only"
+    assert diagnostics["active_track_count"] == 0
+    assert diagnostics["depth_view"]["mode"] == "matte"
 
 
 def test_project_player_auto_paused_uses_full_gpu_before_packet(tmp_path, monkeypatch):

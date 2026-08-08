@@ -183,6 +183,14 @@ class VideoEditorRenderQueueBridge:
 
     @property
     def panel(self) -> Any:
+        ensure = getattr(self.owner, "_ensure_render_queue_panel", None)
+        if callable(ensure):
+            try:
+                panel = ensure()
+                if panel is not None:
+                    return panel
+            except Exception:
+                pass
         return getattr(self.owner, "_render_queue_panel", None)
 
     @property
@@ -206,6 +214,8 @@ class VideoEditorRenderQueueBridge:
             return False
 
     def open_section(self, opened: bool = True) -> bool:
+        if opened:
+            _ = self.panel
         opener = getattr(self.owner, "_set_collapsible_host_open", None)
         if not callable(opener):
             return False
@@ -216,6 +226,17 @@ class VideoEditorRenderQueueBridge:
             return False
 
     def toggle_popout(self) -> bool:
+        ensure = getattr(self.owner, "_ensure_render_queue_panel", None)
+        if callable(ensure):
+            _ = self.panel
+        else:
+            ensure = None
+        try:
+            opener = getattr(self.owner, "_set_collapsible_host_open", None)
+            if ensure is not None and callable(opener):
+                opener(self.host, True)
+        except Exception:
+            pass
         toggle = getattr(self.owner, "_toggle_section_popout", None)
         if not callable(toggle):
             return False

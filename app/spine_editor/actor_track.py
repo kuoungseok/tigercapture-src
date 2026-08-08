@@ -84,7 +84,14 @@ class SpineActorClip:
             bounds = renderer.visual_bounds(requested)
         except Exception:
             bounds = None
-        if bounds is None and requested in {"", "default"}:
+        if requested in {"", "default"}:
+            requested_area = 0.0
+            if bounds:
+                min_x, min_y, max_x, max_y = bounds
+                requested_area = max(0.0, float(max_x) - float(min_x)) * max(
+                    0.0,
+                    float(max_y) - float(min_y),
+                )
             best_name = requested
             best_area = 0.0
             for skin_name in sorted(getattr(skeleton, "skins", {}) or {}):
@@ -104,7 +111,9 @@ class SpineActorClip:
                 if area > best_area:
                     best_area = area
                     best_name = str(skin_name)
-            if best_area > 0:
+            # Some exports keep only guides/effects in the default skin. Treat a
+            # default below 5% of the fullest named skin as visually empty.
+            if best_area > 0 and requested_area < best_area * 0.05:
                 resolved = best_name
 
         self._resolved_skin_key = key

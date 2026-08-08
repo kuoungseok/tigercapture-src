@@ -42,6 +42,11 @@ Last updated: 2026-07-08
 - [x] P0: Remove automatic laptop-to-iPad duplication from the full catalog
   builder. If a page does not have a feature-specific iPad/detail source, it
   must render as laptop-only instead of showing the same screen twice.
+- [x] P0: Lock slide 11 and slide 20 device-detail behavior. Slide 11 Color
+  Grading now renders laptop-only unless a controls-only detail adds real
+  meaning; slide 20 AR/PBR now requires the iPad/detail frame to use the
+  standalone AR/PBR or 3D viewer for the same approved plaster statue/bust
+  asset, not the composited video output or duplicated laptop/editor screen.
 - [x] P0: Add semantic capture contract gates for multi-monitor, PPT Maker
   detail, effect/transition/typography/keyframe details, node details, Live2D,
   and MMD. Image existence and nonblack pixels are no longer enough for those
@@ -88,6 +93,11 @@ Last updated: 2026-07-08
   show transition controls/preview, rich typography controls with multiple text
   styles, and keyframe/curve/transform controls respectively; timeline-only
   strips are invalid.
+- [ ] P0: Add and recapture slide 14 `Music Lab / Composition` as a separate
+  composition page. It must show the real current Music Lab surface with prompt
+  composition, sections/chords/MIDI or preview/render-to-timeline controls.
+  Do not substitute Sound Editor, EQ/dynamics, mixer, waveform editing, or a
+  generic audio workbench capture.
 - [ ] P0: Recapture Live2D and MMD pages so the actor/character is visible in
   the editor viewer and the iPad/detail frame is the matching Live2D or MMD
   viewer/detail surface.
@@ -132,6 +142,18 @@ Last updated: 2026-07-08
   source_report or embeds an action log proving `ui.viewer.compare.set` plus
   the relevant feature action (`clip.set_color_grade` for color, node graph/set
   actions for node pages).
+- [ ] Recapture Color Grading, Node Graph, and Node Effects with the
+  comparison-workbench layout: one real full editor/window screenshot where the
+  left Viewer shows `Before`/`After` or `Split` with a visible divider and the
+  right/workbench side shows the actual color/node/effect controls from the same
+  live state. Source reports must prove `compare_viewer_and_controls_same_frame`
+  or `compare_viewer_and_node_controls_same_frame`.
+- [ ] Apply strong compare parameters during recapture: Color Grading should use
+  the researched `cinematic_teal_orange_strong_compare_v1` values from
+  `COLOR_NODE_COMPARE_PRESETS.md`; Node Graph / Node Effects should use a
+  visibly strong Gaussian Blur comparison, normally 24 px and never below 18 px.
+  Source reports must prove `strong_researched_color_preset_applied` or
+  `strong_blur_effect_applied`.
 - [ ] Add/verify VTuber Studio product capture through `vrm_mtoon_gpu`. Block
   `vrm_mtoon_software`, dotted/point-cloud avatar output, meta thumbnails, and
   AR/PBR/PBR renderer substitutions.
@@ -164,6 +186,8 @@ Last updated: 2026-07-08
   real non-neutral grade changes plus a compare capture sidecar.
 - [ ] Node graph scenario with a real node chain and visible before/after or
   split viewer result plus a compare capture sidecar.
+- [ ] Music Lab / composition scenario with prompt composition, sections,
+  chords, MIDI/note evidence, preview mix, and render-to-timeline controls.
 - [ ] Comparison template scenario for color/effect/node/audio before-after
   pages, using `COMPARISON_TEMPLATE_RULES.md`.
 - [ ] Audio/sound editor scenario.

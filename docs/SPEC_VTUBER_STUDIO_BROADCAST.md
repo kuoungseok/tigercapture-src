@@ -29,6 +29,34 @@ point-like contact previews. Renderer contracts expose
 `software_renderer_available=false`, `legacy_software_renderer_disabled=true`,
 `requested_renderer`, `renderer_rewritten`, and rewrite warnings.
 
+The one-shot `render_internal_vrm_fallback_frame(..., renderer=vrm_mtoon_gpu)`
+export helper is not a live-preview renderer. It may be used for QA/export
+proof frames, prewarm, or cache generation, but Studio playback and broadcast
+operator previews must not call it once per displayed frame. Product preview
+must use a persistent VRM/MToon renderer worker or an explicit prerender/runtime
+cache while the worker is warming. Any evidence that uses the cache must mark
+that state separately from true per-frame live VRM rendering.
+
+As of 2026-07-10, source pitch is converted through
+`app.vtuber.vrm_motion_mapping.source_pitch_to_vrm_pitch`: VRM pitch is
+`-source_pitch + rest_bias`, with a default rest bias of `-12` degrees. This is
+intentional. OpenSeeFace CSV pitch is source-space motion and early neutral
+calibration can erase a speaker who already starts slightly looking down. The
+VRM/MToon target must therefore use the shared mapping helper for internal
+fallback renders and VMC messages; do not apply `FaceMotionFrame.pitch_deg`
+directly to VRM head/neck/chest bones.
+
+The current measured live-render diagnostic path is still not real-time, but it
+no longer rebuilds the hidden Qt/GL widget every frame. A 2026-07-10
+Trump/Milica proof with a conservative preview triangle cap of `12000` measured
+about `13.28s` before widget reuse, then about `2.85s` on a cached-widget frame.
+The cached timing was about `1.23s` vertex-buffer build and `0.035s` GL widget
+grab (`gpu_widget_cache_hit=1`). The remaining renderer fix is to remove the
+per-frame CPU vertex-buffer build/service round trip, preferably by persistent
+VRM render sessions with VBO updates and then GPU skinning. Lowering the
+preview triangle cap too aggressively is invalid because it breaks dense
+hair/cloth into dotted artifacts.
+
 Source-person visibility must drive avatar visibility through
 `match_source_person_exposure_to_vrm_visibility`: `face_only` -> `bust_up`,
 `chest_up` / `bust_up` -> `bust_up` / head-to-mid-chest, `upper_body` ->
@@ -138,8 +166,13 @@ Live Target output path.
 - `app/video_editor_popouts.py`
   - owns `VTuberBroadcastStudioWindow`;
   - owns the Avatar Target selector;
-  - shows VRM Avatar Mapping through the Studio mapping monitor instead of
-    reusing arbitrary avatar preview PNGs from old renderer/debug proof output;
+  - uses explicit preview fit modes for Program Output, Source Tracking, and
+    Avatar Mapping so source frames do not overflow, mapping views do not shrink
+    into a monitor-inside-monitor, and Program Output remains an operator
+    monitor rather than a text card;
+  - accepts real VRM Avatar Mapping preview pixmaps from the editor/proof path
+    before falling back to the schematic mapping monitor; old arbitrary
+    renderer/debug proof output must still be rejected by the evidence layer;
   - owns Live Target controls;
   - owns the Broadcast Evidence card;
   - exposes Refresh Evidence, Register RTMP, and Register YouTube View controls.
@@ -188,6 +221,20 @@ items:
 
 - `private_rtmp_ingest`
 - `youtube_unlisted_viewer_playback`
+
+Current Broadcast commercial evidence status, as of 2026-07-10:
+
+- `broadcast_commercial_evidence`: `missing`
+- `private_rtmp_ingest`: not accepted as commercial evidence until a redacted
+  evidence row is registered. A private YouTube ingest smoke can prove the
+  encoder path, but it is still only partial until recorded in the evidence
+  artifact.
+- `youtube_unlisted_viewer_playback`: missing. A YouTube Studio preview that
+  buffers or shows the avatar only briefly is not enough.
+- `commercial_ready`: false.
+
+Ingest health and viewer playback are separate evidence states. A green
+TigerCapture/FFmpeg session must not satisfy the YouTube viewer playback row.
 
 Optional claim-specific evidence:
 

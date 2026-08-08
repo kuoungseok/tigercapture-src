@@ -1,12 +1,13 @@
 ; Inno Setup script for TigerCapture
 ; Build: iscc installer.iss
-; Produces: installer_output\TigerCapture-Setup-<version>.exe
+; Produces: installer_output\TigerCapture-InnoSetup-<version>.exe
 
 #define MyAppName "TigerCapture"
 #define MyAppVersion "1.4.2"
 #define MyAppPublisher "KyoungSeok Ko (artmouse)"
 #define MyAppURL "https://github.com/kuoungseok/tigercapture"
 #define MyAppExeName "TigerCapture.exe"
+#define MyStudioExeName "TigerStudio.exe"
 #define MyAppId "{8F63A81E-3138-4DA9-B6C7-93FCD1CAA378}"
 
 [Setup]
@@ -22,7 +23,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer_output
-OutputBaseFilename={#MyAppName}-Setup-{#MyAppVersion}
+OutputBaseFilename={#MyAppName}-InnoSetup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -51,6 +52,7 @@ Source: "dist\TigerCapture\*"; DestDir: "{app}"; Flags: recursesubdirs createall
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Tiger Studio"; Filename: "{app}\{#MyStudioExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 

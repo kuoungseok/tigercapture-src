@@ -1,8 +1,8 @@
 # Full Product Catalog Page Production Plan
 
-Last updated: 2026-07-08
+Last updated: 2026-07-12
 
-This is the page-by-page production plan for the locked 22-slide
+This is the page-by-page production plan for the locked 23-slide
 `full-product-catalog` deck.
 
 Use this document to decide how each page should be composed before generating
@@ -15,7 +15,7 @@ docs/review_automation/FULL_PRODUCT_CATALOG_TALK_TRACK.md
 
 ## Global Composition Rules
 
-- Use real TigerCapture editor captures for every screen inside a device frame.
+- Use real Tiger Studio editor captures for every screen inside a device frame.
 - Do not use fake/generated editor UI as feature evidence.
 - Approved presentation frames live under:
 
@@ -133,14 +133,14 @@ multi_monitor_front_facing_catalog_template_v2_tight_clean.screen-map.json
 - A screen looks pasted on top of the monitor rather than inside it.
 - Left monitor contains only one sparse Live2D view with no 3D/character work
   context.
-- The slide's copy implies that TigerCapture requires exactly three monitors.
+- The slide's copy implies that Tiger Studio requires exactly three monitors.
 - Any monitor payload lacks its semantic contract:
   `multi_monitor_left_workspace_v1`, `multi_monitor_center_editor_v1`, or
   `multi_monitor_right_workspace_v1`.
 - Center monitor contains node graph/workbench content that belongs on the
   right monitor, or a side monitor duplicates the center editor payload.
 
-### 2. TigerCapture Studio
+### 2. Tiger Studio
 
 **Layout:** Laptop catalog template or clean laptop/iPad template without using
 the iPad as the main message.
@@ -462,31 +462,48 @@ capture.screenshot
 ### 11. Color Grading Workspace
 
 **Layout:** Laptop catalog template or color-grading reference composition.
+Prefer laptop-only for this page unless the iPad/detail frame adds a meaningful
+color-control close-up.
 
 **Screen composition:**
 
 - Laptop/main screen shows the redesigned color grading workspace with real
   footage, visible before/after or split comparison, and timeline context.
-- iPad/detail frame shows only the color-control close-up: color wheels,
-  curves, scopes, tone controls, and sliders.
+- Preferred main evidence is a single full editor/window capture in the
+  comparison-workbench layout: Viewer on the left, `Before`/`After` or `Split`
+  labels visible, a vertical comparison divider visible, and Color Grading
+  controls on the right. The Viewer and controls must come from the same live
+  editor state.
+- iPad/detail frame is optional. If used, it must show only a meaningful
+  color-control close-up: color wheels, curves, scopes, tone controls, and
+  sliders. If this close-up does not add information beyond the main
+  comparison-workbench capture, omit the iPad and use the laptop-only template.
 - The iPad/detail frame must not contain a video viewer, media pool, or
-  timeline. It is not a second miniature editor.
+  timeline. It is not a second miniature editor and must never be a smaller
+  duplicate of the laptop screen.
 - Viewer uses beautiful footage where color changes are obvious.
 
 **Capture sources:**
 
 - City night, HDR/OLED, architecture, or cinematic footage.
 - Real color grading UI.
+- Research preset values from `COLOR_NODE_COMPARE_PRESETS.md`. Default to
+  `cinematic_teal_orange_strong_compare_v1` so the comparison is obvious at
+  slide scale.
 
 **Build method:**
 
 ```text
 media.import_to_timeline
 color.workspace.open
-color.set_wheels_or_curves
+color.set_wheels_or_curves(preset=cinematic_teal_orange_strong_compare_v1)
 ui.viewer.compare.set(mode=split)
+capture.full_editor_with_compare_viewer_and_controls
 capture.screenshot
-write .capture-contract.json with changed_params and visible_delta=true
+write .capture-contract.json with changed_params, visible_delta=true,
+compare_viewer_and_controls_same_frame=true, color_controls_visible=true,
+strong_researched_color_preset_applied=true,
+cinematic_teal_orange_preset_applied=true, preset_source_urls=[...]
 ```
 
 **Reject if:**
@@ -495,10 +512,16 @@ write .capture-contract.json with changed_params and visible_delta=true
 - Color controls are missing.
 - The page reuses a generic editor screenshot without a color workspace.
 - The viewer is black or does not show a visible before/after result.
+- The comparison Viewer and color controls are separate pasted captures instead
+  of one full editor/window screenshot from the same state.
 - The iPad/detail frame contains the whole editor, viewer, media pool, or
   timeline instead of a controls-only color close-up.
+- The iPad/detail frame is present but does not explain color grading better
+  than the main laptop capture. In that case, render the page laptop-only.
 - Grade parameters are neutral/identity values, or the sidecar contract is
   missing/non-specific.
+- The grade uses tiny parameter changes that do not visibly alter the image at
+  catalog slide scale.
 
 ### 12. Node Graph Composition
 
@@ -509,7 +532,10 @@ write .capture-contract.json with changed_params and visible_delta=true
 - Node graph appears as the main evidence.
 - Connected nodes with real names are visible.
 - Selected node parameters appear beside or below the graph.
-- Viewer should show the affected media when possible.
+- Viewer should show the affected media through the same comparison-workbench
+  layout whenever possible: split/before-after Viewer on the left, node graph
+  and selected node parameters on the right/workbench, all in one live editor
+  capture.
 
 **Capture sources:**
 
@@ -527,10 +553,13 @@ Media In -> Blur -> Color Grade -> Composite -> Output
 node.graph.set
 node.add
 node.connect
-node.set_param
+node.set_param(example=Gaussian Blur, radius_px=24)
 ui.viewer.compare.set(mode=split)
+capture.full_editor_with_compare_viewer_and_node_controls
 capture.screenshot
-write .capture-contract.json with changed_params and visible_delta=true
+write .capture-contract.json with changed_params, visible_delta=true,
+compare_viewer_and_node_controls_same_frame=true,
+node_or_effect_controls_visible=true, strong_blur_effect_applied=true
 ```
 
 **Reject if:**
@@ -539,8 +568,12 @@ write .capture-contract.json with changed_params and visible_delta=true
 - Node names are fake or not implemented.
 - No selected node parameters are visible.
 - The viewer does not show a result from the node chain.
+- The Viewer comparison and node controls are from different screenshots or a
+  pasted mock composition.
 - Node parameters are neutral/identity values, or the sidecar contract is
   missing/non-specific.
+- The blur/effect value is too subtle. Gaussian Blur should normally use about
+  24 px and must not be below 18 px for catalog evidence.
 
 ### 13. Node Effects Library
 
@@ -557,6 +590,9 @@ write .capture-contract.json with changed_params and visible_delta=true
   clearest implemented UI and visible image difference.
 - The before/after can be shown as `Effect Off | Effect On`,
   `Node Off | Node On`, or an iPad/detail crop of the affected viewer region.
+- Preferred laptop/main evidence still uses one full comparison-workbench
+  capture where the Viewer comparison and selected node/effect controls are
+  visible together.
 
 **Capture sources:**
 
@@ -570,12 +606,15 @@ write .capture-contract.json with changed_params and visible_delta=true
 ```text
 node.library.open
 node.category.select
-node.add(example effect)
-node.set_param(example effect)
+node.add(example effect=Gaussian Blur)
+node.set_param(example effect=Gaussian Blur, radius_px=24)
 ui.viewer.compare.set(mode=split)
 node.preview_or_param_focus
+capture.full_editor_with_compare_viewer_and_node_controls
 capture.screenshot
-write .capture-contract.json with changed_params and visible_delta=true
+write .capture-contract.json with changed_params, visible_delta=true,
+compare_viewer_and_node_controls_same_frame=true,
+node_or_effect_controls_visible=true, strong_blur_effect_applied=true
 ```
 
 **Reject if:**
@@ -584,10 +623,58 @@ write .capture-contract.json with changed_params and visible_delta=true
 - The node categories shown in copy do not exist in the UI.
 - No concrete effect result or before/after comparison is visible.
 - The laptop view and iPad detail are from unrelated editor states.
+- The laptop/main evidence shows only the library or only the comparison result
+  rather than the comparison Viewer and node/effect controls together.
 - The example effect uses neutral/identity values, or the sidecar contract is
   missing/non-specific.
+- The example effect is weaker than a visible Gaussian Blur comparison without a
+  documented reason.
 
-### 14. Audio Workbench
+### 14. Music Lab / Composition
+
+**Layout:** Laptop/iPad detail layout.
+
+**Screen composition:**
+
+- Laptop: real Tiger Studio Music Lab or composition workbench surface.
+- Show prompt composition, genre/mood, BPM/key, arranger sections, chord
+  progression, MIDI/note view, preview mix, generated stems, or
+  render-to-timeline controls.
+- iPad/detail: selected composition detail only, such as section/chord/MIDI
+  controls, preview mix, or render controls.
+- This page explains composition. It is not an audio correction, EQ, dynamics,
+  mixer, or waveform-editing page.
+
+**Capture sources:**
+
+- Real current Music Lab UI from Tiger Studio.
+- Use a generated composition state, not an empty panel.
+- If the same workflow renders to the timeline, keep the timeline supporting;
+  do not make it the only visible proof.
+
+**Build method:**
+
+```text
+music.lab.open
+music.compose or music.compose_to_timeline
+music.section.select
+music.preview.play or music.render.preview
+music.render_to_timeline
+capture.screenshot
+write .capture-contract.json with music_lab, composition_surface,
+prompt_composition, and non_empty_composition=true
+```
+
+**Reject if:**
+
+- The page shows Sound Editor, EQ, dynamics, mixer, or waveform editing instead
+  of composition.
+- The iPad/detail frame is a full editor duplicate or a timeline-only crop.
+- No prompt, sections, chords, notes/MIDI, preview mix, or render controls are
+  visible.
+- The page is text-only or uses generic audio evidence.
+
+### 15. Audio Workbench
 
 **Layout:** Laptop template with workbench visible.
 
@@ -617,7 +704,7 @@ capture.screenshot
 - The audio editor appears disconnected from the selected project.
 - No waveform/level/audio evidence is visible.
 
-### 15. EQ, Dynamics And FX Curves
+### 16. EQ, Dynamics And FX Curves
 
 **Layout:** Laptop/iPad detail layout.
 
@@ -647,7 +734,7 @@ capture.screenshot
 - Only generic audio text is visible.
 - Detail area has no curve, waveform, level, or control surface.
 
-### 16. Live2D And Spine Actor Tracks
+### 17. Live2D And Spine Actor Tracks
 
 **Layout:** Laptop/iPad detail layout.
 
@@ -685,7 +772,7 @@ capture.screenshot
   the Live2D actor. A generic editor crop or unrelated timeline strip is
   invalid.
 
-### 17. VRM VTuber Studio
+### 18. VRM VTuber Studio
 
 **Layout:** Laptop/iPad detail or laptop-only studio page.
 
@@ -756,7 +843,7 @@ capture.screenshot
 - The slide uses a generated/synthetic VRM summary image instead of the actual
   studio layout capture.
 
-### 18. MMD / Character Motion
+### 19. MMD / Character Motion
 
 **Layout:** Laptop template with character motion UI visible.
 
@@ -799,24 +886,26 @@ capture.screenshot
 - The iPad/detail frame is not an MMD viewer/detail surface. Live2D, AR/PBR, or
   generic editor screenshots must not be substituted for MMD evidence.
 
-### 19. AR/PBR 3D Composite
+### 20. AR/PBR 3D Composite
 
 **Layout:** Laptop/iPad detail layout.
 
 **Screen composition:**
 
-- Laptop/monitor: normal TigerCapture editor view with a small 3D viewer or
+- Laptop/monitor: normal Tiger Studio editor view with a small 3D viewer or
   visible 3D object inside the editing workflow.
 - The laptop/monitor's video viewer must show the 3D object large enough to
   read immediately. Zoom/pan the 3D object so it is a clear subject in the
   viewer, not a tiny prop at the edge of the frame.
-- iPad/detail: standalone AR/PBR viewer window.
+- iPad/detail: standalone AR/PBR or 3D viewer window. This detail frame must
+  show the actual 3D viewer, not the composited Program Output/video result.
 - Same-asset lock: the laptop/monitor video viewer and the iPad/detail AR/PBR
   viewer must show the same named 3D asset. If the iPad uses the approved
   plaster statue/bust, the laptop/monitor video viewer must also show that
   plaster statue/bust inside the edit. A camera model, vehicle, or unrelated
   3D object in the laptop video viewer is invalid for this page.
-- The standalone viewer should use the approved plaster statue/bust model.
+- The standalone viewer should use the approved plaster statue/bust model and
+  must write the semantic contract `ar_pbr_standalone_viewer_detail_v1`.
 
 **Capture sources:**
 
@@ -827,6 +916,12 @@ E:\ClaudeCodeApp\3d\Somewhat_Recognizable-668ed982\gltf\converted\somewhat_recog
 ```
 
 - Current AR/PBR viewer capture with environment background hidden.
+- Current standalone AR/PBR/3D viewer capture for the iPad/detail frame:
+
+```text
+E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\fresh_review_recapture\ar_pbr_statue_composite\ar_pbr_statue_viewer_detail_action.png
+```
+
 - Real editor capture showing the same 3D object inside the video viewer/editing
   context.
 - Required matched editor capture path:
@@ -853,6 +948,8 @@ capture.screenshot
 
 - The laptop and iPad show the same standalone 3D viewer.
 - The laptop does not show normal editor context.
+- The iPad/detail frame shows the composited video output, a raw video frame,
+  or Program Output instead of the standalone 3D viewer.
 - The laptop video viewer and iPad/detail viewer show different 3D assets.
 - The laptop viewer contains a tiny or hard-to-see 3D object.
 - The model is the old motorcycle debug asset.
@@ -860,7 +957,7 @@ capture.screenshot
 - The page uses a pasted/fake 3D insert instead of a real editor capture after
   loading the asset into the edit.
 
-### 20. Creator Assist
+### 21. Creator Assist
 
 **Layout:** Laptop template or laptop/iPad detail if the assistant panel needs a
 close-up.
@@ -890,7 +987,7 @@ capture.screenshot
 - It looks like a QA dashboard.
 - The assistant panel is unrelated to the visible editor state.
 
-### 21. Export And Render Queue
+### 22. Export And Render Queue
 
 **Layout:** Laptop template.
 
@@ -919,12 +1016,12 @@ capture.screenshot
 
 **Reject if:**
 
-- MRQ or Unreal Bridge is mentioned.
+- Internal renderer bridge names are mentioned.
 - QA readiness numbers appear.
 - Export screen has no project context.
 - The timeline visual style does not match the current editor reference.
 
-### 22. Specification Index Closing Page
+### 23. Specification Index Closing Page
 
 **Layout:** Clean product-catalog specification index page.
 
@@ -935,7 +1032,7 @@ capture.screenshot
 - Use the same visual grammar as the approved catalog templates: ivory paper,
   dark outer background, thin section label, restrained footer, and generous
   negative space.
-- Left side: `TigerCapture Studio / Specification Index` title and dense
+- Left side: `Tiger Studio / Specification Index` title and dense
   micro-spec text. The text may be intentionally small, like a product catalog
   specification block.
 - Right side: approved blue-pot bonsai cutout.
@@ -989,7 +1086,7 @@ E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\catalog_spec_closing\spec_closing
   depth-aware compositing, PPTX, or MP4.
 - The spec text reads like an implementation checklist instead of product
   capability categories.
-- The page mentions MRQ, Unreal Bridge, Marmoset, QA readiness numbers, or
+- The page mentions internal renderer bridge names, Marmoset, QA readiness numbers, or
   pass/fail status language.
 - The tree has a visible white fringe, checkerboard leftovers, or a large
   pasted-object shadow.

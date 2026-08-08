@@ -4,6 +4,8 @@ Pillow>=10.4.0
 imageio>=2.36.0
 imageio-ffmpeg>=0.5.1
 numpy>=2.1.0
+opencolorio>=2.5.2
+PyOpenGL>=3.1.10
 windows-capture>=2.0.0
 pyqtgraph>=0.13.0
 superqt>=0.7.0
@@ -12,3 +14,6 @@ opencv-python>=4.8.0
 live2d-py>=0.7.0.4
 wasmtime>=46.0.1
 gradio_client>=2.5.0
+# Figma .fig archives compress their document chunk with zstd. Python 3.14 ships
+# compression.zstd (PEP 784), so the dependency is only needed before that.
+zstandard>=0.23.0; python_version < "3.14"

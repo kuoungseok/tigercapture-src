@@ -7,17 +7,21 @@ remain internal and are not shown as JSON in the UI.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Any
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDockWidget,
     QFrame,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -62,6 +66,25 @@ from app.ar_pbr.hybrid_rendering import (
     DEFAULT_HYBRID_SAMPLE_COUNT,
     DEFAULT_SPECULAR_GI_STRENGTH,
 )
+from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+    DEFAULT_BLOOM_BOOST,
+    DEFAULT_BLOOM_RADIUS,
+    DEFAULT_BLOOM_STRENGTH,
+    DEFAULT_BLOOM_THRESHOLD,
+    DEFAULT_GRAIN_SCALE,
+    DEFAULT_GRAIN_SEED,
+    DEFAULT_GRAIN_STRENGTH,
+    DEFAULT_POST_EFFECTS_MODE,
+    DEFAULT_SHARPEN_RADIUS,
+    DEFAULT_SHARPEN_STRENGTH,
+    DEFAULT_VIGNETTE_FEATHER,
+    DEFAULT_VIGNETTE_RADIUS,
+    DEFAULT_VIGNETTE_STRENGTH,
+    normalize_post_effects_settings,
+)
 from app.ar_pbr.asset_support import asset_support_status_text
 from app.ar_pbr.render_profile import (
     PROFILE_AUTHORED,
@@ -71,6 +94,7 @@ from app.ar_pbr.render_profile import (
     marmoset_pbr_available,
     vrm_mtoon_available,
 )
+from app.ar_pbr.render_environment import normalize_environment_visibility, resolve_render_mode
 from app.ar_pbr.shadow import DEFAULT_SHADOW_STRENGTH
 from app.ar_pbr.surface import (
     DEFAULT_SURFACE_METALLIC,
@@ -108,6 +132,107 @@ def _render_profile_combo_rows(render_profiles: dict[str, Any] | None) -> list[d
             "enabled": True,
         })
     return rows
+
+
+_LOOK_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "neutral",
+        "label": "Neutral",
+        "status": "Look: Neutral",
+        "settings": {
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+            "vignette_strength": 0.0,
+            "grain_strength": 0.0,
+            "sharpen_strength": 0.0,
+        },
+    },
+    {
+        "id": "ao_proof",
+        "label": "AO Proof",
+        "status": "Look: AO Proof",
+        "settings": {
+            "ambient_occlusion_mode": "screen",
+            "ao_strength": 1.35,
+            "ao_radius": 11.0,
+            "ao_distance": 0.85,
+            "shadow_strength": 0.86,
+            "self_shadow_strength": 0.68,
+            "tone_exposure": -0.04,
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+        },
+    },
+    {
+        "id": "bloomed",
+        "label": "Bloomed",
+        "status": "Look: Bloomed",
+        "settings": {
+            "post_effects_mode": "post_effects",
+            "bloom_enabled": True,
+            "bloom_strength": 1.05,
+            "bloom_radius": 16.0,
+            "bloom_threshold": 0.46,
+            "bloom_kernel": "cinematic",
+            "bloom_convolution_scale": 1.35,
+            "bloom_scatter": 1.45,
+            "bloom_boost": 1.05,
+            "bloom_anamorphic_strength": 2.10,
+            "bloom_anamorphic_threshold": 0.88,
+            "bloom_anamorphic_ratio": 7.4,
+            "vignette_strength": 0.08,
+            "vignette_radius": 0.78,
+            "vignette_feather": 0.34,
+            "sharpen_strength": 0.10,
+            "sharpen_radius": 0.8,
+            "ibl_exposure": 1.34,
+            "direct_strength": 0.64,
+            "tone_exposure": 0.04,
+            "surface_override_strength": 0.22,
+            "surface_roughness": 0.30,
+            "surface_reflectance": 0.68,
+            "clearcoat_strength": 0.30,
+            "clearcoat_roughness": 0.20,
+            "ambient_occlusion_mode": "screen",
+            "ao_strength": 0.72,
+        },
+    },
+    {
+        "id": "off",
+        "label": "Off",
+        "status": "Look: Effects Off",
+        "settings": {
+            "ambient_occlusion_mode": "off",
+            "ao_strength": 0.0,
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+            "vignette_strength": 0.0,
+            "grain_strength": 0.0,
+            "sharpen_strength": 0.0,
+        },
+    },
+)
+_LOOK_PRESET_IDS = {str(row["id"]) for row in _LOOK_PRESETS}
+
+
+def preview_look_preset_rows() -> tuple[dict[str, str], ...]:
+    return tuple({"id": str(row["id"]), "label": str(row["label"])} for row in _LOOK_PRESETS)
+
+
+def preview_look_preset_settings(preset_id: str) -> dict[str, Any]:
+    normalized = str(preset_id or "neutral").strip().casefold()
+    for row in _LOOK_PRESETS:
+        if str(row["id"]) == normalized:
+            return dict(row["settings"])
+    return dict(_LOOK_PRESETS[0]["settings"])
+
+
+def _look_preset_status(preset_id: str) -> str:
+    normalized = str(preset_id or "neutral").strip().casefold()
+    for row in _LOOK_PRESETS:
+        if str(row["id"]) == normalized:
+            return str(row["status"])
+    return str(_LOOK_PRESETS[0]["status"])
 
 
 class _ArPbrPreviewLoader(QThread):
@@ -195,6 +320,98 @@ class _ArPbrPreviewLoader(QThread):
             if timer is not None:
                 timer.mark("error", status="error", detail=f"{type(exc).__name__}: {exc}")
             self.failed.emit(f"{type(exc).__name__}: {exc}")
+
+
+class _AnimationFrameBuildWorker(QThread):
+    frame_ready = Signal(object)
+    frame_failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: dict[str, Any],
+        track: dict[str, Any],
+        time_ms: int,
+        generation: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._track = dict(track)
+        self._time_ms = int(time_ms)
+        self._generation = int(generation)
+
+    def run(self) -> None:
+        try:
+            from tools.ar_pbr_gpu_window import build_vertex_buffer
+
+            vertices, mesh_diag = build_vertex_buffer(
+                self._descriptor,
+                track=self._track,
+                time_ms=self._time_ms,
+            )
+            self.frame_ready.emit({
+                "generation": self._generation,
+                "time_ms": self._time_ms,
+                "vertices": vertices,
+                "mesh_diag": dict(mesh_diag or {}),
+            })
+        except Exception as exc:
+            self.frame_failed.emit({
+                "generation": self._generation,
+                "time_ms": self._time_ms,
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
+
+
+class _NativeRtRenderWorker(QThread):
+    rendered = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: dict[str, Any],
+        *,
+        output_path: str,
+        track: dict[str, Any] | None,
+        mode: str,
+        camera_visible: bool,
+        reflection_visible: bool,
+        hdri_path: str | Path | None,
+        ibl_rotation: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._output_path = output_path
+        self._track = dict(track or {})
+        self._mode = mode
+        self._camera_visible = bool(camera_visible)
+        self._reflection_visible = bool(reflection_visible)
+        self._hdri_path = hdri_path
+        self._ibl_rotation = float(ibl_rotation)
+
+    def run(self) -> None:
+        try:
+            from app.ar_pbr.native_rt import render_descriptor_native_rt
+
+            payload = render_descriptor_native_rt(
+                self._descriptor,
+                output_path=self._output_path,
+                track=self._track,
+                mode=self._mode,
+                samples=16 if self._mode == "path_traced" else 1,
+                bounces=3,
+                camera_visible=self._camera_visible,
+                reflection_visible=self._reflection_visible,
+                hdri_path=self._hdri_path,
+                ibl_rotation=self._ibl_rotation,
+            )
+            if not payload.get("ok"):
+                raise RuntimeError(str(payload.get("native") or payload.get("stderr") or "native RT render failed"))
+            self.rendered.emit(payload)
+        except Exception as exc:
+            self.failed.emit({"error": type(exc).__name__, "message": str(exc)})
 
 
 class _SliderRow(QWidget):
@@ -324,6 +541,74 @@ class _ComboRow(QWidget):
         self.value_changed.emit(self.value())
 
 
+class _TopSliderRow(QWidget):
+    value_changed = Signal(float)
+
+    def __init__(
+        self,
+        label: str,
+        minimum: float,
+        maximum: float,
+        value: float,
+        *,
+        steps: int = 1000,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.minimum = float(minimum)
+        self.maximum = float(maximum)
+        self._block_emit = False
+        self.setObjectName("ArPbrTopSliderRow")
+        self.setMinimumWidth(130)
+        self.setMaximumWidth(154)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(4)
+        title = QLabel(label, self)
+        title.setObjectName("ArPbrTopSliderLabel")
+        self._value = QLabel("", self)
+        self._value.setObjectName("ArPbrTopSliderValue")
+        self._value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(title)
+        top.addStretch(1)
+        top.addWidget(self._value)
+        layout.addLayout(top)
+
+        self.slider = StudioSlider("accent", self)
+        self.slider.setRange(0, max(1, int(steps)))
+        self.slider.valueChanged.connect(self._on_slider_changed)
+        layout.addWidget(self.slider)
+        self.set_value(value, emit=False)
+
+    def set_value(self, value: float, *, emit: bool = False) -> None:
+        value = max(self.minimum, min(self.maximum, float(value)))
+        ratio = (value - self.minimum) / max(self.maximum - self.minimum, 1e-8)
+        self._block_emit = not emit
+        self.slider.setValue(int(round(ratio * self.slider.maximum())))
+        self._block_emit = False
+        self._set_value_label(value)
+        if emit:
+            self.value_changed.emit(value)
+
+    def value(self) -> float:
+        ratio = self.slider.value() / max(float(self.slider.maximum()), 1.0)
+        return self.minimum + (self.maximum - self.minimum) * ratio
+
+    def _set_value_label(self, value: float) -> None:
+        self._value.setText(f"{value:.2f}")
+
+    def _on_slider_changed(self, _raw: int) -> None:
+        value = self.value()
+        self._set_value_label(value)
+        if not self._block_emit:
+            self.value_changed.emit(value)
+
+
 class ArPbrAssetPreviewWindow(QMainWindow):
     """Realtime preview for FBX/GLB media-pool assets."""
 
@@ -335,9 +620,14 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         initial_lighting: dict[str, Any] | None = None,
+        initial_view: dict[str, Any] | None = None,
+        left_panel: QWidget | None = None,
         track_label: str = "",
         max_triangles: int = 120_000,
         texture_max_size: int = 1024,
+        controls_mode: str = "full",
+        display_title: str = "",
+        display_subtitle: str = "",
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.asset_path = Path(asset_path).expanduser().resolve()
@@ -349,13 +639,39 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._descriptor: dict[str, Any] = {}
         self._render_profiles: dict[str, Any] = {}
         self._initial_lighting = dict(initial_lighting or {})
+        self._initial_view = dict(initial_view or {})
+        self._left_panel = left_panel
+        self._animation_timer: QTimer | None = None
+        self._animation_track: dict[str, Any] | None = None
+        self._animation_started_at = 0.0
+        self._animation_duration_ms = 0.0
+        self._animation_generation = 0
+        self._animation_frame_worker: _AnimationFrameBuildWorker | None = None
+        self._native_rt_worker: _NativeRtRenderWorker | None = None
+        self._animation_pending_frame: tuple[dict[str, Any], int, int] | None = None
+        mode = str(controls_mode or "full").strip().casefold()
+        self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
+        self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
+        self._active_look_preset = str(self._initial_lighting.get("look_preset") or "neutral").strip().casefold()
+        if self._active_look_preset not in _LOOK_PRESET_IDS:
+            self._active_look_preset = "neutral"
+        self._look_combo: QComboBox | None = None
+        self._top_bloom_strength: _TopSliderRow | None = None
+        self._top_bloom_threshold: _TopSliderRow | None = None
+        self._top_hdri_combo: QComboBox | None = None
         self._render_profile = str(self._initial_lighting.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
         if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
             self._render_profile = PROFILE_AUTHORED
         self._hdri_presets: list[HdriPreset] = hdri_presets()
         initial_hdri_key = str(self._initial_lighting.get("hdri_id") or self._initial_lighting.get("hdri_path") or "")
         self._selected_hdri = resolve_hdri_preset(initial_hdri_key)
-        self._background_visible = bool(self._initial_lighting.get("show_environment_background", True))
+        initial_environment = normalize_environment_visibility(self._initial_lighting)
+        initial_render_mode = resolve_render_mode(self._initial_lighting)
+        self._background_visible = bool(initial_environment["camera_visible"])
+        self._reflection_environment_visible = bool(initial_environment["reflection_visible"])
+        self._diffuse_environment_visible = bool(initial_environment["diffuse_visible"])
+        self._refraction_environment_visible = bool(initial_environment["refraction_visible"])
+        self._render_mode = str(initial_render_mode["requested"])
         self._preview_max_triangles = max(1_000, int(max_triangles))
         self._preview_texture_max_size = max(64, int(texture_max_size))
         self._suppress_emit = False
@@ -379,9 +695,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         header.addWidget(title_icon)
         title_col = QVBoxLayout()
         title_col.setSpacing(1)
-        self._title = QLabel(self.asset_path.name, self)
+        self._title = QLabel(str(display_title or self.asset_path.name), self)
         self._title.setObjectName("ArPbrPreviewTitle")
-        self._subtitle = QLabel(str(self.asset_path.parent), self)
+        self._subtitle = QLabel(str(display_subtitle or self.asset_path.parent), self)
         self._subtitle.setObjectName("ArPbrPreviewSubtitle")
         title_col.addWidget(self._title)
         title_col.addWidget(self._subtitle)
@@ -389,10 +705,40 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._status = QLabel("Loading 3D asset", self)
         self._status.setObjectName("ArPbrPreviewStatus")
         header.addWidget(self._status)
+        look_label = QLabel("Look", self)
+        look_label.setObjectName("ArPbrTopControlLabel")
+        header.addWidget(look_label)
+        self._look_combo = QComboBox(self)
+        self._look_combo.setObjectName("ArPbrLookCombo")
+        self._look_combo.setMinimumWidth(138)
+        self._look_combo.setEnabled(False)
+        self._look_combo.setToolTip("Preview-only look preset")
+        self._populate_look_combo()
+        header.addWidget(self._look_combo)
+        self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 4.0, DEFAULT_BLOOM_STRENGTH, parent=self)
+        self._top_bloom_strength.setToolTip("Bloom strength for the Bloomed preview look")
+        self._top_bloom_strength.setEnabled(False)
+        header.addWidget(self._top_bloom_strength)
+        self._top_bloom_threshold = _TopSliderRow("Threshold", 0.0, 1.0, DEFAULT_BLOOM_THRESHOLD, parent=self)
+        self._top_bloom_threshold.setToolTip("Lower values make bloom appear on darker highlights")
+        self._top_bloom_threshold.setEnabled(False)
+        header.addWidget(self._top_bloom_threshold)
+        if self._simple_cubemap_controls:
+            cubemap_label = QLabel("Cubemap", self)
+            cubemap_label.setObjectName("ArPbrTopControlLabel")
+            header.addWidget(cubemap_label)
+            self._top_hdri_combo = QComboBox(self)
+            self._top_hdri_combo.setObjectName("ArPbrHdriCombo")
+            self._top_hdri_combo.setMinimumWidth(240)
+            self._top_hdri_combo.setEnabled(False)
+            self._top_hdri_combo.setToolTip("HDR cubemap preset used for lighting")
+            header.addWidget(self._top_hdri_combo)
         layout.addLayout(header)
 
         body = QHBoxLayout()
         body.setSpacing(0)
+        if self._left_panel is not None:
+            body.addWidget(self._left_panel, stretch=0)
         self._viewport_host = QFrame(self)
         self._viewport_host.setObjectName("ArPbrViewportHost")
         self._viewport_layout = QVBoxLayout(self._viewport_host)
@@ -457,6 +803,41 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._hdri_combo.setToolTip("HDR cubemap preset")
         combo_row.addWidget(self._hdri_combo, stretch=1)
         controls_layout.addLayout(combo_row)
+
+        self._render_mode_combo = QComboBox(controls)
+        self._render_mode_combo.setObjectName("ArPbrHdriCombo")
+        for label, value in (
+            ("IBL Realtime", "ibl_realtime"),
+            ("Hybrid RT", "hybrid_rt"),
+            ("Path Traced", "path_traced"),
+            ("Studio Lights Only", "studio_lights_only"),
+        ):
+            self._render_mode_combo.addItem(label, value)
+        mode_index = self._render_mode_combo.findData(self._render_mode)
+        self._render_mode_combo.setCurrentIndex(max(0, mode_index))
+        self._render_mode_combo.setToolTip(
+            "Hardware modes fall back honestly to IBL Realtime until a native DXR/Vulkan RT helper is available."
+        )
+        self._render_mode_combo.currentIndexChanged.connect(self._on_render_mode_changed)
+        controls_layout.addWidget(self._render_mode_combo)
+        self._native_rt_button = QPushButton("Render RT Frame...", controls)
+        self._native_rt_button.setToolTip("Render this asset with the isolated native DXR helper")
+        self._native_rt_button.clicked.connect(self._render_native_rt_frame)
+        controls_layout.addWidget(self._native_rt_button)
+
+        environment_visibility_row = QHBoxLayout()
+        self._diffuse_env_check = QCheckBox("Diffuse HDRI", controls)
+        self._reflection_env_check = QCheckBox("Reflection HDRI", controls)
+        self._refraction_env_check = QCheckBox("Refraction HDRI", controls)
+        for check, checked in (
+            (self._diffuse_env_check, self._diffuse_environment_visible),
+            (self._reflection_env_check, self._reflection_environment_visible),
+            (self._refraction_env_check, self._refraction_environment_visible),
+        ):
+            check.setChecked(bool(checked))
+            check.toggled.connect(self._on_environment_visibility_changed)
+            environment_visibility_row.addWidget(check)
+        controls_layout.addLayout(environment_visibility_row)
 
         self._ibl_exposure = _SliderRow("Environment Intensity", 0.0, 4.0, 1.1, parent=controls, kind="accent")
         self._ibl_rotation = _SliderRow("Environment Rotation", -180.0, 180.0, 0.0, suffix="deg", parent=controls, kind="accent")
@@ -654,6 +1035,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         controls_dock.setWidget(controls)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, controls_dock)
         self._controls_dock = controls_dock
+        if self._simple_cubemap_controls:
+            controls_dock.hide()
 
         for row, callback in (
             (self._ibl_exposure, self._set_ibl_exposure),
@@ -696,9 +1079,196 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._ao_mode.value_changed.connect(self._set_ambient_occlusion_mode)
         self._render_profile_combo.currentIndexChanged.connect(self._set_render_profile_index)
         self._hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
+        if self._look_combo is not None:
+            self._look_combo.currentIndexChanged.connect(self._set_look_preset_index)
+        if self._top_bloom_strength is not None:
+            self._top_bloom_strength.value_changed.connect(self._set_bloom_strength)
+        if self._top_bloom_threshold is not None:
+            self._top_bloom_threshold.value_changed.connect(self._set_bloom_threshold)
+        if self._top_hdri_combo is not None:
+            self._top_hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
         self._sync_background_button()
 
         self._start_loading()
+
+    def attach_animation_clip(self, clip: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(clip, dict):
+            raise TypeError("animation clip must be a dictionary")
+        clips = self._descriptor.setdefault("animation_clips", [])
+        if not isinstance(clips, list):
+            clips = []
+            self._descriptor["animation_clips"] = clips
+        incoming_id = str(clip.get("id") or "")
+        incoming_name = str(clip.get("name") or "")
+        replaced = False
+        for index, existing in enumerate(list(clips)):
+            if not isinstance(existing, dict):
+                continue
+            existing_id = str(existing.get("id") or "")
+            existing_name = str(existing.get("name") or "")
+            if (incoming_id and incoming_id == existing_id) or (incoming_name and incoming_name == existing_name):
+                clips[index] = dict(clip)
+                replaced = True
+                break
+        if not replaced:
+            clips.append(dict(clip))
+        self._descriptor["animation_count"] = len(clips)
+        self._render_profiles = inspect_asset_render_profiles_from_descriptor(self._descriptor)
+        return dict(clip)
+
+    def apply_animation_preview_once(self, clip_name: str, *, duration_ms: float | None = None) -> dict[str, Any]:
+        clip = self._find_animation_clip(clip_name)
+        if clip is None:
+            result = {
+                "status": "unavailable",
+                "reason": "asset_descriptor_has_no_matching_animation_clip",
+                "clip": str(clip_name or ""),
+            }
+            self._status.setText(f"Animation data unavailable: {Path(str(clip_name or '')).stem or 'selected'}")
+            return result
+        clip_id = str(clip.get("id") or clip.get("name") or clip_name)
+        track = {
+            "id": "action_sequencer_owner_preview",
+            "start_ms": 0,
+            "animation": {
+                "auto_play": True,
+                "loop": False,
+                "clip": clip_id,
+                "speed": 1.0,
+                "start_offset_ms": 0.0,
+            },
+        }
+        self._animation_generation += 1
+        self._animation_pending_frame = None
+        self._apply_animation_frame(track, 0)
+        self._animation_track = track
+        self._animation_started_at = time.monotonic()
+        self._animation_duration_ms = max(1.0, float(duration_ms if duration_ms is not None else clip.get("duration_ms") or 1000.0))
+        if self._animation_timer is None:
+            self._animation_timer = QTimer(self)
+            self._animation_timer.setInterval(33)
+            self._animation_timer.timeout.connect(self._tick_animation_preview)
+        self._animation_timer.start()
+        self._status.setText(f"Playing once: {Path(str(clip_name or clip_id)).stem}")
+        return {"status": "playing", "clip": clip_id, "duration_ms": self._animation_duration_ms}
+
+    def apply_animation_pose_frame(self, clip_name: str, *, time_ms: int = 0) -> dict[str, Any]:
+        clip = self._find_animation_clip(clip_name)
+        if clip is None:
+            result = {
+                "status": "unavailable",
+                "reason": "asset_descriptor_has_no_matching_animation_clip",
+                "clip": str(clip_name or ""),
+            }
+            self._status.setText(f"Pose data unavailable: {Path(str(clip_name or '')).stem or 'selected'}")
+            return result
+        clip_id = str(clip.get("id") or clip.get("name") or clip_name)
+        if self._animation_timer is not None:
+            self._animation_timer.stop()
+        self._animation_track = None
+        self._animation_generation += 1
+        self._animation_pending_frame = None
+        track = {
+            "id": "action_sequencer_owner_pose",
+            "start_ms": 0,
+            "animation": {
+                "auto_play": True,
+                "loop": False,
+                "clip": clip_id,
+                "speed": 1.0,
+                "start_offset_ms": max(0, int(time_ms)),
+            },
+        }
+        self._apply_animation_frame(track, max(0, int(time_ms)))
+        self._status.setText(f"Pose applied: {Path(str(clip_name or clip_id)).stem}")
+        return {"status": "pose_applied", "clip": clip_id, "time_ms": max(0, int(time_ms))}
+
+    def _find_animation_clip(self, clip_name: str) -> dict[str, Any] | None:
+        clips = self._descriptor.get("animation_clips") if isinstance(self._descriptor, dict) else None
+        if not isinstance(clips, list) or not clips:
+            return None
+        wanted = {str(clip_name or "").strip(), Path(str(clip_name or "")).stem}
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            if wanted & {str(clip.get("id") or ""), str(clip.get("name") or "")}:
+                return clip
+        return next((clip for clip in clips if isinstance(clip, dict)), None)
+
+    def _tick_animation_preview(self) -> None:
+        if self._animation_track is None:
+            if self._animation_timer is not None:
+                self._animation_timer.stop()
+            return
+        elapsed_ms = max(0.0, (time.monotonic() - self._animation_started_at) * 1000.0)
+        if elapsed_ms >= self._animation_duration_ms:
+            self._apply_animation_frame(self._animation_track, int(self._animation_duration_ms))
+            if self._animation_timer is not None:
+                self._animation_timer.stop()
+            self._animation_track = None
+            return
+        self._apply_animation_frame(self._animation_track, int(elapsed_ms))
+
+    def _apply_animation_frame(self, track: dict[str, Any], time_ms: int) -> None:
+        if self._gl_widget is None or not isinstance(self._descriptor, dict):
+            return
+        set_skinning = getattr(self._gl_widget, "set_skinning_matrices", None)
+        if callable(set_skinning) and bool(self._mesh_diag.get("gpu_skinning_available")):
+            try:
+                from app.ar_pbr.animation import skin_matrices_for_clip
+
+                skinning = skin_matrices_for_clip(self._descriptor, track, int(time_ms))
+            except Exception:
+                skinning = None
+            if isinstance(skinning, dict) and skinning.get("matrices") is not None:
+                set_skinning(skinning["matrices"], skinning)
+                self._mesh_diag["gpu_skinning_active"] = True
+                self._mesh_diag["gpu_skinning_last_time_ms"] = int(time_ms)
+                return
+        generation = int(self._animation_generation)
+        active_worker = self._animation_frame_worker
+        if active_worker is not None and active_worker.isRunning():
+            self._animation_pending_frame = (dict(track), int(time_ms), generation)
+            return
+        worker = _AnimationFrameBuildWorker(
+            self._descriptor,
+            dict(track),
+            int(time_ms),
+            generation,
+            parent=self,
+        )
+        worker.frame_ready.connect(self._on_animation_frame_ready)
+        worker.frame_failed.connect(self._on_animation_frame_failed)
+        worker.finished.connect(lambda worker=worker: self._on_animation_frame_finished(worker))
+        self._animation_frame_worker = worker
+        worker.start()
+
+    def _on_animation_frame_ready(self, payload: dict[str, Any]) -> None:
+        if int(payload.get("generation", -1)) != int(self._animation_generation):
+            return
+        vertices = payload.get("vertices")
+        mesh_diag = payload.get("mesh_diag")
+        self._mesh_diag = dict(mesh_diag or {})
+        if hasattr(self._gl_widget, "set_mesh_data"):
+            self._gl_widget.set_mesh_data(vertices, self._mesh_diag)
+
+    def _on_animation_frame_failed(self, payload: dict[str, Any]) -> None:
+        if int(payload.get("generation", -1)) != int(self._animation_generation):
+            return
+        self._status.setText(f"Animation frame failed: {payload.get('message') or payload.get('error') or 'unknown error'}")
+
+    def _on_animation_frame_finished(self, worker: _AnimationFrameBuildWorker) -> None:
+        if self._animation_frame_worker is worker:
+            self._animation_frame_worker = None
+        worker.deleteLater()
+        pending = self._animation_pending_frame
+        self._animation_pending_frame = None
+        if pending is None or self._animation_track is None:
+            return
+        track, time_ms, generation = pending
+        if int(generation) != int(self._animation_generation):
+            return
+        self._apply_animation_frame(track, int(time_ms))
 
     def _add_parameter_tab(self, title: str, rows: tuple[QWidget, ...], *, tooltip: str = "") -> None:
         page = QWidget(self._parameter_tabs)
@@ -720,19 +1290,48 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             self._parameter_tabs.setTabToolTip(index, tooltip)
 
     def _populate_hdri_combo(self) -> None:
-        self._hdri_combo.blockSignals(True)
+        for combo in self._hdri_combo_widgets():
+            combo.blockSignals(True)
         try:
-            self._hdri_combo.clear()
             selected_id = str(self._selected_hdri.id if self._selected_hdri is not None else "")
             selected_index = 0
-            for idx, preset in enumerate(self._hdri_presets):
-                self._hdri_combo.addItem(preset.to_combo_label(), preset.id)
-                if preset.id == selected_id:
-                    selected_index = idx
-            if self._hdri_combo.count() > 0:
-                self._hdri_combo.setCurrentIndex(selected_index)
+            for combo in self._hdri_combo_widgets():
+                combo.clear()
+                for idx, preset in enumerate(self._hdri_presets):
+                    combo.addItem(preset.to_combo_label(), preset.id)
+                    if preset.id == selected_id:
+                        selected_index = idx
+                if combo.count() > 0:
+                    combo.setCurrentIndex(selected_index)
         finally:
-            self._hdri_combo.blockSignals(False)
+            for combo in self._hdri_combo_widgets():
+                combo.blockSignals(False)
+
+    def _populate_look_combo(self) -> None:
+        if self._look_combo is None:
+            return
+        was_blocked = self._look_combo.blockSignals(True)
+        try:
+            self._look_combo.clear()
+            selected_index = 0
+            for index, row in enumerate(preview_look_preset_rows()):
+                self._look_combo.addItem(row["label"], row["id"])
+                if row["id"] == self._active_look_preset:
+                    selected_index = index
+            if self._look_combo.count() > 0:
+                self._look_combo.setCurrentIndex(selected_index)
+        finally:
+            self._look_combo.blockSignals(was_blocked)
+
+    def _hdri_combo_widgets(self) -> tuple[QComboBox, ...]:
+        widgets: list[QComboBox] = []
+        combo = getattr(self, "_hdri_combo", None)
+        if combo is not None:
+            widgets.append(combo)
+        top_combo = getattr(self, "_top_hdri_combo", None)
+        if top_combo is not None:
+            widgets.append(top_combo)
+        return tuple(widgets)
 
     def _populate_render_profile_combo(self) -> None:
         rows = _render_profile_combo_rows(self._render_profiles)
@@ -767,14 +1366,44 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if self._selected_hdri is None:
             return
         selected_id = str(self._selected_hdri.id)
-        for index in range(self._hdri_combo.count()):
-            if str(self._hdri_combo.itemData(index) or "") == selected_id:
-                was_blocked = self._hdri_combo.blockSignals(True)
-                try:
-                    self._hdri_combo.setCurrentIndex(index)
-                finally:
-                    self._hdri_combo.blockSignals(was_blocked)
-                return
+        for combo in self._hdri_combo_widgets():
+            for index in range(combo.count()):
+                if str(combo.itemData(index) or "") == selected_id:
+                    was_blocked = combo.blockSignals(True)
+                    try:
+                        combo.setCurrentIndex(index)
+                    finally:
+                        combo.blockSignals(was_blocked)
+                    break
+
+    def _sync_look_combo_to_active(self) -> None:
+        if self._look_combo is None:
+            return
+        was_blocked = self._look_combo.blockSignals(True)
+        try:
+            for index in range(self._look_combo.count()):
+                if str(self._look_combo.itemData(index) or "") == self._active_look_preset:
+                    self._look_combo.setCurrentIndex(index)
+                    break
+        finally:
+            self._look_combo.blockSignals(was_blocked)
+
+    def _sync_top_bloom_controls(self) -> None:
+        if self._state is None:
+            enabled = False
+            bloom_strength = DEFAULT_BLOOM_STRENGTH
+            bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        else:
+            enabled = self._active_look_preset == "bloomed"
+            bloom_strength = float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH))
+            bloom_threshold = float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD))
+        for row in (self._top_bloom_strength, self._top_bloom_threshold):
+            if row is not None:
+                row.setEnabled(enabled)
+        if self._top_bloom_strength is not None:
+            self._top_bloom_strength.set_value(bloom_strength)
+        if self._top_bloom_threshold is not None:
+            self._top_bloom_threshold.set_value(bloom_threshold)
 
     def _start_loading(self) -> None:
         self._loader = _ArPbrPreviewLoader(
@@ -838,6 +1467,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._enable_controls(True)
         self.sync_controls()
         self.fit_view()
+        self._apply_initial_view()
 
     def _on_failed(self, reason: str) -> None:
         self._progress.hide()
@@ -855,13 +1485,19 @@ class ArPbrAssetPreviewWindow(QMainWindow):
 
     def _enable_controls(self, enabled: bool) -> None:
         for row in (
+            self._look_combo,
+            self._top_bloom_strength,
+            self._top_bloom_threshold,
             self._render_profile_combo,
             self._hdri_combo,
+            *(self._hdri_combo_widgets()[1:]),
             self._parameter_tabs,
             self._ao_mode,
             *self._parameter_rows,
         ):
-            row.setEnabled(enabled)
+            if row is not None:
+                row.setEnabled(enabled)
+        self._sync_top_bloom_controls()
         self._fit_btn.setEnabled(enabled)
         self._background_btn.setEnabled(enabled)
         self._reset_btn.setEnabled(enabled)
@@ -905,17 +1541,29 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._diffuse_gi_strength.set_value(float(getattr(self._state, "diffuse_gi_strength", DEFAULT_DIFFUSE_GI_STRENGTH)))
         self._specular_gi_strength.set_value(float(getattr(self._state, "specular_gi_strength", DEFAULT_SPECULAR_GI_STRENGTH)))
         self._denoise_strength.set_value(float(getattr(self._state, "denoise_strength", DEFAULT_DENOISE_STRENGTH)))
+        self._sync_look_combo_to_active()
+        self._sync_top_bloom_controls()
 
     def lighting_settings(self) -> dict[str, Any]:
         if self._state is None:
             data = dict(self._initial_lighting)
             data["render_profile"] = self._render_profile
+            data["look_preset"] = self._active_look_preset
             return data
         return {
+            "look_preset": self._active_look_preset,
             "render_profile": self._render_profile,
             "hdri_id": str(self._selected_hdri.id if self._selected_hdri is not None else ""),
             "hdri_path": str(self._selected_hdri.path if self._selected_hdri is not None else ""),
             "show_environment_background": bool(self._background_visible),
+            "render_mode": str(self._render_mode),
+            "environment_visibility": {
+                "camera_visible": bool(self._background_visible),
+                "reflection_visible": bool(self._reflection_environment_visible),
+                "diffuse_visible": bool(self._diffuse_environment_visible),
+                "refraction_visible": bool(self._refraction_environment_visible),
+                "background_output": "environment" if self._background_visible else "transparent",
+            },
             "ibl_exposure": float(self._state.ibl_exposure),
             "ibl_rotation": float(self._state.ibl_rotation),
             "light_azimuth": float(self._state.light_azimuth),
@@ -957,11 +1605,44 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             "diffuse_gi_strength": float(getattr(self._state, "diffuse_gi_strength", DEFAULT_DIFFUSE_GI_STRENGTH)),
             "specular_gi_strength": float(getattr(self._state, "specular_gi_strength", DEFAULT_SPECULAR_GI_STRENGTH)),
             "denoise_strength": float(getattr(self._state, "denoise_strength", DEFAULT_DENOISE_STRENGTH)),
+            "post_effects_mode": str(getattr(self._state, "post_effects_mode", DEFAULT_POST_EFFECTS_MODE)),
+            "post_effects_enabled": str(getattr(self._state, "post_effects_mode", DEFAULT_POST_EFFECTS_MODE)) == "post_effects",
+            "bloom_enabled": float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH)) > 1.0e-6,
+            "bloom_strength": float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH)),
+            "bloom_radius": float(getattr(self._state, "bloom_radius", DEFAULT_BLOOM_RADIUS)),
+            "bloom_threshold": float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)),
+            "bloom_boost": float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)),
+            "bloom_anamorphic_strength": float(
+                getattr(self._state, "bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            ),
+            "bloom_anamorphic_threshold": float(
+                getattr(self._state, "bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+            ),
+            "bloom_anamorphic_ratio": float(
+                getattr(self._state, "bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+            ),
+            "vignette_strength": float(getattr(self._state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH)),
+            "vignette_radius": float(getattr(self._state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS)),
+            "vignette_feather": float(getattr(self._state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER)),
+            "grain_strength": float(getattr(self._state, "grain_strength", DEFAULT_GRAIN_STRENGTH)),
+            "grain_scale": float(getattr(self._state, "grain_scale", DEFAULT_GRAIN_SCALE)),
+            "grain_seed": int(getattr(self._state, "grain_seed", DEFAULT_GRAIN_SEED)),
+            "sharpen_strength": float(getattr(self._state, "sharpen_strength", DEFAULT_SHARPEN_STRENGTH)),
+            "sharpen_radius": float(getattr(self._state, "sharpen_radius", DEFAULT_SHARPEN_RADIUS)),
         }
 
     def apply_lighting_settings(self, settings: dict[str, Any] | None, *, emit: bool = True) -> None:
         if self._state is None or not isinstance(settings, dict):
             return
+        settings = dict(settings)
+        if "look_preset" in settings:
+            preset_id = str(settings.get("look_preset") or "neutral").strip().casefold()
+            if preset_id not in _LOOK_PRESET_IDS:
+                preset_id = "neutral"
+            self._active_look_preset = preset_id
+            merged = preview_look_preset_settings(preset_id)
+            merged.update({key: value for key, value in settings.items() if key != "look_preset"})
+            settings = merged
         previous_profile = self._render_profile
         self._suppress_emit = True
         try:
@@ -977,6 +1658,16 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                     self._sync_render_profile_combo()
             if "show_environment_background" in settings:
                 self._set_environment_background_visible(bool(settings["show_environment_background"]), emit=False)
+            environment = normalize_environment_visibility(settings)
+            if "environment_visibility" in settings:
+                self._set_environment_background_visible(bool(environment["camera_visible"]), emit=False)
+                self._reflection_environment_visible = bool(environment["reflection_visible"])
+                self._diffuse_environment_visible = bool(environment["diffuse_visible"])
+                self._refraction_environment_visible = bool(environment["refraction_visible"])
+                self._sync_environment_visibility_controls()
+            if "render_mode" in settings:
+                self._render_mode = str(resolve_render_mode(settings)["requested"])
+                self._sync_render_mode_combo()
             if "ibl_exposure" in settings:
                 self._state.ibl_exposure = max(0.0, min(8.0, float(settings["ibl_exposure"])))
             if "ibl_rotation" in settings:
@@ -1077,6 +1768,44 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 self._state.specular_gi_strength = max(0.0, min(2.0, float(settings["specular_gi_strength"])))
             if "denoise_strength" in settings:
                 self._state.denoise_strength = max(0.0, min(1.0, float(settings["denoise_strength"])))
+            if any(key in settings for key in (
+                "post_effects",
+                "post_effects_mode",
+                "post_effects_enabled",
+                "bloom_enabled",
+                "bloom_strength",
+                "bloom_radius",
+                "bloom_threshold",
+                "bloom_boost",
+                "bloom_anamorphic_strength",
+                "bloom_anamorphic_threshold",
+                "bloom_anamorphic_ratio",
+                "vignette_strength",
+                "vignette_radius",
+                "vignette_feather",
+                "grain_strength",
+                "grain_scale",
+                "grain_seed",
+                "sharpen_strength",
+                "sharpen_radius",
+            )):
+                post = normalize_post_effects_settings(settings)
+                self._state.post_effects_mode = str(post["mode"])
+                self._state.bloom_strength = float(post["bloom_strength"])
+                self._state.bloom_radius = float(post["bloom_radius"])
+                self._state.bloom_threshold = float(post["bloom_threshold"])
+                self._state.bloom_boost = float(post["bloom_boost"])
+                self._state.bloom_anamorphic_strength = float(post["bloom_anamorphic_strength"])
+                self._state.bloom_anamorphic_threshold = float(post["bloom_anamorphic_threshold"])
+                self._state.bloom_anamorphic_ratio = float(post["bloom_anamorphic_ratio"])
+                self._state.vignette_strength = float(post["vignette_strength"])
+                self._state.vignette_radius = float(post["vignette_radius"])
+                self._state.vignette_feather = float(post["vignette_feather"])
+                self._state.grain_strength = float(post["grain_strength"])
+                self._state.grain_scale = float(post["grain_scale"])
+                self._state.grain_seed = int(post["grain_seed"])
+                self._state.sharpen_strength = float(post["sharpen_strength"])
+                self._state.sharpen_radius = float(post["sharpen_radius"])
             self.sync_controls()
         finally:
             self._suppress_emit = False
@@ -1117,6 +1846,121 @@ class ArPbrAssetPreviewWindow(QMainWindow):
     def _on_background_toggled(self, checked: bool) -> None:
         self._set_environment_background_visible(bool(checked))
 
+    def _sync_render_mode_combo(self) -> None:
+        combo = getattr(self, "_render_mode_combo", None)
+        if combo is None:
+            return
+        index = combo.findData(str(self._render_mode))
+        combo.blockSignals(True)
+        try:
+            if index >= 0:
+                combo.setCurrentIndex(index)
+            policy = resolve_render_mode({"render_mode": self._render_mode})
+            combo.setToolTip(
+                f"Active: {policy['active']}"
+                + (" | native RT unavailable, using IBL fallback" if policy["fallback"] else "")
+            )
+            button = getattr(self, "_native_rt_button", None)
+            if button is not None and self._native_rt_worker is None:
+                button.setEnabled(
+                    bool(policy.get("hardware_rt_active"))
+                    and self._render_mode in {"hybrid_rt", "path_traced"}
+                    and bool(self._descriptor)
+                )
+        finally:
+            combo.blockSignals(False)
+
+    def _render_native_rt_frame(self) -> None:
+        if self._native_rt_worker is not None or not self._descriptor:
+            return
+        mode = self._render_mode if self._render_mode in {"hybrid_rt", "path_traced"} else "hybrid_rt"
+        suggested = str(self.asset_path.with_name(f"{self.asset_path.stem}_{mode}.png"))
+        output_path, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Render Hardware RT Frame",
+            suggested,
+            "PNG Image (*.png)",
+        )
+        if not output_path:
+            return
+        worker = _NativeRtRenderWorker(
+            dict(self._descriptor),
+            output_path=output_path,
+            track=self._animation_track,
+            mode=mode,
+            camera_visible=self._background_visible,
+            reflection_visible=self._reflection_environment_visible,
+            hdri_path=self._selected_hdri.path if self._selected_hdri is not None else None,
+            ibl_rotation=float(self._state.ibl_rotation) * 360.0 if self._state is not None else 0.0,
+            parent=self,
+        )
+        self._native_rt_worker = worker
+        self._native_rt_button.setEnabled(False)
+        self._native_rt_button.setText("Rendering RT...")
+        worker.rendered.connect(self._on_native_rt_rendered)
+        worker.failed.connect(self._on_native_rt_failed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _finish_native_rt_worker(self) -> None:
+        self._native_rt_worker = None
+        self._native_rt_button.setText("Render RT Frame...")
+        self._sync_render_mode_combo()
+
+    def _on_native_rt_rendered(self, payload: object) -> None:
+        result = dict(payload or {})
+        self._finish_native_rt_worker()
+        QMessageBox.information(
+            self,
+            "Hardware RT Render Complete",
+            f"DXR frame saved:\n{result.get('output_path')}\n\n"
+            f"{result.get('triangle_count', 0):,} triangles | {result.get('mode')}",
+        )
+
+    def _on_native_rt_failed(self, payload: object) -> None:
+        result = dict(payload or {})
+        self._finish_native_rt_worker()
+        QMessageBox.warning(
+            self,
+            "Hardware RT Render Failed",
+            f"{result.get('error')}: {result.get('message')}",
+        )
+
+    def _sync_environment_visibility_controls(self) -> None:
+        for name, value in (
+            ("_diffuse_env_check", self._diffuse_environment_visible),
+            ("_reflection_env_check", self._reflection_environment_visible),
+            ("_refraction_env_check", self._refraction_environment_visible),
+        ):
+            check = getattr(self, name, None)
+            if check is not None:
+                check.blockSignals(True)
+                check.setChecked(bool(value))
+                check.blockSignals(False)
+        self._sync_background_button()
+
+    def _on_render_mode_changed(self, _index: int) -> None:
+        combo = getattr(self, "_render_mode_combo", None)
+        if combo is None:
+            return
+        self._render_mode = str(combo.currentData() or "ibl_realtime")
+        policy = resolve_render_mode({"render_mode": self._render_mode})
+        if policy["active"] == "studio_lights_only":
+            self._diffuse_environment_visible = False
+            self._reflection_environment_visible = False
+            self._refraction_environment_visible = False
+            self._sync_environment_visibility_controls()
+        self._sync_render_mode_combo()
+        self._update()
+        self._emit_lighting_changed()
+
+    def _on_environment_visibility_changed(self, _checked: bool) -> None:
+        self._diffuse_environment_visible = bool(self._diffuse_env_check.isChecked())
+        self._reflection_environment_visible = bool(self._reflection_env_check.isChecked())
+        self._refraction_environment_visible = bool(self._refraction_env_check.isChecked())
+        self._update()
+        self._emit_lighting_changed()
+
     def _apply_render_profile_to_mesh(self) -> None:
         if not self._descriptor or self._gl_widget is None:
             return
@@ -1149,6 +1993,15 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._apply_render_profile_to_mesh()
         self._emit_lighting_changed()
 
+    def _set_look_preset_index(self, index: int) -> None:
+        if self._look_combo is None or index < 0:
+            return
+        preset_id = str(self._look_combo.itemData(index) or "neutral")
+        if preset_id not in _LOOK_PRESET_IDS:
+            preset_id = "neutral"
+        self.apply_lighting_settings({"look_preset": preset_id}, emit=True)
+        self._status.setText(_look_preset_status(preset_id))
+
     def fit_view(self) -> None:
         if self._gl_widget is None:
             return
@@ -1161,6 +2014,36 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._gl_widget.auto_fit_pending = False
         self.sync_controls()
         self._gl_widget.update()
+
+    def _apply_initial_view(self) -> None:
+        if self._state is None or not self._initial_view:
+            return
+        changed = False
+        for key, low, high in (
+            ("pitch", -180.0, 180.0),
+            ("yaw", -360.0, 360.0),
+            ("roll", -180.0, 180.0),
+            ("zoom", 0.03, 40.0),
+            ("camera_z", 0.2, 20.0),
+            ("pan_x", -20.0, 20.0),
+            ("pan_y", -20.0, 20.0),
+            ("pan_z", -20.0, 20.0),
+        ):
+            if key not in self._initial_view:
+                continue
+            try:
+                value = float(self._initial_view[key])
+            except (TypeError, ValueError):
+                continue
+            setattr(self._state, key, max(low, min(high, value)))
+            changed = True
+        if not changed:
+            return
+        if self._gl_widget is not None:
+            self._gl_widget.auto_fit_enabled = False
+            self._gl_widget.auto_fit_pending = False
+        self.sync_controls()
+        self._update()
 
     def reset_view(self) -> None:
         if self._state is None:
@@ -1208,11 +2091,29 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._state.diffuse_gi_strength = DEFAULT_DIFFUSE_GI_STRENGTH
         self._state.specular_gi_strength = DEFAULT_SPECULAR_GI_STRENGTH
         self._state.denoise_strength = DEFAULT_DENOISE_STRENGTH
+        self._state.post_effects_mode = DEFAULT_POST_EFFECTS_MODE
+        self._state.bloom_strength = DEFAULT_BLOOM_STRENGTH
+        self._state.bloom_radius = DEFAULT_BLOOM_RADIUS
+        self._state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        self._state.bloom_boost = DEFAULT_BLOOM_BOOST
+        self._state.bloom_anamorphic_strength = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        self._state.bloom_anamorphic_threshold = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+        self._state.bloom_anamorphic_ratio = DEFAULT_BLOOM_ANAMORPHIC_RATIO
+        self._state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
+        self._state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
+        self._state.vignette_feather = DEFAULT_VIGNETTE_FEATHER
+        self._state.grain_strength = DEFAULT_GRAIN_STRENGTH
+        self._state.grain_scale = DEFAULT_GRAIN_SCALE
+        self._state.grain_seed = DEFAULT_GRAIN_SEED
+        self._state.sharpen_strength = DEFAULT_SHARPEN_STRENGTH
+        self._state.sharpen_radius = DEFAULT_SHARPEN_RADIUS
+        self._active_look_preset = "neutral"
         bounds = self._mesh_diag.get("normalized_bounds") if isinstance(self._mesh_diag.get("normalized_bounds"), dict) else {}
         mins = bounds.get("min", []) if isinstance(bounds, dict) else []
         self._state.ground_y = float(mins[1]) + 0.01 if isinstance(mins, list) and len(mins) >= 2 else -0.52
         self.sync_controls()
         self.fit_view()
+        self._apply_initial_view()
         self._emit_lighting_changed()
 
     def _set_hdri_preset_index(self, index: int) -> None:
@@ -1223,6 +2124,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             self._status.setText(f"HDRI missing: {preset.label}")
             return
         self._selected_hdri = preset
+        self._sync_hdri_combo_to_selected()
         self._status.setText(f"Loading HDRI: {preset.label}")
         try:
             from tools.ar_pbr_gpu_window import _load_hdri_or_none
@@ -1250,6 +2152,45 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if self._state is None:
             return
         setattr(self._state, attr, float(value))
+        self._update()
+        self._emit_lighting_changed()
+
+    def _refresh_post_effects_mode(self) -> None:
+        if self._state is None:
+            return
+        enabled = any(
+            float(getattr(self._state, attr, 0.0) or 0.0) > 1.0e-6
+            for attr in ("bloom_strength", "vignette_strength", "grain_strength", "sharpen_strength")
+        )
+        self._state.post_effects_mode = "post_effects" if enabled else DEFAULT_POST_EFFECTS_MODE
+
+    def _set_bloom_strength(self, value: float) -> None:
+        if self._state is None:
+            return
+        self._state.bloom_strength = max(0.0, min(4.0, float(value)))
+        self._state.bloom_boost = max(float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)), self._state.bloom_strength * 0.42)
+        peak_streak = max(0.0, self._state.bloom_strength - 0.75) * 0.72
+        self._state.bloom_anamorphic_strength = max(
+            float(getattr(self._state, "bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)),
+            peak_streak,
+        )
+        self._state.bloom_anamorphic_threshold = min(
+            float(getattr(self._state, "bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)),
+            max(0.50, float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)) + 0.18),
+        )
+        self._state.bloom_anamorphic_ratio = max(
+            float(getattr(self._state, "bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)),
+            DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+        )
+        self._refresh_post_effects_mode()
+        self._update()
+        self._emit_lighting_changed()
+
+    def _set_bloom_threshold(self, value: float) -> None:
+        if self._state is None:
+            return
+        self._state.bloom_threshold = max(0.0, min(1.0, float(value)))
+        self._refresh_post_effects_mode()
         self._update()
         self._emit_lighting_changed()
 
@@ -1383,6 +2324,11 @@ QLabel#ArPbrPreviewStatus {
     font-size: 10px;
     font-weight: 700;
 }
+QLabel#ArPbrTopControlLabel {
+    color: #AEB5CF;
+    font-size: 10px;
+    font-weight: 900;
+}
 QFrame#ArPbrViewportHost {
     background-color: #05070C;
     border: 1px solid #30384F;
@@ -1413,7 +2359,8 @@ QLabel#ArPbrControlsTitle {
     font-size: 12px;
     font-weight: 900;
 }
-QComboBox#ArPbrHdriCombo {
+QComboBox#ArPbrHdriCombo,
+QComboBox#ArPbrLookCombo {
     background-color: rgba(255, 255, 255, 18);
     color: #F8F4EA;
     border: 1px solid #37405A;
@@ -1423,19 +2370,39 @@ QComboBox#ArPbrHdriCombo {
     font-size: 11px;
     font-weight: 800;
 }
-QComboBox#ArPbrHdriCombo:hover {
+QComboBox#ArPbrHdriCombo:hover,
+QComboBox#ArPbrLookCombo:hover {
     background-color: rgba(255, 255, 255, 28);
     border-color: #7580A5;
 }
-QComboBox#ArPbrHdriCombo::drop-down {
+QComboBox#ArPbrHdriCombo::drop-down,
+QComboBox#ArPbrLookCombo::drop-down {
     border: 0px;
     width: 22px;
 }
-QComboBox#ArPbrHdriCombo QAbstractItemView {
+QComboBox#ArPbrHdriCombo QAbstractItemView,
+QComboBox#ArPbrLookCombo QAbstractItemView {
     background-color: #151927;
     color: #F8F4EA;
     selection-background-color: #6D5DFB;
     border: 1px solid #37405A;
+}
+QWidget#ArPbrTopSliderRow {
+    background: transparent;
+}
+QLabel#ArPbrTopSliderLabel {
+    color: #AEB5CF;
+    font-size: 9px;
+    font-weight: 900;
+}
+QLabel#ArPbrTopSliderValue {
+    color: #F8F4EA;
+    font-size: 9px;
+    font-weight: 900;
+    min-width: 28px;
+}
+QWidget#ArPbrTopSliderRow:disabled QLabel {
+    color: #5F6679;
 }
 QTabWidget#ArPbrParamTabs::pane {
     background-color: rgba(10, 12, 22, 150);

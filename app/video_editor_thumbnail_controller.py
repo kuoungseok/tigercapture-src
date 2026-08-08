@@ -10,6 +10,7 @@ from app.timeline_thumbnail_cache import (
     store_timeline_thumb_cache,
 )
 from app.video_editor_thumbnailing import THUMB_H, ThumbnailExtractor
+from app.image_media import image_timeline_thumbnails, is_image_path
 
 
 def _track_extractors(owner: Any) -> MutableMapping[int, Any]:
@@ -115,6 +116,10 @@ def start_thumbnail_extraction(owner: Any, track: Any) -> None:
     if source_path is None:
         return
     track_id = int(getattr(track, "id"))
+    if is_image_path(source_path):
+        track.thumbnails = image_timeline_thumbnails(source_path, THUMB_H)
+        _update_track_row(owner, track_id)
+        return
     cached = load_timeline_thumb_cache(source_path, THUMB_H)
     extractors = _track_extractors(owner)
     if cached:
@@ -184,6 +189,10 @@ def on_extractor_done(owner: Any, track_id: int) -> None:
 def start_thumbnail_extraction_for_clip(owner: Any, clip: Any, track_id: int) -> None:
     source_path = getattr(clip, "source_path", None)
     if source_path is None:
+        return
+    if is_image_path(source_path):
+        clip.thumbnails = image_timeline_thumbnails(source_path, THUMB_H)
+        _update_track_row(owner, track_id)
         return
     cached = load_timeline_thumb_cache(source_path, THUMB_H)
     if cached:

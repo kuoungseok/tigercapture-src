@@ -261,6 +261,10 @@ from app.ar_pbr.displacement import (
     normalize_displacement_settings,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+    DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_RADIUS,
     DEFAULT_BLOOM_STRENGTH,
     DEFAULT_BLOOM_THRESHOLD,
@@ -351,10 +355,14 @@ FRAME_FIT_FOV_DEG = 45.0
 VRM_MTOON_UNLIT_EXPOSURE_SCALE = 1.0
 VRM_MTOON_UNLIT_CONTRAST = 1.0
 VRM_MTOON_UNLIT_GAMMA = 1.35
+GPU_SKINNING_MAX_BONES = 128
+GPU_VERTEX_STRIDE_FLOAT_COUNT = 29
+GPU_VERTEX_BASE_STRIDE_FLOAT_COUNT = 21
 
 
 VERT_SHADER = """
 #version 330 core
+const int MAX_SKIN_BONES = 128;
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec4 a_color;
@@ -362,10 +370,21 @@ layout(location = 3) in vec3 a_material;
 layout(location = 4) in vec2 a_uv;
 layout(location = 5) in vec3 a_tangent;
 layout(location = 6) in vec3 a_bitangent;
+layout(location = 7) in vec4 a_bone_indices;
+layout(location = 8) in vec4 a_bone_weights;
 uniform mat4 u_mvp;
 uniform mat4 u_model;
 uniform mat4 u_light_mvp;
 uniform mat3 u_normal_mat;
+uniform int u_skinning_enabled;
+uniform int u_skin_bone_count;
+uniform mat4 u_skin_bones[MAX_SKIN_BONES];
+uniform vec3 u_bounds_center;
+uniform float u_bounds_max_size;
+uniform int u_stage_transform_enabled;
+uniform int u_stage_rotate_y_180;
+uniform vec3 u_stage_center;
+uniform vec3 u_stage_offset;
 out vec3 v_world_pos;
 out vec4 v_light_pos;
 out vec3 v_normal;
@@ -374,17 +393,52 @@ out vec3 v_material;
 out vec2 v_uv;
 out vec3 v_tangent;
 out vec3 v_bitangent;
+mat4 skin_bone(float raw_index) {
+    int idx = int(raw_index + 0.5);
+    if (idx < 0 || idx >= u_skin_bone_count || idx >= MAX_SKIN_BONES) {
+        return mat4(1.0);
+    }
+    return u_skin_bones[idx];
+}
 void main() {
-    vec4 world_pos = u_model * vec4(a_pos, 1.0);
-    gl_Position = u_mvp * vec4(a_pos, 1.0);
+    vec3 raw_object_pos = a_pos * u_bounds_max_size + u_bounds_center;
+    vec3 object_normal = a_normal;
+    vec3 object_tangent = a_tangent;
+    vec3 object_bitangent = a_bitangent;
+    float weight_sum = a_bone_weights.x + a_bone_weights.y + a_bone_weights.z + a_bone_weights.w;
+    if (u_skinning_enabled != 0 && weight_sum > 0.0001 && u_bounds_max_size > 0.000001) {
+        mat4 skin =
+            skin_bone(a_bone_indices.x) * a_bone_weights.x +
+            skin_bone(a_bone_indices.y) * a_bone_weights.y +
+            skin_bone(a_bone_indices.z) * a_bone_weights.z +
+            skin_bone(a_bone_indices.w) * a_bone_weights.w;
+        vec4 skinned_pos = skin * vec4(raw_object_pos, 1.0);
+        raw_object_pos = skinned_pos.xyz;
+        object_normal = normalize(mat3(skin) * a_normal);
+        object_tangent = normalize(mat3(skin) * a_tangent);
+        object_bitangent = normalize(mat3(skin) * a_bitangent);
+    }
+    if (u_stage_transform_enabled != 0) {
+        if (u_stage_rotate_y_180 != 0) {
+            raw_object_pos.x = u_stage_center.x - (raw_object_pos.x - u_stage_center.x);
+            raw_object_pos.z = u_stage_center.z - (raw_object_pos.z - u_stage_center.z);
+            object_normal.xz *= -1.0;
+            object_tangent.xz *= -1.0;
+            object_bitangent.xz *= -1.0;
+        }
+        raw_object_pos += u_stage_offset;
+    }
+    vec3 object_pos = (raw_object_pos - u_bounds_center) / u_bounds_max_size;
+    vec4 world_pos = u_model * vec4(object_pos, 1.0);
+    gl_Position = u_mvp * vec4(object_pos, 1.0);
     v_world_pos = world_pos.xyz;
-    v_light_pos = u_light_mvp * vec4(a_pos, 1.0);
-    v_normal = normalize(u_normal_mat * a_normal);
+    v_light_pos = u_light_mvp * vec4(object_pos, 1.0);
+    v_normal = normalize(u_normal_mat * object_normal);
     v_color = a_color;
     v_material = a_material;
     v_uv = a_uv;
-    v_tangent = normalize(u_normal_mat * a_tangent);
-    v_bitangent = normalize(u_normal_mat * a_bitangent);
+    v_tangent = normalize(u_normal_mat * object_tangent);
+    v_bitangent = normalize(u_normal_mat * object_bitangent);
 }
 """
 
@@ -401,6 +455,7 @@ in vec2 v_uv;
 in vec3 v_tangent;
 in vec3 v_bitangent;
 uniform vec3 u_light_dir;
+uniform vec3 u_light_color;
 uniform vec3 u_camera_pos;
 uniform sampler2D u_hdri;
 uniform sampler2D u_irradiance;
@@ -466,6 +521,7 @@ uniform vec3 u_clearcoat_tint;
 uniform float u_parallax_strength;
 uniform float u_parallax_depth;
 uniform float u_parallax_center;
+uniform int u_parallax_steps;
 uniform float u_bevel_strength;
 uniform float u_bevel_radius;
 uniform float u_bevel_edge_width;
@@ -520,7 +576,8 @@ uniform vec3 u_screen_ao_color;
 uniform int u_screen_ao_ambient;
 uniform int u_screen_ao_diffuse;
 uniform int u_screen_ao_specular;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 vec2 dir_to_equirect(vec3 dir) {
     vec3 d = normalize(dir);
@@ -568,15 +625,22 @@ float screen_space_ao_factor(vec3 normal, vec3 view_dir, vec3 world_pos) {
     vec3 n = normalize(normal);
     vec3 v = normalize(view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
-    float grazing = pow(1.0 - ndotv, 1.45);
-    float normal_variation = length(dFdx(n)) + length(dFdy(n));
-    float depth_variation = abs(dFdx(world_pos.z)) + abs(dFdy(world_pos.z));
     float radius = max(u_screen_ao_radius, 0.5);
     float distance = max(u_screen_ao_distance, 0.01);
-    float crease = clamp(normal_variation * radius * 0.34, 0.0, 1.0);
-    float depth_cavity = clamp(depth_variation * radius / distance * 0.18, 0.0, 1.0);
-    float underside = clamp((-n.y * 0.5 + 0.5) * 0.18, 0.0, 0.18);
-    float occlusion = clamp(crease * 0.60 + depth_cavity * 0.42 + grazing * 0.24 + underside, 0.0, 1.0);
+    vec3 dn_dx = dFdx(n);
+    vec3 dn_dy = dFdy(n);
+    vec3 dp_dx = dFdx(world_pos);
+    vec3 dp_dy = dFdy(world_pos);
+    float curvature = length(dn_dx) + length(dn_dy);
+    float depth_gradient = length(vec2(dFdx(world_pos.z), dFdy(world_pos.z)));
+    float footprint = max(max(length(dp_dx), length(dp_dy)), 0.0001);
+    float crease = smoothstep(0.015, 0.22, curvature * radius * 0.42);
+    float contact = smoothstep(0.005, max(0.006, distance * 0.34), depth_gradient * radius / max(footprint, 0.0001) * 0.025);
+    float horizon = smoothstep(0.18, 0.92, pow(1.0 - ndotv, 1.35));
+    float underside = smoothstep(0.10, 0.82, -n.y) * 0.22;
+    float micro = pow(clamp(curvature * radius * 0.22, 0.0, 1.0), 1.8) * 0.35;
+    float occlusion = clamp(crease * 0.46 + contact * 0.34 + horizon * 0.18 + underside + micro, 0.0, 1.0);
+    occlusion = smoothstep(0.02, 0.96, occlusion);
     return clamp(1.0 - occlusion * strength, 0.0, 1.0);
 }
 
@@ -660,6 +724,49 @@ vec2 apply_parallax_uv(vec2 uv, vec3 view_dir, vec3 tangent, vec3 bitangent, vec
     vec3 v = normalize(view_dir);
     float view_z = max(abs(dot(v, n)), 0.18);
     vec2 view_xy = vec2(dot(v, t), dot(v, b)) / view_z;
+    int steps = clamp(u_parallax_steps, 1, 64);
+    if (steps > 1) {
+        float layer_step = 1.0 / float(steps);
+        vec2 ray = vec2(view_xy.x, -view_xy.y) * u_parallax_depth * u_parallax_strength;
+        vec2 delta = ray / float(steps);
+        vec2 current_uv = uv;
+        vec2 previous_uv = uv;
+        float current_layer = 0.0;
+        float previous_layer = 0.0;
+        float center_bias = clamp(u_parallax_center, 0.0, 1.0) - 0.5;
+        float surface_depth = clamp(
+            1.0 - sample_material_rgba(u_height_map, current_uv, world_pos, n).r + center_bias,
+            0.0,
+            1.0
+        );
+        for (int i = 0; i < 64; ++i) {
+            if (i >= steps || current_layer >= surface_depth) {
+                break;
+            }
+            previous_uv = current_uv;
+            previous_layer = current_layer;
+            current_uv -= delta;
+            current_layer += layer_step;
+            surface_depth = clamp(
+                1.0 - sample_material_rgba(u_height_map, current_uv, world_pos, n).r + center_bias,
+                0.0,
+                1.0
+            );
+        }
+        float current_error = current_layer - surface_depth;
+        float previous_depth = clamp(
+            1.0 - sample_material_rgba(u_height_map, previous_uv, world_pos, n).r + center_bias,
+            0.0,
+            1.0
+        );
+        float previous_error = previous_depth - previous_layer;
+        float blend = clamp(
+            previous_error / max(previous_error + current_error, 0.000001),
+            0.0,
+            1.0
+        );
+        return clamp(mix(previous_uv, current_uv, blend), vec2(-0.25), vec2(1.25));
+    }
     float height = sample_material_rgba(u_height_map, uv, world_pos, n).r;
     float amount = (height - clamp(u_parallax_center, 0.0, 1.0)) * u_parallax_depth * u_parallax_strength;
     return clamp(uv + view_xy * amount, vec2(-0.25), vec2(1.25));
@@ -699,11 +806,17 @@ vec3 apply_transmission_refraction(vec3 rgb, vec3 albedo, vec3 normal, vec3 view
 }
 
 vec3 srgb_to_linear(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x / 12.92;
+    vec3 high = pow((x + vec3(0.055)) / 1.055, vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), x));
 }
 
 vec3 linear_to_srgb(vec3 c) {
-    return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x * 12.92;
+    vec3 high = 1.055 * pow(x, vec3(1.0 / 2.4)) - vec3(0.055);
+    return mix(low, high, step(vec3(0.0031308), x));
 }
 
 void apply_material_layer(inout vec3 albedo, inout float roughness, inout float metallic, inout float out_alpha, inout vec3 emissive) {
@@ -986,7 +1099,7 @@ void main() {
     float out_alpha = clamp(v_color.a, 0.0, 1.0);
     if (u_has_base_map == 1) {
         vec4 base_sample = sample_material_rgba(u_base_map, material_uv, v_world_pos, n);
-        albedo = srgb_to_linear(base_sample.rgb);
+        albedo = srgb_to_linear(base_sample.rgb) * clamp(albedo, vec3(0.0), vec3(16.0));
         if (u_base_alpha_to_opacity == 1) {
             out_alpha *= clamp(base_sample.a, 0.0, 1.0);
         }
@@ -998,9 +1111,11 @@ void main() {
         discard;
     }
     if (unlit) {
-        vec3 rgb = apply_output_transform_gamma(albedo * max(u_unlit_exposure_scale, 0.0), u_unlit_output_gamma);
+        vec3 bloom_rgb = albedo * max(u_unlit_exposure_scale, 0.0);
+        vec3 rgb = apply_output_transform_gamma(bloom_rgb, u_unlit_output_gamma);
         rgb = clamp((rgb - vec3(0.5)) * max(u_unlit_contrast, 0.0) + vec3(0.5), 0.0, 1.0);
         frag_color = vec4(rgb, out_alpha);
+        bloom_source = vec4(bloom_rgb, out_alpha);
         return;
     }
     if (u_has_roughness_map == 1) {
@@ -1047,7 +1162,7 @@ void main() {
     vec3 h = normalize(l + v);
     float ndoth = max(dot(n, h), 0.0);
     float vdoth = max(dot(v, h), 0.0);
-    vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, ndotl, ndotv, ndoth, vdoth, direct_power) * diffuse_ao;
+    vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, ndotl, ndotv, ndoth, vdoth, direct_power) * diffuse_ao * max(u_light_color, vec3(0.0));
     direct *= shadow;
 
     vec3 fill = albedo * (0.045 + roughness * 0.03) * kd * mix(0.48, 1.0, ambient_ao);
@@ -1065,18 +1180,65 @@ void main() {
     float screen_ao_shadow = clamp(1.0 - min(min(ambient_ao, diffuse_ao), specular_ao), 0.0, 1.0);
     rgb = mix(rgb, rgb * (0.82 + clamp(u_screen_ao_color, vec3(0.0), vec3(1.0)) * 0.18), screen_ao_shadow);
     rgb = apply_transmission_refraction(rgb, albedo, n, v, roughness, fresnel);
+    vec3 bloom_rgb = max(
+        emissive * 1.75
+        + specular * 1.25
+        + direct * 0.42
+        + specular_gi * 0.70
+        + rgb * 0.10,
+        vec3(0.0)
+    );
     rgb = apply_output_transform(rgb);
     frag_color = vec4(rgb, out_alpha);
+    bloom_source = vec4(bloom_rgb, out_alpha);
 }
 """
 
 
 DEPTH_VERT_SHADER = """
 #version 330 core
+const int MAX_SKIN_BONES = 128;
 layout(location = 0) in vec3 a_pos;
+layout(location = 7) in vec4 a_bone_indices;
+layout(location = 8) in vec4 a_bone_weights;
 uniform mat4 u_light_mvp;
+uniform int u_skinning_enabled;
+uniform int u_skin_bone_count;
+uniform mat4 u_skin_bones[MAX_SKIN_BONES];
+uniform vec3 u_bounds_center;
+uniform float u_bounds_max_size;
+uniform int u_stage_transform_enabled;
+uniform int u_stage_rotate_y_180;
+uniform vec3 u_stage_center;
+uniform vec3 u_stage_offset;
+mat4 skin_bone(float raw_index) {
+    int idx = int(raw_index + 0.5);
+    if (idx < 0 || idx >= u_skin_bone_count || idx >= MAX_SKIN_BONES) {
+        return mat4(1.0);
+    }
+    return u_skin_bones[idx];
+}
 void main() {
-    gl_Position = u_light_mvp * vec4(a_pos, 1.0);
+    vec3 raw_object_pos = a_pos * u_bounds_max_size + u_bounds_center;
+    float weight_sum = a_bone_weights.x + a_bone_weights.y + a_bone_weights.z + a_bone_weights.w;
+    if (u_skinning_enabled != 0 && weight_sum > 0.0001 && u_bounds_max_size > 0.000001) {
+        mat4 skin =
+            skin_bone(a_bone_indices.x) * a_bone_weights.x +
+            skin_bone(a_bone_indices.y) * a_bone_weights.y +
+            skin_bone(a_bone_indices.z) * a_bone_weights.z +
+            skin_bone(a_bone_indices.w) * a_bone_weights.w;
+        vec4 skinned_pos = skin * vec4(raw_object_pos, 1.0);
+        raw_object_pos = skinned_pos.xyz;
+    }
+    if (u_stage_transform_enabled != 0) {
+        if (u_stage_rotate_y_180 != 0) {
+            raw_object_pos.x = u_stage_center.x - (raw_object_pos.x - u_stage_center.x);
+            raw_object_pos.z = u_stage_center.z - (raw_object_pos.z - u_stage_center.z);
+        }
+        raw_object_pos += u_stage_offset;
+    }
+    vec3 object_pos = (raw_object_pos - u_bounds_center) / u_bounds_max_size;
+    gl_Position = u_light_mvp * vec4(object_pos, 1.0);
 }
 """
 
@@ -1135,7 +1297,8 @@ uniform int u_tone_mapping_mode;
 uniform float u_tone_exposure;
 uniform vec3 u_tone_white_balance;
 uniform float u_tone_gamma;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 const float PI = 3.14159265358979323846;
 
@@ -1249,6 +1412,7 @@ void main() {
     float matte_alpha = max(u_shadow_catcher_matte_alpha, u_reflection_catcher_matte_alpha);
     float alpha = clamp(matte_alpha + shadow_alpha + reflection_amount * (0.08 + soft * 0.10), 0.0, 1.0);
     frag_color = vec4(rgb, alpha);
+    bloom_source = vec4(0.0, 0.0, 0.0, 0.0);
 }
 """
 
@@ -1280,7 +1444,8 @@ uniform int u_tone_mapping_mode;
 uniform float u_tone_exposure;
 uniform vec3 u_tone_white_balance;
 uniform float u_tone_gamma;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 vec3 tonemap_aces(vec3 x) {
     const float a = 2.51;
@@ -1321,6 +1486,199 @@ void main() {
         rgb = apply_output_transform(rgb);
     }
     frag_color = vec4(rgb, 1.0);
+    bloom_source = vec4(0.0, 0.0, 0.0, 0.0);
+}
+"""
+
+
+POST_BLOOM_VERT_SHADER = """
+#version 330 core
+const vec2 POSITIONS[3] = vec2[3](
+    vec2(-1.0, -1.0),
+    vec2(3.0, -1.0),
+    vec2(-1.0, 3.0)
+);
+out vec2 v_uv;
+void main() {
+    vec2 pos = POSITIONS[gl_VertexID];
+    gl_Position = vec4(pos, 0.0, 1.0);
+    v_uv = pos * 0.5 + 0.5;
+}
+"""
+
+
+BLOOM_BLUR_FRAG_SHADER = """
+#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_source;
+uniform vec2 u_texel_size;
+uniform vec2 u_direction;
+uniform float u_bloom_radius;
+uniform float u_bloom_threshold;
+uniform float u_bloom_boost;
+uniform float u_anamorphic_strength;
+uniform float u_anamorphic_threshold;
+uniform float u_anamorphic_ratio;
+uniform int u_extract_bright;
+out vec4 frag_color;
+
+vec3 bright_pass(vec4 sample_rgba) {
+    vec3 rgb = max(sample_rgba.rgb, vec3(0.0));
+    if (u_extract_bright == 0) {
+        return rgb;
+    }
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
+    float knee = mix(0.10, 0.32, clamp(u_bloom_radius / 24.0, 0.0, 1.0));
+    float excess = max(lum - threshold, 0.0);
+    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 8.0);
+    float soft_mask = smoothstep(0.0, knee, excess);
+    float boost = 1.0 + clamp(u_bloom_boost, 0.0, 8.0) * (0.85 + contribution * 0.35);
+    return rgb * contribution * soft_mask * source_mask * boost;
+}
+
+vec3 sample_blur(vec2 offset_px, float weight) {
+    return bright_pass(texture(u_source, clamp(v_uv + u_texel_size * offset_px, vec2(0.0), vec2(1.0)))) * weight;
+}
+
+vec3 peak_pass(vec4 sample_rgba) {
+    vec3 rgb = max(sample_rgba.rgb, vec3(0.0));
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float threshold = max(clamp(u_anamorphic_threshold, 0.0, 2.0), clamp(u_bloom_threshold, 0.0, 1.0) + 0.14);
+    float excess = max(lum - threshold, 0.0);
+    float gate = smoothstep(0.0, 0.42, excess);
+    float power = clamp(excess / max(threshold, 0.001), 0.0, 12.0);
+    return rgb * gate * power * source_mask;
+}
+
+vec3 sample_peak_streak(float offset_px, float weight) {
+    vec2 offset = vec2(u_texel_size.x * offset_px, 0.0);
+    vec3 a = peak_pass(texture(u_source, clamp(v_uv + offset, vec2(0.0), vec2(1.0))));
+    vec3 b = peak_pass(texture(u_source, clamp(v_uv - offset, vec2(0.0), vec2(1.0))));
+    return (a + b) * weight;
+}
+
+void main() {
+    vec2 dir = normalize(u_direction);
+    float radius = max(u_bloom_radius, 1.0);
+    float step_px = max(0.65, radius * 0.185);
+    vec3 bloom = bright_pass(texture(u_source, v_uv)) * 0.19648255;
+    bloom += sample_blur( dir * step_px * 1.0, 0.17603266);
+    bloom += sample_blur(-dir * step_px * 1.0, 0.17603266);
+    bloom += sample_blur( dir * step_px * 2.0, 0.12098138);
+    bloom += sample_blur(-dir * step_px * 2.0, 0.12098138);
+    bloom += sample_blur( dir * step_px * 3.0, 0.06475994);
+    bloom += sample_blur(-dir * step_px * 3.0, 0.06475994);
+    bloom += sample_blur( dir * step_px * 4.0, 0.02699548);
+    bloom += sample_blur(-dir * step_px * 4.0, 0.02699548);
+    bloom += sample_blur( dir * step_px * 5.0, 0.00876430);
+    bloom += sample_blur(-dir * step_px * 5.0, 0.00876430);
+    if (u_extract_bright == 1 && abs(u_direction.x) > abs(u_direction.y) && u_anamorphic_strength > 0.0) {
+        float streak_radius = radius * clamp(u_anamorphic_ratio, 1.0, 12.0);
+        vec3 streak = peak_pass(texture(u_source, v_uv)) * 0.070;
+        streak += sample_peak_streak(streak_radius * 0.16, 0.070);
+        streak += sample_peak_streak(streak_radius * 0.36, 0.060);
+        streak += sample_peak_streak(streak_radius * 0.68, 0.046);
+        streak += sample_peak_streak(streak_radius * 1.12, 0.032);
+        streak += sample_peak_streak(streak_radius * 1.76, 0.020);
+        streak += sample_peak_streak(streak_radius * 2.72, 0.012);
+        streak += sample_peak_streak(streak_radius * 4.10, 0.006);
+        bloom += streak * clamp(u_anamorphic_strength, 0.0, 6.0);
+    }
+    frag_color = vec4(max(bloom, vec3(0.0)), 1.0);
+}
+"""
+
+
+POST_BLOOM_FRAG_SHADER = """
+#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_scene_color;
+uniform sampler2D u_bloom_source;
+uniform sampler2D u_peak_source;
+uniform vec2 u_texel_size;
+uniform vec2 u_peak_texel_size;
+uniform float u_bloom_strength;
+uniform float u_bloom_radius;
+uniform float u_bloom_threshold;
+uniform float u_anamorphic_strength;
+uniform float u_anamorphic_threshold;
+uniform float u_anamorphic_ratio;
+uniform int u_force_opaque;
+out vec4 frag_color;
+
+vec3 peak_sprite_source(vec2 uv) {
+    vec4 sample_rgba = texture(u_peak_source, clamp(uv, vec2(0.0), vec2(1.0)));
+    vec3 rgb = max(sample_rgba.rgb, vec3(0.0));
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec2 peak_px = u_peak_texel_size * max(2.0, u_bloom_radius * 0.11);
+    float n0 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n1 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n2 = dot(max(texture(u_peak_source, clamp(uv + vec2(0.0,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n3 = dot(max(texture(u_peak_source, clamp(uv + vec2(0.0, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n4 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n5 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n6 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n7 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float neighbor_max = max(max(max(n0, n1), max(n2, n3)), max(max(n4, n5), max(n6, n7)));
+    float local_peak = smoothstep(0.015, 0.11, lum - neighbor_max);
+    float threshold = max(clamp(u_anamorphic_threshold, 0.0, 2.0), clamp(u_bloom_threshold, 0.0, 1.0) + 0.28);
+    float excess = max(lum - threshold, 0.0);
+    float gate = smoothstep(0.0, 0.26, excess);
+    float power = pow(clamp(excess / max(threshold, 0.001), 0.0, 14.0), 1.35);
+    return rgb * gate * power * source_mask * local_peak;
+}
+
+vec3 peak_sprite_sample(float x_px, float y_px, float weight) {
+    vec2 offset = vec2(x_px * u_peak_texel_size.x, y_px * u_peak_texel_size.y);
+    return peak_sprite_source(v_uv + offset) * weight;
+}
+
+vec3 sample_anamorphic_lens_sprite() {
+    float strength = clamp(u_anamorphic_strength, 0.0, 6.0);
+    if (strength <= 0.0) {
+        return vec3(0.0);
+    }
+    float radius = max(u_bloom_radius, 1.0);
+    float span = radius * clamp(u_anamorphic_ratio, 1.0, 12.0);
+    float y = max(1.0, radius * 0.085);
+    vec3 tint_a = vec3(1.00, 0.92, 0.78);
+    vec3 tint_b = vec3(0.64, 0.78, 1.00);
+    vec3 glare = peak_sprite_sample(0.0, 0.0, 0.12);
+    for (int i = 1; i <= 26; ++i) {
+        float t = float(i) / 26.0;
+        float curve = t * t;
+        float dx = span * mix(0.035, 2.35, curve);
+        float w = exp(-t * 4.15) * 0.040;
+        vec3 near_line =
+            peak_sprite_sample( dx, 0.0, w) +
+            peak_sprite_sample(-dx, 0.0, w);
+        vec3 soft_edge =
+            peak_sprite_sample( dx * 1.018, y, w * 0.34) +
+            peak_sprite_sample(-dx * 1.018, y, w * 0.34) +
+            peak_sprite_sample( dx * 1.018, -y, w * 0.34) +
+            peak_sprite_sample(-dx * 1.018, -y, w * 0.34) +
+            peak_sprite_sample( dx * 0.992, y * 2.0, w * 0.09) +
+            peak_sprite_sample(-dx * 0.992, -y * 2.0, w * 0.09);
+        float tint_mix = t;
+        glare += (near_line + soft_edge) * mix(tint_a, tint_b, tint_mix) * (1.0 + tint_mix * 0.22);
+    }
+    return glare * pow(strength, 1.18) * 0.92;
+}
+
+void main() {
+    vec4 base = texture(u_scene_color, v_uv);
+    float strength = pow(clamp(u_bloom_strength, 0.0, 4.0), 1.35) * 1.75;
+    vec3 bloom = max(texture(u_bloom_source, v_uv).rgb, vec3(0.0));
+    vec3 lens_sprite = sample_anamorphic_lens_sprite();
+    vec3 rgb = clamp(base.rgb + bloom * strength + lens_sprite, 0.0, 1.0);
+    float lens_alpha = max(max(lens_sprite.r, lens_sprite.g), lens_sprite.b);
+    float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength + lens_alpha, 0.0, 1.0);
+    float alpha = u_force_opaque == 1 ? 1.0 : max(base.a, bloom_alpha * 0.45);
+    frag_color = vec4(rgb, alpha);
 }
 """
 
@@ -1332,6 +1690,7 @@ class GpuState:
     roll: float = 0.0
     zoom: float = 1.75
     camera_z: float = 3.25
+    fov_deg: float = FRAME_FIT_FOV_DEG
     pan_x: float = 0.0
     pan_y: float = 0.0
     pan_z: float = 0.0
@@ -1543,6 +1902,10 @@ class GpuState:
     bloom_strength: float = DEFAULT_BLOOM_STRENGTH
     bloom_radius: float = DEFAULT_BLOOM_RADIUS
     bloom_threshold: float = DEFAULT_BLOOM_THRESHOLD
+    bloom_boost: float = DEFAULT_BLOOM_BOOST
+    bloom_anamorphic_strength: float = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+    bloom_anamorphic_threshold: float = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+    bloom_anamorphic_ratio: float = DEFAULT_BLOOM_ANAMORPHIC_RATIO
     vignette_strength: float = DEFAULT_VIGNETTE_STRENGTH
     vignette_radius: float = DEFAULT_VIGNETTE_RADIUS
     vignette_feather: float = DEFAULT_VIGNETTE_FEATHER
@@ -1592,6 +1955,7 @@ class GpuState:
     triplanar_space: str = "object"
     light_azimuth: float = 45.0
     light_elevation: float = 45.0
+    light_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
     direct_intensity: float = 0.42
     shadow_strength: float = DEFAULT_SHADOW_STRENGTH
     shadow_pcf_radius: float = DEFAULT_SHADOW_PCF_RADIUS
@@ -2006,6 +2370,22 @@ def post_effects_diagnostics(state: GpuState) -> dict[str, Any]:
         "bloom_strength": getattr(state, "bloom_strength", DEFAULT_BLOOM_STRENGTH),
         "bloom_radius": getattr(state, "bloom_radius", DEFAULT_BLOOM_RADIUS),
         "bloom_threshold": getattr(state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD),
+        "bloom_boost": getattr(state, "bloom_boost", DEFAULT_BLOOM_BOOST),
+        "bloom_anamorphic_strength": getattr(
+            state,
+            "bloom_anamorphic_strength",
+            DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+        ),
+        "bloom_anamorphic_threshold": getattr(
+            state,
+            "bloom_anamorphic_threshold",
+            DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+        ),
+        "bloom_anamorphic_ratio": getattr(
+            state,
+            "bloom_anamorphic_ratio",
+            DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+        ),
         "vignette_strength": getattr(state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH),
         "vignette_radius": getattr(state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS),
         "vignette_feather": getattr(state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER),
@@ -2507,6 +2887,123 @@ def _descriptor_bounds(descriptor: Mapping[str, Any]) -> tuple[np.ndarray, float
     return center, float(max(size.max(initial=1.0), 1e-6))
 
 
+def _geometry_skin_attribute_arrays(
+    geometry: Mapping[str, Any],
+    vertex_count: int,
+    *,
+    max_influences: int = 4,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    indices = np.zeros((max(0, int(vertex_count)), max_influences), dtype=np.float32)
+    weights = np.zeros((max(0, int(vertex_count)), max_influences), dtype=np.float32)
+    rows_raw = geometry.get("skin_weights")
+    if not isinstance(rows_raw, list) or vertex_count <= 0:
+        return indices, weights, 0
+    skinned_vertex_count = 0
+    for vertex_index in range(min(vertex_count, len(rows_raw))):
+        rows = _normalized_skin_rows(rows_raw[vertex_index])
+        slot = 0
+        for row in rows:
+            if slot >= max_influences:
+                break
+            bone_index = _bone_index_from_skin_row(row)
+            weight = _skin_row_weight(row)
+            if bone_index < 0 or weight <= 1.0e-8:
+                continue
+            indices[vertex_index, slot] = float(bone_index)
+            weights[vertex_index, slot] = float(max(0.0, min(1.0, weight)))
+            slot += 1
+        total = float(weights[vertex_index].sum())
+        if total > 1.0e-8:
+            weights[vertex_index] /= total
+            skinned_vertex_count += 1
+    return indices, weights, skinned_vertex_count
+
+
+def _normalized_skin_rows(value: Any) -> list[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        joints = value.get("joints")
+        weights = value.get("weights")
+        if isinstance(joints, (list, tuple)) and isinstance(weights, (list, tuple)):
+            return [
+                {"bone_index": joints[idx], "weight": weights[idx] if idx < len(weights) else 0.0}
+                for idx in range(len(joints))
+            ]
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, Mapping)]
+    return []
+
+
+def _bone_index_from_skin_row(row: Mapping[str, Any]) -> int:
+    for key in ("bone_index", "joint", "joint_index"):
+        try:
+            return int(row[key])
+        except Exception:
+            pass
+    text = str(row.get("bone_id") or row.get("model_id") or "")
+    if text.startswith("bone_"):
+        try:
+            return int(text.split("_", 1)[1])
+        except Exception:
+            return -1
+    try:
+        return int(text)
+    except Exception:
+        return -1
+
+
+def _skin_row_weight(row: Mapping[str, Any]) -> float:
+    try:
+        return float(row.get("weight", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _geometry_stage_transform(geometry: Mapping[str, Any]) -> dict[str, Any]:
+    raw = geometry.get("stage_transform")
+    if not isinstance(raw, Mapping) or raw.get("enabled") is False:
+        return {
+            "enabled": False,
+            "center": [0.0, 0.0, 0.0],
+            "offset": [0.0, 0.0, 0.0],
+            "rotate_y_180": False,
+        }
+    center = list(raw.get("center") or [0.0, 0.0, 0.0])[:3]
+    offset = list(raw.get("offset") or [0.0, 0.0, 0.0])[:3]
+    center += [0.0] * (3 - len(center))
+    offset += [0.0] * (3 - len(offset))
+    try:
+        center_out = [float(center[0]), float(center[1]), float(center[2])]
+    except Exception:
+        center_out = [0.0, 0.0, 0.0]
+    try:
+        offset_out = [float(offset[0]), float(offset[1]), float(offset[2])]
+    except Exception:
+        offset_out = [0.0, 0.0, 0.0]
+    return {
+        "enabled": True,
+        "center": center_out,
+        "offset": offset_out,
+        "rotate_y_180": bool(raw.get("rotate_y_180")),
+    }
+
+
+def _apply_stage_transform_points(vertices: np.ndarray, transform: Mapping[str, Any]) -> np.ndarray:
+    if not bool(transform.get("enabled")) or vertices.size <= 0:
+        return vertices
+    out = np.asarray(vertices, dtype=np.float32).copy()
+    center = np.asarray(transform.get("center") or [0.0, 0.0, 0.0], dtype=np.float32)
+    offset = np.asarray(transform.get("offset") or [0.0, 0.0, 0.0], dtype=np.float32)
+    if center.shape[0] < 3:
+        center = np.pad(center, (0, 3 - center.shape[0]))
+    if offset.shape[0] < 3:
+        offset = np.pad(offset, (0, 3 - offset.shape[0]))
+    if bool(transform.get("rotate_y_180")):
+        out[:, 0] = center[0] - (out[:, 0] - center[0])
+        out[:, 2] = center[2] - (out[:, 2] - center[2])
+    out[:, :3] += offset[:3]
+    return out
+
+
 PREVIEW_UV_V_FLIP_MODE = "auto"
 
 
@@ -2661,6 +3158,7 @@ def build_vertex_buffer(
     render_profile, render_profiles, render_profile_warning = _active_render_profile(descriptor, track)
     center, max_size = _descriptor_bounds(descriptor)
     chunks: list[np.ndarray] = []
+    bounds_chunks: list[np.ndarray] = []
     draw_ranges: list[dict[str, Any]] = []
     geometry_count = 0
     triangle_count = 0
@@ -2668,6 +3166,7 @@ def build_vertex_buffer(
     skipped_triangle_count = 0
     animated_geometry_count = 0
     skeletal_geometry_count = 0
+    gpu_skinning_vertex_count = 0
     animation_clip_count = len(descriptor.get("animation_clips") or []) if isinstance(descriptor, Mapping) else 0
     flip_uv_v_for_texture_upload = _preview_uv_v_flip_enabled(descriptor)
     vertex_start = 0
@@ -2699,6 +3198,8 @@ def build_vertex_buffer(
         triangles_np = np.asarray(tris, dtype=np.int64)
         if vertices_np.ndim != 2 or vertices_np.shape[1] != 3 or triangles_np.ndim != 2 or triangles_np.shape[1] < 3:
             continue
+        stage_transform = _geometry_stage_transform(geometry)
+        bounds_vertices_np = _apply_stage_transform_points(vertices_np, stage_transform)
         in_range = np.all((triangles_np[:, :3] >= 0) & (triangles_np[:, :3] < len(vertices_np)), axis=1)
         skipped_triangle_count += int(len(triangles_np) - int(np.count_nonzero(in_range)))
         triangles_np = triangles_np[in_range, :3]
@@ -2730,6 +3231,8 @@ def build_vertex_buffer(
         material_uv_set = _material_uv_set(material)
         geometry_count += 1
         points = ((vertices_np[triangles_np] - center) / max_size).astype(np.float32)
+        bounds_points = ((bounds_vertices_np[triangles_np] - center) / max_size).astype(np.float32)
+        bounds_chunks.append(bounds_points.reshape(-1, 3))
         normals = smooth_normals[triangles_np].astype(np.float32)
         uvs_np = _geometry_uv_array_for_material(geometry, material)
         if uvs_np.ndim == 2 and len(uvs_np) == len(vertices_np) and uvs_np.shape[1] >= 2:
@@ -2745,11 +3248,18 @@ def build_vertex_buffer(
         tangents_np, bitangents_np = _compute_tangent_basis(vertices_np, triangles_np, smooth_normals, compact_uvs)
         tangents = tangents_np[triangles_np].astype(np.float32)
         bitangents = bitangents_np[triangles_np].astype(np.float32)
+        skin_indices_np, skin_weights_np, skinned_vertices = _geometry_skin_attribute_arrays(geometry, len(vertices_np))
+        gpu_skinning_vertex_count += int(skinned_vertices)
+        skin_indices = skin_indices_np[triangles_np].astype(np.float32)
+        skin_weights = skin_weights_np[triangles_np].astype(np.float32)
         colors = np.empty((len(triangles_np), 3, 4), dtype=np.float32)
         colors[:] = np.asarray(color, dtype=np.float32)
         materials = np.empty((len(triangles_np), 3, 3), dtype=np.float32)
         materials[:] = np.asarray(pbr, dtype=np.float32)
-        chunk = np.concatenate([points, normals, colors, materials, uvs, tangents, bitangents], axis=2).reshape(-1, 21)
+        chunk = np.concatenate(
+            [points, normals, colors, materials, uvs, tangents, bitangents, skin_indices, skin_weights],
+            axis=2,
+        ).reshape(-1, GPU_VERTEX_STRIDE_FLOAT_COUNT)
         chunks.append(chunk)
         chunk_vertex_count = int(len(chunk))
         draw_ranges.append({
@@ -2765,18 +3275,22 @@ def build_vertex_buffer(
             "depth_write": bool(material_depth_write),
             "render_queue": int(_material_render_queue(material)),
             "shader_model": str(material.get("shader_model") or material.get("source_shader") or ""),
+            "stage_transform_enabled": bool(stage_transform.get("enabled")),
+            "stage_rotate_y_180": bool(stage_transform.get("rotate_y_180")),
+            "stage_center": list(stage_transform.get("center") or [0.0, 0.0, 0.0]),
+            "stage_offset": list(stage_transform.get("offset") or [0.0, 0.0, 0.0]),
         })
         vertex_start += chunk_vertex_count
         triangle_count += int(len(triangles_np))
     if not chunks:
         chunks = [np.asarray([
-            [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            [0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ], dtype=np.float32)]
         draw_ranges = [{"start": 0, "count": 3, "geometry_name": "fallback", "material_name": "", "normal_mode": "fallback", "has_uvs": True}]
     arr = np.ascontiguousarray(np.concatenate(chunks, axis=0), dtype=np.float32)
-    xyz = arr[:, :3] if len(arr) else np.zeros((0, 3), dtype=np.float32)
+    xyz = np.concatenate(bounds_chunks, axis=0) if bounds_chunks else (arr[:, :3] if len(arr) else np.zeros((0, 3), dtype=np.float32))
     min_xyz = xyz.min(axis=0).tolist() if len(xyz) else [-0.5, -0.5, -0.5]
     max_xyz = xyz.max(axis=0).tolist() if len(xyz) else [0.5, 0.5, 0.5]
     return arr, {
@@ -2784,14 +3298,19 @@ def build_vertex_buffer(
         "triangle_count": int(len(arr) // 3),
         "geometry_count": geometry_count,
         "normal_mode": "fbx_layer_normals_or_smooth",
-        "vertex_stride_float_count": 21,
+        "vertex_stride_float_count": GPU_VERTEX_STRIDE_FLOAT_COUNT,
         "shading_model": "hdr_ibl_pbr_textured_normal_mapped_shadow_mapped",
         "flipped_normal_count": int(flipped_normal_count),
         "skipped_triangle_count": int(skipped_triangle_count),
         "animation_clip_count": int(animation_clip_count),
         "animated_geometry_count": int(animated_geometry_count),
         "skeletal_geometry_count": int(skeletal_geometry_count),
+        "gpu_skinning_vertex_count": int(gpu_skinning_vertex_count),
+        "gpu_skinning_bone_count": len(descriptor.get("bones") or []) if isinstance(descriptor, Mapping) else 0,
+        "gpu_skinning_available": bool(gpu_skinning_vertex_count > 0 and len(descriptor.get("bones") or []) > 0 if isinstance(descriptor, Mapping) else False),
         "skeletal_animation_applied": bool(animated_geometry_count > 0 and skeletal_geometry_count > 0),
+        "descriptor_center": center.astype(float).tolist(),
+        "descriptor_max_size": float(max_size),
         "render_profile": render_profile,
         "render_profiles": render_profiles,
         "mtoon_color_policy": (
@@ -3108,6 +3627,19 @@ class GpuMeshWidget(QOpenGLWidget):
         self.vao = 0
         self.environment_program = 0
         self.environment_vao = 0
+        self.post_bloom_program = 0
+        self.bloom_blur_program = 0
+        self.post_bloom_vao = 0
+        self.scene_fbo = 0
+        self.scene_color_texture = 0
+        self.scene_bloom_texture = 0
+        self.bloom_blur_fbo_a = 0
+        self.bloom_blur_fbo_b = 0
+        self.bloom_blur_texture_a = 0
+        self.bloom_blur_texture_b = 0
+        self.bloom_blur_fbo_size: tuple[int, int] = (0, 0)
+        self.scene_depth_renderbuffer = 0
+        self.scene_fbo_size: tuple[int, int] = (0, 0)
         self.hdri_texture = 0
         self.hdri_max_lod = 0.0
         self.ibl_irradiance_texture = 0
@@ -3116,14 +3648,20 @@ class GpuMeshWidget(QOpenGLWidget):
         self.ibl_prefilter_level_count = 0
         self.ibl_probe_diag: dict[str, Any] = {"available": False}
         self.material_textures: dict[str, dict[str, int]] = {}
+        self._vbo_size_bytes = 0
         self.depth_program = 0
         self.ground_program = 0
         self.shadow_fbo = 0
         self.shadow_texture = 0
         self.shadow_qt_fbo = None
-        self.shadow_size = 2048
+        self.shadow_size = int(DEFAULT_SHADOW_MAP_SIZE)
         self.shadow_supported = False
         self.shadow_error = ""
+        self._shadow_dirty = True
+        self._last_shadow_signature: tuple[object, ...] | None = None
+        self._uniform_locations: dict[tuple[int, str], int] = {}
+        self.skinning_matrices: np.ndarray | None = None
+        self.skinning_diag: dict[str, Any] = {}
         self.ground_vao = 0
         self.ground_vbo = 0
         self.last_pos = None
@@ -3146,6 +3684,88 @@ class GpuMeshWidget(QOpenGLWidget):
                 GL.glDeleteTextures([int(texture_id)])
         except Exception:
             pass
+
+    @staticmethod
+    def _delete_gl_framebuffer(framebuffer_id: int) -> None:
+        if not int(framebuffer_id or 0):
+            return
+        try:
+            from OpenGL import GL
+
+            try:
+                GL.glDeleteFramebuffers(1, [int(framebuffer_id)])
+            except TypeError:
+                GL.glDeleteFramebuffers([int(framebuffer_id)])
+        except Exception:
+            pass
+
+    @staticmethod
+    def _delete_gl_renderbuffer(renderbuffer_id: int) -> None:
+        if not int(renderbuffer_id or 0):
+            return
+        try:
+            from OpenGL import GL
+
+            try:
+                GL.glDeleteRenderbuffers(1, [int(renderbuffer_id)])
+            except TypeError:
+                GL.glDeleteRenderbuffers([int(renderbuffer_id)])
+        except Exception:
+            pass
+
+    def _uniform_location(self, program: int, name: str) -> int:
+        """Cache uniform lookups; PyOpenGL calls are measurable during drags."""
+        key = (int(program or 0), str(name))
+        cached = self._uniform_locations.get(key)
+        if cached is not None:
+            return int(cached)
+        from OpenGL import GL
+
+        loc = int(GL.glGetUniformLocation(int(program or 0), str(name)))
+        self._uniform_locations[key] = loc
+        return loc
+
+    def _invalidate_shadow_cache(self) -> None:
+        self._shadow_dirty = True
+
+    @staticmethod
+    def _rounded(value: float, digits: int = 5) -> float:
+        try:
+            return round(float(value), int(digits))
+        except Exception:
+            return 0.0
+
+    def _shadow_signature(self) -> tuple[object, ...]:
+        ranges = tuple(
+            (
+                int(row.get("start", 0) or 0),
+                int(row.get("count", 0) or 0),
+                bool(row.get("depth_write", True)),
+            )
+            for row in self.draw_ranges
+        )
+        return (
+            int(self._vbo_size_bytes or 0),
+            int(self.shadow_size or 0),
+            ranges,
+            self._rounded(self.state.pitch),
+            self._rounded(self.state.yaw),
+            self._rounded(self.state.roll),
+            self._rounded(self.state.zoom),
+            self._rounded(self.state.pan_x),
+            self._rounded(self.state.pan_y),
+            self._rounded(self.state.pan_z),
+            self._rounded(self.state.light_azimuth),
+            self._rounded(self.state.light_elevation),
+            self._rounded(self.state.ibl_rotation),
+            str(self.state.shadow_light_type),
+            self._rounded(self.state.shadow_spot_inner_angle),
+            self._rounded(self.state.shadow_spot_outer_angle),
+        )
+
+    def _mark_shadow_clean(self, signature: tuple[object, ...]) -> None:
+        self._last_shadow_signature = signature
+        self._shadow_dirty = False
 
     def shadow_diagnostics(self) -> dict[str, Any]:
         return shadow_filter_diagnostics(
@@ -3198,6 +3818,204 @@ class GpuMeshWidget(QOpenGLWidget):
             max(1, int(round(self.height() * dpr))),
         )
 
+    def _bind_default_framebuffer(self) -> None:
+        from OpenGL import GL
+
+        default_fbo = 0
+        try:
+            default_fbo = int(self.defaultFramebufferObject())
+        except Exception:
+            default_fbo = 0
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, default_fbo)
+        try:
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0 if default_fbo else GL.GL_BACK)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _set_scene_draw_buffers() -> None:
+        from OpenGL import GL
+
+        buffers = [GL.GL_COLOR_ATTACHMENT0, GL.GL_COLOR_ATTACHMENT1]
+        try:
+            GL.glDrawBuffers(len(buffers), buffers)
+        except TypeError:
+            GL.glDrawBuffers(buffers)
+
+    def _delete_scene_fbo(self) -> None:
+        self._delete_gl_framebuffer(self.scene_fbo)
+        self._delete_gl_texture(self.scene_color_texture)
+        self._delete_gl_texture(self.scene_bloom_texture)
+        self._delete_gl_framebuffer(self.bloom_blur_fbo_a)
+        self._delete_gl_framebuffer(self.bloom_blur_fbo_b)
+        self._delete_gl_texture(self.bloom_blur_texture_a)
+        self._delete_gl_texture(self.bloom_blur_texture_b)
+        self._delete_gl_renderbuffer(self.scene_depth_renderbuffer)
+        self.scene_fbo = 0
+        self.scene_color_texture = 0
+        self.scene_bloom_texture = 0
+        self.bloom_blur_fbo_a = 0
+        self.bloom_blur_fbo_b = 0
+        self.bloom_blur_texture_a = 0
+        self.bloom_blur_texture_b = 0
+        self.bloom_blur_fbo_size = (0, 0)
+        self.scene_depth_renderbuffer = 0
+        self.scene_fbo_size = (0, 0)
+
+    def _ensure_bloom_blur_fbo(self, width: int, height: int) -> bool:
+        from OpenGL import GL
+
+        width = max(1, int(width) // 2)
+        height = max(1, int(height) // 2)
+        if (
+            int(self.bloom_blur_fbo_a or 0)
+            and int(self.bloom_blur_fbo_b or 0)
+            and int(self.bloom_blur_texture_a or 0)
+            and int(self.bloom_blur_texture_b or 0)
+            and self.bloom_blur_fbo_size == (width, height)
+        ):
+            return True
+        for fbo_id in (self.bloom_blur_fbo_a, self.bloom_blur_fbo_b):
+            self._delete_gl_framebuffer(fbo_id)
+        for texture_id in (self.bloom_blur_texture_a, self.bloom_blur_texture_b):
+            self._delete_gl_texture(texture_id)
+        self.bloom_blur_fbo_a = self.bloom_blur_fbo_b = 0
+        self.bloom_blur_texture_a = self.bloom_blur_texture_b = 0
+        self.bloom_blur_fbo_size = (0, 0)
+        try:
+            self.bloom_blur_fbo_a = int(GL.glGenFramebuffers(1))
+            self.bloom_blur_fbo_b = int(GL.glGenFramebuffers(1))
+            self.bloom_blur_texture_a = int(GL.glGenTextures(1))
+            self.bloom_blur_texture_b = int(GL.glGenTextures(1))
+            for fbo_id, texture_id in (
+                (self.bloom_blur_fbo_a, self.bloom_blur_texture_a),
+                (self.bloom_blur_fbo_b, self.bloom_blur_texture_b),
+            ):
+                GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexImage2D(
+                    GL.GL_TEXTURE_2D,
+                    0,
+                    getattr(GL, "GL_RGBA16F", 0x881A),
+                    width,
+                    height,
+                    0,
+                    GL.GL_RGBA,
+                    GL.GL_FLOAT,
+                    None,
+                )
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo_id)
+                GL.glFramebufferTexture2D(
+                    GL.GL_FRAMEBUFFER,
+                    GL.GL_COLOR_ATTACHMENT0,
+                    GL.GL_TEXTURE_2D,
+                    texture_id,
+                    0,
+                )
+                try:
+                    GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
+                except Exception:
+                    pass
+                status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
+                if status != GL.GL_FRAMEBUFFER_COMPLETE:
+                    raise RuntimeError(f"bloom blur framebuffer incomplete: {status}")
+            self.bloom_blur_fbo_size = (width, height)
+            return True
+        except Exception:
+            for fbo_id in (self.bloom_blur_fbo_a, self.bloom_blur_fbo_b):
+                self._delete_gl_framebuffer(fbo_id)
+            for texture_id in (self.bloom_blur_texture_a, self.bloom_blur_texture_b):
+                self._delete_gl_texture(texture_id)
+            self.bloom_blur_fbo_a = self.bloom_blur_fbo_b = 0
+            self.bloom_blur_texture_a = self.bloom_blur_texture_b = 0
+            self.bloom_blur_fbo_size = (0, 0)
+            return False
+        finally:
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+
+    def _ensure_scene_fbo(self, width: int, height: int) -> bool:
+        from OpenGL import GL
+
+        width = max(1, int(width))
+        height = max(1, int(height))
+        if (
+            int(self.scene_fbo or 0)
+            and int(self.scene_color_texture or 0)
+            and int(self.scene_bloom_texture or 0)
+            and int(self.scene_depth_renderbuffer or 0)
+            and self.scene_fbo_size == (width, height)
+        ):
+            return True
+
+        self._delete_scene_fbo()
+        try:
+            self.scene_fbo = int(GL.glGenFramebuffers(1))
+            self.scene_color_texture = int(GL.glGenTextures(1))
+            self.scene_bloom_texture = int(GL.glGenTextures(1))
+            self.scene_depth_renderbuffer = int(GL.glGenRenderbuffers(1))
+
+            for texture_id, internal_format, pixel_type in (
+                (self.scene_color_texture, GL.GL_RGBA8, GL.GL_UNSIGNED_BYTE),
+                (self.scene_bloom_texture, getattr(GL, "GL_RGBA16F", 0x881A), GL.GL_FLOAT),
+            ):
+                GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexImage2D(
+                    GL.GL_TEXTURE_2D,
+                    0,
+                    internal_format,
+                    width,
+                    height,
+                    0,
+                    GL.GL_RGBA,
+                    pixel_type,
+                    None,
+                )
+
+            GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, self.scene_depth_renderbuffer)
+            GL.glRenderbufferStorage(GL.GL_RENDERBUFFER, GL.GL_DEPTH_COMPONENT24, width, height)
+
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self.scene_fbo)
+            GL.glFramebufferTexture2D(
+                GL.GL_FRAMEBUFFER,
+                GL.GL_COLOR_ATTACHMENT0,
+                GL.GL_TEXTURE_2D,
+                self.scene_color_texture,
+                0,
+            )
+            GL.glFramebufferTexture2D(
+                GL.GL_FRAMEBUFFER,
+                GL.GL_COLOR_ATTACHMENT1,
+                GL.GL_TEXTURE_2D,
+                self.scene_bloom_texture,
+                0,
+            )
+            GL.glFramebufferRenderbuffer(
+                GL.GL_FRAMEBUFFER,
+                GL.GL_DEPTH_ATTACHMENT,
+                GL.GL_RENDERBUFFER,
+                self.scene_depth_renderbuffer,
+            )
+            self._set_scene_draw_buffers()
+            status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
+            if status != GL.GL_FRAMEBUFFER_COMPLETE:
+                raise RuntimeError(f"scene framebuffer incomplete: {status}")
+            self.scene_fbo_size = (width, height)
+            return True
+        except Exception:
+            self._delete_scene_fbo()
+            return False
+        finally:
+            GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+            GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, 0)
+
     def initializeGL(self) -> None:
         from OpenGL import GL
 
@@ -3207,6 +4025,9 @@ class GpuMeshWidget(QOpenGLWidget):
         self.program = self._create_program()
         self.environment_program = self._create_program(ENV_VERT_SHADER, ENV_FRAG_SHADER)
         self.environment_vao = GL.glGenVertexArrays(1)
+        self.bloom_blur_program = self._create_program(POST_BLOOM_VERT_SHADER, BLOOM_BLUR_FRAG_SHADER)
+        self.post_bloom_program = self._create_program(POST_BLOOM_VERT_SHADER, POST_BLOOM_FRAG_SHADER)
+        self.post_bloom_vao = GL.glGenVertexArrays(1)
         self.depth_program = self._create_program(DEPTH_VERT_SHADER, DEPTH_FRAG_SHADER)
         self.ground_program = self._create_program(GROUND_VERT_SHADER, GROUND_FRAG_SHADER)
         self._upload_hdri()
@@ -3220,26 +4041,66 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glBindVertexArray(self.vao)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_STATIC_DRAW)
-        stride = 21 * 4
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(0))
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(12))
-        GL.glEnableVertexAttribArray(2)
-        GL.glVertexAttribPointer(2, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(24))
-        GL.glEnableVertexAttribArray(3)
-        GL.glVertexAttribPointer(3, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(40))
-        GL.glEnableVertexAttribArray(4)
-        GL.glVertexAttribPointer(4, 2, GL.GL_FLOAT, False, stride, ctypes.c_void_p(52))
-        GL.glEnableVertexAttribArray(5)
-        GL.glVertexAttribPointer(5, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(60))
-        GL.glEnableVertexAttribArray(6)
-        GL.glVertexAttribPointer(6, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(72))
+        self._vbo_size_bytes = int(self.vertices.nbytes)
+        self._configure_mesh_vertex_attributes()
         GL.glBindVertexArray(0)
+
+    def _configure_mesh_vertex_attributes(self) -> None:
+        from OpenGL import GL
+
+        stride_float_count = int(self.mesh_diag.get("vertex_stride_float_count") or GPU_VERTEX_STRIDE_FLOAT_COUNT)
+        stride = max(GPU_VERTEX_BASE_STRIDE_FLOAT_COUNT, stride_float_count) * 4
+        specs = (
+            (0, 3, 0),
+            (1, 3, 12),
+            (2, 4, 24),
+            (3, 3, 40),
+            (4, 2, 52),
+            (5, 3, 60),
+            (6, 3, 72),
+        )
+        for location, size, offset in specs:
+            GL.glEnableVertexAttribArray(location)
+            GL.glVertexAttribPointer(location, size, GL.GL_FLOAT, False, stride, ctypes.c_void_p(offset))
+        if stride_float_count >= GPU_VERTEX_STRIDE_FLOAT_COUNT:
+            GL.glEnableVertexAttribArray(7)
+            GL.glVertexAttribPointer(7, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(84))
+            GL.glEnableVertexAttribArray(8)
+            GL.glVertexAttribPointer(8, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(100))
+        else:
+            for location in (7, 8):
+                GL.glDisableVertexAttribArray(location)
+
+    def replace_vertices(self, vertices: np.ndarray, mesh_diag: Mapping[str, Any]) -> None:
+        """Replace animated vertex data without rebuilding programs/textures."""
+        self.vertices = np.ascontiguousarray(vertices, dtype=np.float32)
+        self.mesh_diag = mesh_diag
+        self.draw_ranges = list(mesh_diag.get("draw_ranges") or [{"start": 0, "count": int(len(self.vertices)), "material_name": ""}])
+        if not int(self.vbo or 0):
+            return
+        from OpenGL import GL
+
+        self.makeCurrent()
+        try:
+            GL.glBindVertexArray(self.vao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+            if int(self.vertices.nbytes) <= int(self._vbo_size_bytes or 0):
+                GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, int(self.vertices.nbytes), self.vertices)
+            else:
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_DYNAMIC_DRAW)
+                self._vbo_size_bytes = int(self.vertices.nbytes)
+            self._configure_mesh_vertex_attributes()
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+            GL.glBindVertexArray(0)
+        finally:
+            self.doneCurrent()
+        self._invalidate_shadow_cache()
+        self.update()
 
     def _create_shadow_resources(self) -> None:
         from OpenGL import GL
 
+        self._invalidate_shadow_cache()
         self.shadow_supported = False
         self.shadow_error = ""
         self.shadow_fbo = 0
@@ -3264,6 +4125,7 @@ class GpuMeshWidget(QOpenGLWidget):
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
             self.shadow_supported = True
             self.shadow_error = ""
+            self._invalidate_shadow_cache()
             return
         except Exception as qt_exc:
             qt_error = f"{type(qt_exc).__name__}: {qt_exc}"
@@ -3296,6 +4158,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 raise RuntimeError(f"shadow framebuffer incomplete: {status}")
             self.shadow_supported = True
             self.shadow_error = f"qt_color_depth_fbo_unavailable; using_raw_depth_shadow_map: {qt_error}"
+            self._invalidate_shadow_cache()
         except Exception as exc:
             raw_error = f"{type(exc).__name__}: {exc}"
             self.shadow_supported = False
@@ -3524,6 +4387,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 self.doneCurrent()
             except Exception:
                 pass
+        self._invalidate_shadow_cache()
         self.update()
 
     def set_environment_background_visible(self, visible: bool) -> None:
@@ -3543,6 +4407,8 @@ class GpuMeshWidget(QOpenGLWidget):
 
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
                 GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_STATIC_DRAW)
+                self._vbo_size_bytes = int(self.vertices.nbytes)
+                self._configure_mesh_vertex_attributes()
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
         finally:
             try:
@@ -3550,6 +4416,87 @@ class GpuMeshWidget(QOpenGLWidget):
             except Exception:
                 pass
         self.update()
+
+    def set_skinning_matrices(self, matrices: Any, diagnostics: Mapping[str, Any] | None = None) -> None:
+        """Update the GPU bone palette without rebuilding mesh vertices."""
+        arr = np.asarray(matrices, dtype=np.float32)
+        if arr.ndim != 3 or arr.shape[1:] != (4, 4) or len(arr) <= 0:
+            self.skinning_matrices = None
+            self.skinning_diag = {"available": False, "reason": "invalid_skinning_matrix_shape"}
+        else:
+            self.skinning_matrices = np.ascontiguousarray(arr[:GPU_SKINNING_MAX_BONES], dtype=np.float32)
+            self.skinning_diag = {
+                "available": True,
+                "bone_count": int(len(self.skinning_matrices)),
+                **dict(diagnostics or {}),
+            }
+        self._invalidate_shadow_cache()
+        self.update()
+
+    def clear_skinning_matrices(self) -> None:
+        self.skinning_matrices = None
+        self.skinning_diag = {"available": False}
+        self._invalidate_shadow_cache()
+        self.update()
+
+    def _upload_skinning_uniforms(self, program: int) -> None:
+        from OpenGL import GL
+
+        available = (
+            self.skinning_matrices is not None
+            and int(self.mesh_diag.get("gpu_skinning_vertex_count", 0) or 0) > 0
+        )
+        GL.glUniform1i(self._uniform_location(program, "u_skinning_enabled"), 1 if available else 0)
+        count = int(len(self.skinning_matrices)) if available and self.skinning_matrices is not None else 0
+        count = max(0, min(GPU_SKINNING_MAX_BONES, count))
+        GL.glUniform1i(self._uniform_location(program, "u_skin_bone_count"), count)
+        center = self.mesh_diag.get("descriptor_center") or [0.0, 0.0, 0.0]
+        max_size = float(self.mesh_diag.get("descriptor_max_size") or 1.0)
+        GL.glUniform3f(
+            self._uniform_location(program, "u_bounds_center"),
+            float(center[0] if len(center) > 0 else 0.0),
+            float(center[1] if len(center) > 1 else 0.0),
+            float(center[2] if len(center) > 2 else 0.0),
+        )
+        GL.glUniform1f(self._uniform_location(program, "u_bounds_max_size"), max(1.0e-6, max_size))
+        if count > 0 and self.skinning_matrices is not None:
+            GL.glUniformMatrix4fv(
+                self._uniform_location(program, "u_skin_bones"),
+                count,
+                True,
+                self.skinning_matrices[:count],
+            )
+
+    def _upload_stage_transform_uniforms(self, program: int, draw_range: Mapping[str, Any]) -> None:
+        from OpenGL import GL
+
+        enabled = bool(draw_range.get("stage_transform_enabled"))
+        center = list(draw_range.get("stage_center") or [0.0, 0.0, 0.0])[:3]
+        offset = list(draw_range.get("stage_offset") or [0.0, 0.0, 0.0])[:3]
+        center += [0.0] * (3 - len(center))
+        offset += [0.0] * (3 - len(offset))
+        try:
+            center_values = [float(center[0]), float(center[1]), float(center[2])]
+        except Exception:
+            center_values = [0.0, 0.0, 0.0]
+        try:
+            offset_values = [float(offset[0]), float(offset[1]), float(offset[2])]
+        except Exception:
+            offset_values = [0.0, 0.0, 0.0]
+        GL.glUniform1i(self._uniform_location(program, "u_stage_transform_enabled"), 1 if enabled else 0)
+        GL.glUniform1i(self._uniform_location(program, "u_stage_rotate_y_180"), 1 if bool(draw_range.get("stage_rotate_y_180")) else 0)
+        GL.glUniform3f(
+            self._uniform_location(program, "u_stage_center"),
+            float(center_values[0]),
+            float(center_values[1]),
+            float(center_values[2]),
+        )
+        GL.glUniform3f(
+            self._uniform_location(program, "u_stage_offset"),
+            float(offset_values[0]),
+            float(offset_values[1]),
+            float(offset_values[2]),
+        )
 
     def _upload_material_textures(self) -> None:
         for material_name, maps in self.texture_plan.items():
@@ -3600,6 +4547,237 @@ class GpuMeshWidget(QOpenGLWidget):
         if self.auto_fit_enabled:
             self.auto_fit_pending = True
 
+    def _draw_bloom_blur_pass(
+        self,
+        *,
+        source_texture: int,
+        source_width: int,
+        source_height: int,
+        target_fbo: int,
+        target_width: int,
+        target_height: int,
+        direction: tuple[float, float],
+        radius: float,
+        threshold: float,
+        boost: float,
+        anamorphic_strength: float,
+        anamorphic_threshold: float,
+        anamorphic_ratio: float,
+        extract_bright: bool,
+    ) -> bool:
+        from OpenGL import GL
+
+        if not int(self.bloom_blur_program or 0) or not int(source_texture or 0) or not int(target_fbo or 0):
+            return False
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, int(target_fbo))
+        try:
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
+        except Exception:
+            pass
+        GL.glViewport(0, 0, max(1, int(target_width)), max(1, int(target_height)))
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glDepthMask(False)
+        GL.glUseProgram(self.bloom_blur_program)
+        GL.glActiveTexture(GL.GL_TEXTURE15)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, int(source_texture))
+        GL.glUniform1i(self._uniform_location(self.bloom_blur_program, "u_source"), 15)
+        GL.glUniform2f(
+            self._uniform_location(self.bloom_blur_program, "u_texel_size"),
+            1.0 / max(1, int(source_width)),
+            1.0 / max(1, int(source_height)),
+        )
+        GL.glUniform2f(
+            self._uniform_location(self.bloom_blur_program, "u_direction"),
+            float(direction[0]),
+            float(direction[1]),
+        )
+        GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_radius"), float(radius))
+        GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_threshold"), float(threshold))
+        GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_boost"), float(boost))
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_strength"),
+            float(anamorphic_strength),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_threshold"),
+            float(anamorphic_threshold),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_ratio"),
+            float(anamorphic_ratio),
+        )
+        GL.glUniform1i(self._uniform_location(self.bloom_blur_program, "u_extract_bright"), 1 if extract_bright else 0)
+        GL.glBindVertexArray(self.post_bloom_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
+        GL.glBindVertexArray(0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glUseProgram(0)
+        return True
+
+    def _blurred_bloom_texture(self, width: int, height: int, post_effects: Mapping[str, Any]) -> tuple[int, int, int]:
+        from OpenGL import GL
+
+        if not self._ensure_bloom_blur_fbo(width, height):
+            return int(self.scene_bloom_texture or 0), max(1, int(width)), max(1, int(height))
+        blur_w, blur_h = self.bloom_blur_fbo_size
+        radius = float(post_effects.get("bloom_radius", DEFAULT_BLOOM_RADIUS) or DEFAULT_BLOOM_RADIUS)
+        strength = float(post_effects.get("bloom_strength", DEFAULT_BLOOM_STRENGTH) or DEFAULT_BLOOM_STRENGTH)
+        boost = max(float(post_effects.get("bloom_boost", DEFAULT_BLOOM_BOOST) or DEFAULT_BLOOM_BOOST), strength * 0.42)
+        raw_threshold = float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD)
+        threshold = max(0.02, raw_threshold - min(0.34, strength * 0.075 + boost * 0.035))
+        anamorphic_strength = float(
+            post_effects.get("bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            or DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        )
+        if anamorphic_strength <= 0.0:
+            anamorphic_strength = max(0.0, strength - 0.72) * 0.72 + boost * 0.28
+        anamorphic_strength = max(0.0, min(6.0, anamorphic_strength))
+        anamorphic_threshold = max(
+            threshold + 0.14,
+            float(
+                post_effects.get("bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+                or DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+            ),
+        )
+        anamorphic_ratio = max(
+            1.0,
+            min(
+                12.0,
+                float(
+                    post_effects.get("bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+                    or DEFAULT_BLOOM_ANAMORPHIC_RATIO
+                ),
+            ),
+        )
+        vertical_radius = radius * (0.34 if anamorphic_strength > 0.001 else 1.0)
+        second_horizontal_radius = radius * (0.82 if anamorphic_strength > 0.001 else 0.62)
+        second_vertical_radius = radius * (0.22 if anamorphic_strength > 0.001 else 0.62)
+        pass_plan = (
+            (
+                int(self.scene_bloom_texture or 0),
+                max(1, int(width)),
+                max(1, int(height)),
+                self.bloom_blur_fbo_a,
+                (1.0, 0.0),
+                radius,
+                True,
+                0.0,
+            ),
+            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), vertical_radius, False, 0.0),
+            (self.bloom_blur_texture_b, blur_w, blur_h, self.bloom_blur_fbo_a, (1.0, 0.0), second_horizontal_radius, False, 0.0),
+            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), second_vertical_radius, False, 0.0),
+        )
+        for source, source_w, source_h, target_fbo, direction, pass_radius, extract, pass_anamorphic_strength in pass_plan:
+            ok = self._draw_bloom_blur_pass(
+                source_texture=source,
+                source_width=source_w,
+                source_height=source_h,
+                target_fbo=int(target_fbo or 0),
+                target_width=blur_w,
+                target_height=blur_h,
+                direction=direction,
+                radius=pass_radius,
+                threshold=threshold,
+                boost=boost if extract else 0.0,
+                anamorphic_strength=pass_anamorphic_strength,
+                anamorphic_threshold=anamorphic_threshold,
+                anamorphic_ratio=anamorphic_ratio,
+                extract_bright=extract,
+            )
+            if not ok:
+                GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                return int(self.scene_bloom_texture or 0), max(1, int(width)), max(1, int(height))
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+        return int(self.bloom_blur_texture_b or 0), blur_w, blur_h
+
+    def _draw_bloom_post(self, width: int, height: int, post_effects: Mapping[str, Any], bloom_strength: float) -> None:
+        from OpenGL import GL
+
+        if not int(self.post_bloom_program or 0) or not int(self.scene_color_texture or 0) or not int(self.scene_bloom_texture or 0):
+            self._bind_default_framebuffer()
+            return
+        bloom_texture, bloom_width, bloom_height = self._blurred_bloom_texture(width, height, post_effects)
+        self._bind_default_framebuffer()
+        GL.glViewport(0, 0, max(1, int(width)), max(1, int(height)))
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glDisable(GL.GL_BLEND)
+        GL.glDepthMask(False)
+        GL.glUseProgram(self.post_bloom_program)
+        GL.glActiveTexture(GL.GL_TEXTURE14)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self.scene_color_texture)
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_scene_color"), 14)
+        GL.glActiveTexture(GL.GL_TEXTURE15)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, int(bloom_texture or self.scene_bloom_texture))
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_bloom_source"), 15)
+        GL.glActiveTexture(GL.GL_TEXTURE13)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, int(self.scene_bloom_texture or 0))
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_peak_source"), 13)
+        GL.glUniform2f(
+            self._uniform_location(self.post_bloom_program, "u_texel_size"),
+            1.0 / max(1, int(bloom_width)),
+            1.0 / max(1, int(bloom_height)),
+        )
+        GL.glUniform2f(
+            self._uniform_location(self.post_bloom_program, "u_peak_texel_size"),
+            1.0 / max(1, int(width)),
+            1.0 / max(1, int(height)),
+        )
+        GL.glUniform1f(self._uniform_location(self.post_bloom_program, "u_bloom_strength"), float(bloom_strength))
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_bloom_radius"),
+            float(post_effects.get("bloom_radius", DEFAULT_BLOOM_RADIUS) or DEFAULT_BLOOM_RADIUS),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_bloom_threshold"),
+            float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD),
+        )
+        anamorphic_strength = float(
+            post_effects.get("bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            or DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        )
+        if anamorphic_strength <= 0.0:
+            anamorphic_strength = max(0.0, float(bloom_strength) - 0.72) * 0.72
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_strength"),
+            max(0.0, min(6.0, anamorphic_strength)),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_threshold"),
+            float(
+                post_effects.get("bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+                or DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+            ),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_ratio"),
+            max(
+                1.0,
+                min(
+                    12.0,
+                    float(
+                        post_effects.get("bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+                        or DEFAULT_BLOOM_ANAMORPHIC_RATIO
+                    ),
+                ),
+            ),
+        )
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_force_opaque"), 0 if self.transparent_background else 1)
+        GL.glBindVertexArray(self.post_bloom_vao)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
+        GL.glBindVertexArray(0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE13)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE14)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE0)
+        GL.glUseProgram(0)
+        GL.glDepthMask(True)
+        GL.glEnable(GL.GL_BLEND)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+
     def paintGL(self) -> None:
         from OpenGL import GL
 
@@ -3609,7 +4787,7 @@ class GpuMeshWidget(QOpenGLWidget):
         if self.auto_fit_enabled and self.auto_fit_pending:
             self.fit_current_view()
             self.auto_fit_pending = False
-        proj = _perspective(FRAME_FIT_FOV_DEG, width / height, 0.05, 50.0)
+        proj = _perspective(max(10.0, min(120.0, float(self.state.fov_deg))), width / height, 0.05, 50.0)
         view = np.eye(4, dtype=np.float32)
         view[2, 3] = -float(self.state.camera_z)
         rot3 = _rotation_matrix(self.state.pitch, self.state.yaw, self.state.roll)
@@ -3650,7 +4828,12 @@ class GpuMeshWidget(QOpenGLWidget):
         ground_mvp = proj @ view @ ground_model
         ground_light_mvp = light_proj @ light_view @ ground_model
 
-        if self.shadow_supported:
+        shadow_signature = self._shadow_signature()
+        should_update_shadow = bool(
+            self.shadow_supported
+            and (self._shadow_dirty or shadow_signature != self._last_shadow_signature)
+        )
+        if should_update_shadow:
             shadow_bound = True
             if self.shadow_qt_fbo is not None:
                 shadow_bound = bool(self.shadow_qt_fbo.bind())
@@ -3667,26 +4850,59 @@ class GpuMeshWidget(QOpenGLWidget):
                     clear_bits |= GL.GL_COLOR_BUFFER_BIT
                 GL.glClear(clear_bits)
                 GL.glUseProgram(self.depth_program)
-                GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.depth_program, "u_light_mvp"), 1, True, light_mvp)
+                GL.glUniformMatrix4fv(self._uniform_location(self.depth_program, "u_light_mvp"), 1, True, light_mvp)
+                self._upload_skinning_uniforms(self.depth_program)
                 GL.glBindVertexArray(self.vao)
                 for draw_range in self.draw_ranges:
+                    if draw_range.get("depth_write") is False:
+                        continue
+                    draw_count = int(draw_range.get("count", len(self.vertices)) or 0)
+                    if draw_count <= 0:
+                        continue
+                    self._upload_stage_transform_uniforms(self.depth_program, draw_range)
                     GL.glDrawArrays(
                         GL.GL_TRIANGLES,
                         int(draw_range.get("start", 0) or 0),
-                        int(draw_range.get("count", len(self.vertices)) or 0),
+                        draw_count,
                     )
                 GL.glBindVertexArray(0)
                 if self.shadow_qt_fbo is not None:
                     self.shadow_qt_fbo.release()
                 else:
                     GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                self._mark_shadow_clean(shadow_signature)
 
+        post_effects = post_effects_diagnostics(self.state)
+        bloom_strength = (
+            float(post_effects.get("bloom_strength", 0.0) or 0.0)
+            if bool(post_effects.get("enabled")) and bool(post_effects.get("bloom_enabled"))
+            else 0.0
+        )
+        bloom_post_active = bool(
+            bloom_strength > 0.0001
+            and self._ensure_scene_fbo(framebuffer_width, framebuffer_height)
+        )
+        if bloom_post_active:
+            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self.scene_fbo)
+            self._set_scene_draw_buffers()
+        else:
+            self._bind_default_framebuffer()
         GL.glViewport(0, 0, framebuffer_width, framebuffer_height)
         if self.transparent_background:
-            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+            clear_color = (0.0, 0.0, 0.0, 0.0)
         else:
-            GL.glClearColor(0.36, 0.40, 0.43, 1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            clear_color = (0.36, 0.40, 0.43, 1.0)
+        if bloom_post_active:
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
+            GL.glClearColor(*clear_color)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT1)
+            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+            self._set_scene_draw_buffers()
+        else:
+            GL.glClearColor(*clear_color)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         color_management = color_management_diagnostics(self.state)
         hybrid_rendering = hybrid_rendering_diagnostics(self.state)
         transmission = transmission_diagnostics(self.state)
@@ -3729,17 +4945,17 @@ class GpuMeshWidget(QOpenGLWidget):
             GL.glDepthMask(False)
             GL.glDisable(GL.GL_DEPTH_TEST)
             GL.glUseProgram(self.environment_program)
-            GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
-            GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_tone_mapping_mode"), tone_mode)
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_tone_exposure"), tone_exposure)
-            GL.glUniform3f(GL.glGetUniformLocation(self.environment_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_tone_gamma"), tone_gamma)
+            GL.glUniform1i(self._uniform_location(self.environment_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+            GL.glUniform1i(self._uniform_location(self.environment_program, "u_tone_mapping_mode"), tone_mode)
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_tone_exposure"), tone_exposure)
+            GL.glUniform3f(self._uniform_location(self.environment_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_tone_gamma"), tone_gamma)
             if self.hdri_texture:
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_hdri"), 0)
+                GL.glUniform1i(self._uniform_location(self.environment_program, "u_hdri"), 0)
             GL.glBindVertexArray(self.environment_vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
             GL.glBindVertexArray(0)
@@ -3749,226 +4965,240 @@ class GpuMeshWidget(QOpenGLWidget):
 
         if self.draw_ground:
             GL.glUseProgram(self.ground_program)
-            GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.ground_program, "u_mvp"), 1, True, ground_mvp)
-            GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.ground_program, "u_light_mvp"), 1, True, ground_light_mvp)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_strength"), float(self.state.shadow_strength))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_bias"), float(self.state.shadow_bias))
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ground_reflection"), float(self.state.ground_reflection))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_opacity"), float(self.state.shadow_catcher_opacity))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_softness"), float(self.state.shadow_catcher_softness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_opacity"), float(self.state.reflection_catcher_opacity))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_roughness"), float(self.state.reflection_catcher_roughness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_softness"), float(self.state.reflection_catcher_softness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_contact_reflection_strength"), float(self.state.contact_reflection_strength))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_contact_reflection_falloff"), float(self.state.contact_reflection_falloff))
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_tone_mapping_mode"), tone_mode)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_tone_exposure"), tone_exposure)
-            GL.glUniform3f(GL.glGetUniformLocation(self.ground_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_tone_gamma"), tone_gamma)
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
+            GL.glUniformMatrix4fv(self._uniform_location(self.ground_program, "u_mvp"), 1, True, ground_mvp)
+            GL.glUniformMatrix4fv(self._uniform_location(self.ground_program, "u_light_mvp"), 1, True, ground_light_mvp)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_strength"), float(self.state.shadow_strength))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_bias"), float(self.state.shadow_bias))
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ground_reflection"), float(self.state.ground_reflection))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_opacity"), float(self.state.shadow_catcher_opacity))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_softness"), float(self.state.shadow_catcher_softness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_opacity"), float(self.state.reflection_catcher_opacity))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_roughness"), float(self.state.reflection_catcher_roughness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_softness"), float(self.state.reflection_catcher_softness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_contact_reflection_strength"), float(self.state.contact_reflection_strength))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_contact_reflection_falloff"), float(self.state.contact_reflection_falloff))
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_tone_mapping_mode"), tone_mode)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_tone_exposure"), tone_exposure)
+            GL.glUniform3f(self._uniform_location(self.ground_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_tone_gamma"), tone_gamma)
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
             if self.shadow_supported:
                 GL.glActiveTexture(GL.GL_TEXTURE6)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.shadow_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_shadow_map"), 6)
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+                GL.glUniform1i(self._uniform_location(self.ground_program, "u_shadow_map"), 6)
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
             if self.hdri_texture:
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_hdri"), 0)
+                GL.glUniform1i(self._uniform_location(self.ground_program, "u_hdri"), 0)
             GL.glBindVertexArray(self.ground_vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
             GL.glBindVertexArray(0)
 
         GL.glUseProgram(self.program)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_mvp"), 1, True, mvp)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_model"), 1, True, model)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_light_mvp"), 1, True, light_mvp)
-        GL.glUniformMatrix3fv(GL.glGetUniformLocation(self.program, "u_normal_mat"), 1, True, normal_mat)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_mvp"), 1, True, mvp)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_model"), 1, True, model)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_light_mvp"), 1, True, light_mvp)
+        GL.glUniformMatrix3fv(self._uniform_location(self.program, "u_normal_mat"), 1, True, normal_mat)
+        self._upload_skinning_uniforms(self.program)
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_light_dir"),
+            self._uniform_location(self.program, "u_light_dir"),
             float(light_dir[0]),
             float(light_dir[1]),
             float(light_dir[2]),
         )
-        GL.glUniform3f(GL.glGetUniformLocation(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+        light_color = list(self.state.light_color) + [1.0, 1.0, 1.0]
+        GL.glUniform3f(
+            self._uniform_location(self.program, "u_light_color"),
+            max(0.0, float(light_color[0])),
+            max(0.0, float(light_color[1])),
+            max(0.0, float(light_color[2])),
+        )
+        GL.glUniform3f(self._uniform_location(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
         unlit_controls = self.unlit_color_controls()
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_exposure_scale"),
+            self._uniform_location(self.program, "u_unlit_exposure_scale"),
             float(unlit_controls["unlit_exposure_scale"]),
         )
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_contrast"),
+            self._uniform_location(self.program, "u_unlit_contrast"),
             float(unlit_controls["unlit_contrast"]),
         )
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_output_gamma"),
+            self._uniform_location(self.program, "u_unlit_output_gamma"),
             float(unlit_controls["unlit_output_gamma"]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_max_lod"), float(self.hdri_max_lod))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_direct_intensity"), float(self.state.direct_intensity))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_tone_mapping_mode"), tone_mode)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_tone_exposure"), tone_exposure)
-        GL.glUniform3f(GL.glGetUniformLocation(self.program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_tone_gamma"), tone_gamma)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_hybrid_sample_count"), hybrid_samples)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_diffuse_gi_strength"), diffuse_gi)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_specular_gi_strength"), specular_gi)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_denoise_strength"), denoise_strength)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_transmission"), float(transmission.get("transmission", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_refraction_strength"), float(transmission.get("refraction_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ior"), float(transmission.get("ior", DEFAULT_IOR) or DEFAULT_IOR))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_thickness"), float(transmission.get("thickness", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+        GL.glUniform1f(self._uniform_location(self.program, "u_max_lod"), float(self.hdri_max_lod))
+        GL.glUniform1f(self._uniform_location(self.program, "u_direct_intensity"), float(self.state.direct_intensity))
+        GL.glUniform1i(self._uniform_location(self.program, "u_tone_mapping_mode"), tone_mode)
+        GL.glUniform1f(self._uniform_location(self.program, "u_tone_exposure"), tone_exposure)
+        GL.glUniform3f(self._uniform_location(self.program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+        GL.glUniform1f(self._uniform_location(self.program, "u_tone_gamma"), tone_gamma)
+        GL.glUniform1i(self._uniform_location(self.program, "u_hybrid_sample_count"), hybrid_samples)
+        GL.glUniform1f(self._uniform_location(self.program, "u_diffuse_gi_strength"), diffuse_gi)
+        GL.glUniform1f(self._uniform_location(self.program, "u_specular_gi_strength"), specular_gi)
+        GL.glUniform1f(self._uniform_location(self.program, "u_denoise_strength"), denoise_strength)
+        GL.glUniform1f(self._uniform_location(self.program, "u_transmission"), float(transmission.get("transmission", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_refraction_strength"), float(transmission.get("refraction_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ior"), float(transmission.get("ior", DEFAULT_IOR) or DEFAULT_IOR))
+        GL.glUniform1f(self._uniform_location(self.program, "u_thickness"), float(transmission.get("thickness", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_absorption_color"),
+            self._uniform_location(self.program, "u_absorption_color"),
             float(absorption_color[0]),
             float(absorption_color[1]),
             float(absorption_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_strength"), float(clearcoat.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_roughness"), float(clearcoat.get("roughness", DEFAULT_CLEARCOAT_ROUGHNESS) or DEFAULT_CLEARCOAT_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_ior"), float(clearcoat.get("ior", DEFAULT_CLEARCOAT_IOR) or DEFAULT_CLEARCOAT_IOR))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_strength"), float(clearcoat.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_roughness"), float(clearcoat.get("roughness", DEFAULT_CLEARCOAT_ROUGHNESS) or DEFAULT_CLEARCOAT_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_ior"), float(clearcoat.get("ior", DEFAULT_CLEARCOAT_IOR) or DEFAULT_CLEARCOAT_IOR))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_clearcoat_tint"),
+            self._uniform_location(self.program, "u_clearcoat_tint"),
             float(clearcoat_tint[0]),
             float(clearcoat_tint[1]),
             float(clearcoat_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_strength"), float(parallax.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_depth"), float(parallax.get("depth", DEFAULT_PARALLAX_DEPTH) or DEFAULT_PARALLAX_DEPTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_center"), float(parallax.get("center", DEFAULT_PARALLAX_CENTER) or DEFAULT_PARALLAX_CENTER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_strength"), float(bevel.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_radius"), float(bevel.get("radius", DEFAULT_BEVEL_RADIUS) or DEFAULT_BEVEL_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_edge_width"), float(bevel.get("edge_width", DEFAULT_BEVEL_EDGE_WIDTH) or DEFAULT_BEVEL_EDGE_WIDTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_blend"), float(material_layering.get("blend", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_strength"), float(parallax.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_depth"), float(parallax.get("depth", DEFAULT_PARALLAX_DEPTH) or DEFAULT_PARALLAX_DEPTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_center"), float(parallax.get("center", DEFAULT_PARALLAX_CENTER) or DEFAULT_PARALLAX_CENTER))
+        GL.glUniform1i(
+            self._uniform_location(self.program, "u_parallax_steps"),
+            int(parallax.get("steps", 24) or 24)
+            if str(parallax.get("mode") or "") == "pom"
+            else 1,
+        )
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_strength"), float(bevel.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_radius"), float(bevel.get("radius", DEFAULT_BEVEL_RADIUS) or DEFAULT_BEVEL_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_edge_width"), float(bevel.get("edge_width", DEFAULT_BEVEL_EDGE_WIDTH) or DEFAULT_BEVEL_EDGE_WIDTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_blend"), float(material_layering.get("blend", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_material_layer_color"),
+            self._uniform_location(self.program, "u_material_layer_color"),
             float(material_layer_color[0]),
             float(material_layer_color[1]),
             float(material_layer_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_roughness"), float(material_layering.get("roughness", DEFAULT_MATERIAL_LAYER_ROUGHNESS) or DEFAULT_MATERIAL_LAYER_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_metallic"), float(material_layering.get("metallic", DEFAULT_MATERIAL_LAYER_METALLIC) or DEFAULT_MATERIAL_LAYER_METALLIC))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_alpha"), float(material_layering.get("alpha", DEFAULT_MATERIAL_LAYER_ALPHA) or DEFAULT_MATERIAL_LAYER_ALPHA))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_emissive_strength"), float(material_layering.get("emissive_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_mask_strength"), float(material_layering.get("mask_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_override_strength"), float(surface.get("override_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_roughness"), float(surface.get("roughness", DEFAULT_SURFACE_ROUGHNESS) or DEFAULT_SURFACE_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_metallic"), float(surface.get("metallic", DEFAULT_SURFACE_METALLIC) or DEFAULT_SURFACE_METALLIC))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_reflectance"), float(surface.get("reflectance", DEFAULT_SURFACE_REFLECTANCE) or DEFAULT_SURFACE_REFLECTANCE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_strength"), float(subsurface.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_roughness"), float(material_layering.get("roughness", DEFAULT_MATERIAL_LAYER_ROUGHNESS) or DEFAULT_MATERIAL_LAYER_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_metallic"), float(material_layering.get("metallic", DEFAULT_MATERIAL_LAYER_METALLIC) or DEFAULT_MATERIAL_LAYER_METALLIC))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_alpha"), float(material_layering.get("alpha", DEFAULT_MATERIAL_LAYER_ALPHA) or DEFAULT_MATERIAL_LAYER_ALPHA))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_emissive_strength"), float(material_layering.get("emissive_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_mask_strength"), float(material_layering.get("mask_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_override_strength"), float(surface.get("override_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_roughness"), float(surface.get("roughness", DEFAULT_SURFACE_ROUGHNESS) or DEFAULT_SURFACE_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_metallic"), float(surface.get("metallic", DEFAULT_SURFACE_METALLIC) or DEFAULT_SURFACE_METALLIC))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_reflectance"), float(surface.get("reflectance", DEFAULT_SURFACE_REFLECTANCE) or DEFAULT_SURFACE_REFLECTANCE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_strength"), float(subsurface.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_subsurface_color"),
+            self._uniform_location(self.program, "u_subsurface_color"),
             float(subsurface_color[0]),
             float(subsurface_color[1]),
             float(subsurface_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_radius"), float(subsurface.get("radius", DEFAULT_SUBSURFACE_RADIUS) or DEFAULT_SUBSURFACE_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_power"), float(subsurface.get("power", DEFAULT_SUBSURFACE_POWER) or DEFAULT_SUBSURFACE_POWER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_wrap"), float(subsurface.get("wrap", DEFAULT_SUBSURFACE_WRAP) or DEFAULT_SUBSURFACE_WRAP))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_thickness"), float(subsurface.get("thickness", DEFAULT_SUBSURFACE_THICKNESS) or DEFAULT_SUBSURFACE_THICKNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_groom_strength"), float(hair_groom.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_radius"), float(subsurface.get("radius", DEFAULT_SUBSURFACE_RADIUS) or DEFAULT_SUBSURFACE_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_power"), float(subsurface.get("power", DEFAULT_SUBSURFACE_POWER) or DEFAULT_SUBSURFACE_POWER))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_wrap"), float(subsurface.get("wrap", DEFAULT_SUBSURFACE_WRAP) or DEFAULT_SUBSURFACE_WRAP))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_thickness"), float(subsurface.get("thickness", DEFAULT_SUBSURFACE_THICKNESS) or DEFAULT_SUBSURFACE_THICKNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_groom_strength"), float(hair_groom.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_hair_groom_tint"),
+            self._uniform_location(self.program, "u_hair_groom_tint"),
             float(hair_tint[0]),
             float(hair_tint[1]),
             float(hair_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_primary_shift"), float(hair_groom.get("primary_shift", DEFAULT_HAIR_PRIMARY_SHIFT) if hair_groom.get("primary_shift") is not None else DEFAULT_HAIR_PRIMARY_SHIFT))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_shift"), float(hair_groom.get("secondary_shift", DEFAULT_HAIR_SECONDARY_SHIFT) if hair_groom.get("secondary_shift") is not None else DEFAULT_HAIR_SECONDARY_SHIFT))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_primary_roughness"), float(hair_groom.get("primary_roughness", DEFAULT_HAIR_PRIMARY_ROUGHNESS) or DEFAULT_HAIR_PRIMARY_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_roughness"), float(hair_groom.get("secondary_roughness", DEFAULT_HAIR_SECONDARY_ROUGHNESS) or DEFAULT_HAIR_SECONDARY_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_strength"), float(hair_groom.get("secondary_strength", DEFAULT_HAIR_SECONDARY_STRENGTH) if hair_groom.get("secondary_strength") is not None else DEFAULT_HAIR_SECONDARY_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_anisotropy"), float(hair_groom.get("anisotropy", DEFAULT_HAIR_ANISOTROPY) if hair_groom.get("anisotropy") is not None else DEFAULT_HAIR_ANISOTROPY))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_rim_strength"), float(hair_groom.get("rim_strength", DEFAULT_HAIR_RIM_STRENGTH) if hair_groom.get("rim_strength") is not None else DEFAULT_HAIR_RIM_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_strength"), float(cloth_sheen.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_primary_shift"), float(hair_groom.get("primary_shift", DEFAULT_HAIR_PRIMARY_SHIFT) if hair_groom.get("primary_shift") is not None else DEFAULT_HAIR_PRIMARY_SHIFT))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_shift"), float(hair_groom.get("secondary_shift", DEFAULT_HAIR_SECONDARY_SHIFT) if hair_groom.get("secondary_shift") is not None else DEFAULT_HAIR_SECONDARY_SHIFT))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_primary_roughness"), float(hair_groom.get("primary_roughness", DEFAULT_HAIR_PRIMARY_ROUGHNESS) or DEFAULT_HAIR_PRIMARY_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_roughness"), float(hair_groom.get("secondary_roughness", DEFAULT_HAIR_SECONDARY_ROUGHNESS) or DEFAULT_HAIR_SECONDARY_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_strength"), float(hair_groom.get("secondary_strength", DEFAULT_HAIR_SECONDARY_STRENGTH) if hair_groom.get("secondary_strength") is not None else DEFAULT_HAIR_SECONDARY_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_anisotropy"), float(hair_groom.get("anisotropy", DEFAULT_HAIR_ANISOTROPY) if hair_groom.get("anisotropy") is not None else DEFAULT_HAIR_ANISOTROPY))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_rim_strength"), float(hair_groom.get("rim_strength", DEFAULT_HAIR_RIM_STRENGTH) if hair_groom.get("rim_strength") is not None else DEFAULT_HAIR_RIM_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_strength"), float(cloth_sheen.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_cloth_sheen_color"),
+            self._uniform_location(self.program, "u_cloth_sheen_color"),
             float(cloth_color[0]),
             float(cloth_color[1]),
             float(cloth_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_roughness"), float(cloth_sheen.get("roughness", DEFAULT_CLOTH_SHEEN_ROUGHNESS) or DEFAULT_CLOTH_SHEEN_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_roughness"), float(cloth_sheen.get("roughness", DEFAULT_CLOTH_SHEEN_ROUGHNESS) or DEFAULT_CLOTH_SHEEN_ROUGHNESS))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_cloth_sheen_edge_tint"),
+            self._uniform_location(self.program, "u_cloth_sheen_edge_tint"),
             float(cloth_edge_tint[0]),
             float(cloth_edge_tint[1]),
             float(cloth_edge_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_fiber_strength"), float(cloth_sheen.get("fiber_strength", DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH) if cloth_sheen.get("fiber_strength") is not None else DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_wrap"), float(cloth_sheen.get("wrap", DEFAULT_CLOTH_SHEEN_WRAP) if cloth_sheen.get("wrap") is not None else DEFAULT_CLOTH_SHEEN_WRAP))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_retroreflection"), float(cloth_sheen.get("retroreflection", DEFAULT_CLOTH_SHEEN_RETROREFLECTION) if cloth_sheen.get("retroreflection") is not None else DEFAULT_CLOTH_SHEEN_RETROREFLECTION))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_strength"), float(glint_sparkle.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_fiber_strength"), float(cloth_sheen.get("fiber_strength", DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH) if cloth_sheen.get("fiber_strength") is not None else DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_wrap"), float(cloth_sheen.get("wrap", DEFAULT_CLOTH_SHEEN_WRAP) if cloth_sheen.get("wrap") is not None else DEFAULT_CLOTH_SHEEN_WRAP))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_retroreflection"), float(cloth_sheen.get("retroreflection", DEFAULT_CLOTH_SHEEN_RETROREFLECTION) if cloth_sheen.get("retroreflection") is not None else DEFAULT_CLOTH_SHEEN_RETROREFLECTION))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_strength"), float(glint_sparkle.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_glint_color"),
+            self._uniform_location(self.program, "u_glint_color"),
             float(glint_color[0]),
             float(glint_color[1]),
             float(glint_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_density"), float(glint_sparkle.get("density", DEFAULT_GLINT_DENSITY) if glint_sparkle.get("density") is not None else DEFAULT_GLINT_DENSITY))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_scale"), float(glint_sparkle.get("scale", DEFAULT_GLINT_SCALE) if glint_sparkle.get("scale") is not None else DEFAULT_GLINT_SCALE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_threshold"), float(glint_sparkle.get("threshold", DEFAULT_GLINT_THRESHOLD) if glint_sparkle.get("threshold") is not None else DEFAULT_GLINT_THRESHOLD))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_sharpness"), float(glint_sparkle.get("sharpness", DEFAULT_GLINT_SHARPNESS) if glint_sparkle.get("sharpness") is not None else DEFAULT_GLINT_SHARPNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_roughness_jitter"), float(glint_sparkle.get("roughness_jitter", DEFAULT_GLINT_ROUGHNESS_JITTER) if glint_sparkle.get("roughness_jitter") is not None else DEFAULT_GLINT_ROUGHNESS_JITTER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_strength"), float(triplanar.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_scale"), float(triplanar.get("scale", DEFAULT_TRIPLANAR_SCALE) or DEFAULT_TRIPLANAR_SCALE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_blend_sharpness"), float(triplanar.get("blend_sharpness", DEFAULT_TRIPLANAR_BLEND_SHARPNESS) or DEFAULT_TRIPLANAR_BLEND_SHARPNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_density"), float(glint_sparkle.get("density", DEFAULT_GLINT_DENSITY) if glint_sparkle.get("density") is not None else DEFAULT_GLINT_DENSITY))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_scale"), float(glint_sparkle.get("scale", DEFAULT_GLINT_SCALE) if glint_sparkle.get("scale") is not None else DEFAULT_GLINT_SCALE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_threshold"), float(glint_sparkle.get("threshold", DEFAULT_GLINT_THRESHOLD) if glint_sparkle.get("threshold") is not None else DEFAULT_GLINT_THRESHOLD))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_sharpness"), float(glint_sparkle.get("sharpness", DEFAULT_GLINT_SHARPNESS) if glint_sparkle.get("sharpness") is not None else DEFAULT_GLINT_SHARPNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_roughness_jitter"), float(glint_sparkle.get("roughness_jitter", DEFAULT_GLINT_ROUGHNESS_JITTER) if glint_sparkle.get("roughness_jitter") is not None else DEFAULT_GLINT_ROUGHNESS_JITTER))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_strength"), float(triplanar.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_scale"), float(triplanar.get("scale", DEFAULT_TRIPLANAR_SCALE) or DEFAULT_TRIPLANAR_SCALE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_blend_sharpness"), float(triplanar.get("blend_sharpness", DEFAULT_TRIPLANAR_BLEND_SHARPNESS) or DEFAULT_TRIPLANAR_BLEND_SHARPNESS))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_triplanar_offset"),
+            self._uniform_location(self.program, "u_triplanar_offset"),
             float(triplanar_offset[0]),
             float(triplanar_offset[1]),
             float(triplanar_offset[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_strength"), ao_strength)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_radius"), float(ambient_occlusion.get("radius", DEFAULT_AO_RADIUS) or DEFAULT_AO_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_distance"), float(ambient_occlusion.get("distance", DEFAULT_AO_DISTANCE) or DEFAULT_AO_DISTANCE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_strength"), ao_strength)
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_radius"), float(ambient_occlusion.get("radius", DEFAULT_AO_RADIUS) or DEFAULT_AO_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_distance"), float(ambient_occlusion.get("distance", DEFAULT_AO_DISTANCE) or DEFAULT_AO_DISTANCE))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_screen_ao_color"),
+            self._uniform_location(self.program, "u_screen_ao_color"),
             float(ao_color[0]),
             float(ao_color[1]),
             float(ao_color[2]),
         )
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_ambient"), 1 if bool(ambient_occlusion.get("ambient", True)) else 0)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_diffuse"), 1 if bool(ambient_occlusion.get("diffuse", True)) else 0)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_specular"), 1 if bool(ambient_occlusion.get("specular", False)) else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_strength"), float(self.state.shadow_strength))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_bias"), float(self.state.shadow_bias))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_normal_bias"), float(self.state.shadow_normal_bias))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_self_shadow_strength"), float(self.state.self_shadow_strength))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_ambient"), 1 if bool(ambient_occlusion.get("ambient", True)) else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_diffuse"), 1 if bool(ambient_occlusion.get("diffuse", True)) else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_specular"), 1 if bool(ambient_occlusion.get("specular", False)) else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_strength"), float(self.state.shadow_strength))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_bias"), float(self.state.shadow_bias))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_normal_bias"), float(self.state.shadow_normal_bias))
+        GL.glUniform1i(self._uniform_location(self.program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_self_shadow_strength"), float(self.state.self_shadow_strength))
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_hdri"), 1 if self.hdri_texture else 0)
         has_ibl_probe = bool(self.ibl_irradiance_texture and self.ibl_prefilter_texture and self.ibl_brdf_lut_texture)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_ibl_probe"), 1 if has_ibl_probe else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_prefilter_level_count"), float(self.ibl_prefilter_level_count))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_ibl_probe"), 1 if has_ibl_probe else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_prefilter_level_count"), float(self.ibl_prefilter_level_count))
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
         if self.shadow_supported:
             GL.glActiveTexture(GL.GL_TEXTURE6)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.shadow_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_shadow_map"), 6)
+            GL.glUniform1i(self._uniform_location(self.program, "u_shadow_map"), 6)
         if self.hdri_texture:
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_hdri"), 0)
+            GL.glUniform1i(self._uniform_location(self.program, "u_hdri"), 0)
         if has_ibl_probe:
             GL.glActiveTexture(GL.GL_TEXTURE7)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_irradiance_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_irradiance"), 7)
+            GL.glUniform1i(self._uniform_location(self.program, "u_irradiance"), 7)
             GL.glActiveTexture(GL.GL_TEXTURE8)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_prefilter_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_prefilter"), 8)
+            GL.glUniform1i(self._uniform_location(self.program, "u_prefilter"), 8)
             GL.glActiveTexture(GL.GL_TEXTURE9)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_brdf_lut_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_brdf_lut"), 9)
+            GL.glUniform1i(self._uniform_location(self.program, "u_brdf_lut"), 9)
         GL.glBindVertexArray(self.vao)
         for draw_range in self.draw_ranges:
             material_name = str(draw_range.get("material_name") or "")
@@ -3978,6 +5208,7 @@ class GpuMeshWidget(QOpenGLWidget):
             else:
                 GL.glDepthMask(True)
             self._bind_material_textures(material_name)
+            self._upload_stage_transform_uniforms(self.program, draw_range)
             GL.glDrawArrays(
                 GL.GL_TRIANGLES,
                 int(draw_range.get("start", 0) or 0),
@@ -3993,6 +5224,10 @@ class GpuMeshWidget(QOpenGLWidget):
                 GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
             GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUseProgram(0)
+        if bloom_post_active:
+            self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)
+        else:
+            self._bind_default_framebuffer()
 
     def _bind_material_textures(self, material_name: str) -> None:
         from OpenGL import GL
@@ -4028,18 +5263,18 @@ class GpuMeshWidget(QOpenGLWidget):
         if not textures and len(self.material_textures) == 1:
             textures = next(iter(self.material_textures.values()))
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_alpha_cutoff"),
+            self._uniform_location(self.program, "u_alpha_cutoff"),
             _material_float(maps, "alpha_cutoff", 0.02, lo=0.0, hi=1.0),
         )
         emissive = _material_vec3(maps, "emissive_factor")
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_emissive_factor"),
+            self._uniform_location(self.program, "u_emissive_factor"),
             float(emissive[0]),
             float(emissive[1]),
             float(emissive[2]),
         )
         GL.glUniform1i(
-            GL.glGetUniformLocation(self.program, "u_base_alpha_to_opacity"),
+            self._uniform_location(self.program, "u_base_alpha_to_opacity"),
             1 if _base_alpha_to_opacity(material_name, maps) else 0,
         )
         for map_name, unit in texture_units.items():
@@ -4047,8 +5282,8 @@ class GpuMeshWidget(QOpenGLWidget):
             texture_id = int(textures.get(map_name, 0) or 0)
             GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, sampler_name), unit)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, flag_name), 1 if texture_id else 0)
+            GL.glUniform1i(self._uniform_location(self.program, sampler_name), unit)
+            GL.glUniform1i(self._uniform_location(self.program, flag_name), 1 if texture_id else 0)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
@@ -4093,6 +5328,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 viewport_width=max(1, self.width()),
                 viewport_height=max(1, self.height()),
                 camera_z=float(self.state.camera_z),
+                fov_deg=max(10.0, min(120.0, float(self.state.fov_deg))),
             )
             self.state.pan_x = max(-20.0, min(20.0, float(self.state.pan_x) + pan_dx))
             self.state.pan_y = max(-20.0, min(20.0, float(self.state.pan_y) + pan_dy))
@@ -4661,6 +5897,10 @@ class GpuWindow(QMainWindow):
         self.state.bloom_strength = DEFAULT_BLOOM_STRENGTH
         self.state.bloom_radius = DEFAULT_BLOOM_RADIUS
         self.state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        self.state.bloom_boost = DEFAULT_BLOOM_BOOST
+        self.state.bloom_anamorphic_strength = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        self.state.bloom_anamorphic_threshold = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+        self.state.bloom_anamorphic_ratio = DEFAULT_BLOOM_ANAMORPHIC_RATIO
         self.state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
         self.state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
         self.state.vignette_feather = DEFAULT_VIGNETTE_FEATHER
@@ -4844,7 +6084,7 @@ def main() -> int:
         ),
         enable_shadow_map=bool(args.enable_shadow_map),
         shadow_supported=bool(args.enable_shadow_map),
-        shadow_size=2048,
+        shadow_size=int(DEFAULT_SHADOW_MAP_SIZE),
     )
     texture_diag["shadow_filter"] = shadow_config
     texture_diag["catcher"] = catcher_settings
@@ -4876,6 +6116,9 @@ def main() -> int:
     QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv)
+    from app.window_placement import install_global_window_placement
+
+    install_global_window_placement(app)
     window = GpuWindow(
         asset,
         descriptor,
@@ -4927,6 +6170,7 @@ def main() -> int:
                 "roll": float(window.state.roll),
                 "zoom": float(window.state.zoom),
                 "camera_z": float(window.state.camera_z),
+                "fov_deg": float(window.state.fov_deg),
                 "pan_x": float(window.state.pan_x),
                 "pan_y": float(window.state.pan_y),
                 "pan_z": float(window.state.pan_z),

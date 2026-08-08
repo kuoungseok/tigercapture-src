@@ -81,7 +81,21 @@ def material_texture_maps(
     if not isinstance(maps, Mapping):
         return {}
     out: dict[str, str] = {}
-    for key in ("base", "roughness", "metallic", "specular", "normal", "occlusion", "emissive", "opacity", "height"):
+    for key in (
+        "base",
+        "roughness",
+        "metallic",
+        "specular",
+        "diffuse_albedo",
+        "f0",
+        "f90",
+        "f90_mask",
+        "normal",
+        "occlusion",
+        "emissive",
+        "opacity",
+        "height",
+    ):
         path = str(maps.get(key) or "")
         if path:
             out[key] = path
@@ -106,6 +120,11 @@ def material_texture_maps(
         "uv_v_flip",
         "shader_model",
         "source_shader",
+        "substrate_enabled",
+        "substrate_mode",
+        "substrate_f90_color",
+        "substrate_f90_strength",
+        "substrate_f90_mask_strength",
         "render_queue",
         "mtoon_render_queue",
         "mtoon_cull_mode",
@@ -338,6 +357,7 @@ def build_material_triangle_packets(
     width: int,
     height: int,
     avg_z: float,
+    pbr_rgba: tuple[float, float, float, float] | None = None,
     force_marmoset_pbr: bool = False,
 ) -> dict[str, Any]:
     texture_triangle: dict[str, Any] | None = None
@@ -368,6 +388,7 @@ def build_material_triangle_packets(
         tangent, bitangent = triangle_tangent_basis(v0, v1, v2, uv0, uv1, uv2, normal)
         pbr = material_pbr(material, force_pbr=force_marmoset_pbr)
         pbr_roughness = float(pbr[0])
+        pbr_color = pbr_rgba if pbr_rgba is not None else rgba
         for point, world_pos, uv in ((p0, v0, uv0), (p1, v1, uv1), (p2, v2, uv2)):
             extend_pbr_texture_vertex(
                 pbr_row,
@@ -379,7 +400,7 @@ def build_material_triangle_packets(
                 bitangent,
                 width,
                 height,
-                rgba,
+                pbr_color,
                 pbr,
             )
         if len(pbr_row) == PBR_TRIANGLE_FLOATS:
@@ -395,6 +416,7 @@ def build_material_triangle_packets(
                 ),
                 "texture": texture_path,
                 "maps": dict(texture_maps or {}),
+                "base_color_factor": list(pbr_color),
                 "vertices": pbr_row,
             }
     return {

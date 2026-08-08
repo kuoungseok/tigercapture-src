@@ -132,7 +132,25 @@ class ActorLoadingManagerDialog(QDialog):
             self._detail.setPlainText("")
             self._sync_selection_buttons()
             return
-        self._detail.setPlainText(json.dumps(row, ensure_ascii=False, indent=2, default=str))
+        try:
+            from app.actor_loading_status import actor_loading_diagnostic_card, format_actor_loading_diagnostic_card
+
+            card = row.get("diagnostic_card") if isinstance(row.get("diagnostic_card"), dict) else None
+            if card is None:
+                card = actor_loading_diagnostic_card(
+                    str(row.get("kind") or ""),
+                    str(row.get("path") or ""),
+                    status=str(row.get("status") or ""),
+                    stage=str(row.get("stage") or ""),
+                    message=str(row.get("message") or ""),
+                    metadata=dict(row.get("metadata") or {}),
+                )
+            body = format_actor_loading_diagnostic_card(card)
+            body += "\n\nTechnical details\n"
+            body += json.dumps(row, ensure_ascii=False, indent=2, default=str)
+            self._detail.setPlainText(body)
+        except Exception:
+            self._detail.setPlainText(json.dumps(row, ensure_ascii=False, indent=2, default=str))
         self._sync_selection_buttons()
 
     def _sync_selection_buttons(self) -> None:

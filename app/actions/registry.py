@@ -184,6 +184,9 @@ class ActionRegistry:
         from app.actions.creative_namespace import register_creative_readiness_actions
 
         register_creative_readiness_actions(self)
+        from app.actions.unreal_link_namespace import register_unreal_link_actions
+
+        register_unreal_link_actions(self)
         from app.actions.source_record_monitor_namespace import register_source_record_monitor_actions
 
         register_source_record_monitor_actions(self)
@@ -217,6 +220,9 @@ class ActionRegistry:
         from app.actions.music_namespace import register_music_actions
 
         register_music_actions(self)
+        from app.actions.tts_namespace import register_tts_actions
+
+        register_tts_actions(self)
         from app.actions.track_selection_namespace import register_track_selection_actions
 
         register_track_selection_actions(self)
@@ -226,9 +232,15 @@ class ActionRegistry:
         from app.actions.creative_namespace import register_creative_clip_actions
 
         register_creative_clip_actions(self)
+        from app.actions.color_namespace import register_color_management_actions
+
+        register_color_management_actions(self)
         from app.actions.actor_namespace import register_actor_actions
 
         register_actor_actions(self)
+        from app.actions.character_template_namespace import register_character_template_actions
+
+        register_character_template_actions(self)
         from app.actions.mmd_namespace import register_mmd_actions
 
         register_mmd_actions(self)
@@ -241,6 +253,31 @@ class ActionRegistry:
         from app.actions.ppt_namespace import register_ppt_actions
 
         register_ppt_actions(self)
+        from app.actions.paint_namespace import register_paint_actions
+
+        register_paint_actions(self)
+        from app.actions.motion_namespace import register_motion_actions
+
+        register_motion_actions(self)
+        from app.actions.motion_aep_namespace import register_motion_aep_actions
+
+        register_motion_aep_actions(self)
+        from app.actions.motion_tracking_namespace import (
+            register_motion_tracking_actions,
+        )
+
+        register_motion_tracking_actions(self)
+        from app.actions.motion_lookdev_namespace import (
+            register_motion_lookdev_actions,
+        )
+
+        register_motion_lookdev_actions(self)
+        from app.actions.motion_plugin_namespace import register_motion_plugin_actions
+
+        register_motion_plugin_actions(self)
+        from app.actions.motion_ai_generation_namespace import register_motion_ai_generation_actions
+
+        register_motion_ai_generation_actions(self)
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)

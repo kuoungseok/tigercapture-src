@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.simple_video_player import PlayerState
 from app.drawing import SpeechBubble, SpeechBubbleItem
+from app.drawing_editor_object_import import collect_editor_paint_objects
 
 
 def _open_paint_dialog(self) -> None:
@@ -31,6 +32,11 @@ def _open_paint_dialog(self) -> None:
         parent=self,
         initial_bubbles=self._bubbles,
         initial_stickers=self._stickers,
+        editor_object_provider=lambda: collect_editor_paint_objects(
+            self,
+            time_ms=self._player.position(),
+            include_inactive=True,
+        ),
     )
     if dlg.exec() == dlg.DialogCode.Accepted:
         self._strokes = dlg.result_strokes()
@@ -150,4 +156,3 @@ def _update_sticker_visibility(self, pos_ms: int) -> None:
     t = int(pos_ms)
     for item in self._sticker_items:
         item.setVisible(_sticker_active(item.sticker, t))
-

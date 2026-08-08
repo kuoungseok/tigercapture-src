@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtGui import QImage
 
+from app.image_media import is_image_path, load_image_rgb, preview_canvas_size
+
 
 def _apply_node_chain_preview_compare(*args, **kwargs):
     from app.project_player import _apply_node_chain_preview_compare as _impl
@@ -24,6 +26,32 @@ def _screenstudio_owner_for_preview(*args, **kwargs):
     return _impl(*args, **kwargs)
 
 
+def _node_item_has_active_preview_effect(node_item) -> bool:
+    if getattr(node_item, "bypassed", False):
+        return False
+    blur_params = getattr(node_item, "blur_params", None)
+    if blur_params is not None:
+        try:
+            if not blur_params.is_identity():
+                return True
+        except Exception:
+            return True
+    effect_params = getattr(node_item, "effect_params", None)
+    if effect_params is not None:
+        try:
+            if not effect_params.is_identity():
+                return True
+        except Exception:
+            return True
+    grade = getattr(node_item, "color_grade", None)
+    if grade is not None:
+        try:
+            return not grade.is_identity()
+        except Exception:
+            return True
+    return False
+
+
 def _emit_rgb_frame(
     self,
     rgb: np.ndarray,
@@ -39,6 +67,26 @@ def _emit_rgb_frame(
     if rgb is None:
         return
     rgb_out = np.ascontiguousarray(rgb)
+    if getattr(self, "_motion_clips", None):
+        rgb_out = np.ascontiguousarray(self._apply_motion_clips(rgb_out, int(getattr(self, "_position_ms", 0))))
+    try:
+        from app.color_runtime import apply_project_display_transform_rgb
+
+        project_settings = getattr(self, "_project_settings", {}) or {}
+        rgb_out, color_report = apply_project_display_transform_rgb(
+            rgb_out,
+            project_settings.get("color_management"),
+        )
+        if color_report.get("applied") or color_report.get("warnings"):
+            gpu_meta = dict(gpu_meta or {})
+            gpu_meta["project_color_transform"] = color_report
+    except Exception as exc:
+        gpu_meta = dict(gpu_meta or {})
+        gpu_meta["project_color_transform"] = {
+            "applied": False,
+            "engine": "error",
+            "warnings": [str(exc)],
+        }
     h, w = rgb_out.shape[:2]
     gpu_payload = grade
     if gpu_meta:
@@ -438,7 +486,7 @@ def _emit_nested_sequence_frame(self, rgb: np.ndarray, pos_ms: int) -> None:
     self._emit_rgb_frame(rgb, None, _perf_detail, _perf_stage_ms, gpu_meta=gpu_meta)
 
 
-def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: bool = False) -> None:
+def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: bool = False) -> bool:
     from app.perf_monitor import perf_span, stage_threshold_ms
 
     _perf_stage_ms = stage_threshold_ms()
@@ -462,63 +510,106 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             self._emit_blank()
         self._last_rendered_track_id = None
         self._last_rendered_clip_path = None
-        return
+        return True
     track, clip = pair
     if bool(getattr(clip, "is_nested_sequence", False)):
         rgb = self._render_nested_sequence_rgb(clip, pos_ms)
         if rgb is None:
             self._emit_blank()
-            return
+            return True
         self._last_rendered_track_id = None
         self._last_rendered_clip_path = None
         self._last_rendered_frame_idx = -1
         self._emit_nested_sequence_frame(rgb, pos_ms)
-        return
+        return True
     # Resolve decoder and fps: prefer per-clip source_path (multi-source),
     # fall back to per-track decoder (legacy single-source).
     clip_sp = getattr(clip, "source_path", None)
     if clip_sp is not None:
         clip_sp = Path(clip_sp)
-    if clip_sp is not None and clip_sp in self._path_caps:
+    image_clip = clip_sp is not None and is_image_path(clip_sp)
+    local_ms = clip.timeline_to_source_ms(pos_ms)
+    if image_clip:
+        canvas_w, canvas_h = preview_canvas_size(getattr(self, "_project_settings", {}) or {})
+        rgb = load_image_rgb(clip_sp, canvas_w, canvas_h)
+        if rgb is None:
+            return False
+        decoder = None
+        fps = 30.0
+        frame_idx = 0
+        cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
+        if allow_cached and self._emit_cached_preview_frame(
+            cache_key,
+            f"{_perf_detail} frame={frame_idx}",
+            _perf_stage_ms,
+        ):
+            return True
+        self._last_rendered_track_id = track.id
+        self._last_rendered_clip_path = clip_sp
+        self._last_rendered_frame_idx = frame_idx
+        repair_applied = False
+    elif clip_sp is not None and clip_sp in self._path_caps:
         decoder = self._path_caps[clip_sp]
         fps = self._path_fps.get(clip_sp, 30.0)
     else:
         decoder = self._caps.get(track.id)
         fps = self._fps.get(track.id, 30.0)
         clip_sp = None  # fall back path: use track-level sequential opt
-    if decoder is None or fps <= 0:
-        return
-    local_ms = clip.timeline_to_source_ms(pos_ms)
-    frame_idx = int(local_ms / 1000.0 * fps)
-    cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
-    if allow_cached and self._emit_cached_preview_frame(
-        cache_key,
-        f"{_perf_detail} frame={frame_idx}",
-        _perf_stage_ms,
-    ):
-        return
-    # Sequential read optimization: only seek when necessary.
-    # The sequential key is now (track_id, clip_source_path) so switching
-    # between clips with different source files always seeks.
-    need_seek = (
-        force_seek
-        or track.id != self._last_rendered_track_id
-        or clip_sp != self._last_rendered_clip_path
-        or frame_idx != self._last_rendered_frame_idx + 1
-    )
-    with perf_span(
-        "preview.stage.decode",
-        detail=f"{_perf_detail} frame={frame_idx} seek={int(need_seek)}",
-        threshold_ms=_perf_stage_ms,
-    ):
-        if need_seek:
-            decoder.seek_to_frame(frame_idx)
-        rgb = decoder.read_rgb()
-    if rgb is None:
-        return
-    self._last_rendered_track_id = track.id
-    self._last_rendered_clip_path = clip_sp
-    self._last_rendered_frame_idx = frame_idx
+    if not image_clip:
+        if decoder is None or fps <= 0:
+            return False
+        frame_idx = int(local_ms / 1000.0 * fps)
+        cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
+        if allow_cached and self._emit_cached_preview_frame(
+            cache_key,
+            f"{_perf_detail} frame={frame_idx}",
+            _perf_stage_ms,
+        ):
+            return True
+        # Sequential read optimization: only seek when necessary.
+        # The sequential key is now (track_id, clip_source_path) so switching
+        # between clips with different source files always seeks.
+        need_seek = (
+            force_seek
+            or track.id != self._last_rendered_track_id
+            or clip_sp != self._last_rendered_clip_path
+            or frame_idx != self._last_rendered_frame_idx + 1
+        )
+        with perf_span(
+            "preview.stage.decode",
+            detail=f"{_perf_detail} frame={frame_idx} seek={int(need_seek)}",
+            threshold_ms=_perf_stage_ms,
+        ):
+            if need_seek:
+                decoder.seek_to_frame(frame_idx)
+            rgb = decoder.read_rgb()
+        if rgb is None:
+            return False
+        self._last_rendered_track_id = track.id
+        self._last_rendered_clip_path = clip_sp
+        self._last_rendered_frame_idx = frame_idx
+
+        repair_applied = False
+        try:
+            from app.frame_repair import apply_frame_repair_rgb
+
+            def _repair_reader(idx: int):
+                decoder.seek_to_frame(max(0, int(idx)))
+                return decoder.read_rgb()
+
+            repaired_rgb, repair_applied = apply_frame_repair_rgb(
+                rgb,
+                clip=clip,
+                source_ms=local_ms,
+                fps=fps,
+                frame_reader=_repair_reader,
+            )
+            if repair_applied:
+                rgb = repaired_rgb
+                # The repair reader seeks around; sequential-read state is stale.
+                self._last_rendered_frame_idx = -1
+        except Exception:
+            pass
 
     # Slow-motion frame blending: when a SpeedSegment with
     # frame_blend=True covers this position and speed < 1.0, blend
@@ -532,8 +623,10 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             break
     if (
         active_seg is not None
+        and decoder is not None
         and getattr(active_seg, "frame_blend", False)
         and active_seg.speed < 1.0
+        and not repair_applied
     ):
         # Fractional position within this source frame (0.0–1.0)
         exact_frame = local_ms / 1000.0 * fps
@@ -642,15 +735,14 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             and getattr(active_seg, "frame_blend", False)
             and active_seg.speed < 1.0
         )
-        color_grade_in_chain = any(
-            (getattr(node_item, "color_grade", None) is not None)
-            and not getattr(node_item, "color_grade").is_identity()
+        active_node_effect_in_chain = any(
+            _node_item_has_active_preview_effect(node_item)
             for node_item, _masks in node_item_chain
         )
         if (
             not frame_blend_active
             and not stabilizer_active
-            and not color_grade_in_chain
+            and not active_node_effect_in_chain
             and zactor is None
             and source_for_cache is not None
         ):
@@ -955,7 +1047,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             gpu_meta=self._merge_gpu_meta(_clip_fx_meta, gpu_meta),
             cache_key=cache_key,
         )
-        return
+        return True
 
     # Determine whether the GL fragment shader can handle this grade.
     # Simple grades (brightness/contrast/saturation/3-way wheels) are
@@ -1044,6 +1136,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
         gpu_meta=self._merge_gpu_meta(_clip_fx_meta, gpu_meta),
         cache_key=cache_key,
     )
+    return True
 
 
 def _blend_frames(
@@ -1174,6 +1267,11 @@ def _apply_transition_blend(
         next_sp = getattr(next_clip, "source_path", None)
         if next_sp is not None:
             next_sp = Path(next_sp)
+        next_offset_ms = pos_ms - t_start_ms
+        next_source_ms = int(next_clip.source_in_ms) + next_offset_ms
+        if next_sp is not None and is_image_path(next_sp):
+            h, w = rgb.shape[:2]
+            return load_image_rgb(next_sp, w, h)
         if next_sp is not None and next_sp in self._path_caps:
             next_decoder = self._path_caps[next_sp]
             fps = self._path_fps.get(next_sp, 30.0)
@@ -1182,8 +1280,6 @@ def _apply_transition_blend(
             fps = self._fps.get(track.id, 30.0)
         else:
             return None
-        next_offset_ms = pos_ms - t_start_ms
-        next_source_ms = int(next_clip.source_in_ms) + next_offset_ms
         next_frame_idx = int(next_source_ms / 1000.0 * fps)
         try:
             next_decoder.seek_to_frame(next_frame_idx)

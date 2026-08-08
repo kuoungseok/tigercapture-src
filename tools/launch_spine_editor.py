@@ -12,10 +12,12 @@ from PySide6.QtWidgets import QApplication
 from app.i18n import initialize
 from app.spine_editor.editor_window import SpineEditorWindow
 from app.style import APP_QSS
+from app.window_placement import install_global_window_placement
 
 
 def main() -> int:
     app = QApplication(sys.argv)
+    install_global_window_placement(app)
     app.setApplicationName("TigerCapture")
     app.setStyleSheet(APP_QSS)
     initialize()

@@ -672,6 +672,9 @@ def test_lighting_schema_normalizes_post_effects_settings():
             "bloom_strength": 0.44,
             "bloom_radius": 3.5,
             "bloom_threshold": 0.39,
+            "bloom_anamorphic_strength": 1.2,
+            "bloom_anamorphic_threshold": 0.71,
+            "bloom_anamorphic_ratio": 6.0,
             "vignette_strength": 0.21,
             "vignette_radius": 0.67,
             "vignette_feather": 0.31,
@@ -689,6 +692,9 @@ def test_lighting_schema_normalizes_post_effects_settings():
     assert lighting["bloom_strength"] == 0.44
     assert lighting["bloom_radius"] == 3.5
     assert lighting["bloom_threshold"] == 0.39
+    assert lighting["bloom_anamorphic_strength"] == 1.2
+    assert lighting["bloom_anamorphic_threshold"] == 0.71
+    assert lighting["bloom_anamorphic_ratio"] == 6.0
     assert lighting["vignette_enabled"] is True
     assert lighting["vignette_strength"] == 0.21
     assert lighting["vignette_radius"] == 0.67
@@ -1053,7 +1059,7 @@ def test_software_pbr_tints_material_from_base_texture(tmp_path):
     out, diag = composite_preview_frame(
         base,
         time_ms=100,
-        ar_tracks=[_track(asset_path=str(asset))],
+        ar_tracks=[_track(asset_path=str(asset), material_override=False)],
         camera_solution={
             "id": "cam_001",
             "frame_size": [96, 96],
@@ -1120,7 +1126,7 @@ def test_software_pbr_uses_shared_material_uv_transform_precedence(tmp_path):
     out, diag = composite_preview_frame(
         base,
         time_ms=100,
-        ar_tracks=[_track(asset_path=str(asset), occlusion=False)],
+        ar_tracks=[_track(asset_path=str(asset), occlusion=False, material_override=False)],
         camera_solution={
             "id": "cam_001",
             "frame_size": [96, 96],
@@ -1317,6 +1323,7 @@ def test_gpu_packet_export_renderer_surfaces_texture_plan(tmp_path):
                     "clearcoat_roughness": 0.09,
                     "clearcoat_ior": 1.53,
                     "clearcoat_tint": [1.0, 0.95, 0.9],
+                    "parallax_mode": "pom",
                     "parallax_strength": 0.48,
                     "parallax_depth": 0.04,
                     "parallax_center": 0.5,
@@ -1479,9 +1486,11 @@ def test_gpu_packet_export_renderer_surfaces_texture_plan(tmp_path):
     assert diag["pbr_clearcoat_pixels"] > 0
     assert diag["pbr_parallax_rendering"]["schema"] == "tigerstudio.ar_pbr.parallax.v1"
     assert diag["pbr_parallax_rendering"]["enabled"] is True
+    assert diag["pbr_parallax_rendering"]["mode"] == "pom"
     assert diag["pbr_parallax_rendering"]["strength"] == 0.48
     assert diag["pbr_parallax_applied"] is True
     assert diag["pbr_parallax_pixels"] > 0
+    assert diag["pbr_parallax_sampling"] == "single_offset_fallback"
     assert diag["pbr_displacement_rendering"]["schema"] == "tigerstudio.ar_pbr.displacement.v1"
     assert diag["pbr_displacement_rendering"]["enabled"] is True
     assert diag["pbr_displacement_rendering"]["height_strength"] == 0.54
@@ -2289,6 +2298,10 @@ def test_gpu_packet_export_renderer_applies_post_effects(tmp_path):
     assert base_diag["pbr_post_effects_applied"] is False
     assert post_diag["pbr_post_effects_rendering"]["schema"] == "tigerstudio.ar_pbr.post_effects.v1"
     assert post_diag["pbr_post_effects_rendering"]["enabled"] is True
+    assert post_diag["pbr_post_effects_rendering"]["bloom_method"] == "convolution"
+    assert post_diag["pbr_post_effects_rendering"]["bloom_model"] == (
+        "thresholded_convolution_bloom_with_peak_anamorphic_streaks"
+    )
     assert post_diag["pbr_post_effects_applied"] is True
     assert post_diag["pbr_bloom_applied"] is True
     assert post_diag["pbr_vignette_applied"] is True
@@ -2835,6 +2848,65 @@ def test_gpu_preview_items_preserve_material_uv_set_transform_for_opengl_path(tm
         ],
         [[0.1, 0.2], [0.6, 0.2], [0.1, 0.45]],
     )
+
+
+def test_gpu_preview_pbr_packets_apply_base_color_factor_to_base_texture(tmp_path):
+    from PIL import Image
+    from app.ar_pbr.gpu_preview import build_gpu_preview_items
+
+    base = np.zeros((64, 64, 3), dtype=np.uint8)
+    asset = tmp_path / "factor_tinted_scene.gltf"
+    texture = tmp_path / "factor_base.png"
+    asset.write_text("{}", encoding="utf-8")
+    Image.new("RGBA", (4, 4), (200, 120, 40, 255)).save(texture)
+    descriptor = {
+        "bounds": {"center": [0, 0, 0], "size": [2, 2, 1]},
+        "geometries": [
+            {
+                "id": "geom_0",
+                "material_id": "mat_0",
+                "vertices": [[-0.7, -0.7, 0.0], [0.7, -0.7, 0.0], [0.0, 0.7, 0.0]],
+                "uvs": [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0]],
+                "triangles": [[0, 1, 2]],
+            }
+        ],
+        "materials": [
+            {
+                "id": "mat_0",
+                "name": "TintedPaint",
+                "base_color": [0.5, 0.25, 1.0, 1.0],
+                "base_texture": str(texture),
+                "base_texture_source": "gltf_pbr_base_color_texture",
+                "roughness": 0.42,
+                "metallic": 0.0,
+                "pbr_available": True,
+            }
+        ],
+    }
+    settings = {"asset_descriptors": {str(asset): descriptor}, "camera_z": 3.0}
+
+    items, packet_diag = build_gpu_preview_items(
+        frame_size=(64, 64),
+        time_ms=0,
+        ar_tracks=[_track(asset_path=str(asset), occlusion=False, material_override=False)],
+        camera_solution={
+            "frame_size": [64, 64],
+            "intrinsics": {"fx": 55, "fy": 55, "cx": 32, "cy": 32},
+        },
+        settings=settings,
+    )
+    pbr_triangle = items[0]["pbr_triangles"][0]
+    pbr_vertices = pbr_triangle["vertices"]
+
+    assert packet_diag["pbr_triangle_count"] == 1
+    assert pbr_triangle["base_color_factor"] == [0.5, 0.25, 1.0, 1.0]
+    assert np.allclose(pbr_vertices[13:16], [0.5, 0.25, 1.0])
+
+    out, diag = export_renderer.rasterize_gpu_preview_items(base, items, settings=settings)
+
+    assert diag["pbr_base_color_factor_applied"] is True
+    assert diag["pbr_base_color_factor_pixels"] > 0
+    assert out.sum() > 0
 
 
 def test_full_gpu_export_service_serializes_depth_frame_to_request(tmp_path, monkeypatch):

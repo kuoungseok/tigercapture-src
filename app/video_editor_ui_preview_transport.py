@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -17,30 +18,89 @@ from app.drawing import DrawingCanvas
 from app.i18n import tr
 from app.icons import app_icon, icon_size
 from app.style import COLOR_TEXT_TERTIARY
+from app.video_editor_frame_repair_workflow import install_frame_repair_transport_button
 from app.video_editor_layout_specs import (
-    TOP_WORK_MAX_HEIGHT,
+    EDITOR_RESIZABLE_PANE_MAX_HEIGHT,
+    PREVIEW_HOST_MIN_HEIGHT,
     TOP_WORK_MIN_HEIGHT,
+    TOP_WORKBENCH_SPLITTER_SETTINGS_KEY,
+    TOP_WORKBENCH_SPLITTER_HANDLE_WIDTH,
     VIEWER_COLUMN_MIN_WIDTH,
     VIEWER_TOP_STRETCH,
+    WORKBENCH_SLOT_DEFAULT_WIDTH,
+    WORKBENCH_SLOT_MAX_WIDTH,
     WORKBENCH_SLOT_MIN_WIDTH,
     WORKBENCH_TOP_STRETCH,
     horizontal_tool_scroll_qss,
+    top_workbench_splitter_qss,
 )
 from app.video_editor_window_widgets import _PreviewSurfaceLabel
+
+
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_top_workbench_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(TOP_WORKBENCH_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_top_workbench_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_top_work_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            TOP_WORKBENCH_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
 
 
 def build_preview_transport_area(self, main_col, root) -> None:
     self._top_work_area = QWidget(main_col)
     self._top_work_area.setObjectName("TopWorkArea")
     self._top_work_area.setMinimumHeight(TOP_WORK_MIN_HEIGHT)
-    self._top_work_area.setMaximumHeight(TOP_WORK_MAX_HEIGHT)
-    top_work_layout = QHBoxLayout(self._top_work_area)
-    top_work_layout.setContentsMargins(0, 0, 0, 0)
-    top_work_layout.setSpacing(5)
-    self._top_work_layout = top_work_layout
+    self._top_work_area.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
+    top_work_container_layout = QHBoxLayout(self._top_work_area)
+    top_work_container_layout.setContentsMargins(0, 0, 0, 0)
+    top_work_container_layout.setSpacing(0)
+    self._top_work_container_layout = top_work_container_layout
     root.addWidget(self._top_work_area, stretch=0)
 
-    self._viewer_column = QWidget(self._top_work_area)
+    top_work_splitter = QSplitter(Qt.Orientation.Horizontal, self._top_work_area)
+    top_work_splitter.setObjectName("TopWorkbenchSplitter")
+    top_work_splitter.setChildrenCollapsible(False)
+    top_work_splitter.setHandleWidth(TOP_WORKBENCH_SPLITTER_HANDLE_WIDTH)
+    top_work_splitter.setStyleSheet(top_workbench_splitter_qss())
+    top_work_splitter.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._top_work_splitter = top_work_splitter
+    # Back-compat for older helpers that talk about the top work "layout":
+    # the splitter is now the controller for the viewer/workbench pair.
+    self._top_work_layout = top_work_splitter
+    top_work_container_layout.addWidget(top_work_splitter)
+
+    self._viewer_column = QWidget(top_work_splitter)
     self._viewer_column.setObjectName("ViewerColumn")
     self._viewer_column.setMinimumWidth(VIEWER_COLUMN_MIN_WIDTH)
     self._viewer_column.setSizePolicy(
@@ -51,23 +111,30 @@ def build_preview_transport_area(self, main_col, root) -> None:
     viewer_column_layout.setContentsMargins(0, 0, 0, 0)
     viewer_column_layout.setSpacing(0)
     self._viewer_column_layout = viewer_column_layout
-    top_work_layout.addWidget(
-        self._viewer_column,
-        stretch=VIEWER_TOP_STRETCH,
-    )
+    top_work_splitter.addWidget(self._viewer_column)
 
-    self._top_workbench_slot = QWidget(self._top_work_area)
+    self._top_workbench_slot = QWidget(top_work_splitter)
     self._top_workbench_slot.setObjectName("TopWorkbenchSlot")
     self._top_workbench_slot.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
+    self._top_workbench_slot.setMaximumWidth(WORKBENCH_SLOT_MAX_WIDTH)
     self._top_workbench_slot.setSizePolicy(
-        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Preferred,
         QSizePolicy.Policy.Expanding,
     )
     top_workbench_layout = QVBoxLayout(self._top_workbench_slot)
     top_workbench_layout.setContentsMargins(0, 0, 0, 0)
     top_workbench_layout.setSpacing(0)
     self._top_workbench_layout = top_workbench_layout
-    top_work_layout.addWidget(self._top_workbench_slot, stretch=WORKBENCH_TOP_STRETCH)
+    top_work_splitter.addWidget(self._top_workbench_slot)
+    top_work_splitter.setStretchFactor(0, VIEWER_TOP_STRETCH)
+    top_work_splitter.setStretchFactor(1, WORKBENCH_TOP_STRETCH)
+    if not _restore_top_workbench_splitter_state(top_work_splitter):
+        top_work_splitter.setSizes(
+            [VIEWER_TOP_STRETCH * 160, WORKBENCH_SLOT_DEFAULT_WIDTH],
+        )
+    top_work_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_top_workbench_splitter_state(self),
+    )
 
     self._viewer_project_breadcrumb_label = QLabel(self._viewer_column)
     self._viewer_project_breadcrumb_label.setObjectName("ViewerProjectBreadcrumb")
@@ -94,12 +161,12 @@ def build_preview_transport_area(self, main_col, root) -> None:
     viewer_column_layout.addWidget(preview_header)
     preview_host = QWidget(self._viewer_column)
     preview_host.setObjectName("PreviewHost")
-    preview_host.setMinimumHeight(270)
-    preview_host.setMaximumHeight(380)
+    preview_host.setMinimumHeight(PREVIEW_HOST_MIN_HEIGHT)
+    preview_host.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
     preview_host.setAcceptDrops(True)
     preview_host.installEventFilter(self)
     preview_host.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
     )
     host_layout = QVBoxLayout(preview_host)
     host_layout.setContentsMargins(0, 0, 0, 0)
@@ -179,7 +246,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     transport.setSpacing(5)
     self.play_btn = QPushButton("")
     self.play_btn.setObjectName("PlayButton")
-    self.play_btn.setFixedSize(20, 20)
+    self.play_btn.setFixedSize(20, 30)
     self.play_btn.setIcon(app_icon("play", size=11, color="#D7DAE7"))
     self.play_btn.setIconSize(icon_size(11))
     self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -190,7 +257,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.prev_frame_btn = QPushButton("")
     self.prev_frame_btn.setObjectName("ToolButton")
     self.prev_frame_btn.setProperty("transportAction", True)
-    self.prev_frame_btn.setFixedSize(20, 20)
+    self.prev_frame_btn.setFixedSize(20, 30)
     self.prev_frame_btn.setIcon(app_icon("previous", size=11, color="#D7DAE7"))
     self.prev_frame_btn.setIconSize(icon_size(11))
     self.prev_frame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -201,7 +268,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.stop_btn = QPushButton("")
     self.stop_btn.setObjectName("ToolButton")
     self.stop_btn.setProperty("transportAction", True)
-    self.stop_btn.setFixedSize(20, 20)
+    self.stop_btn.setFixedSize(20, 30)
     self.stop_btn.setIcon(app_icon("stop", size=10, color="#D7DAE7"))
     self.stop_btn.setIconSize(icon_size(10))
     self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -212,7 +279,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.next_frame_btn = QPushButton("")
     self.next_frame_btn.setObjectName("ToolButton")
     self.next_frame_btn.setProperty("transportAction", True)
-    self.next_frame_btn.setFixedSize(20, 20)
+    self.next_frame_btn.setFixedSize(20, 30)
     self.next_frame_btn.setIcon(app_icon("next", size=11, color="#D7DAE7"))
     self.next_frame_btn.setIconSize(icon_size(11))
     self.next_frame_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -226,30 +293,30 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.current_speed_label = QPushButton("1.0x")
     self.current_speed_label.setObjectName("SpeedLabel")
     self.current_speed_label.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.current_speed_label.setFixedSize(42, 20)
-    self.current_speed_label.setToolTip(tr("veditor.current_speed", speed="1.0"))
+    self.current_speed_label.setFixedSize(42, 30)
+    self.current_speed_label.setToolTip(f"{tr('veditor.current_speed', speed='1.0')} - click for speed menu")
     self.current_speed_label.clicked.connect(self._show_viewer_speed_menu)
 
     self.viewer_compare_btn = QPushButton("Compare")
     self.viewer_compare_btn.setObjectName("ViewerDropdownButton")
     self.viewer_compare_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.viewer_compare_btn.setFixedSize(70, 20)
+    self.viewer_compare_btn.setFixedSize(70, 30)
     self.viewer_compare_btn.setToolTip("Comparison Templates")
     self.viewer_compare_btn.clicked.connect(self._show_viewer_compare_menu)
 
     self.viewer_fit_btn = QPushButton("Fit")
     self.viewer_fit_btn.setObjectName("ViewerDropdownButton")
     self.viewer_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.viewer_fit_btn.setFixedSize(38, 20)
+    self.viewer_fit_btn.setFixedSize(38, 30)
     self.viewer_fit_btn.setToolTip("Fit frame to viewer")
-    self.viewer_fit_btn.clicked.connect(lambda _checked=False: self._scale_preview_to_fit())
+    self.viewer_fit_btn.clicked.connect(lambda _checked=False: self._fit_viewer_preview_from_button())
 
     self.viewer_depth_btn = QPushButton("Depth")
     self.viewer_depth_btn.setObjectName("ViewerDropdownButton")
     self.viewer_depth_btn.setCheckable(True)
     self.viewer_depth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.viewer_depth_btn.setFixedSize(52, 20)
-    self.viewer_depth_btn.setToolTip("Show AR/PBR depth map only")
+    self.viewer_depth_btn.setFixedSize(62, 30)
+    self.viewer_depth_btn.setToolTip("Show AR/PBR depth matte / distance / plane views")
     self.viewer_depth_btn.clicked.connect(self._toggle_ar_pbr_depth_view)
 
     # Mark In / Mark Out / Clear selection ??prosumer-editor style
@@ -307,6 +374,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     transport.addWidget(self.play_btn)
     transport.addWidget(self.stop_btn)
     transport.addWidget(self.next_frame_btn)
+    install_frame_repair_transport_button(self, transport)
     transport.addStretch(1)
     transport.addWidget(self.mark_in_btn)
     transport.addWidget(self.mark_out_btn)

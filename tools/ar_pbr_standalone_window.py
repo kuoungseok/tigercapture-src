@@ -35,6 +35,7 @@ from app.ar_pbr.compositor import composite_preview_frame
 from app.ar_pbr.importer import import_asset
 from app.ar_pbr.sample_scene import write_pbr_fbx_scene
 from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
+from app.window_placement import install_global_window_placement
 
 
 DEFAULT_EXTERNAL_ASSET = default_ar_pbr_preview_asset()
@@ -396,6 +397,7 @@ def main() -> int:
         render_scene(asset, width=args.width, height=args.height, generated=False)
         return 0
     app = QApplication(sys.argv)
+    install_global_window_placement(app)
     window = RenderWindow(
         asset,
         descriptor,

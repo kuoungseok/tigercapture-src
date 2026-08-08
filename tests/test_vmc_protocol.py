@@ -68,6 +68,17 @@ def test_build_vmc_messages_counter_rolls_head_against_shoulder_roll():
     assert abs(chest_rotation[2]) > 0.001
 
 
+def test_build_vmc_messages_inverts_source_pitch_for_vrm_space():
+    from app.vtuber.video_face_driver import FaceMotionFrame
+    from app.vtuber.vmc_protocol import build_vmc_messages_from_face_frame, summarize_vmc_messages
+
+    positive = summarize_vmc_messages(build_vmc_messages_from_face_frame(FaceMotionFrame(time_ms=0, pitch_deg=6.0)))
+    negative = summarize_vmc_messages(build_vmc_messages_from_face_frame(FaceMotionFrame(time_ms=0, pitch_deg=-6.0)))
+
+    assert positive["bones"]["Head"]["rotation"][0] < 0.0
+    assert positive["bones"]["Head"]["rotation"][0] < negative["bones"]["Head"]["rotation"][0]
+
+
 def test_parse_osc_message_round_trips_bridge_packets():
     from app.vtuber.vmc_protocol import osc_message, parse_osc_message
 

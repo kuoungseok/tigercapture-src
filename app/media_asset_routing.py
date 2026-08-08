@@ -10,24 +10,35 @@ from pathlib import Path
 from typing import Any
 
 from app.audio_tracks import is_audio_path, is_video_path
+from app.image_media import is_image_path
 
 
 VRM_AVATAR_MIME_TYPE = "application/x-tigerstudio-vrm-avatar"
+MEDIA_POOL_ITEM_MIME_TYPE = "application/x-tigercapture-media-pool-item"
 
 
 def mime_url_paths(mime: Any) -> list[Path]:
     if mime is None:
         return []
+    paths: list[Path] = []
+    try:
+        if mime.hasFormat(MEDIA_POOL_ITEM_MIME_TYPE):
+            raw = bytes(mime.data(MEDIA_POOL_ITEM_MIME_TYPE)).decode("utf-8", errors="ignore")
+            for line in raw.splitlines():
+                path = Path(line.strip())
+                if str(path):
+                    paths.append(path)
+    except Exception:
+        pass
     try:
         if not mime.hasUrls():
-            return []
+            return paths
     except Exception:
-        return []
-    paths: list[Path] = []
+        return paths
     try:
         urls = list(mime.urls())
     except Exception:
-        return []
+        return paths
     for url in urls:
         try:
             path = Path(url.toLocalFile())
@@ -35,7 +46,14 @@ def mime_url_paths(mime: Any) -> list[Path]:
             continue
         if str(path):
             paths.append(path)
-    return paths
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
 def ar_pbr_paths_from_mime(mime: Any) -> list[Path]:
@@ -86,10 +104,17 @@ def mmd_paths_from_mime(mime: Any) -> list[Path]:
     return _mmd_paths_from_mime(mime)
 
 
+def motion_project_paths_from_mime(mime: Any) -> list[Path]:
+    return [
+        path for path in mime_url_paths(mime)
+        if path.suffix.casefold() == ".tgmotion"
+    ]
+
+
 def timeline_media_paths_from_mime(mime: Any) -> list[Path]:
     return [
         path for path in mime_url_paths(mime)
-        if is_video_path(path) or is_audio_path(path)
+        if is_video_path(path) or is_audio_path(path) or is_image_path(path)
     ]
 
 

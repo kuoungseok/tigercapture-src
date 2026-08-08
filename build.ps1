@@ -3,7 +3,9 @@
 #   .\build.ps1              # PyInstaller only (dist\TigerCapture)
 #   .\build.ps1 -NSIS        # PyInstaller + NSIS (installer_output\TigerCapture-Setup-*.exe)
 #   .\build.ps1 -Installer   # alias for -NSIS
-#   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup
+#   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup (installer_output\TigerCapture-InnoSetup-*.exe)
+#   .\build.ps1 -PortableUpdate # PyInstaller + portable update zip
+#   .\build.ps1 -Version 1.4.3 -PortableUpdate -UpdateManifestOutput installer_output\latest.json
 #   .\build.ps1 -Clean       # clean build artifacts first
 #   .\build.ps1 -Version 1.3.0 -NSIS   # explicit version override
 
@@ -11,8 +13,12 @@ param(
     [switch]$Installer,
     [switch]$NSIS,
     [switch]$InnoSetup,
+    [switch]$PortableUpdate,
     [switch]$Clean,
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$UpdateArtifactUrl = "",
+    [string]$UpdateManifestOutput = "",
+    [string]$UpdateReleaseNotesUrl = ""
 )
 
 if ($Installer) { $NSIS = $true }
@@ -42,6 +48,12 @@ Write-Host "[version] $Version" -ForegroundColor Cyan
 
 if (-not (Test-Path $python)) {
     Write-Error "venv not found at $python. Run `py -3.13 -m venv .venv` and install requirements first."
+    exit 1
+}
+
+& $python -c "import PyInstaller" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "PyInstaller is not installed in .venv. Run: .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt"
     exit 1
 }
 
@@ -92,11 +104,58 @@ Write-Host "[pyinstaller] building dist\TigerCapture..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $exePath = Join-Path $root "dist\TigerCapture\TigerCapture.exe"
+$studioExePath = Join-Path $root "dist\TigerCapture\TigerStudio.exe"
+$updaterExePath = Join-Path $root "dist\TigerCapture\TigerCaptureUpdater.exe"
 if (-not (Test-Path $exePath)) {
     Write-Error "Build failed: $exePath missing."
     exit 1
 }
+if (-not (Test-Path $studioExePath)) {
+    Write-Error "Build failed: $studioExePath missing."
+    exit 1
+}
+if (-not (Test-Path $updaterExePath)) {
+    Write-Error "Build failed: $updaterExePath missing."
+    exit 1
+}
 Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
+Write-Host "[pyinstaller] OK: $studioExePath" -ForegroundColor Green
+Write-Host "[pyinstaller] OK: $updaterExePath" -ForegroundColor Green
+
+# 3b. Root launcher
+# PyInstaller uses an onedir layout, so copying dist\TigerCapture\TigerCapture.exe
+# to the repository root would break its _internal lookup. Build a tiny native
+# launcher instead: it starts .venv\Scripts\pythonw.exe main.py in a source
+# checkout, then falls back to the frozen app when no source venv is present.
+$launcherSource = Join-Path $root "tools\windows_launcher\TigerCaptureLauncher.cs"
+$launcherExe = Join-Path $root "TigerCapture.exe"
+$studioLauncherExe = Join-Path $root "TigerStudio.exe"
+if (Test-Path $launcherSource) {
+    $csc = $null
+    $cscCandidates = @(
+        "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+        "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+    )
+    foreach ($candidate in $cscCandidates) {
+        if (Test-Path $candidate) { $csc = $candidate; break }
+    }
+    if (-not $csc) {
+        $foundCsc = Get-Command csc.exe -ErrorAction Ignore
+        if ($foundCsc) { $csc = $foundCsc.Source }
+    }
+    if ($csc) {
+        Write-Host "[launcher] building root TigerCapture.exe..." -ForegroundColor Cyan
+        & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/win32icon:$icoPath" /reference:System.Windows.Forms.dll "/out:$launcherExe" "$launcherSource"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "[launcher] OK: $launcherExe" -ForegroundColor Green
+        Write-Host "[launcher] building root TigerStudio.exe..." -ForegroundColor Cyan
+        & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/win32icon:$icoPath" /reference:System.Windows.Forms.dll "/out:$studioLauncherExe" "$launcherSource"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "[launcher] OK: $studioLauncherExe" -ForegroundColor Green
+    } else {
+        Write-Warning "csc.exe not found; root TigerCapture.exe launcher was not rebuilt."
+    }
+}
 
 # 4a. NSIS installer (preferred)
 if ($NSIS) {
@@ -147,7 +206,34 @@ if ($InnoSetup) {
     Write-Host "[iscc] building installer via $iscc" -ForegroundColor Cyan
     & $iscc (Join-Path $root "installer.iss")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "[iscc] OK: installer_output\TigerCapture-Setup-*.exe" -ForegroundColor Green
+    Write-Host "[iscc] OK: installer_output\TigerCapture-InnoSetup-*.exe" -ForegroundColor Green
+}
+
+if ($PortableUpdate) {
+    New-Item -ItemType Directory -Force (Join-Path $root "installer_output") | Out-Null
+    $portableZip = Join-Path $root "installer_output\TigerCapture-Portable-$Version.zip"
+    $packageArgs = @(
+        (Join-Path $root "tools\build_portable_update_package.py"),
+        "--dist-dir", (Join-Path $root "dist\TigerCapture"),
+        "--version", $Version,
+        "--output", $portableZip
+    )
+    if ($UpdateArtifactUrl) {
+        $packageArgs += @("--artifact-url", $UpdateArtifactUrl)
+    }
+    if ($UpdateManifestOutput) {
+        $packageArgs += @("--manifest-output", $UpdateManifestOutput)
+    }
+    if ($UpdateReleaseNotesUrl) {
+        $packageArgs += @("--release-notes-url", $UpdateReleaseNotesUrl)
+    }
+    Write-Host "[update] building portable package..." -ForegroundColor Cyan
+    & $python @packageArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "[update] OK: $portableZip" -ForegroundColor Green
+    if ($UpdateManifestOutput) {
+        Write-Host "[update] OK: $UpdateManifestOutput" -ForegroundColor Green
+    }
 }
 
 Write-Host "Done." -ForegroundColor Green

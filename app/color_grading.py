@@ -539,6 +539,12 @@ def apply_to_rgb(rgb, grade: ColorGrade):
             str(getattr(grade, "output_lut_path", "")),
             float(getattr(grade, "output_lut_strength", 1.0)),
         )
+    try:
+        from app.video_letterbox import preserve_letterbox_matte
+
+        out = preserve_letterbox_matte(rgb, out)
+    except Exception:
+        pass
     return out
 
 

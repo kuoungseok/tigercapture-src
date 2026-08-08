@@ -23,6 +23,7 @@ from app.media_pool import (
     LIST_THUMB_W,
     MEDIA_EXTS,
     MMD_MOTION_EXTS,
+    MOTION_PROJECT_EXTS,
     ROLE_MMD_BADGE,
     ROLE_PERFORMANCE_SOURCE,
     THUMB_SIZE,
@@ -39,7 +40,10 @@ from app.media_pool import (
     _kind_for_path,
     _make_ar_pbr_thumbnail,
     _make_audio_thumbnail,
+    _make_image_list_thumbnail,
+    _make_image_thumbnail,
     _make_mmd_thumbnail,
+    _make_motion_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
     _make_video_thumbnail,
@@ -52,6 +56,7 @@ from app.media_pool import (
     _probe_duration_ms,
     _proxy_state_for_video,
 )
+from app.image_media import DEFAULT_IMAGE_DURATION_MS
 
 def eventFilter(self, obj, event):
     if obj in (
@@ -103,7 +108,7 @@ def add_path(self, path: Path | str) -> bool:
     self._registered.add(key)
 
     kind = _kind_for_path(p)
-    dur_ms = _probe_duration_ms(p)
+    dur_ms = DEFAULT_IMAGE_DURATION_MS if kind == "I" else _probe_duration_ms(p)
     dur_str = _format_duration(dur_ms)
     # Compact display text for the narrow pool; full file identity stays in tooltip/data.
     item = QListWidgetItem(_media_pool_item_text(p, dur_str, self._view_mode))
@@ -135,6 +140,12 @@ def add_path(self, path: Path | str) -> bool:
             f"{_mmd_kind_name_for_path(p)} badge: {_mmd_badge_label_for_path(p)}\n"
             "MMD asset: PMX/PMD/PBX models and VMD motions can be paired on MMD tracks."
         )
+    elif kind == "G":
+        item.setData(Qt.ItemDataRole.UserRole + 8, "motion_actor_asset")
+        item.setToolTip(
+            f"{item.toolTip() or key}\n"
+            "Editable Motion Asset: drag to the timeline to create a Motion Actor."
+        )
     if self._view_mode == "list":
         item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         item.setSizeHint(QSize(0, LIST_ROW_H))
@@ -148,12 +159,16 @@ def add_path(self, path: Path | str) -> bool:
         base_thumb = _make_video_thumbnail(p) or _placeholder_pixmap()
     elif kind == "A":
         base_thumb = _make_audio_thumbnail(p)
+    elif kind == "I":
+        base_thumb = _make_image_thumbnail(p) or _placeholder_pixmap()
     elif kind == "S":
         base_thumb = _make_spine_thumbnail()
     elif kind == "R":
         base_thumb = _make_vrm_avatar_thumbnail()
     elif kind == "M":
         base_thumb = _make_mmd_thumbnail()
+    elif kind == "G":
+        base_thumb = _make_motion_thumbnail(p) or _placeholder_pixmap()
     elif kind == "3":
         base_thumb = _make_ar_pbr_thumbnail()
     else:
@@ -194,6 +209,8 @@ def add_path(self, path: Path | str) -> bool:
         thumb = _draw_auto_polish_badge(thumb, auto_polish_report)
     if self._view_mode == "list" and kind == "V":
         item.setIcon(QIcon(_make_video_list_thumbnail(p) or thumb))
+    elif self._view_mode == "list" and kind == "I":
+        item.setIcon(QIcon(_make_image_list_thumbnail(p) or thumb))
     else:
         item.setIcon(QIcon(thumb))
     # Stash the probe result on the item so the workbench / future
@@ -529,4 +546,3 @@ def _apply_filter(self) -> None:
     )
     state = self._media_pool_state(total=self._list.count(), visible=visible)
     self._status_label.setText(state.title)
-

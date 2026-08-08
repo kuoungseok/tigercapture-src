@@ -62,6 +62,64 @@ def register_clip_edit_actions(registry: Any) -> None:
         ),
         lambda params, dry: _clip_trim(registry, params, dry),
     )
+    registry.register_adapter_action(
+        "clip.frame_repair.list",
+        "List non-destructive bad-frame repair ranges on a video clip.",
+        "clip",
+        "list_frame_repairs",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "clip_id": {"type": "integer"},
+            },
+            required=("track_id", "clip_id"),
+        ),
+        required=("track_id", "clip_id"),
+        mutating=False,
+        changed=False,
+        dry_summary="frame repair ranges would be listed",
+    )
+    registry.register_adapter_action(
+        "clip.frame_repair.add",
+        "Add a non-destructive bad-frame repair range to a video clip.",
+        "clip",
+        "add_frame_repair",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "clip_id": {"type": "integer"},
+                "source_start_ms": {"type": "integer", "minimum": 0},
+                "source_end_ms": {"type": "integer", "minimum": 1},
+                "method": {"type": "string", "enum": ["interpolate", "hold_previous", "hold_next"]},
+                "algorithm": {"type": "string", "enum": ["optical_flow", "linear"]},
+                "label": {"type": "string"},
+            },
+            required=("track_id", "clip_id", "source_start_ms", "source_end_ms"),
+        ),
+        required=("track_id", "clip_id", "source_start_ms", "source_end_ms"),
+        undo_label="Add frame repair",
+        dry_summary="frame repair range would be added",
+    )
+    registry.register_adapter_action(
+        "clip.frame_repair.remove",
+        "Remove non-destructive bad-frame repair ranges from a video clip.",
+        "clip",
+        "remove_frame_repair",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "clip_id": {"type": "integer"},
+                "repair_id": {"type": "string"},
+                "source_start_ms": {"type": "integer", "minimum": 0},
+                "source_end_ms": {"type": "integer", "minimum": 1},
+                "clear_all": {"type": "boolean"},
+            },
+            required=("track_id", "clip_id"),
+        ),
+        required=("track_id", "clip_id"),
+        undo_label="Remove frame repair",
+        dry_summary="frame repair range would be removed",
+    )
     registry.register(
         ActionSpec(
             "clip.ripple_trim",

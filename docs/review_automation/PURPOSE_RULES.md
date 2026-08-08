@@ -1,11 +1,11 @@
 # Review Automation Purpose Rules
 
-Last updated: 2026-07-03
+Last updated: 2026-07-12
 
 ## Primary Purpose
 
 Review automation is a product promotion and product explanation system. It
-should show what TigerCapture/Tiger Studio can do and what a creator can make
+should show what Tiger Studio can do and what a creator can make
 with it.
 
 Despite the name, it is not:
@@ -65,6 +65,11 @@ They should:
   `Specification Index` page object described below,
 - hide QA/action details behind the scenes unless the page is explicitly an
   internal appendix.
+- use `Tiger Studio` as the only visible product name. Do not put
+  `TigerCapture`, `TIGERCAPTURE`, `TigerCapture Studio`, or
+  `TIGERCAPTURE.COM` in product-facing titles, footers, captions, website copy,
+  or generated slide imagery. `TigerCapture` may remain only in technical paths,
+  schema identifiers, repository URLs, or legacy executable/package names.
 
 They must not show:
 
@@ -96,6 +101,20 @@ Hard rules:
   original; a neutral/original-looking comparison is invalid. If suitable preset
   values are unknown, research real preset values and record the source in the
   capture contract.
+- Color grading catalog evidence should use the documented
+  `cinematic_teal_orange_strong_compare_v1` preset from
+  `COLOR_NODE_COMPARE_PRESETS.md` unless the user requests a different look.
+  The capture report must record the researched source URLs and prove that a
+  strong researched color preset was applied. For node/effect pages, default to
+  a visibly strong Gaussian Blur comparison, normally 24 px and never below
+  18 px for catalog evidence unless a stronger implemented node is documented.
+- Color grading, node graph, and node/effect library pages should use the
+  comparison-workbench layout: the same full editor/window capture must show the
+  Viewer on the left with `Before`/`After` or `Split` comparison labels and a
+  visible comparison divider, while the right/workbench side shows the actual
+  color or node/effect controls that produced the result. Do not build these
+  pages from separate pasted screenshots, a detached comparison-only popout, a
+  controls-only panel, or an iPad crop standing in for the main proof.
 - A black, blank, or raw-source-only Viewer region is a build blocker. Do not
   hide a failed Viewer capture by pasting in an unrelated source frame.
 - Live2D, VRM, MMD, and other actor pages must show the character inside the
@@ -129,6 +148,10 @@ Hard rules:
 - AR/PBR pages must keep the laptop/editor viewer and the iPad/detail viewer on
   the same named 3D asset. If the iPad shows the approved plaster bust, the
   editor viewer must also show that same bust, scaled large enough to read.
+  The iPad/detail frame for the AR/PBR composite page must be the standalone
+  AR/PBR or 3D viewer, not the composited video output, raw video frame,
+  Program Output, camera model, vehicle, or a duplicate of the laptop/editor
+  screen.
 - The timeline in product screenshots must come from the current editor UI. Do
   not reuse old timeline thumbnails, old track styling, or synthetic fallback
   strips that no longer match the application.
@@ -164,7 +187,7 @@ The visible micro-spec groups must come from
 generation. The final page must stay product-catalog oriented: include current
 surfaces such as PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI,
 Python Action, MCP, VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and
-MP4, but exclude MRQ, Unreal Bridge, Marmoset, QA readiness numbers, and
+MP4, but exclude internal renderer bridge names, Marmoset, QA readiness numbers, and
 pass/fail status wording.
 
 ## Current Timeline Visual Contract
@@ -246,6 +269,14 @@ For the Color Grading Workspace page, the iPad/detail frame must contain only
 color controls such as color wheels, curves, scopes, tone controls, or standard
 sliders. It must not contain the video viewer, media pool, or timeline. The
 main laptop/editor screen is where the before/after viewer and timeline belong.
+If the Color Grading iPad/detail frame does not add a meaningful control
+close-up beyond the main comparison-workbench capture, omit the iPad and use a
+laptop-only layout.
+
+For the AR/PBR 3D Composite page, the iPad/detail frame must contain the
+standalone AR/PBR or 3D viewer for the same approved asset shown in the laptop
+editor viewer. It must not show the composited video output or a second copy of
+the laptop screen.
 
 Do not delete:
 

@@ -304,6 +304,11 @@ def capture_editor_snapshot(editor) -> dict:
         "spine_actor_tracks": _history_copy(getattr(editor, "_spine_actor_tracks", [])),
         "live2d_actor_tracks": _history_copy(getattr(editor, "_live2d_actor_tracks", [])),
         "ar_pbr_tracks": _history_copy(getattr(editor, "_ar_pbr_tracks", [])),
+        "motion_compositions": [
+            item.to_dict() if hasattr(item, "to_dict") else _history_copy(item)
+            for item in (getattr(editor, "_motion_compositions", {}) or {}).values()
+        ],
+        "motion_clips": _history_copy(getattr(editor, "_motion_clips", [])),
         "selected_clips": _history_copy(getattr(editor, "_selected_clips", [])),
         "px_per_sec": getattr(editor, "_px_per_sec", None),
         "playhead_ms": _safe_player_position(editor),
@@ -381,6 +386,17 @@ def apply_editor_snapshot(editor, snap: dict) -> None:
         editor._ar_pbr_tracks = _history_copy(snap.get("ar_pbr_tracks", []))
         _call_if_present(editor, "_sync_ar_pbr_tracks_to_player")
         _call_if_present(editor, "_refresh_player_tracks")
+    if "motion_compositions" in snap and hasattr(editor, "_motion_compositions"):
+        try:
+            from app.motion_designer.schema import MotionComposition
+            values = [MotionComposition.from_dict(item) for item in snap.get("motion_compositions", [])]
+            editor._motion_compositions = {item.id: item for item in values}
+        except Exception:
+            editor._motion_compositions = {}
+    if "motion_clips" in snap and hasattr(editor, "_motion_clips"):
+        editor._motion_clips = _history_copy(snap.get("motion_clips", []))
+        _call_if_present(editor, "_rebuild_motion_lanes")
+        _call_if_present(editor, "_sync_motion_state_to_player")
 
     if "selected_clips" in snap:
         _restore_selected_clips(editor, snap.get("selected_clips", []))
@@ -719,7 +735,7 @@ def _refresh_timeline_zoom(editor, px_per_sec: float) -> None:
                         row.set_px_per_sec(px_per_sec)
                     except Exception:
                         pass
-    for row_list_name in ("_actor_lane_rows", "_live2d_lane_rows"):
+    for row_list_name in ("_actor_lane_rows", "_live2d_lane_rows", "_motion_lane_rows"):
         rows = getattr(editor, row_list_name, None)
         if rows:
             for row in rows:

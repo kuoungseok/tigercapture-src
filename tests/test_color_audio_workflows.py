@@ -946,6 +946,155 @@ def test_color_preview_compare_before_and_split_are_preview_only():
     assert not np.array_equal(after, rgb)
 
 
+def test_color_split_compare_preserves_encoded_letterbox_matte():
+    from app.color_grading import ColorGrade
+    from app.project_player import _apply_node_chain_preview_compare
+    from app.workbench.node_graph.items.node_item import NodeItem
+
+    rgb = np.full((8, 10, 3), 5, dtype=np.uint8)
+    rgb[2:6, 2:8] = np.array([80, 92, 104], dtype=np.uint8)
+    node = NodeItem("N1", "Node 1")
+    node.color_grade = ColorGrade(brightness=45, contrast=15, saturation=20)
+
+    split = _apply_node_chain_preview_compare(rgb.copy(), [(node, [])], 0, "split")
+
+    assert split is not None
+    np.testing.assert_array_equal(split[:2], rgb[:2])
+    np.testing.assert_array_equal(split[6:], rgb[6:])
+    np.testing.assert_array_equal(split[:, :2], rgb[:, :2])
+    np.testing.assert_array_equal(split[:, 8:], rgb[:, 8:])
+    np.testing.assert_array_equal(split[2:6, 2:5], rgb[2:6, 2:5])
+    assert not np.array_equal(split[2:6, 5:8], rgb[2:6, 5:8])
+
+
+def test_color_split_compare_grades_large_dark_bottom_scene_content():
+    from app.color_grading import ColorGrade
+    from app.project_player import _apply_node_chain_preview_compare
+    from app.workbench.node_graph.items.node_item import NodeItem
+
+    rgb = np.full((90, 140, 3), 88, dtype=np.uint8)
+    rgb[:55, :, 1] = np.linspace(64, 180, 55, dtype=np.uint8)[:, None]
+    rgb[55:, :] = np.array([8, 12, 16], dtype=np.uint8)
+    node = NodeItem("N1", "Node 1")
+    node.color_grade = ColorGrade(brightness=45, contrast=15, saturation=20)
+
+    split = _apply_node_chain_preview_compare(rgb.copy(), [(node, [])], 0, "split")
+
+    assert split is not None
+    np.testing.assert_array_equal(split[:, :70], rgb[:, :70])
+    assert not np.array_equal(split[62:82, 82:124], rgb[62:82, 82:124])
+
+
+def test_color_split_compare_applies_vignette_effect_on_after_side():
+    from types import SimpleNamespace
+
+    from app.effect_node_params import VignetteParams
+    from app.project_player import _apply_node_chain_preview_compare
+
+    rgb = np.full((40, 60, 3), 180, dtype=np.uint8)
+    node = SimpleNamespace(
+        NODE_KIND="vignette",
+        bypassed=False,
+        effect_params=VignetteParams(amount=0.9, size=0.18, feather=1.0, round=1.0),
+        color_grade=None,
+    )
+
+    split = _apply_node_chain_preview_compare(rgb.copy(), [(node, [])], 0, "split")
+
+    assert split is not None
+    np.testing.assert_array_equal(split[:, :30], rgb[:, :30])
+    assert int(split[0, 59, 0]) < int(rgb[0, 59, 0])
+    assert int(split[20, 35, 0]) == int(rgb[20, 35, 0])
+
+
+def test_color_split_compare_applies_blur_effect_on_after_side():
+    from types import SimpleNamespace
+
+    from app.blur_params import BlurParams
+    from app.project_player import _apply_node_chain_preview_compare
+
+    rgb = np.zeros((40, 60, 3), dtype=np.uint8)
+    rgb[:, ::2] = np.array([235, 235, 235], dtype=np.uint8)
+    rgb[:, 1::2] = np.array([20, 20, 20], dtype=np.uint8)
+    node = SimpleNamespace(
+        NODE_KIND="blur",
+        bypassed=False,
+        blur_params=BlurParams(radius=16, shape="gaussian", strength=1.0, enabled=True),
+        blur_invert_mask=True,
+        effect_params=None,
+        color_grade=None,
+    )
+
+    split = _apply_node_chain_preview_compare(rgb.copy(), [(node, [])], 0, "split")
+
+    assert split is not None
+    np.testing.assert_array_equal(split[:, :30], rgb[:, :30])
+    assert not np.array_equal(split[:, 30:], rgb[:, 30:])
+
+
+def test_preview_prerender_cache_is_not_used_for_active_effect_nodes():
+    from types import SimpleNamespace
+
+    from app.effect_node_params import VignetteParams
+    from app.project_player_render_workflow import _node_item_has_active_preview_effect
+
+    active = SimpleNamespace(
+        NODE_KIND="vignette",
+        bypassed=False,
+        effect_params=VignetteParams(amount=0.35),
+        color_grade=None,
+    )
+    inactive = SimpleNamespace(
+        NODE_KIND="vignette",
+        bypassed=False,
+        effect_params=VignetteParams(amount=0.0),
+        color_grade=None,
+    )
+
+    assert _node_item_has_active_preview_effect(active) is True
+    assert _node_item_has_active_preview_effect(inactive) is False
+
+
+def test_color_grade_preserves_encoded_letterbox_matte():
+    from app.color_grading import ColorGrade, apply_to_rgb
+
+    rgb = np.full((20, 30, 3), 70, dtype=np.uint8)
+    rgb[5:15, :, 1] = np.linspace(60, 180, 10, dtype=np.uint8)[:, None]
+    rgb[:5, :] = 0
+    rgb[15:, :] = 0
+    grade = ColorGrade(brightness=45, contrast=20, saturation=25)
+
+    out = apply_to_rgb(rgb.copy(), grade)
+
+    np.testing.assert_array_equal(out[:5], rgb[:5])
+    np.testing.assert_array_equal(out[15:], rgb[15:])
+    assert not np.array_equal(out[8], rgb[8])
+
+
+def test_node_effect_preserves_encoded_letterbox_matte():
+    from types import SimpleNamespace
+
+    from app.effect_node_params import LevelsParams
+    from app.project_player import _apply_node_effect_player
+
+    rgb = np.full((24, 32, 3), 92, dtype=np.uint8)
+    rgb[6:18, :, 0] = np.linspace(40, 200, 12, dtype=np.uint8)[:, None]
+    rgb[:6, :] = 0
+    rgb[18:, :] = 0
+    node = SimpleNamespace(
+        NODE_KIND="serial",
+        bypassed=False,
+        effect_params=LevelsParams(out_black=0.22, out_white=1.0),
+        color_grade=None,
+    )
+
+    out = _apply_node_effect_player(node, rgb.copy(), [], 0)
+
+    np.testing.assert_array_equal(out[:6], rgb[:6])
+    np.testing.assert_array_equal(out[18:], rgb[18:])
+    assert not np.array_equal(out[10], rgb[10])
+
+
 def test_color_workbench_selection_does_not_force_split_compare():
     from app.video_editor_window import VideoEditorWindow
 
@@ -1156,6 +1305,62 @@ def test_color_workspace_ratio_keeps_viewer_visible():
     assert layout.stretches[1] == WORKBENCH_TOP_STRETCH
     assert viewer.updated is True
     assert workbench.updated is True
+
+
+def test_color_workspace_ratio_supports_top_work_splitter():
+    from app.video_editor_layout_specs import (
+        VIEWER_TOP_STRETCH,
+        WORKBENCH_SLOT_MIN_WIDTH,
+        WORKBENCH_TOP_STRETCH,
+    )
+    from app.video_editor_window import VideoEditorWindow
+
+    class _Widget:
+        def __init__(self):
+            self.minimum_width = None
+            self.updated = False
+
+        def setMinimumWidth(self, value):
+            self.minimum_width = int(value)
+
+        def updateGeometry(self):
+            self.updated = True
+
+    class _Splitter:
+        def __init__(self, viewer, workbench):
+            self._items = [viewer, workbench]
+            self.stretches = {}
+            self.updated = False
+
+        def indexOf(self, widget):
+            return self._items.index(widget) if widget in self._items else -1
+
+        def setStretchFactor(self, index, value):
+            self.stretches[int(index)] = int(value)
+
+        def updateGeometry(self):
+            self.updated = True
+
+    viewer = _Widget()
+    workbench = _Widget()
+    top = _Widget()
+    splitter = _Splitter(viewer, workbench)
+    editor = SimpleNamespace(
+        _top_work_splitter=splitter,
+        _top_work_layout=None,
+        _viewer_column=viewer,
+        _top_workbench_slot=workbench,
+        _top_work_area=top,
+    )
+
+    VideoEditorWindow._set_color_reference_workspace_ratio(editor, True)
+
+    assert workbench.minimum_width == WORKBENCH_SLOT_MIN_WIDTH
+    assert splitter.stretches[0] == VIEWER_TOP_STRETCH
+    assert splitter.stretches[1] == WORKBENCH_TOP_STRETCH
+    assert viewer.updated is True
+    assert workbench.updated is True
+    assert splitter.updated is True
 
 
 def test_color_tab_preview_guard_restores_last_good_frame():

@@ -6,9 +6,16 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox, QMenu
 
-from app.i18n import tr
+from app.i18n import current_language, tr
 from app.icons import app_icon
 from app.video_editor_nested_sequence import NestedSequenceEditorDialog
+
+
+def _context_menu_text(ko: str, en: str) -> str:
+    try:
+        return ko if current_language() == "ko" else en
+    except Exception:
+        return en
 
 
 def _on_audio_load_source_requested(self, tid: int) -> None:
@@ -212,6 +219,144 @@ def _first_overlapping_actor_ms(actors, clip) -> int:
     return max(0, clip_start)
 
 
+def _clip_context_fps(self) -> float:
+    try:
+        return max(1.0, float((getattr(self, "_project_settings", {}) or {}).get("fps") or 30.0))
+    except Exception:
+        return 30.0
+
+
+def _clip_context_playhead_ms(self) -> int:
+    player = getattr(self, "_player", None)
+    if player is None:
+        return 0
+    position = getattr(player, "position", None)
+    try:
+        if callable(position):
+            return max(0, int(position()))
+        if position is not None:
+            return max(0, int(position))
+    except Exception:
+        pass
+    try:
+        return max(0, int(getattr(player, "position_ms", 0) or 0))
+    except Exception:
+        return 0
+
+
+def _run_video_clip_action(
+    self,
+    action_id: str,
+    params: dict,
+    *,
+    confirm_destructive: bool = False,
+    success: str = "",
+) -> bool:
+    registry_fn = getattr(self, "_ensure_python_action_registry", None)
+    if not callable(registry_fn):
+        flash = getattr(self, "_flash_status", None)
+        if callable(flash):
+            flash("Clip action registry is unavailable")
+        return False
+    result = registry_fn().execute(
+        action_id,
+        params,
+        confirm_destructive=bool(confirm_destructive),
+    ).to_dict()
+    if not result.get("ok"):
+        QMessageBox.warning(
+            self,
+            tr("veditor.title"),
+            str(result.get("error") or "Clip action failed"),
+        )
+        return False
+    if success:
+        flash = getattr(self, "_flash_status", None)
+        if callable(flash):
+            flash(success)
+    return True
+
+
+def _move_video_clip_to_playhead(self, track, clip) -> bool:
+    target = _clip_context_playhead_ms(self)
+    return _run_video_clip_action(
+        self,
+        "clip.move",
+        {
+            "track_id": int(getattr(track, "id", -1)),
+            "clip_id": int(getattr(clip, "id", -1)),
+            "at_ms": target,
+        },
+        success=f"Clip moved to playhead ({target} ms)",
+    )
+
+
+def _prompt_move_video_clip_to_time(self, track, clip) -> bool:
+    current = int(getattr(clip, "timeline_in_ms", 0) or 0)
+    value, ok = QInputDialog.getInt(
+        self,
+        "Move clip",
+        "Move clip start to project time (ms):",
+        current,
+        0,
+        24 * 60 * 60 * 1000,
+        100,
+    )
+    if not ok:
+        return False
+    return _run_video_clip_action(
+        self,
+        "clip.move",
+        {
+            "track_id": int(getattr(track, "id", -1)),
+            "clip_id": int(getattr(clip, "id", -1)),
+            "at_ms": int(value),
+        },
+        success=f"Clip moved to {int(value)} ms",
+    )
+
+
+def _nudge_video_clip_frames(self, track, clip, frames: int) -> bool:
+    frames = int(frames)
+    return _run_video_clip_action(
+        self,
+        "clip.nudge_frames",
+        {
+            "track_id": int(getattr(track, "id", -1)),
+            "clip_id": int(getattr(clip, "id", -1)),
+            "frames": frames,
+            "fps": _clip_context_fps(self),
+        },
+        success=f"Clip nudged {frames:+d} frame{'s' if abs(frames) != 1 else ''}",
+    )
+
+
+def _delete_video_clip_leave_gap(self, track, clip) -> bool:
+    return _run_video_clip_action(
+        self,
+        "clip.delete",
+        {
+            "track_id": int(getattr(track, "id", -1)),
+            "clip_id": int(getattr(clip, "id", -1)),
+        },
+        confirm_destructive=True,
+        success="Clip deleted; gap left on timeline",
+    )
+
+
+def _ripple_delete_video_clip(self, track, clip) -> bool:
+    return _run_video_clip_action(
+        self,
+        "timeline.ripple_delete",
+        {
+            "track_id": int(getattr(track, "id", -1)),
+            "clip_id": int(getattr(clip, "id", -1)),
+        },
+        confirm_destructive=True,
+        success="Clip ripple deleted; following clips moved left",
+    )
+
+
 def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "QPoint") -> None:
     """Right-click on a video clip ??show effects + standard options."""
     track = self._find_track(track_id)
@@ -222,7 +367,10 @@ def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "
         return
     self._select_workflow_video_clip(track, clip)
     menu = QMenu(self)
-    fx_act = menu.addAction(app_icon("color", size=16), "?대┰ ?댄럺??..")
+    fx_act = menu.addAction(
+        app_icon("color", size=16),
+        _context_menu_text("클립 효과...", "Clip effects..."),
+    )
     focus_fx_act = menu.addAction("FX stack in Workbench")
     has_active_fx = self._clip_has_active_fx(clip)
     has_disabled_fx = self._clip_has_disabled_fx(clip)
@@ -245,8 +393,25 @@ def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "
         or getattr(track, "source_path", None) is not None
     )
     menu.addSeparator()
-    split_act = menu.addAction(app_icon("scissors", size=16), "?ш린??遺꾪븷")
-    del_act = menu.addAction(app_icon("trash", size=16), "??젣")
+    split_act = menu.addAction(
+        app_icon("scissors", size=16),
+        _context_menu_text("여기서 분할", "Split here"),
+    )
+    menu.addSeparator()
+    move_menu = menu.addMenu("Move clip")
+    move_to_playhead_act = move_menu.addAction("Move to playhead")
+    move_to_time_act = move_menu.addAction("Move to time...")
+    move_menu.addSeparator()
+    nudge_left_1_act = move_menu.addAction("Nudge left 1 frame")
+    nudge_right_1_act = move_menu.addAction("Nudge right 1 frame")
+    nudge_left_5_act = move_menu.addAction("Nudge left 5 frames")
+    nudge_right_5_act = move_menu.addAction("Nudge right 5 frames")
+    menu.addSeparator()
+    delete_gap_act = menu.addAction(
+        app_icon("trash", size=16),
+        "Delete clip (leave gap)",
+    )
+    ripple_delete_act = menu.addAction("Ripple delete clip (close gap)")
     chosen = menu.exec(global_pos)
     if chosen is fx_act:
         self._open_clip_effects(track, clip)
@@ -273,8 +438,22 @@ def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "
         self._extract_audio_from_video_selection(track, clip)
     elif chosen is split_act:
         self._blade_at_playhead(track_id=track_id)
-    elif chosen is del_act:
-        self._delete_selected_clips()
+    elif chosen is move_to_playhead_act:
+        _move_video_clip_to_playhead(self, track, clip)
+    elif chosen is move_to_time_act:
+        _prompt_move_video_clip_to_time(self, track, clip)
+    elif chosen is nudge_left_1_act:
+        _nudge_video_clip_frames(self, track, clip, -1)
+    elif chosen is nudge_right_1_act:
+        _nudge_video_clip_frames(self, track, clip, 1)
+    elif chosen is nudge_left_5_act:
+        _nudge_video_clip_frames(self, track, clip, -5)
+    elif chosen is nudge_right_5_act:
+        _nudge_video_clip_frames(self, track, clip, 5)
+    elif chosen is delete_gap_act:
+        _delete_video_clip_leave_gap(self, track, clip)
+    elif chosen is ripple_delete_act:
+        _ripple_delete_video_clip(self, track, clip)
 
 
 def _extract_audio_from_video_selection(self, track, clip=None) -> None:
@@ -365,13 +544,18 @@ def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         [track],
         getattr(self, "_project_settings", None),
     )
-    act_clean_edges = menu.addAction("Clean 1-frame gaps/overlaps")
+    act_clean_edges = menu.addAction(
+        _context_menu_text("1프레임 빈틈/겹침 정리", "Clean 1-frame gaps/overlaps")
+    )
     act_clean_edges.setEnabled(
         int(edge_summary.get("auto_fixable_count", 0) or 0) > 0
         and not bool(getattr(track, "locked", False))
     )
     act_clean_edges.setToolTip(
-        "Close one-frame gaps and trim one-frame overlaps on this track."
+        _context_menu_text(
+            "이 트랙의 1프레임 빈틈을 닫고 1프레임 겹침을 다듬습니다.",
+            "Close one-frame gaps and trim one-frame overlaps on this track.",
+        )
     )
 
     menu.addSeparator()
@@ -397,15 +581,22 @@ def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         if _link_clip is not None and self._audio_tracks:
             menu.addSeparator()
             is_linked = getattr(_link_clip, "linked_audio_id", None) is not None
-            link_label = "?ㅻ뵒??留곹겕 ?댁젣" if is_linked else "?ㅻ뵒??留곹겕"
+            link_label = _context_menu_text(
+                "오디오 연결 해제" if is_linked else "오디오 연결",
+                "Unlink audio" if is_linked else "Link audio",
+            )
             act_audio_link = menu.addAction(link_label)
 
     menu.addSeparator()
     # Track reorder
     idx = self._tracks.index(track) if track in self._tracks else -1
-    act_move_up = menu.addAction("?꾨줈 ?대룞 (?덉씠???щ━湲?")
+    act_move_up = menu.addAction(
+        _context_menu_text("위로 이동 (레이어 올리기)", "Move up (raise layer)")
+    )
     act_move_up.setEnabled(idx > 0)
-    act_move_down = menu.addAction("?꾨옒濡??대룞 (?덉씠???대━湲?")
+    act_move_down = menu.addAction(
+        _context_menu_text("아래로 이동 (레이어 내리기)", "Move down (lower layer)")
+    )
     act_move_down.setEnabled(0 <= idx < len(self._tracks) - 1)
 
     menu.addSeparator()

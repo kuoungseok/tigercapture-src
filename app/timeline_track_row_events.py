@@ -12,6 +12,7 @@ from app.effect_cards import (
 )
 from app.i18n import tr
 from app.media_asset_routing import (
+    motion_project_paths_from_mime as _shared_motion_project_paths_from_mime,
     performance_source_paths_from_mime as _shared_performance_source_paths_from_mime,
     timeline_media_paths_from_mime as _shared_timeline_media_paths_from_mime,
 )
@@ -48,6 +49,15 @@ def mousePressEvent(self, event: QMouseEvent) -> None:
     x = pos.x()
     mods = event.modifiers()
     rect = self._timeline_rect()
+    if self._playhead_hit(pos):
+        self._dragging_playhead = True
+        self._drag_start_x = x
+        self._drag_start_y = pos.y()
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.position_requested.emit(self.track.id, self._x_to_project_ms(x))
+        event.accept()
+        return
+
     if self._edit_tool_mode == "blade" and rect.contains(pos):
         if self._hit_test_clip(pos) is not None:
             self.tool_action_requested.emit(
@@ -283,6 +293,12 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
     vertical_delta = abs(pos.y() - int(getattr(self, "_drag_start_y", pos.y()) or 0))
     horizontal_delta = abs(x - int(getattr(self, "_drag_start_x", x) or 0))
     wants_external_ppt_drag = outside_row and vertical_delta >= 28 and vertical_delta > max(12, horizontal_delta * 0.45)
+    if self._dragging_playhead:
+        project_ms = self._x_to_project_ms(x)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.position_requested.emit(self.track.id, project_ms)
+        event.accept()
+        return
 
     # Typography drag ??active
     if self._typo_drag_mode is not None and self._typo_drag_actor_id is not None:
@@ -602,6 +618,10 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
     # Also update hover-state fields so paint can thicken the edge
     # handles on the thing under the cursor.
     if not (self._dragging_offset or self._dragging_playhead):
+        if self._playhead_hit(pos):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self._set_hover_hint("")
+            return
         typo_actor, typo_zone = self._typography_at(pos)
         tooltip_clip = self._hit_test_clip(pos)
         tooltip_text = self._clip_effect_tooltip(tooltip_clip) if tooltip_clip is not None else ""
@@ -894,6 +914,7 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
 def mouseReleaseEvent(self, event: QMouseEvent) -> None:
     if event.button() != Qt.MouseButton.LeftButton:
         return
+    was_dragging_playhead = self._dragging_playhead
     if self._speed_drag_mode is not None:
         # Keep segments ordered for subsequent hit-tests / painting.
         self.track.speed_segments.sort(key=lambda s: s.start_ms)
@@ -983,6 +1004,9 @@ def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self.drag_committed.emit(self.track.id)
         self.update()
     self._dragging_playhead = False
+    if was_dragging_playhead:
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
 
 def dragEnterEvent(self, event) -> None:
     md = event.mimeData()
@@ -1014,14 +1038,15 @@ def dragEnterEvent(self, event) -> None:
     # mismatches to the right track type. Qt does not automatically
     # propagate drags from a dropAccepting child to its parent ??
     # so we swallow the event here and emit our own signal.
-    if md.hasUrls():
-        if (
-            self._ar_pbr_paths_from_mime(md)
-            or self._mmd_paths_from_mime(md)
-            or _shared_timeline_media_paths_from_mime(md)
-        ):
-            event.acceptProposedAction()
-            return
+    if (
+        self._ar_pbr_paths_from_mime(md)
+        or self._mmd_paths_from_mime(md)
+        or _shared_motion_project_paths_from_mime(md)
+        or _shared_performance_source_paths_from_mime(md)
+        or _shared_timeline_media_paths_from_mime(md)
+    ):
+        event.acceptProposedAction()
+        return
     event.ignore()
 
 def dragMoveEvent(self, event) -> None:
@@ -1270,31 +1295,35 @@ def dropEvent(self, event) -> None:
         self.clicked.emit(self.track.id)
         event.acceptProposedAction()
         return
-    if md.hasUrls():
-        mmd_paths = self._mmd_paths_from_mime(md)
-        if mmd_paths:
-            self.media_dropped.emit(self.track.id, mmd_paths[0])
-            event.acceptProposedAction()
-            return
-        ar_paths = self._ar_pbr_paths_from_mime(md)
-        if ar_paths:
-            self.ar_pbr_asset_dropped.emit(
-                ar_paths[0],
-                int(self._x_to_ms(event.position().toPoint().x())),
-            )
-            event.acceptProposedAction()
-            return
-        perf_paths = _shared_performance_source_paths_from_mime(md)
-        if perf_paths:
-            self.performance_source_dropped.emit(
-                perf_paths[0],
-                int(self._x_to_ms(event.position().toPoint().x())),
-            )
-            event.acceptProposedAction()
-            return
-        media_paths = _shared_timeline_media_paths_from_mime(md)
-        if media_paths:
-            self.media_dropped.emit(self.track.id, media_paths[0])
-            event.acceptProposedAction()
-            return
+    mmd_paths = self._mmd_paths_from_mime(md)
+    if mmd_paths:
+        self.media_dropped.emit(self.track.id, mmd_paths[0])
+        event.acceptProposedAction()
+        return
+    motion_paths = _shared_motion_project_paths_from_mime(md)
+    if motion_paths:
+        self.media_dropped.emit(self.track.id, motion_paths[0])
+        event.acceptProposedAction()
+        return
+    ar_paths = self._ar_pbr_paths_from_mime(md)
+    if ar_paths:
+        self.ar_pbr_asset_dropped.emit(
+            ar_paths[0],
+            int(self._x_to_ms(event.position().toPoint().x())),
+        )
+        event.acceptProposedAction()
+        return
+    perf_paths = _shared_performance_source_paths_from_mime(md)
+    if perf_paths:
+        self.performance_source_dropped.emit(
+            perf_paths[0],
+            int(self._x_to_ms(event.position().toPoint().x())),
+        )
+        event.acceptProposedAction()
+        return
+    media_paths = _shared_timeline_media_paths_from_mime(md)
+    if media_paths:
+        self.media_dropped.emit(self.track.id, media_paths[0])
+        event.acceptProposedAction()
+        return
     event.ignore()

@@ -2,6 +2,204 @@
 
 ## Remaining Product Gaps
 
+- [ ] Motion Designer professional motion-graphics expansion (M13-M20):
+  follow `docs/MOTION_DESIGNER_AE_GAP_MILESTONES_KO.md` in dependency order.
+  M13 is complete: full-body 2D rig schema, 17-bone setup UI, Canvas overlay,
+  editable limits, persistent pole-based two-bone IK/end locking, FK/IK switch
+  and bake, symmetric bone editing, Timeline bone channels, pose storage,
+  arm/head/walk presets, three real character-part fixtures, and bounded
+  ten-minute cache QA. Start M14 Puppet deformation next. Do not claim After
+  Effects parity or `.aep` compatibility; M13 is rigid cutout rigging, not
+  deformable skin or cloth.
+  M14 is in progress with a versioned triangular mesh/pin contract,
+  alpha-aware boundary culling, Position/Bend/Starch/Overlap deformation,
+  inversion stabilization, Canvas and Timeline pin editing, rig-bone drivers,
+  Action/MCP, and shared Preview/Export piecewise-affine rendering. Real
+  bundled character-part rendering and the 100-pin/20,000-triangle contract
+  are covered by tests. Finish true local boundary refinement, explicit tear
+  repair, GPU Preview deformation, and long playback evidence before marking
+  M14 complete. M15 Composition and Animation Core is complete: embedded Pre-compose documents,
+  open-in-place parent navigation, per-instance overrides, recursive
+  Preview/Export, source Time Remap presets/channels, Value/Speed graph display,
+  tangent mode editing, and corresponding Action/MCP surfaces are implemented.
+  Published properties, per-instance published values, Controller Null links,
+  roving key distribution, and draggable broken Bezier tangent handles are
+  also implemented. Expression pick-whip UI, deterministic Frame Mix rendering,
+  and explicit optical-flow backend preflight/fallback are implemented.
+  Three-level nesting, 100 instances, and 500 undo steps now have automated QA.
+
+- [x] M16 Typography and Vector Motion is complete. Text layers support
+  a 32-entry Animator stack with character/word/line range selection,
+  offset/random/reverse/ping-pong ordering, selector shapes, smoothness, and
+  composited per-glyph position/scale/rotation/opacity/fill/tracking/blur.
+  Shape layers expose
+  Offset Paths, topology-corresponded Path Morph, linear gradient strokes,
+  dash offset, taper, and variable-width profiles through Inspector and
+  Action/MCP surfaces. Ordered Merge Paths, explicit SVG bake preflight, and a
+  non-rendering per-character 3D handoff contract are included. Acceptance QA
+  renders five kinetic typography samples, five logo reveals, three animated
+  infographic paths, and a 3840x2160 vector-edge frame under
+  `debugCapture/motion_designer/m16_typography_vector`.
+
+- [x] M17 Matte, Roto and Keying is complete. Local/optional semantic object
+  selection and refinement, point/planar matte propagation, correction keys,
+  frozen tracking caches, Chroma/Luma/Difference Key, Garbage/Holdout masks,
+  despill, and Alpha/Luma/Inverse track mattes share Preview/Export contracts.
+  Edge-aware refinement preserves incoming soft semantic alpha instead of
+  binarizing hair, translucency, and motion blur. The 10-case green/blue-screen
+  acceptance corpus and temporal/halo metrics are generated under
+  `debugCapture/motion_designer/m17_matte_keying`. Moving-object removal remains
+  explicitly experimental rather than a general product claim.
+
+- [ ] M18 Tracking and Stabilization is in progress. A provider-neutral
+  composition track asset, Point/Multi-point/Planar/Mask/Face action contracts,
+  layer transform attachment, inverse stabilization, confidence/occlusion/
+  reacquisition diagnostics, source-revision validation, Tracking inspector,
+  effect-point/Puppet-pin targets, planar-affine Corner Pin baking,
+  featureless-opening acquisition, background Point/Planar/Face inspector
+  analysis, drift review states, bounded point-track occlusion prediction and
+  reacquisition, direct face-video extraction, and
+  manual-assisted depth-plane camera solve are implemented. Remaining:
+  facial-region targets, perspective
+  homography, long/nonlinear-occlusion recovery, 20 real-video drift
+  evidence, and a non-manual 3D camera solve. Do not call the current assisted
+  plane solver full matchmove. Current `tools/qa_motion_m18_real_tracking.py`
+  evidence finds 11 local real clips, 10 generated tracks, and 9 quality
+  passes; the 20-clip gate remains intentionally failed.
+
+- [ ] M19 Unified 2.5D/3D Composition is in progress. Normal Motion layers can
+  opt into a 3D-card contract with Depth Z and X/Y affine foreshortening;
+  Perspective/Orthographic camera modes and orthographic size share the same
+  Preview/Export evaluator and AR/PBR framing bridge. Directional-light card
+  shadows now project caster alpha onto explicitly enabled lower receiver
+  cards with depth-aware offset, strength, and softness, but remain a shared
+  Qt raster path. AR/PBR preview and packet export now share one primary
+  shadowed Directional Light plus up to two unshadowed Directional/Point/Spot
+  lights, including range and spot-cone attenuation. Remaining: true
+  perspective mesh/homography for cards, camera rigs and focus targets,
+  secondary-light shadow maps, GPU card shadow maps and contact shadows, model
+  animation clips and camera/light extraction, 3D text/shape extrusion,
+  camera-solve binding, and the software-renderer-zero acceptance scene.
+
+- [ ] M20 Effects, Color, Templates and Render Scale is in progress. The first
+  2D authoring slice is implemented: Effects and Masks inspector numeric
+  parameters have current-time keyframe diamonds, layer-local time mapping,
+  animated-value refresh while scrubbing, and non-destructive current-key
+  updates. Adjustment layers now retain the compatible all-below mode or target
+  checked lower render layers without affecting unselected layers. Actions/MCP
+  provide matching effect/mask keyframe set/delete and adjustment scope get/set
+  operations. Remaining: effect-group scoping, broader effect library, GPU
+  effect contribution/failure isolation, HDR/OCIO/ACES parity, published
+  template controls and replaceable slots, package/relink metadata, profiler,
+  bounded cache controls, and resumable/background render preparation.
+
+- [ ] Painter / Motion Actor product integration polish:
+  keep Motion Designer template quality as the current priority. Resume the
+  Painter bridge only from
+  `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`; remaining work includes visual
+  asset browsing, drag/drop, independent playback offsets, coordinate
+  composition, GPU frame sharing, relink/reload/conflict UX, export parity,
+  orphan cleanup, Action/MCP coverage, and real long-template QA. Do not treat
+  the existing placement foundation as finished product integration.
+
+- [ ] Painter production art workspace:
+  Painter must be treated as a primary drawing app for game concept artists,
+  not as a video-annotation helper. Use
+  `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md` as the implementation source
+  of truth, with `SPEC.md` carrying only the durable product contract.
+  - [ ] Rebalance Painter layout around drawing: large central canvas, compact
+    left rail, top tool options, right Navigator/Reference, Color/Brush, and
+    Layers/Channels/Paths. Move Typography/PBR/3D into optional panels instead
+    of default visual priority. Keep Layers/Channels/Paths pinned as a frequent
+    production dock; optional 3D/PBR/Typography panels must not replace or hide
+    it in the default drawing workspace.
+    - [x] 2026-07-24 feedback pass: standalone Painter opens clean at 100%
+      zoom with no sample strokes, the top bar uses compact Photoshop-style
+      quick controls instead of large text buttons, and the right inspector is
+      capped so the canvas remains wider than the inspector even on small
+      remote/offscreen windows.
+  - [ ] Brush engine pass for production concept art: pressure/flow/hardness/
+    spacing/shape dynamics/texture/smudge/mixer behavior, real stroke-preview
+    thumbnails, and game-art presets for sketch, clean ink, blocking, oil,
+    dry brush, texture, hair, skin, metal, smoke/cloud, ground/rock, and pixel.
+  - [ ] Layer workflow pass: thumbnails, clipping mask, layer mask clarity,
+    group/folder planning, drag reorder, blend-mode readability, lock
+    transparency, duplicate/merge/flatten behavior, and PSD compatibility plan.
+  - [ ] Selection/transform pass: lasso/polygon lasso, color range, feather,
+    expand/contract, transform selection, free transform, rotate/scale/skew,
+    and selection-to-mask polish.
+  - [ ] Reference workflow pass: PureRef-like image board, pinned references,
+    navigator/value-check/flip-canvas controls, perspective rulers, symmetry,
+    and silhouette/value preview.
+    - [x] 2026-07-24 first slice: non-destructive Painter reference board,
+      file/clipboard image add, selected position/size/opacity/visibility,
+      canvas overlay, duplicate/delete, explicit bake-to-sticker, `Window >
+      Reference Board`, `paint.reference.*` action coverage, and regression
+      tests. Remaining reference work: media-pool add, rotate/lock UI,
+      color sample, palette extraction, navigator/value/silhouette views, and
+      perspective/symmetry guides.
+    - [x] 2026-07-24 second slice: reference rotation, reference lock UI,
+      bake-with-rotation, color sampling, palette extraction, and
+      `paint.reference.sample_color` / `paint.reference.extract_palette`
+      action coverage. Remaining reference work: media-pool add, navigator,
+      value/silhouette views, and perspective/symmetry guides.
+    - [x] 2026-07-24 third slice: canvas-level perspective and symmetry guide
+      overlays with `paint.guide.perspective` / `paint.guide.symmetry` action
+      coverage and `paint.state.guides` reporting. Remaining reference work:
+      media-pool add, navigator, and value/silhouette views.
+  - [ ] 3D blockout pass for background concept art: box-first placement with
+    stretch/widen/tall scale, move/rotate/scale standard gizmos, optional simple
+    arch helpers for door/window openings, grid snap, camera orbit/pan/zoom/FOV,
+    perspective/horizon/vanishing overlays, wireframe/transparent/value/
+    silhouette views, opacity control, and bake-to-paint-layer. Keep it a
+    drawing reference, not a Blender clone.
+    - [x] 2026-07-24 first slice: box/arch data model, canvas overlay,
+      selected move/scale/rotate handles, duplicate, align-to-ground, grid
+      snapping, camera/FOV controls and presets, `paint.3d_blockout.*` action
+      coverage, and bake-to-layer as Painter strokes on a
+      `3D Blockout Guide` layer.
+  - [ ] Preserve Texture Lab entry points while moving PBR into optional
+    texture-artist workflow. Existing `PBR Texture Lab...`, `paint.pbr.*`, and
+    `ar_pbr.texture_lab.*` doorways must keep working and must not displace the
+    pinned Layers/Channels/Paths dock.
+  - [ ] GPU-forward Painter architecture: design brush preview, high-zoom
+    canvas work, Texture Lab/PBR previews, and 3D blockout with GPU
+    acceleration/parity as the target. CPU/QPainter fallbacks are acceptable
+    first passes only if they do not slow default 2D drawing startup.
+    - [x] 2026-07-24 first OpenGL slice: 3D blockout preview/overlay now tries
+      an optional offscreen OpenGL FBO renderer first, keeps QPainter fallback
+      as the remote/RDP-safe product path, and exposes `paint.gpu.status` for
+      AI/MCP readiness checks. Remaining GPU work: actual paint-canvas stroke
+      texture/FBO atlas, high-zoom canvas acceleration, and parity evidence.
+    - [x] 2026-07-24 canvas OpenGL slice: the active Painter canvas now has an
+      OpenGL basic-stroke FBO cache for round/marker/highlighter strokes and
+      records `canvas_renderer` in `paint.state` / `paint.gpu.status`. Complex
+      brushes, layer masks, unsupported GL, and remote/headless failures still
+      fall back to the maintained QPainter stroke loop. Remaining GPU work:
+      persistent stroke atlas, textured-brush parity, and reduced readback.
+    - [x] 2026-07-24 stroke-atlas slice: the active Painter canvas now routes
+      supported OpenGL strokes through a session-local persistent stroke atlas
+      cache, so GL FBO readback happens only when the stroke signature changes.
+      `paint.gpu.status` reports
+      `painter_canvas_opengl_persistent_stroke_atlas_v1` plus the base FBO
+      renderer, texture-brush parity target styles, layer/mask shader plan, and
+      high-zoom dirty-region contract. Remaining GPU work: retained GL texture
+      display, textured brush stamp/noise shaders, and per-layer FBO mask
+      compositing.
+    - [x] 2026-07-24 paint-input feedback pass: active freehand strokes repaint
+      only the dirty segment bounds while drawing instead of invalidating the
+      whole canvas on every pointer move.
+    - [x] 2026-07-24 window-move feedback pass: standalone Painter pauses widget
+      updates while the top-level window is being dragged, then performs one
+      geometry sync/repaint after movement idles so remote desktop window moves
+      do not continuously refresh the whole UI.
+  - [ ] Painter action parity: every production drawing feature above must get
+    registered `paint.*` actions, dry-run/review support where destructive,
+    undo transactions, and regression tests before AI/MCP claims it.
+  - [ ] Painter QA matrix: small laptop window, 1080p, high-DPI, tablet/stylus
+    input, pixel-art 800% zoom, heavy brush strokes, layer/mask operations,
+    copy/cut/paste, PNG/PSD/export paths, and optional 3D blockout overlay.
+
 - [x] 2026-07-08 Music Lab arranger handoff: Workbench Sound Editor `Music Lab`
   now displays real composition sections/tracks/clips instead of a static
   mockup, supports selected-block regenerate/section resize controls, exposes
@@ -255,6 +453,21 @@
       - [x] Render audio waveforms as fine, precise lines.
       - [x] Keep thumbnails restrained, with first-frame emphasis rather than
         noisy repetition.
+      - [x] 2026-07-11 Timeline track identity color pass: each clip's small leading
+        vertical strip and selected-track outline now use the corresponding
+        video track color, selection uses the same hue with stronger
+        brightness/alpha, and the playhead keeps its own coral/orange identity.
+        The earlier aggressive active/inactive thumbnail focus was backed off
+        to the original visual weight so rows do not look farther apart; the
+        playhead sharp-over-blur blend stays active on every track, and node
+        graph items inherit the same track context stripe so Workbench editing
+        keeps track identity visible.
+      - [x] 2026-07-11 Timeline row density pass: reduce the unused video-row
+        header strip from a visible header gap to no extra body header, use a
+        zero-gap video-clip inset, and enlarge timeline thumbnails vertically
+        so V1/V2 rows stack without lane gaps while preserving hit testing,
+        drop guides, track color strips, and playhead drawing. The selected
+        track now uses 30% less thumbnail blur than inactive tracks.
       - [x] Refine keyframe diamonds, markers, playhead shape, and edit points.
         - [x] 2026-07-02 Playhead and cut-marker painter pass lowered line
           width, glow alpha, and cut-marker saturation in `app/studio_theme.py`.
@@ -1263,6 +1476,61 @@
     `commercial_ready`, sale blockers, and next actions. The gate currently
     allows local alpha use but blocks sale-ready claims until real Record/RTMP
     and Discord/video-call platform evidence is attached.
+  - [ ] 2026-07-10 Broadcast/VRM stabilization gate:
+    today's private YouTube Live QA proved that TigerCapture can push RTMP
+    Program Output and that the VRM frame can appear in YouTube Studio, but the
+    flow is not product-stable yet. Do not mark VTuber broadcast sale-ready
+    until these defects are closed:
+    - [ ] YouTube ingest health and YouTube viewer playback must be tracked as
+      separate states. A green FFmpeg/session status is not enough when Studio
+      preview is still buffering or only briefly displays the avatar.
+    - [ ] The Live Target UI needs safer operator warnings for private/unlisted
+      tests, YouTube auto-start behavior, Stop ingest vs End stream, and stream
+      key regeneration after any manual test key exposure.
+    - [ ] VRM first-frame startup must be prewarmed or cached; the current
+      internal fallback proof can take tens of seconds before the first frame.
+      2026-07-10 measured Trump/Milica bust-up frames took about 48-56 seconds
+      per frame through `render_internal_vrm_fallback_frame(...,
+      renderer=vrm_mtoon_gpu)`, so live UI preview must use a separate
+      renderer worker plus prerender/runtime cache until the renderer is made
+      interactive.
+      2026-07-10 follow-up reduced the live-render diagnostic to about
+      `13.28s` per frame by using the persistent full-GPU helper process plus a
+      conservative `12000` preview triangle cap. A second follow-up keeps the
+      hidden Qt/GL widget alive and updates the VBO, reducing cached frames to
+      about `2.852s` with `gpu_widget_cache_hit=1`,
+      `build_vertex_buffer_s ~= 1.23`, and `gpu_widget_grab_s ~= 0.035`.
+      This is still too slow for live playback. Next: remove the per-frame CPU
+      vertex-buffer build and helper-service round trip, then move animated
+      skinning to GPU/VBO updates. Do not use low triangle caps as a fix;
+      `2400` visibly broke dense hair/body meshes.
+    - [x] 2026-07-10 Trump-to-VRM pitch mapping corrected: internal pose curves
+      and VMC messages now use `source_pitch_to_vrm_pitch`, mapping source
+      pitch to VRM pitch as `-source_pitch - 12deg`. The latest real Studio
+      proof records `mapped_vrm_motion.pitch_deg=-11.1916` so the VRM no
+      longer looks like it is leaning backward against a down-looking source.
+    - [ ] Trump-source VRM live smoke currently uses a cached avatar sprite plus
+      a fast motion proxy for YouTube QA. Replace that with full per-frame
+      VRM/MToon pose rendering before claiming true avatar mapping quality.
+    - [x] 2026-07-10 local Studio proof corrected the framing failure:
+      `tools/run_vtuber_studio_trump_live.py --frame-source cached-bustup`
+      opens the real `VTuberBroadcastStudioWindow`, crops Trump Source Tracking
+      from OpenSeeFace face boxes to a 16:9 bust-up view, and composites actual
+      prerendered `vrm_mtoon_gpu` RGBA bust-up frames so Program Output records
+      `program_avatar_height_ratio ~= 0.96`. This is valid local framing/UI
+      evidence, not live renderer-performance evidence.
+    - [x] 2026-07-10 agent-reviewed local Studio fit fix: Source Tracking now
+      expands the OpenSeeFace subject crop to one 16:9 box before resize
+      (`crop_aspect ~= 1.78`, `face_fully_visible=true`), VRM Avatar Mapping no
+      longer ignores real mapping pixmaps, Program Output records
+      `program_avatar_grounded=true` with `bottom_gap_ratio=0.0`, and the proof
+      tool writes separate Program/Source/Mapping PNGs for visual QA.
+    - [ ] Evidence capture must be reliable from the real YouTube/Program
+      Output surface. Avoid generated or composited screenshots for platform
+      evidence; use only real UI capture or clearly labeled diagnostics.
+    - [ ] Record exact redacted status artifacts for failed/buffering runs so
+      recovery diagnostics can distinguish TigerCapture encoder issues from
+      YouTube Studio/player delay.
   - [ ] Attach real broadcast platform E2E evidence:
     Record-to-file metadata, one private/unlisted RTMP ingest test with redacted
     keys, and one Discord/video-call Program Output window-share test should be

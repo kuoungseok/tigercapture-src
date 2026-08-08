@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -18,6 +19,7 @@ from app.ar_pbr.schema import SUPPORTED_ASSET_EXTS, normalize_ar_track
 
 
 FBX_EXTS = frozenset({".fbx"})
+PROXY_DESCRIPTOR_EXTS = frozenset({".arpbr"})
 RUNTIME_PREFERRED_FORMAT = "glb"
 DESCRIPTOR_CACHE_SCHEMA_VERSION = 3
 
@@ -40,6 +42,7 @@ def importer_backend_status() -> dict[str, Any]:
             "internal_binary_fbx": True,
             "internal_gltf": True,
             "internal_vrm": True,
+            "internal_proxy_descriptor": True,
             "trimesh": _module_available("trimesh"),
             "pyassimp": _module_available("pyassimp"),
             "autodesk_fbx_sdk": autodesk_fbx_sdk,
@@ -49,6 +52,7 @@ def importer_backend_status() -> dict[str, Any]:
             "FBX is accepted as source data.",
             "VRM is accepted through the internal GLB/glTF avatar path.",
             "Runtime rendering should prefer GLB/glTF-style PBR materials.",
+            "Internal .arpbr descriptors are accepted as prebuilt AR/PBR preview scenes.",
             "Optional import backends are lazy-loaded only during import.",
         ],
     }
@@ -175,6 +179,7 @@ def _base_diagnostics(path: Path, ext: str) -> dict[str, Any]:
         "fbx_source": ext in FBX_EXTS,
         "gltf_source": ext in GLTF_EXTS,
         "vrm_source": ext == ".vrm",
+        "proxy_descriptor_source": ext in PROXY_DESCRIPTOR_EXTS,
         "available_backends": status["available_backends"],
         "warnings": [],
         "errors": [],
@@ -198,6 +203,78 @@ def _placeholder(
         diagnostics["warnings"].append(reason)
     else:
         diagnostics["errors"].append(reason)
+    return descriptor, diagnostics
+
+
+def _import_proxy_descriptor(
+    path: Path,
+    ext: str,
+    diagnostics: dict[str, Any],
+    *,
+    placeholder_ok: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return _placeholder(
+            path,
+            ext,
+            diagnostics,
+            f"AR/PBR proxy descriptor could not be read: {type(exc).__name__}",
+            ok=placeholder_ok,
+        )
+
+    descriptor_raw = raw.get("descriptor") if isinstance(raw, Mapping) else raw
+    if not isinstance(descriptor_raw, Mapping):
+        return _placeholder(path, ext, diagnostics, "AR/PBR proxy descriptor is not an object", ok=placeholder_ok)
+
+    raw_runtime_format = raw.get("runtime_format") if isinstance(raw, Mapping) else ""
+    raw_schema = raw.get("schema") if isinstance(raw, Mapping) else ""
+    runtime_format = str(descriptor_raw.get("runtime_format") or raw_runtime_format or "")
+    schema = str(descriptor_raw.get("schema") or raw_schema or "")
+    if runtime_format and runtime_format != "ar_scene_descriptor":
+        diagnostics["warnings"].append(f"unexpected AR/PBR proxy runtime_format: {runtime_format}")
+    if schema and not schema.startswith("tigerstudio.ar_pbr."):
+        diagnostics["warnings"].append(f"unexpected AR/PBR proxy schema: {schema}")
+
+    descriptor = _base_descriptor(path, ext, state="ready", backend="proxy_descriptor")
+    descriptor.update(dict(descriptor_raw))
+    descriptor["id"] = str(descriptor.get("id") or _asset_id(path))
+    descriptor["type"] = "ar_pbr_asset"
+    descriptor["source_path"] = str(path)
+    descriptor["source_ext"] = ext
+    descriptor["source_format"] = str(descriptor.get("source_format") or "ar_pbr_proxy")
+    descriptor["runtime_format"] = "ar_scene_descriptor"
+    descriptor["preferred_runtime_format"] = RUNTIME_PREFERRED_FORMAT
+    descriptor["requires_runtime_conversion"] = False
+    descriptor["import_state"] = "ready"
+    descriptor["backend"] = "proxy_descriptor"
+
+    geometries = [item for item in descriptor.get("geometries") or [] if isinstance(item, Mapping)]
+    materials = [item for item in descriptor.get("materials") or [] if isinstance(item, Mapping)]
+    descriptor["geometries"] = [dict(item) for item in geometries]
+    descriptor["materials"] = [dict(item) for item in materials]
+    descriptor["mesh_count"] = int(descriptor.get("mesh_count") or len(geometries))
+    descriptor["material_count"] = int(descriptor.get("material_count") or len(materials))
+    descriptor["texture_count"] = int(descriptor.get("texture_count") or 0)
+    descriptor["animation_count"] = int(descriptor.get("animation_count") or 0)
+    descriptor["skeletal_mesh_count"] = int(descriptor.get("skeletal_mesh_count") or 0)
+    descriptor["skin_count"] = int(descriptor.get("skin_count") or 0)
+    descriptor.setdefault("animation_clips", [])
+    descriptor.setdefault("bones", [])
+    descriptor.setdefault("skeletons", [])
+    descriptor.setdefault("models", [])
+    descriptor.setdefault("connections", [])
+    descriptor.setdefault("warnings", [])
+
+    if not geometries:
+        diagnostics["warnings"].append("AR/PBR proxy descriptor has no geometries")
+    if not materials:
+        diagnostics["warnings"].append("AR/PBR proxy descriptor has no materials")
+    diagnostics["ok"] = True
+    diagnostics["imported"] = True
+    diagnostics["fallback"] = False
+    diagnostics["backend"] = "proxy_descriptor"
     return descriptor, diagnostics
 
 
@@ -502,7 +579,14 @@ def import_asset(
         except Exception as exc:
             diagnostics["warnings"].append(f"descriptor cache read failed: {type(exc).__name__}")
 
-    if ext in FBX_EXTS:
+    if ext in PROXY_DESCRIPTOR_EXTS:
+        descriptor, diagnostics = _import_proxy_descriptor(
+            path,
+            ext,
+            diagnostics,
+            placeholder_ok=placeholder_ok,
+        )
+    elif ext in FBX_EXTS:
         descriptor, diagnostics = _import_fbx(
             path,
             ext,

@@ -94,10 +94,20 @@ def initialize() -> str:
 
 
 def set_language(code: str) -> None:
-    """Switch runtime language (does not persist; use ``save_language`` too)."""
-    global _current_lang
-    if code in SUPPORTED_LANGUAGES:
-        _current_lang = code
+    """Switch runtime language (does not persist; use ``save_language`` too).
+
+    An explicit choice also counts as initialised.  Without that, calling this
+    before anything had translated a string left ``_initialized`` False, so the
+    first ``tr()`` ran ``initialize()`` and overwrote the requested language
+    with the saved or detected one - the caller's choice vanished silently.
+    """
+    global _current_lang, _initialized
+    if code not in SUPPORTED_LANGUAGES:
+        return
+    if not _translations:
+        _load_translations()
+    _current_lang = code
+    _initialized = True
 
 
 def current_language() -> str:

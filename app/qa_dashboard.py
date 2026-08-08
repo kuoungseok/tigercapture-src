@@ -85,6 +85,7 @@ REPORT_SPECS: tuple[tuple[str, str, str], ...] = (
     ("CapCut Publish Review", "debugCapture/capcut_publish_review_qa.json", "capcut_publish_review"),
     ("CapCut Quick Result", "debugCapture/capcut_quick_result_qa.json", "capcut_quick_result"),
     ("CapCut Voice Workflow", "debugCapture/capcut_voice_workflow_qa.json", "capcut_voice_workflow"),
+    ("Voice Lab Sidecar", "debugCapture/voice_lab_sidecar_qa.json", "voice_lab_sidecar"),
     ("CapCut Prompt Edit", "debugCapture/capcut_prompt_edit_qa.json", "capcut_prompt_edit"),
     ("CapCut Collab Handoff", "debugCapture/capcut_collab_handoff_qa.json", "capcut_collab_handoff"),
     ("CapCut Cloud Handoff", "debugCapture/capcut_cloud_handoff_qa.json", "capcut_cloud_handoff"),
@@ -1002,6 +1003,36 @@ def _summary_for(kind: str, report: dict[str, Any]) -> tuple[bool, str, list[str
             f"{int(summary.get('configured_provider_count', 0) or 0)}/"
             f"{int(summary.get('provider_count', 0) or 0)} provider(s)"
         ), lines
+    if kind == "voice_lab_sidecar":
+        server = report.get("server", {}) or {}
+        view = report.get("view", {}) or {}
+        status = server.get("status", {}) if isinstance(server.get("status"), dict) else {}
+        root = status.get("root", {}) if isinstance(status.get("root"), dict) else {}
+        model_names = list(root.get("model_names", []) or [])
+        endpoint = str(server.get("endpoint") or status.get("endpoint") or view.get("endpoint") or "")
+        failures = [str(value) for value in list(report.get("failures", []) or []) if str(value)]
+        lines.append(f"- provider: {'OK' if bool(view.get('ready')) else 'NEEDS SETUP'}")
+        lines.append(
+            "- server: "
+            f"{'ready' if bool(server.get('ready')) else 'offline'}"
+            f", running={bool(server.get('running'))}, started={bool(server.get('started'))}"
+        )
+        if endpoint:
+            lines.append(f"- endpoint: {endpoint}")
+        if model_names:
+            lines.append(f"- models: {', '.join(str(name) for name in model_names[:8])}")
+        for failure in failures[:6]:
+            lines.append(f"! {failure}")
+        message = str(report.get("user_message") or "").strip()
+        if message:
+            for line in message.splitlines()[:4]:
+                if line.strip():
+                    lines.append(f"- {line.strip()}")
+        return ok, (
+            f"{'ready' if bool(report.get('ready')) else 'offline'}, "
+            f"{len(model_names)} model(s), "
+            f"endpoint {endpoint or '-'}"
+        ), lines
     if kind == "capcut_prompt_edit":
         summary = report.get("summary", {}) or {}
         for case in list(report.get("cases", []) or [])[:6]:
@@ -1712,6 +1743,16 @@ class QADashboardDialog(QDialog):
             return [python, "tools/qa_capcut_quick_result.py", "--out", str(path)]
         if kind == "capcut_voice_workflow":
             return [python, "tools/qa_capcut_voice_workflow.py", "--out", str(path)]
+        if kind == "voice_lab_sidecar":
+            return [
+                python,
+                "tools/qa_tts_voice_lab.py",
+                "--out",
+                str(path),
+                "--auto-start",
+                "--wait-timeout",
+                "120",
+            ]
         if kind == "capcut_prompt_edit":
             return [python, "tools/qa_capcut_prompt_edit.py", "--out", str(path)]
         if kind == "capcut_collab_handoff":

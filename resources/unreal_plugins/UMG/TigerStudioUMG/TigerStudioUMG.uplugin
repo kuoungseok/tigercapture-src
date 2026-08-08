@@ -1,0 +1,24 @@
+{
+  "FileVersion": 3,
+	"Version": 21,
+	"VersionName": "1.8.2",
+  "FriendlyName": "Tiger Studio UMG",
+  "Description": "Project-local UMG generation and reimport backend for Tiger Studio authoring tools.",
+  "Category": "Tiger Studio",
+  "CreatedBy": "Tiger Studio",
+  "CanContainContent": true,
+  "Installed": true,
+  "EnabledByDefault": false,
+  "Modules": [
+    {
+      "Name": "TigerStudioUMG",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    },
+    {
+      "Name": "TigerStudioUMGEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

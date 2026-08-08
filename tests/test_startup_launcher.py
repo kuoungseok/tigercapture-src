@@ -82,6 +82,7 @@ def test_video_editor_payload_parser_and_crash_note(monkeypatch, tmp_path):
 def test_launcher_video_editor_open_does_not_auto_resume(monkeypatch):
     from app.controller import AppController
 
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
     events: list[tuple] = []
 
     class FakeEditor:
@@ -127,6 +128,23 @@ def test_launcher_video_editor_open_does_not_auto_resume(monkeypatch):
     assert ("mode", "standard") in events
     assert ("crash_note",) in events
     assert ("resume",) not in events
+
+
+def test_capture_launcher_blocks_studio_entry_by_default(monkeypatch):
+    from app.controller import AppController
+
+    monkeypatch.delenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", raising=False)
+    monkeypatch.delenv("TIGERCAPTURE_ALLOW_STUDIO_ENTRY", raising=False)
+    monkeypatch.delenv("TIGERSTUDIO_BUNDLED_STUDIO_ENTRY", raising=False)
+    events: list[tuple] = []
+
+    controller = AppController.__new__(AppController)
+    controller._clear_launcher_busy_later = lambda: events.append(("clear_busy",))
+    monkeypatch.setattr("app.controller.open_in_explorer", lambda path: events.append(("reveal", path)))
+
+    AppController._open_video_editor(controller, None)
+
+    assert events == [("clear_busy",)]
 
 
 def test_project_load_video_track_skips_hdr_probe_by_default(monkeypatch, tmp_path):
@@ -271,6 +289,7 @@ def test_startup_launcher_cards_and_busy_state(monkeypatch, tmp_path):
             )
         ] if kind == "template" else [],
     )
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "0")
 
     window = MainWindow()
     try:
@@ -283,6 +302,7 @@ def test_startup_launcher_cards_and_busy_state(monkeypatch, tmp_path):
         start_texts = "\n".join(card.text() for card in start_cards)
         start_tooltips = "\n".join(card.toolTip() for card in start_cards)
         assert len(start_cards) == 2
+        assert len([card for card in start_cards if not card.isHidden()]) == 1
         assert "Screen Studio Test" not in start_texts
         assert "Screen Studio Test" not in start_tooltips
         assert "템플릿" not in start_texts
@@ -290,6 +310,8 @@ def test_startup_launcher_cards_and_busy_state(monkeypatch, tmp_path):
         assert window.minimumHeight() <= 620
         assert window.height() <= 700
         assert window.templates_btn.text() in {"스튜디오 열기", "Open Studio"}
+        assert window.templates_btn.isHidden()
+        assert window.pro_editor_btn.isHidden()
         assert not hasattr(window, "_template_row_layout")
         assert window.launcher_workspace_mode() == "standard"
         assert window.launcher_workspace_standard_btn.isChecked()
@@ -298,9 +320,39 @@ def test_startup_launcher_cards_and_busy_state(monkeypatch, tmp_path):
         assert not window.launcher_workspace_switch.isChecked()
         window.retranslate()
         assert window.templates_btn.text() in {"스튜디오 열기", "Open Studio"}
+        assert window._pro_editor_label.text() in {"가벼운 캡처", "Light Capture"}
+        opened_editors: list[object] = []
+        window.open_video_editor_requested.connect(lambda payload: opened_editors.append(payload))
+        window.pro_editor_btn.click()
+        assert opened_editors == []
+
+        window.show_startup_busy("Opening...")
+        assert not window._startup_busy.isHidden()
+        window.clear_startup_busy()
+        assert window._startup_busy.isHidden()
+    finally:
+        window.close()
+
+
+def test_startup_launcher_can_enable_bundled_studio_entry(monkeypatch, tmp_path):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    _ = app
+    monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
+
+    from app.main_window import MainWindow
+
+    window = MainWindow()
+    try:
+        assert not window.templates_btn.isHidden()
+        assert not window.pro_editor_btn.isHidden()
         assert window._pro_editor_label.text() in {"스튜디오 진입", "Open Studio"}
         opened_editors: list[object] = []
         window.open_video_editor_requested.connect(lambda payload: opened_editors.append(payload))
+
         window.pro_editor_btn.click()
         QTimer.singleShot(80, app.quit)
         app.exec()
@@ -316,11 +368,55 @@ def test_startup_launcher_cards_and_busy_state(monkeypatch, tmp_path):
         assert isinstance(opened_editors[-1], dict)
         assert opened_editors[-1]["source_path"] is None
         assert opened_editors[-1]["workspace_mode"] == "simple"
+    finally:
+        window.close()
 
-        window.show_startup_busy("Opening...")
-        assert not window._startup_busy.isHidden()
-        window.clear_startup_busy()
-        assert window._startup_busy.isHidden()
+
+def test_launcher_ignores_internal_media_pool_file_drag(monkeypatch, tmp_path):
+    from PySide6.QtCore import QMimeData, QUrl
+    from PySide6.QtWidgets import QApplication
+
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+    from app.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    _ = app
+    monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
+    video = tmp_path / "pool_clip.mp4"
+    video.write_bytes(b"fake")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(video))])
+    mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(video).encode("utf-8"))
+
+    class _FakeDropEvent:
+        def __init__(self, mime_data):
+            self._mime_data = mime_data
+            self.accepted = False
+            self.ignored = False
+
+        def mimeData(self):
+            return self._mime_data
+
+        def acceptProposedAction(self):
+            self.accepted = True
+            self.ignored = False
+
+        def ignore(self):
+            self.ignored = True
+
+    window = MainWindow()
+    opened_editors: list[object] = []
+    window.open_video_editor_requested.connect(lambda payload: opened_editors.append(payload))
+    try:
+        drag = _FakeDropEvent(mime)
+        MainWindow.dragEnterEvent(window, drag)
+        drop = _FakeDropEvent(mime)
+        MainWindow.dropEvent(window, drop)
+
+        assert drag.ignored is True
+        assert drop.ignored is True
+        assert opened_editors == []
     finally:
         window.close()
 
@@ -331,6 +427,7 @@ def test_launcher_workspace_toggle_can_restore_env_mode(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _ = app
     monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
     monkeypatch.setenv("TIGERCAPTURE_LAUNCHER_WORKSPACE_MODE", "simple")
     from app.main_window import MainWindow
 
@@ -351,6 +448,7 @@ def test_launcher_workspace_state_repairs_invalid_json(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     _ = app
     monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
     monkeypatch.setenv("TIGERCAPTURE_LAUNCHER_STATE_FORCE", "1")
     state = tmp_path / "launcher_state.json"
     state.write_text("{broken", encoding="utf-8")

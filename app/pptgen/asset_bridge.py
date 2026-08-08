@@ -7,7 +7,7 @@ from typing import Any
 from app.pptgen.schema import ElementStyle, SlideElement
 
 
-IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".jfif", ".webp", ".bmp", ".gif"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv"}
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"}
 AR_PBR_SUFFIXES = {".fbx", ".glb", ".gltf", ".obj", ".usd", ".usdz"}

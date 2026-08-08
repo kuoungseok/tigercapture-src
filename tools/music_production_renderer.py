@@ -318,7 +318,13 @@ def _write_meta(output_wav: Path, payload: dict[str, Any]) -> None:
 def render_production_music(composition_json: Path, output_wav: Path, *, config_path: Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
     request_row = _request_row(composition_json)
     config = _load_json(config_path)
-    provider = str(os.environ.get("TIGERCAPTURE_MUSIC_AI_PROVIDER") or config.get("preferred_provider") or "auto").strip().lower()
+    request_provider = request_row.get("ai_provider") or request_row.get("provider")
+    provider = str(
+        os.environ.get("TIGERCAPTURE_MUSIC_AI_PROVIDER")
+        or request_provider
+        or config.get("preferred_provider")
+        or "auto"
+    ).strip().lower()
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     stable_config = providers.get("stable_audio_3") if isinstance(providers.get("stable_audio_3"), dict) else {}
     ace_config = providers.get("acestep_api") if isinstance(providers.get("acestep_api"), dict) else {}

@@ -237,7 +237,7 @@ def _mmd_overlay_items(self, pos_ms: int, animate: bool = True) -> list[dict]:
                 gpu_morph_slots=gpu_morph_slots if use_gpu_skinning else 0,
             )
             camera_controls = camera_to_view_controls(
-                camera_at(motion, frame),
+                camera_at(motion, frame) if bool(playback.get("use_vmd_camera", True)) else None,
                 fallback_yaw=float(view.get("yaw", 0.0) or 0.0),
                 fallback_pitch=float(view.get("pitch", -4.0) or -4.0),
                 fallback_zoom=float(view.get("zoom", 0.72) or 0.72),
@@ -312,4 +312,3 @@ def _apply_or_defer_mmd_overlay(self, rgb: np.ndarray, pos_ms: int, animate: boo
     if not items:
         return rgb, None
     return rgb, {"mmd_items": items}
-

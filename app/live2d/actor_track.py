@@ -444,7 +444,9 @@ class _OffscreenRenderer:
                         clip_key: int = 0,
                         start_motion: bool = False,
                         expression_id: str = "",
-                        parameter_values: Mapping[str, float] | None = None):
+                        parameter_values: Mapping[str, float] | None = None,
+                        auto_blink: bool = True,
+                        auto_breath: bool = True):
         """Render one frame. Returns RGBA PIL Image or None. Call from main thread."""
         from PIL import Image
 
@@ -459,6 +461,14 @@ class _OffscreenRenderer:
                 self._begin_frame(w, h)
 
                 model = self._get_model(model_path, w, h, clip_key)
+                try:
+                    model.SetAutoBlinkEnable(bool(auto_blink))
+                except Exception:
+                    pass
+                try:
+                    model.SetAutoBreathEnable(bool(auto_breath))
+                except Exception:
+                    pass
 
                 # Start motion on first render or after reset
                 if start_motion and motion_group:
@@ -632,6 +642,8 @@ class Live2DActorClip:
     pos_y:        float = 0.5         # normalized (0=top, 1=bottom)
     scale:        float = 1.0
     opacity:      float = 1.0
+    auto_blink:   bool  = True
+    auto_breath:  bool  = True
 
     # Per-property keyframe tracks (time_ms relative to clip start)
     kf_pos_x:   list = field(default_factory=list)   # list[Live2DKeyframe]
@@ -648,6 +660,10 @@ class Live2DActorClip:
     # evaluated after the authored motion update and before draw, so they can
     # layer face/gesture/hand-authored corrections on top of a selected motion.
     parameter_keyframes: dict = field(default_factory=dict)
+    tts_lipsync_payload: dict = field(default_factory=dict)
+    tts_lipsync_source: str = ""
+    dialogue_placement_payload: dict = field(default_factory=dict)
+    dialogue_motion_payload: dict = field(default_factory=dict)
 
     # Offline video/webcam retarget payloads. Transform keyframes above are the
     # broad actor movement path; mocap parameter payloads are renderable too and
@@ -747,6 +763,8 @@ class Live2DActorClip:
             start_motion = need_start,
             expression_id = self.expression_id,
             parameter_values = parameter_values,
+            auto_blink     = self.auto_blink,
+            auto_breath    = self.auto_breath,
         )
         if img is not None:
             self._model_motion_started = True

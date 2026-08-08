@@ -42,6 +42,32 @@ def test_timeline_drop_guide_reports_ar_pbr_assets(tmp_path):
     }]
 
 
+def test_timeline_drop_guide_reports_motion_actor_duration(tmp_path):
+    from app.motion_designer.project_io import save_motion_project
+    from app.motion_designer.schema import MotionComposition
+    from app.timeline_drop_guides import (
+        drop_guide_segments_for_mime,
+        drop_guide_text,
+        drop_guide_width_for_mime,
+    )
+
+    asset = save_motion_project(
+        MotionComposition(name="UI Reveal", duration_ms=4200),
+        tmp_path / "ui-reveal.tgmotion",
+    )
+    mime = _mime_for_path(asset)
+
+    assert drop_guide_text(mime) == "Motion Actor"
+    assert drop_guide_width_for_mime(mime, px_per_sec=100.0) == 420
+    assert drop_guide_segments_for_mime(mime) == [{
+        "kind": "motion_actor",
+        "label": "Motion Actor",
+        "start_ms": 0,
+        "duration_ms": 4200,
+        "color": "#27C2A0",
+    }]
+
+
 def test_timeline_drop_guide_effect_detail_uses_preset_metadata():
     from app.timeline_drop_guides import drop_guide_detail_for_mime, effect_preset_drag_label
     from app.video_editor_preset_cards import EFFECT_PRESET_MIME_TYPE

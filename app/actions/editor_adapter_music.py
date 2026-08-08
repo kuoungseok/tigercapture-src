@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,8 @@ from app.music_composer import (
     regenerate_section,
     render_preview,
     summary,
+    _normalize_sample_library_policy,
+    _sample_production_bus_for_role,
 )
 
 
@@ -47,6 +50,47 @@ def _grid_ticks(grid: str) -> int:
         return max(1, int(round(float(text))))
     except Exception:
         return TICKS_PER_BEAT // 2
+
+
+def _music_backend_for_provider(backend: str, ai_provider: str = "") -> str:
+    requested = str(backend or "auto").strip()
+    provider = str(ai_provider or "").strip().lower()
+    if provider and provider != "auto" and requested.lower() in {"", "auto"}:
+        return "production"
+    if requested.lower() in {"", "auto"}:
+        try:
+            preferred = str(music_render_backend_status().get("preferred_backend") or "")
+            if preferred == "sample_production":
+                return "sample_production"
+        except Exception:
+            pass
+    return requested or "auto"
+
+
+def _music_provider_forces_mix(ai_provider: str = "") -> bool:
+    provider = str(ai_provider or "").strip().lower()
+    return bool(provider and provider != "auto")
+
+
+def _music_render_role_aliases(role: Any) -> set[str]:
+    text = str(role or "").strip().lower()
+    if not text:
+        return set()
+    aliases = {text}
+    bus = str(_sample_production_bus_for_role(text) or "").strip().lower()
+    if bus:
+        aliases.add(bus)
+    if text in {"drum", "drums", "perc", "percussion"}:
+        aliases.add("percussion")
+    elif text in {"bass", "sub", "sub_bass", "low"}:
+        aliases.add("low")
+    elif text in {"chord", "chords", "pad", "pads", "arp"}:
+        aliases.add("pads")
+    elif text in {"lead", "melody", "counter", "counter_melody", "guitar"}:
+        aliases.add("lead")
+    elif text in {"strings", "orchestra", "orchestral"}:
+        aliases.add("orchestra")
+    return aliases
 
 
 class MusicAdapterMixin:
@@ -154,16 +198,24 @@ class MusicAdapterMixin:
         composition_id: str | None = None,
         output_dir: str | None = None,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
         render_stems: bool = True,
     ) -> dict[str, Any]:
         composition = self._music_composition(composition_id) if composition_id else self._latest_music_composition()
+        effective_backend = _music_backend_for_provider(backend, ai_provider)
+        effective_render_stems = _bool(render_stems, True) and not _music_provider_forces_mix(ai_provider)
         rendered = render_preview(
             composition,
             output_dir=output_dir or None,
-            backend=backend or "auto",
+            backend=effective_backend,
+            ai_provider=ai_provider or "",
             soundfont_path=soundfont_path or None,
-            render_stems=_bool(render_stems, True),
+            drum_kit_path=drum_kit_path or None,
+            sample_library_policy=sample_library_policy or None,
+            render_stems=effective_render_stems,
         )
         self._store_music_composition(composition)
         return {"schema": MUSIC_SCHEMA, "summary": summary(composition), **rendered}
@@ -193,13 +245,19 @@ class MusicAdapterMixin:
         output_dir: str | None = None,
         *,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
         require_stems: bool = True,
     ) -> None:
-        requested = str(backend or "auto").strip().lower()
+        effective_backend = _music_backend_for_provider(backend, ai_provider)
+        requested = str(effective_backend or "auto").strip().lower()
         current_backend = ""
+        current_render_meta: dict[str, Any] = {}
         if isinstance(getattr(composition, "render_backend", None), dict):
-            current_backend = str(composition.render_backend.get("backend") or "")
+            current_render_meta = dict(composition.render_backend)
+            current_backend = str(current_render_meta.get("backend") or "")
         explicit_backend = requested not in {"", "auto"}
         if requested in {"local", "local_synth"}:
             requested_backend = "local_synth"
@@ -207,6 +265,8 @@ class MusicAdapterMixin:
             requested_backend = "fluidsynth_soundfont"
         elif requested in {"studio_edm", "edm_studio", "edm", "draft_synth"}:
             requested_backend = "studio_edm"
+        elif requested in {"sample_production", "sample", "cinematic_local", "local_production", "production_sample"}:
+            requested_backend = "sample_production"
         elif requested in {"production", "production_external", "external_music", "external_ai"}:
             requested_backend = "production_external"
         elif requested in {"", "auto"}:
@@ -224,13 +284,25 @@ class MusicAdapterMixin:
         if (rendered_stems_ok if _bool(require_stems, True) else preview_ok):
             preview_ok = not composition.preview_mix_path or Path(composition.preview_mix_path).exists()
             backend_ok = not explicit_backend or not requested_backend or current_backend == requested_backend
-            if preview_ok and backend_ok:
+            sample_policy_ok = True
+            if requested_backend == "sample_production":
+                requested_policy = _normalize_sample_library_policy(sample_library_policy)
+                current_policy = _normalize_sample_library_policy(str(current_render_meta.get("sample_library_policy") or ""))
+                sample_policy_ok = current_policy == requested_policy
+                if soundfont_path:
+                    sample_policy_ok = sample_policy_ok and str(current_render_meta.get("requested_soundfont_path") or "") == str(soundfont_path)
+                if drum_kit_path:
+                    sample_policy_ok = sample_policy_ok and str(current_render_meta.get("requested_drum_kit_path") or "") == str(drum_kit_path)
+            if preview_ok and backend_ok and sample_policy_ok:
                 return
         render_preview(
             composition,
             output_dir=output_dir or None,
-            backend=backend or "auto",
+            backend=effective_backend,
+            ai_provider=ai_provider or "",
             soundfont_path=soundfont_path or None,
+            drum_kit_path=drum_kit_path or None,
+            sample_library_policy=sample_library_policy or None,
             render_stems=_bool(require_stems, True),
         )
         self._store_music_composition(composition)
@@ -245,22 +317,31 @@ class MusicAdapterMixin:
         create_mix: bool = False,
         update_existing: bool = False,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
     ) -> dict[str, Any]:
         owner = self._require_owner()
         composition = self._music_composition(composition_id) if composition_id else self._latest_music_composition()
+        effective_create_mix = _bool(create_mix, False) or _music_provider_forces_mix(ai_provider)
         self._ensure_music_rendered(
             composition,
             output_dir=output_dir,
-            backend=backend or "auto",
+            backend=_music_backend_for_provider(backend, ai_provider),
+            ai_provider=ai_provider or "",
             soundfont_path=soundfont_path or None,
-            require_stems=not _bool(create_mix, False),
+            drum_kit_path=drum_kit_path or None,
+            sample_library_policy=sample_library_policy or None,
+            require_stems=not effective_create_mix,
         )
         from app.audio_tracks import AudioClip, AudioTrack
 
-        wanted_roles = {str(role).strip().lower() for role in list(roles or []) if str(role).strip()}
+        wanted_roles: set[str] = set()
+        for role in list(roles or []):
+            wanted_roles.update(_music_render_role_aliases(role))
         rendered_items: list[tuple[str, Path, float, float]] = []
-        if _bool(create_mix, False):
+        if effective_create_mix:
             rendered_items.append(("mix", Path(composition.preview_mix_path), 0.86, 0.0))
         else:
             tracks_by_role = {track.role: track for track in composition.tracks}
@@ -399,7 +480,10 @@ class MusicAdapterMixin:
         auto_balance: bool = True,
         update_existing: bool = True,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
     ) -> dict[str, Any]:
         composition_result = self.music_compose(
             prompt=prompt,
@@ -411,22 +495,29 @@ class MusicAdapterMixin:
             include_fx=include_fx,
         )
         composition_id = str(composition_result["summary"]["id"])
+        effective_create_mix = _bool(create_mix, False) or _music_provider_forces_mix(ai_provider)
         preview = self.music_render_preview(
             composition_id=composition_id,
             output_dir=output_dir,
-            backend=backend or "auto",
+            backend=_music_backend_for_provider(backend, ai_provider),
+            ai_provider=ai_provider or "",
             soundfont_path=soundfont_path or None,
-            render_stems=not _bool(create_mix, False),
+            drum_kit_path=drum_kit_path or None,
+            sample_library_policy=sample_library_policy or None,
+            render_stems=not effective_create_mix,
         )
         timeline = self.music_render_to_timeline(
             composition_id=composition_id,
             output_dir=output_dir,
             at_ms=at_ms,
             roles=roles,
-            create_mix=create_mix,
+            create_mix=effective_create_mix,
             update_existing=update_existing,
-            backend=backend or "auto",
+            backend=_music_backend_for_provider(backend, ai_provider),
+            ai_provider=ai_provider or "",
             soundfont_path=soundfont_path or None,
+            drum_kit_path=drum_kit_path or None,
+            sample_library_policy=sample_library_policy or None,
         )
         balance = (
             self.music_mixer_auto_balance(composition_id=composition_id)
@@ -481,6 +572,83 @@ class MusicAdapterMixin:
         self._after_timeline_mutation("Action auto balance music mixer")
         return {"schema": MUSIC_SCHEMA, "changed": changed, "changed_count": len(changed)}
 
+    def music_apply_master_fx(
+        self,
+        *,
+        composition_id: str | None = None,
+        role: str = "mix",
+        effects: Mapping[str, Any] | None = None,
+        merge: bool = True,
+        focus_workbench: bool = False,
+    ) -> dict[str, Any]:
+        """Apply Sound Editor effect state to rendered Music Lab audio clips.
+
+        Composer owns MIDI/arrangement.  Sound shaping should still flow through
+        the Sound Editor effect model, so this action finds the rendered Music
+        Mix or requested stem tracks and merges ``AudioClip.effects`` there.
+        """
+        owner = self._require_owner()
+        target_role = str(role or "mix").strip().lower()
+        target_aliases = _music_render_role_aliases(target_role)
+        if target_role in {"", "all", "*", "music"}:
+            target_aliases = set()
+        elif target_role == "mix":
+            target_aliases = {"mix"}
+        if not isinstance(effects, Mapping):
+            effects = {}
+
+        from app.audio_tracks import default_effects_state
+
+        defaults = default_effects_state()
+        changed: list[dict[str, Any]] = []
+        last_track = None
+        last_clip = None
+        for track in list(getattr(owner, "_audio_tracks", []) or []):
+            cid = str(getattr(track, "music_composition_id", "") or "")
+            if composition_id and cid != str(composition_id):
+                continue
+            music_role = str(getattr(track, "music_role", "") or "").strip().lower()
+            label = str(getattr(track, "label", "") or "").strip().lower()
+            is_music = bool(music_role or label.startswith("music"))
+            if not is_music:
+                continue
+            if target_aliases and music_role not in target_aliases:
+                continue
+            for clip in list(getattr(track, "clips", []) or []):
+                if getattr(clip, "source_path", None) is None:
+                    continue
+                if not isinstance(getattr(clip, "effects", None), dict) or not merge:
+                    clip.effects = copy.deepcopy(defaults)
+                self._merge_sound_editor_effects(clip.effects, effects)
+                self._update_audio_track(track)
+                last_track = track
+                last_clip = clip
+                changed.append(
+                    {
+                        "track_id": _int(getattr(track, "id", 0)),
+                        "clip_id": _int(getattr(clip, "id", 0)),
+                        "role": music_role or "music",
+                        "label": str(getattr(track, "label", "") or ""),
+                    }
+                )
+        ui_updated = False
+        if last_track is not None and last_clip is not None:
+            ui_updated = self._focus_workbench_sound_editor(
+                last_track,
+                last_clip,
+                focus_workbench=_bool(focus_workbench, False),
+            )
+        if changed:
+            self._after_timeline_mutation("Action apply Composer master FX")
+        return {
+            "schema": MUSIC_SCHEMA,
+            "composition_id": str(composition_id or ""),
+            "role": target_role,
+            "changed": changed,
+            "changed_count": len(changed),
+            "ui_updated": ui_updated,
+        }
+
     def music_regenerate_section(
         self,
         *,
@@ -489,7 +657,10 @@ class MusicAdapterMixin:
         mood: str = "",
         intensity: float | None = None,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
     ) -> dict[str, Any]:
         composition = self._music_composition(composition_id)
         regenerate_section(composition, section_name, mood=mood, intensity=intensity)
@@ -508,7 +679,10 @@ class MusicAdapterMixin:
         intensity: float | None = None,
         chord_progression: Sequence[str] | None = None,
         backend: str = "auto",
+        ai_provider: str = "",
         soundfont_path: str | None = None,
+        drum_kit_path: str | None = None,
+        sample_library_policy: str | None = None,
     ) -> dict[str, Any]:
         composition = self._music_composition(composition_id)
         section = self._section(composition, section_name=section_name, index=index)

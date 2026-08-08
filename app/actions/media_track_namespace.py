@@ -24,7 +24,7 @@ def register_media_track_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "path": {"type": "string"},
-                "kind": {"type": "string", "enum": ["video", "audio", ""]},
+                "kind": {"type": "string", "enum": ["video", "audio", "image", ""]},
                 "track_id": {"type": "integer"},
                 "at_ms": {"type": "integer", "minimum": 0},
                 "duration_ms": {"type": "integer", "minimum": 1},
@@ -36,6 +36,25 @@ def register_media_track_actions(registry: Any) -> None:
         undo_label="Import media to timeline",
         async_kind="media_import",
         dry_summary="media file would be imported and placed on the timeline",
+    )
+    registry.register_adapter_action(
+        "media.pool_drop_to_timeline",
+        "Drop a Media Pool item onto the timeline and report before/after editor window state.",
+        "media",
+        "media_pool_drop_to_timeline",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "drop_x": {"type": "integer", "minimum": 0},
+                "drop_y": {"type": "integer", "minimum": 0},
+                "settle_ms": {"type": "integer", "minimum": 0},
+            },
+            required=("path",),
+        ),
+        required=("path",),
+        undo_label="Drop media pool item to timeline",
+        async_kind="media_import",
+        dry_summary="media pool item would be dropped onto the timeline and the editor window state would be compared",
     )
     registry.register(
         ActionSpec(

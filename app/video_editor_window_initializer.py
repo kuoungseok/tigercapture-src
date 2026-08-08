@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -22,6 +23,20 @@ def trace_video_editor_init(event: str, **payload) -> None:
         pass
 
 
+def trace_video_editor_phase(self, event: str, **payload) -> None:
+    now = time.perf_counter()
+    begin = float(getattr(self, "_startup_trace_begin", now) or now)
+    previous = float(getattr(self, "_startup_trace_last", begin) or begin)
+    self._startup_trace_begin = begin
+    self._startup_trace_last = now
+    trace_video_editor_init(
+        event,
+        elapsed_ms=round((now - begin) * 1000.0, 2),
+        delta_ms=round((now - previous) * 1000.0, 2),
+        **payload,
+    )
+
+
 def init_editor_state(self) -> None:
     from app.history import HistoryStack
 
@@ -29,7 +44,7 @@ def init_editor_state(self) -> None:
     self._track_rows = {}
     self._audio_tracks = []
     self._audio_rows = {}
-    from app.sound_editor_panel import SoundEditStateStore
+    from app.sound_edit_state_store import SoundEditStateStore
 
     self._sound_edit_state_store = SoundEditStateStore()
     self._waveform_extractors = {}
@@ -143,7 +158,7 @@ def init_window_shell(self) -> None:
 
 def init_player_and_audio(self) -> None:
     self._player = ProjectPlayer(self)
-    trace_video_editor_init("video_editor.init.player_created")
+    trace_video_editor_phase(self, "video_editor.init.player_created")
     self._player.frame_ready.connect(self._on_frame_ready)
     self._player.gpu_frame_ready.connect(self._on_gpu_frame_ready)
     self._player.position_changed.connect(self._on_position_changed)
@@ -175,6 +190,11 @@ def init_actor_state(self) -> None:
     self._mmd_lane_rows = []
     self._next_mmd_id = 1
     self._selected_mmd_track_id = ""
+    self._motion_compositions = {}
+    self._motion_clips = []
+    self._motion_lane_rows = []
+    self._motion_project_issues = []
+    self._motion_designer_window = None
 
 
 def init_project_settings(self) -> None:
@@ -193,28 +213,53 @@ def init_project_settings(self) -> None:
 
 
 def build_editor_ui_and_finish_startup(self, source_path: Path | None) -> None:
-    trace_video_editor_init("video_editor.init.build_ui_begin")
+    trace_video_editor_phase(self, "video_editor.init.build_ui_begin")
     self._build_ui()
     try:
-        from app.startup_trace import cleanup_hidden_qt_orphan_windows, log_startup_trace
+        from app.startup_trace import cleanup_hidden_qt_orphan_windows
 
-        log_startup_trace("video_editor.init.build_ui_done")
+        trace_video_editor_phase(self, "video_editor.init.build_ui_done")
         cleanup_hidden_qt_orphan_windows(self, "video_editor.init.build_ui_done")
     except Exception:
         pass
-    self._refresh_preview_qimage_mode()
-    if source_path is not None:
-        self._add_track_with_source(Path(source_path))
-    from app.history import capture_editor_snapshot
-
-    self._history.push(capture_editor_snapshot(self), label="initial")
     try:
-        from app.preview_acceleration import schedule_editor_runtime_prewarm
-
-        schedule_editor_runtime_prewarm(
-            delay_ms=1100 if _live2d_startup_warmup_enabled() else 1400,
-            status_callback=lambda msg: self._flash_status(msg),
+        prewarm_preview_gl = getattr(self, "_prewarm_preview_gl_surface", None)
+        if callable(prewarm_preview_gl):
+            prewarm_ok = bool(prewarm_preview_gl())
+            trace_video_editor_phase(
+                self,
+                "video_editor.init.preview_gl_prewarm",
+                ok=prewarm_ok,
+            )
+    except Exception as exc:
+        trace_video_editor_phase(
+            self,
+            "video_editor.init.preview_gl_prewarm",
+            ok=False,
+            error=f"{type(exc).__name__}: {exc}",
         )
-    except Exception:
-        pass
-    trace_video_editor_init("video_editor.init.done")
+    self._refresh_preview_qimage_mode()
+    self._startup_deferred_finished = False
+
+    def _finish_deferred_startup() -> None:
+        if getattr(self, "_startup_deferred_finished", False):
+            return
+        self._startup_deferred_finished = True
+        if source_path is not None:
+            self._add_track_with_source(Path(source_path))
+        from app.history import capture_editor_snapshot
+
+        self._history.push(capture_editor_snapshot(self), label="initial")
+        try:
+            from app.preview_acceleration import schedule_editor_runtime_prewarm
+
+            schedule_editor_runtime_prewarm(
+                delay_ms=1100 if _live2d_startup_warmup_enabled() else 1400,
+                status_callback=lambda msg: self._flash_status(msg),
+            )
+        except Exception:
+            pass
+        trace_video_editor_phase(self, "video_editor.init.done")
+
+    QTimer.singleShot(0, _finish_deferred_startup)
+    trace_video_editor_phase(self, "video_editor.init.deferred_finish_scheduled")

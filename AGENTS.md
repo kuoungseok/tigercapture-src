@@ -73,6 +73,45 @@ If existing code still points at `debugCapture` for important dependencies,
 move the dependency to the proper durable location and leave only regenerated
 reports or screenshots in `debugCapture`.
 
+## Unreal Engine Source Path
+
+The canonical Unreal Engine source and installation root for this project is:
+
+```text
+D:\UE_5.8\Engine
+```
+
+- Use this path for Unreal Engine source inspection, headers, binaries, build
+  scripts, commandlets, and integration work.
+- Resolve engine source files under `D:\UE_5.8\Engine\Source`.
+- Do not infer, auto-select, or substitute another Unreal Engine installation
+  unless the user explicitly changes this project rule.
+
+## Tiger Studio UMG Synchronization Rule
+
+`resources/unreal_plugins/UMG/TigerStudioUMG` is the single shared Unreal UMG
+backend for Motion Designer, Painter, and future Tiger authoring providers.
+Do not create provider-specific Unreal plugins for those tools.
+
+When adding or changing an authoring feature that can affect Unreal UI output:
+
+- update the provider-neutral Tiger UMG document contract and its schema
+  version when the serialized meaning changes
+- update the `TigerStudioUMG` runtime/editor conversion path in the same change
+- map the feature to native UMG, UI Material, deterministic bake, or an explicit
+  blocked preflight result; never silently omit it
+- keep Motion Designer and Painter provider adapters behaviorally aligned where
+  they expose the same feature
+- update Python/plugin tests, rebuild with
+  `tools/build_unreal_umg_plugin.py`, and verify with `D:\UE_5.8\Engine`
+- do not claim support until the generated Widget Blueprint compiles and a real
+  Unreal capture proves the result
+
+Unrelated editor features that cannot enter a UMG document do not require a
+plugin change. The public installer must contain only the source-free bundle
+under `bundled/unreal_plugins/UMG/TigerStudioUMG`, never the private plugin
+`Source` tree.
+
 ## VTuber / VSeeFace Fallback Boundary
 
 Assume VSeeFace is absent unless the user explicitly asks to install, launch, or
@@ -134,6 +173,39 @@ feature area. Wire it into the editor through `video_editor_window_delegates.py`
 the relevant controller/workflow module, or the initializer. Keep the facade
 small.
 
+## Editor Capture Means MCP/AI Capture
+
+When the user says "캡쳐기능 봐줘", "에디터 안 캡쳐", "editor capture",
+or similar without explicitly asking for launcher UI, assume they mean the
+UI-less MCP/AI capture action surface, not the visible Capture app or editor
+toolbar buttons.
+
+Start from these files:
+
+- `app/actions/evidence_namespace.py` for `capture.*` action registration.
+- `app/actions/editor_adapter_editing_review.py` for screenshot/GIF/window
+  capture action implementations.
+- `app/actions/editor_adapter_core_helpers.py` for semantic capture targets
+  such as `editor`, `viewer`, `timeline`, `media_pool`, `workbench`, `audio`,
+  `color`, and diagnostic `screen`.
+- `app/actions/ui_namespace.py` and `app/actions/editor_adapter_ui.py` for
+  `ui.popout.capture`.
+- `app/automation_bridge.py` and `app/automation_mcp.py` for MCP/AI exposure.
+- `app/window_capture.py` for ownerless external Windows app screenshot/video
+  capture.
+
+For external tools where another AI/agent controls when the operation finishes,
+use `capture.window.video.start`, optionally poll
+`capture.window.video.status`, and call `capture.window.video.stop` when the
+external task completes. Always pass `max_duration_ms` as a hard safety cap.
+If that external agent asks "until when?", answer: until it sends stop after
+the task completes, or until `max_duration_ms` expires.
+
+Only inspect launcher capture UI (`app/controller.py`, `app/recorder.py`,
+`app/capture.py`, recording bars/overlays) when the user explicitly asks about
+the standalone Capture app, visible recording UI, region selection, or
+capture-to-Studio handoff.
+
 ## AR/PBR Depth Preview Rules
 
 Many agents only read this file or `SPEC.md`, so keep the core AR/PBR depth
@@ -153,6 +225,20 @@ contract here instead of relying only on `docs/SPEC_AR_PBR_COMPOSITOR.md`.
 - Video-depth occlusion must use the shared normalization/effect-mask helpers in
   `app.ar_pbr.depth_occlusion` and viewer conversion in
   `app.ar_pbr.depth_view`.
+
+## Music Lab Audio Safety Rules
+
+Generated Music Lab output is not considered ready until the renderer's
+post-master safety guard has run. For `sample_production` renders,
+`render_backend.audio_safety.profile` must be `music_audio_output_safety_v1`;
+the final `after` report should have zero sample jumps, zero isolated frame
+drops/surges, and peak at or below the final guard ceiling. If the user reports
+crackling, distorted, broken, or "깨짐" audio, do not rely on `glitch_score`
+alone: inspect the relevant bus/stem, renderer source, and role mapping.
+Fast classical solo violin is a known weak case for General MIDI/SoundFont
+lead programs, so `classical_solo_violin` lead buses must use the
+`procedural_clean_violin` bypass unless the user explicitly requests a raw
+SoundFont comparison.
 
 ## VTuber Source Visibility Rules
 

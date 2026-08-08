@@ -1582,6 +1582,8 @@ def test_professional_preset_helpers_return_one_click_plan():
     assert "template-patch-note-update" in ids
     assert "template-spine-actor-action" in ids
     assert "actor-spine-placeholder" in ids
+    assert "template-character-intro-short" in ids
+    assert "template-gacha-character-showcase" in ids
 
     template = preset_by_id("template-gameplay-highlight")
     assert template is not None
@@ -1997,6 +1999,7 @@ def test_qa_dashboard_exposes_safe_runners():
         "capcut_publish_review": {"kind": "capcut_publish_review", "path": "debugCapture/capcut_publish_review_qa.json"},
         "capcut_quick_result": {"kind": "capcut_quick_result", "path": "debugCapture/capcut_quick_result_qa.json"},
         "capcut_voice_workflow": {"kind": "capcut_voice_workflow", "path": "debugCapture/capcut_voice_workflow_qa.json"},
+        "voice_lab_sidecar": {"kind": "voice_lab_sidecar", "path": "debugCapture/voice_lab_sidecar_qa.json"},
         "capcut_prompt_edit": {"kind": "capcut_prompt_edit", "path": "debugCapture/capcut_prompt_edit_qa.json"},
         "capcut_collab_handoff": {"kind": "capcut_collab_handoff", "path": "debugCapture/capcut_collab_handoff_qa.json"},
         "capcut_cloud_handoff": {"kind": "capcut_cloud_handoff", "path": "debugCapture/capcut_cloud_handoff_qa.json"},
@@ -2044,6 +2047,10 @@ def test_qa_dashboard_exposes_safe_runners():
     assert "qa_capcut_publish_review.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_publish_review"]))
     assert "qa_capcut_quick_result.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_quick_result"]))
     assert "qa_capcut_voice_workflow.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_voice_workflow"]))
+    voice_lab_cmd = " ".join(QADashboardDialog._command_for_row(rows["voice_lab_sidecar"]))
+    assert "qa_tts_voice_lab.py" in voice_lab_cmd
+    assert "--auto-start" in voice_lab_cmd
+    assert "--wait-timeout 120" in voice_lab_cmd
     assert "qa_capcut_prompt_edit.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_prompt_edit"]))
     assert "qa_capcut_collab_handoff.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_collab_handoff"]))
     assert "qa_capcut_cloud_handoff.py" in " ".join(QADashboardDialog._command_for_row(rows["capcut_cloud_handoff"]))
@@ -2248,6 +2255,60 @@ def test_live2d_editor_deferred_load_cancels_stale_autoload():
 
         assert calls == [("timeline.model3.json", True)]
     finally:
+        win.close()
+        win.deleteLater()
+
+
+def test_live2d_editor_ignores_stale_model_loaded_signal():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app.live2d.live2d_viewer import Live2DEditorWindow
+
+    QApplication.instance() or QApplication([])
+    win = Live2DEditorWindow(autoload_sample=False)
+    try:
+        win._current_model_path = r"C:\models\new.model3.json"
+        win._current_loading_path = r"C:\models\new.model3.json"
+        win._viewport._model_path = r"C:\models\old.model3.json"
+        win._motions = [("Idle", 0, "old")]
+        win._pending_loaded_name = "new"
+
+        win._on_model_loaded("old", [("Tap", 1, "tap")], ["smile"], [], [])
+
+        assert win._motions == [("Idle", 0, "old")]
+        assert win._pending_loaded_name == "new"
+    finally:
+        win._current_model_path = ""
+        win._current_loading_path = ""
+        win.close()
+        win.deleteLater()
+
+
+def test_live2d_editor_ignores_stale_first_frame_signal():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app.live2d.live2d_viewer import Live2DEditorWindow
+
+    QApplication.instance() or QApplication([])
+    win = Live2DEditorWindow(autoload_sample=False)
+    try:
+        win.show()
+        win._current_model_path = r"C:\models\new.model3.json"
+        win._current_loading_path = r"C:\models\new.model3.json"
+        win._pending_loaded_name = "new"
+        win._set_loading(True, "first frame", progress=90, stage="first_frame")
+        win._viewport._model_path = r"C:\models\old.model3.json"
+        win._viewport._first_frame_model_path = r"C:\models\old.model3.json"
+
+        win._on_first_frame_ready()
+
+        assert win._loading_bar.isVisible()
+        assert win._loading_active is True
+    finally:
+        win._current_model_path = ""
+        win._current_loading_path = ""
         win.close()
         win.deleteLater()
 
@@ -2514,6 +2575,51 @@ def test_live2d_editor_applies_current_model_without_apply_button():
         assert clip.motion_idx == 0
         assert signal.count == 1
     finally:
+        win.close()
+        win.deleteLater()
+
+
+def test_live2d_editor_ignores_deleted_lane_row_on_auto_apply():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QCoreApplication, QEvent, Signal
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from app.live2d.live2d_viewer import Live2DEditorWindow
+
+    class _Row(QWidget):
+        clip_changed = Signal()
+
+    class _Clip(SimpleNamespace):
+        def reset(self):
+            self.reset_count = getattr(self, "reset_count", 0) + 1
+
+    app = QApplication.instance() or QApplication([])
+    win = Live2DEditorWindow(autoload_sample=False)
+    row = _Row()
+    clip = _Clip(
+        model_path="",
+        motion_group="",
+        motion_idx=-1,
+        pos_x=0.5,
+        pos_y=0.5,
+        scale=1.0,
+        opacity=1.0,
+    )
+    try:
+        win._ensure_model_supported = lambda _path: True
+        win.set_target_clip(clip, row)
+        row.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
+        win._assign_to_target(path="hero.model3.json", motion_group="Idle", motion_idx=0)
+
+        assert clip.model_path == "hero.model3.json"
+        assert clip.motion_group == "Idle"
+        assert clip.motion_idx == 0
+    finally:
+        win._current_model_path = ""
+        win._current_loading_path = ""
         win.close()
         win.deleteLater()
 

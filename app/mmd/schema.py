@@ -39,6 +39,7 @@ DEFAULT_RENDER = {
 DEFAULT_PLAYBACK = {
     "motion_start_ms": 0,
     "loop": True,
+    "use_vmd_camera": True,
     "enable_ik": True,
     "enable_physics": True,
     "gpu_skinning": True,
@@ -175,6 +176,7 @@ def normalize_playback(value: Any) -> dict[str, Any]:
     return {
         "motion_start_ms": max(0, _coerce_int(data.get("motion_start_ms"), DEFAULT_PLAYBACK["motion_start_ms"])),
         "loop": _coerce_bool(data.get("loop"), DEFAULT_PLAYBACK["loop"]),
+        "use_vmd_camera": _coerce_bool(data.get("use_vmd_camera"), DEFAULT_PLAYBACK["use_vmd_camera"]),
         "enable_ik": _coerce_bool(data.get("enable_ik"), DEFAULT_PLAYBACK["enable_ik"]),
         "enable_physics": _coerce_bool(data.get("enable_physics"), DEFAULT_PLAYBACK["enable_physics"]),
         "gpu_skinning": _coerce_bool(data.get("gpu_skinning"), DEFAULT_PLAYBACK["gpu_skinning"]),

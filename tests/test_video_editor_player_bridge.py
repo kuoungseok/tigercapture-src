@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -132,6 +133,176 @@ def test_sync_nested_audio_preview_track_updates_hidden_track_and_removes_empty(
     empty_owner = SimpleNamespace(_tracks=[], _audio_mixer=_Mixer(log))
     assert bridge.sync_nested_audio_preview_track(empty_owner) == 0
     assert log[-1] == "mixer.remove:-9001"
+
+
+def test_collect_video_embedded_audio_preview_clips_skips_linked_or_duplicate_audio() -> None:
+    from app.audio_tracks import AudioClip, AudioTrack
+    from app.timeline_model import VideoClip
+
+    source = Path("camera.mp4")
+    linked_audio = AudioClip(
+        id=20,
+        source_path=source,
+        duration_ms=5000,
+        offset_ms=0,
+        trim_start_ms=0,
+        trim_end_ms=1000,
+    )
+    duplicate_audio = AudioClip(
+        id=21,
+        source_path=source,
+        duration_ms=5000,
+        offset_ms=3000,
+        trim_start_ms=1000,
+        trim_end_ms=1800,
+    )
+    linked_video = VideoClip(
+        id=10,
+        source_path=source,
+        source_duration_ms=5000,
+        timeline_in_ms=0,
+        source_in_ms=0,
+        source_out_ms=1000,
+        linked_audio_id=20,
+    )
+    duplicate_video = VideoClip(
+        id=11,
+        source_path=source,
+        source_duration_ms=5000,
+        timeline_in_ms=3000,
+        source_in_ms=1000,
+        source_out_ms=1800,
+    )
+    audible_video = VideoClip(
+        id=12,
+        source_path=source,
+        source_duration_ms=5000,
+        timeline_in_ms=5000,
+        source_in_ms=1800,
+        source_out_ms=2600,
+    )
+    owner = SimpleNamespace(
+        _tracks=[SimpleNamespace(id=1, clips=[linked_video, duplicate_video, audible_video])],
+        _audio_tracks=[AudioTrack(id=2, clips=[linked_audio, duplicate_audio])],
+    )
+
+    clips = bridge.collect_video_embedded_audio_preview_clips(owner)
+
+    assert len(clips) == 1
+    assert clips[0].id == -200000
+    assert clips[0].source_path == source
+    assert clips[0].offset_ms == 5000
+    assert clips[0].trim_start_ms == 1800
+    assert clips[0].trim_end_ms == 2600
+    assert getattr(clips[0], "preview_embedded_video_audio") is True
+
+
+def test_sync_video_embedded_audio_preview_track_updates_hidden_track() -> None:
+    from app.timeline_model import VideoClip
+
+    log: list[str] = []
+    clip = VideoClip(
+        id=10,
+        source_path=Path("clip.mp4"),
+        source_duration_ms=4000,
+        timeline_in_ms=250,
+        source_in_ms=500,
+        source_out_ms=1800,
+    )
+    owner = SimpleNamespace(
+        _tracks=[SimpleNamespace(id=1, clips=[clip])],
+        _audio_tracks=[],
+        _audio_mixer=_Mixer(log),
+    )
+
+    extent = bridge.sync_video_embedded_audio_preview_track(
+        owner,
+        audio_track_factory=_FakeAudioTrack,
+    )
+
+    assert extent == 1550
+    assert log == ["mixer.update:-9002:Embedded video audio preview"]
+    assert owner._audio_mixer.updated.clips[0].offset_ms == 250
+    assert owner._audio_mixer.updated.clips[0].trim_start_ms == 500
+    assert owner._audio_mixer.updated.clips[0].trim_end_ms == 1800
+
+
+def test_video_embedded_audio_preview_follows_timeline_with_editor_state() -> None:
+    from app.audio_tracks import AudioClip
+    from app.timeline_model import VideoClip
+
+    source = Path("scene.mp4")
+    clip = VideoClip(
+        id=32,
+        source_path=source,
+        source_duration_ms=9000,
+        timeline_in_ms=1000,
+        source_in_ms=1500,
+        source_out_ms=3600,
+    )
+    proxy = AudioClip(
+        id=-300032,
+        source_path=source,
+        duration_ms=9000,
+        offset_ms=1000,
+        trim_start_ms=1500,
+        trim_end_ms=3600,
+        fade_in_ms=120,
+        fade_out_ms=240,
+        gain=0.42,
+    )
+    proxy.effects["eq"]["low"]["gain"] = 4.5
+    setattr(proxy, "_picture_sync_markers", [
+        {
+            "source_ms": 1800,
+            "local_ms": 300,
+            "project_ms": 1300,
+            "kind": "motion",
+            "label": "Zoom start",
+        }
+    ])
+    setattr(proxy, "_se_speed", 1.2)
+    setattr(clip, "_embedded_audio_proxy_clip", proxy)
+    owner = SimpleNamespace(
+        _tracks=[SimpleNamespace(id=1, clips=[clip])],
+        _audio_tracks=[],
+    )
+
+    [audio_clip] = bridge.collect_video_embedded_audio_preview_clips(owner)
+
+    assert audio_clip.offset_ms == 1000
+    assert audio_clip.trim_start_ms == 1500
+    assert audio_clip.trim_end_ms == 3600
+    assert audio_clip.gain == 0.42
+    assert audio_clip.fade_in_ms == 120
+    assert audio_clip.fade_out_ms == 240
+    assert audio_clip.effects["eq"]["low"]["gain"] == 4.5
+    assert getattr(audio_clip, "_se_speed") == 1.2
+    assert getattr(audio_clip, "_picture_sync_markers")[0]["local_ms"] == 300
+    assert getattr(audio_clip, "_picture_sync_markers")[0]["project_ms"] == 1300
+
+    clip.timeline_in_ms = 4200
+    clip.source_in_ms = 2300
+    clip.source_out_ms = 5200
+    proxy._picture_sync_markers = [
+        {
+            "source_ms": 2500,
+            "local_ms": 200,
+            "project_ms": 4400,
+            "kind": "motion",
+            "label": "Zoom start",
+        }
+    ]
+    [moved_audio_clip] = bridge.collect_video_embedded_audio_preview_clips(owner)
+
+    assert moved_audio_clip.offset_ms == 4200
+    assert moved_audio_clip.trim_start_ms == 2300
+    assert moved_audio_clip.trim_end_ms == 5200
+    assert moved_audio_clip.gain == 0.42
+    assert moved_audio_clip.effects["eq"]["low"]["gain"] == 4.5
+    moved_markers = getattr(moved_audio_clip, "_picture_sync_markers")
+    assert moved_markers[0]["local_ms"] == 200
+    assert moved_markers[0]["project_ms"] == 4400
 
 
 class _RefreshPlayer:

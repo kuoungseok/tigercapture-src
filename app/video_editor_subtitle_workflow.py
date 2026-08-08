@@ -432,7 +432,7 @@ class SubtitleSectionBuilder:
         header_layout.addWidget(srt_button)
 
         toggle_button = QPushButton("Show")
-        toggle_button.setObjectName("SectionDisclosure")
+        toggle_button.setObjectName("ToolButton")
         toggle_button.setCheckable(True)
         toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         toggle_button.setToolTip("Show or hide subtitle editor")

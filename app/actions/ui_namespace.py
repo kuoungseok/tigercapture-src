@@ -39,6 +39,39 @@ def _geometry_schema(required_path: bool = False) -> dict[str, Any]:
 
 def register_ui_actions(registry: Any) -> None:
     registry.register_adapter_action(
+        "ui.section.list",
+        "List collapsible editor sections that AI/MCP can open or close.",
+        "ui",
+        "list_ui_sections",
+        params_schema=schema_object({}, additional_properties=True),
+        mutating=False,
+        changed=False,
+        async_kind="ui",
+        dry_summary="collapsible editor sections would be listed",
+    )
+    registry.register_adapter_action(
+        "ui.section.set_open",
+        "Open or close a collapsible editor section such as Effects, Voice/Audio Workspace, or Render Queue.",
+        "ui",
+        "set_ui_section_open",
+        params_schema=schema_object(
+            {
+                "target": {
+                    "type": "string",
+                    "description": "Section target, e.g. actor_library, effects, title_presets, transitions, workflow_presets, creator_assist, script_edit, render_queue, audio_workspace, subtitle, pip.",
+                },
+                "section": {"type": "string", "description": "Alias for target."},
+                "open": {"type": "boolean"},
+                "scroll": {"type": "boolean"},
+            },
+            additional_properties=True,
+        ),
+        mutating=False,
+        changed=False,
+        async_kind="ui",
+        dry_summary="collapsible editor section would be opened or closed",
+    )
+    registry.register_adapter_action(
         "ui.viewer.compare.set",
         "Set the viewer Comparison Templates preview mode for the active video track.",
         "ui",

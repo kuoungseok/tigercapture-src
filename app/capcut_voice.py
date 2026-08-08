@@ -158,6 +158,33 @@ def voice_provider_contracts(
             if not row["configured"]:
                 row["warning"] = row.get("setup_hint") or "Provider is not configured."
             providers.append(row)
+    try:
+        from app.tts_setup import capcut_voice_tts_provider_row
+
+        tts_row = capcut_voice_tts_provider_row()
+        if tts_row["id"] in overrides:
+            tts_row["configured"] = bool(overrides[tts_row["id"]])
+            tts_row["status"] = "configured" if tts_row["configured"] else "needs_setup"
+            tts_row["warning"] = "" if tts_row["configured"] else tts_row.get("setup_hint", "")
+        if tts_row.get("configured") or include_unconfigured:
+            providers.append(tts_row)
+    except Exception:
+        if include_unconfigured:
+            providers.append(
+                {
+                    "id": "style_bert_vits2_sidecar",
+                    "label": "Style-Bert-VITS2 local TTS",
+                    "kind": "tts",
+                    "configured": False,
+                    "requires_network": False,
+                    "local_first": True,
+                    "supports": ("tts", "anime_voiceover", "character_narration"),
+                    "description": "Local anime/subculture voice generation sidecar.",
+                    "setup_hint": "Install or connect Style-Bert-VITS2 before generating character voiceover.",
+                    "status": "needs_setup",
+                    "warning": "Install or connect the local TTS sidecar first.",
+                }
+            )
     return providers
 
 

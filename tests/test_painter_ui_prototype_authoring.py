@@ -1,0 +1,545 @@
+from __future__ import annotations
+
+import os
+
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _app():
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def test_prototype_panel_switches_between_settings_and_authoring() -> None:
+    app = _app()
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+    )
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    panel = PainterUIPrototypePanel()
+    document = create_ui_document(390, 844)
+    panel.set_document(document)
+    assert not panel.settings_host.isHidden()
+    assert panel.authoring_host.isHidden()
+    labels = [
+        panel.device_combo.itemText(index)
+        for index in range(panel.device_combo.count())
+    ]
+    assert labels[0] == "기기 없음"
+    assert any("iPhone 17" in label and "402×874" in label for label in labels)
+    assert any("Android 컴팩트" in label for label in labels)
+    assert any("iPad mini 8.3" in label for label in labels)
+
+    emitted: list[dict] = []
+    panel.device_changed.connect(emitted.append)
+    iphone_index = next(
+        index
+        for index, label in enumerate(labels)
+        if label.startswith("iPhone 17    ")
+    )
+    panel.device_combo.setCurrentIndex(iphone_index)
+    app.processEvents()
+    assert emitted[-1]["width"] == 402
+    assert emitted[-1]["height"] == 874
+    assert emitted[-1]["orientation"] == "portrait"
+    panel.landscape_button.click()
+    assert emitted[-1]["width"] == 874
+    assert emitted[-1]["height"] == 402
+    assert emitted[-1]["orientation"] == "landscape"
+
+    colors: list[str] = []
+    panel.background_changed.connect(colors.append)
+    panel.background_edit.setText("1a2b3c")
+    panel._emit_background()
+    assert colors[-1] == "#1A2B3C"
+
+    document, button = add_ui_object(document, kind="button", name="Go")
+    document = select_ui_object(document, button["id"])
+    panel.set_document(document)
+    assert panel.settings_host.isHidden()
+    assert not panel.authoring_host.isHidden()
+    panel.deleteLater()
+    app.processEvents()
+
+
+def test_prototype_flow_and_transition_round_trip() -> None:
+    from app.painter_ui_document import (
+        add_ui_interaction,
+        add_ui_object,
+        create_ui_document,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+    from app.painter_ui_prototype_authoring import (
+        add_ui_prototype_flow,
+        inspect_ui_prototype_authoring,
+        reorder_ui_prototype_interaction,
+        set_ui_prototype_transition,
+    )
+
+    document, button = add_ui_object(
+        create_ui_document(390, 844),
+        kind="button",
+        name="Continue",
+    )
+    document, interaction = add_ui_interaction(
+        document,
+        source_object_id=button["id"],
+        trigger="click",
+        action="navigate",
+        target_artboard_id="artboard-1",
+    )
+    document, flow = add_ui_prototype_flow(
+        document,
+        name="Checkout",
+        artboard_id="artboard-1",
+        start_object_id=button["id"],
+        device_preset="iPhone 390 x 844",
+    )
+    document, _interaction = set_ui_prototype_transition(
+        document,
+        interaction["id"],
+        {
+            "kind": "smart_animate",
+            "duration_ms": 320,
+            "easing": "ease_in_out",
+            "direction": "left",
+        },
+    )
+    report = inspect_ui_prototype_authoring(
+        document,
+        object_id=button["id"],
+    )
+    assert report["active_flow_id"] == flow["id"]
+    assert report["interactions"][0]["transition"]["kind"] == "smart_animate"
+    assert report["interactions"][0]["transition"]["duration_ms"] == 320
+    assert report["interactions"][0]["smart_animate"]["status"] == "fallback"
+    assert (
+        "no_stable_component_matches"
+        in report["interactions"][0]["smart_animate"]["fallback_reasons"]
+    )
+    assert validate_ui_document(document)["ok"] is True
+    assert normalize_ui_document(document) == document
+    document, second_interaction = add_ui_interaction(
+        document,
+        source_object_id=button["id"],
+        trigger="click",
+        action="play_sound",
+        parameters={"uri": "click.wav"},
+    )
+    document, reorder = reorder_ui_prototype_interaction(
+        document,
+        second_interaction["id"],
+        -1,
+    )
+    assert reorder["to_index"] == 0
+    assert document["interactions"][0]["id"] == second_interaction["id"]
+
+
+def test_smart_animate_matches_component_source_objects_and_properties() -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import (
+        add_ui_artboard,
+        add_ui_interaction,
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_prototype_authoring import (
+        inspect_ui_smart_animate,
+        set_ui_prototype_transition,
+    )
+
+    document = create_ui_document(390, 844)
+    source_artboard = document["active_artboard_id"]
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+        x=24,
+        y=32,
+        width=180,
+        height=96,
+    )
+    document, _label = add_ui_object(
+        document,
+        kind="text",
+        name="Label",
+        parent_id=root["id"],
+        x=16,
+        y=16,
+        width=120,
+        height=32,
+        content={"text": "Continue"},
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, target_artboard = add_ui_artboard(
+        document,
+        name="Details",
+        width=390,
+        height=844,
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        artboard_id=target_artboard["id"],
+        x=72,
+        y=96,
+    )
+    document, _updated = update_ui_object(
+        document,
+        instance["root_object_id"],
+        {"width": 240, "height": 128, "opacity": 0.72},
+    )
+    document, interaction = add_ui_interaction(
+        document,
+        source_object_id=root["id"],
+        trigger="click",
+        action="navigate",
+        target_artboard_id=target_artboard["id"],
+    )
+    document, interaction = set_ui_prototype_transition(
+        document,
+        interaction["id"],
+        {
+            "kind": "smart_animate",
+            "duration_ms": 320,
+            "easing": "ease_in_out",
+        },
+    )
+
+    report = inspect_ui_smart_animate(document, interaction)
+    assert report["status"] == "supported"
+    assert len(report["matched_pairs"]) == 2
+    assert report["fallback_reasons"] == []
+    root_pair = next(
+        row
+        for row in report["matched_pairs"]
+        if row["source_object_id"] == root["id"]
+    )
+    assert root_pair["match_key"].endswith(f":{root['id']}")
+    assert root_pair["properties"] == ["transform", "opacity"]
+
+
+def test_prototype_authoring_actions_share_document_and_undo() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    object_id = registry.execute(
+        "paint.ui.object.add",
+        {"kind": "button", "name": "Continue"},
+    ).to_dict()["result"]["ui_design"]["selected_object_id"]
+    interaction = registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "source_object_id": object_id,
+            "trigger": "mouse_enter",
+            "action": "change_variant",
+            "target_object_id": object_id,
+            "parameters": {"variant": "Hover"},
+        },
+    ).to_dict()
+    interaction_id = interaction["result"]["ui_design"]["document"][
+        "interactions"
+    ][0]["id"]
+    second = registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "source_object_id": object_id,
+            "trigger": "click",
+            "action": "play_sound",
+            "parameters": {"uri": "click.wav"},
+        },
+    ).to_dict()
+    second_id = second["result"]["ui_design"]["document"]["interactions"][1][
+        "id"
+    ]
+    reordered_action = registry.execute(
+        "paint.ui.prototype.connection.reorder",
+        {"interaction_id": second_id, "direction": -1},
+    ).to_dict()
+    assert reordered_action["ok"] is True
+    assert reordered_action["result"]["reorder"]["to_index"] == 0
+    flow = registry.execute(
+        "paint.ui.prototype.flow.add",
+        {
+            "name": "Primary Flow",
+            "artboard_id": "artboard-1",
+            "start_object_id": object_id,
+        },
+    ).to_dict()
+    assert flow["ok"] is True
+    transition = registry.execute(
+        "paint.ui.prototype.transition.set",
+        {
+            "interaction_id": interaction_id,
+            "transition": {
+                "kind": "dissolve",
+                "duration_ms": 180,
+                "easing": "ease_out",
+            },
+        },
+    ).to_dict()
+    assert transition["ok"] is True
+    inspected = registry.execute(
+        "paint.ui.prototype.authoring.inspect",
+        {"object_id": object_id},
+    ).to_dict()
+    assert inspected["result"]["interaction_count"] == 2
+    transition_row = next(
+        row
+        for row in inspected["result"]["interactions"]
+        if row["id"] == interaction_id
+    )
+    assert transition_row["transition"]["kind"] == "dissolve"
+    dialog._set_painter_ui_prototype_preview(True)
+    dialog._execute_painter_ui_prototype_trigger(
+        object_id,
+        "click",
+        "",
+    )
+    assert dialog._painter_ui_prototype_state["events"][-1]["action"] == "play_sound"
+    assert dialog._painter_ui_overlay.prototype_preview_enabled() is True
+    assert dialog._paint_ui_inspector.prototype_panel.preview_check.isChecked()
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_compact_prototype_panel_emits_connection_flow_and_transition() -> None:
+    app = _app()
+    from app.painter_ui_document import (
+        add_ui_interaction,
+        add_ui_object,
+        create_ui_document,
+    )
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    document, button = add_ui_object(
+        create_ui_document(390, 844),
+        kind="button",
+        name="Continue",
+    )
+    document, _interaction = add_ui_interaction(
+        document,
+        source_object_id=button["id"],
+        trigger="click",
+        action="navigate",
+        target_artboard_id="artboard-1",
+    )
+    document["selection"] = {
+        "object_id": button["id"],
+        "object_ids": [button["id"]],
+    }
+    panel = PainterUIPrototypePanel()
+    panel.set_document(document)
+    added: list[dict] = []
+    transitions: list[tuple[str, dict]] = []
+    flows: list[dict] = []
+    reordered: list[tuple[str, int]] = []
+    preview: list[bool] = []
+    resets: list[bool] = []
+    panel.connection_add_requested.connect(added.append)
+    panel.transition_set_requested.connect(
+        lambda interaction_id, value: transitions.append(
+            (interaction_id, value)
+        )
+    )
+    panel.flow_add_requested.connect(flows.append)
+    panel.connection_reorder_requested.connect(
+        lambda interaction_id, direction: reordered.append(
+            (interaction_id, direction)
+        )
+    )
+    panel.preview_changed.connect(preview.append)
+    panel.preview_reset_requested.connect(lambda: resets.append(True))
+    panel.add_button.click()
+    panel.connection_list.setCurrentRow(0)
+    panel.transition_combo.setCurrentIndex(
+        panel.transition_combo.findData("dissolve")
+    )
+    panel.duration_spin.setValue(220)
+    panel.transition_button.click()
+    panel.flow_add_button.click()
+    panel.move_down_button.click()
+    panel.preview_check.click()
+    panel.set_preview_state(
+        {
+            "artboard_id": "artboard-1",
+            "variables": {"theme": "dark"},
+            "events": [{"action": "navigate"}],
+        },
+        enabled=True,
+    )
+    panel.preview_reset_button.click()
+    app.processEvents()
+    assert added[0]["source_object_id"] == button["id"]
+    assert transitions[0][1]["kind"] == "dissolve"
+    assert transitions[0][1]["duration_ms"] == 220
+    assert flows[0]["start_object_id"] == button["id"]
+    assert reordered[0][1] == 1
+    assert preview == [True]
+    assert resets == [True]
+    assert "1 vars" in panel.preview_state_label.text()
+    panel.close()
+    panel.deleteLater()
+    app.processEvents()
+
+
+def test_inline_preview_runs_scoped_delay_interaction() -> None:
+    app = _app()
+    from PySide6.QtTest import QTest
+
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    object_id = registry.execute(
+        "paint.ui.object.add",
+        {"kind": "button", "name": "Delayed"},
+    ).to_dict()["result"]["ui_design"]["selected_object_id"]
+    registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "source_object_id": object_id,
+            "trigger": "delay",
+            "action": "play_sound",
+            "parameters": {"delay_ms": 5, "uri": "ready.wav"},
+        },
+    )
+
+    dialog._set_painter_ui_prototype_preview(True)
+    QTest.qWait(100)
+
+    assert dialog._painter_ui_prototype_state["events"][-1]["action"] == "play_sound"
+    assert len(dialog._painter_ui_prototype_state["events"]) == 1
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_prototype_panel_offers_change_to_targets_from_same_component_set() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        define_ui_component_variant_property,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    document = create_ui_document(390, 844)
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Button",
+        width=120,
+        height=40,
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Button",
+    )
+    document, _inspection = define_ui_component_variant_property(
+        document,
+        component_id=component["id"],
+        property_name="State",
+        values=["Default", "Hover"],
+        default_value="Default",
+    )
+    document, hover = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Button / Hover",
+        variant_properties={"State": "Hover"},
+    )
+    document["selection"] = {
+        "object_id": component["root_object_id"],
+        "object_ids": [component["root_object_id"]],
+    }
+    panel = PainterUIPrototypePanel()
+    panel.set_document(document)
+    panel.action_combo.setCurrentIndex(
+        panel.action_combo.findData("change_variant")
+    )
+    app.processEvents()
+    assert panel.target_combo.count() == 1
+    assert panel.target_combo.currentData() == hover["id"]
+    assert panel.target_combo.currentText() == "State=Hover"
+    emitted: list[dict] = []
+    panel.connection_add_requested.connect(emitted.append)
+    panel.add_button.click()
+    assert emitted == [
+        {
+            "source_object_id": component["root_object_id"],
+            "trigger": str(panel.trigger_combo.currentData()),
+            "action": "change_variant",
+            "target_artboard_id": "",
+            "target_object_id": component["root_object_id"],
+            "component_id": hover["id"],
+            "parameters": {"preserve_overrides": True},
+        }
+    ]
+    panel.close()
+    panel.deleteLater()
+    app.processEvents()
+
+
+def test_prototype_panel_emits_reset_component_state_for_navigation() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_prototype_panel import PainterUIPrototypePanel
+
+    document = create_ui_document(390, 844)
+    document, source = add_ui_object(
+        document,
+        kind="frame",
+        name="Next",
+        width=120,
+        height=40,
+    )
+    document["selection"] = {
+        "object_id": source["id"],
+        "object_ids": [source["id"]],
+    }
+    panel = PainterUIPrototypePanel()
+    panel.set_document(document)
+    panel.show()
+    panel.action_combo.setCurrentIndex(panel.action_combo.findData("navigate"))
+    app.processEvents()
+    assert panel.reset_component_state_check.isVisible() is True
+    panel.reset_component_state_check.setChecked(True)
+    emitted: list[dict] = []
+    panel.connection_add_requested.connect(emitted.append)
+    panel.add_button.click()
+
+    assert emitted[-1]["parameters"] == {"reset_component_state": True}
+    panel.close()
+    panel.deleteLater()
+    app.processEvents()

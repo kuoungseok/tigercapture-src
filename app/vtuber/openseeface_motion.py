@@ -15,9 +15,12 @@ OPENSEEFACE_MOTION_SCHEMA = "tigerstudio.vtuber.openseeface_motion.v1"
 
 @dataclass(frozen=True)
 class OpenSeeFaceMotionTuning:
-    pitch_scale: float = 1.0
-    yaw_scale: float = 1.0
-    roll_scale: float = 1.0
+    # OpenSeeFace's raw Euler deltas are physically conservative. On a stylized
+    # VRM head they read almost static in broadcast framing, so the default
+    # bridge tuning keeps the sign intact but makes subtle face turns visible.
+    pitch_scale: float = 2.75
+    yaw_scale: float = 1.75
+    roll_scale: float = 1.35
     shoulder_roll_scale: float = 1.0
     mouth_scale: float = 1.0
     neutral_frames: int = 3
@@ -103,6 +106,7 @@ def frames_from_openseeface_rows(
                 blink_r=blink_r,
                 confidence=confidence,
                 face_box=_face_box_from_landmarks(row),
+                chin_offset_x_norm=_chin_offset_x_from_landmarks(row),
                 source="openseeface_csv",
             )
         )
@@ -143,6 +147,11 @@ def summarize_openseeface_motion(frames: Iterable[FaceMotionFrame]) -> dict[str,
         "mouth_max": max(frame.mouth_open for frame in data),
         "blink_max": max(max(frame.blink_l, frame.blink_r) for frame in data),
         "confidence_mean": sum(frame.confidence for frame in data) / len(data),
+        "chin_offset_x_norm_mean": sum(frame.chin_offset_x_norm for frame in data) / len(data),
+        "chin_offset_x_norm_min": min(frame.chin_offset_x_norm for frame in data),
+        "chin_offset_x_norm_max": max(frame.chin_offset_x_norm for frame in data),
+        "chin_left_frames": sum(1 for frame in data if frame.chin_offset_x_norm < -0.05),
+        "chin_right_frames": sum(1 for frame in data if frame.chin_offset_x_norm > 0.05),
     }
 
 
@@ -174,6 +183,23 @@ def _face_box_from_landmarks(row: dict[str, Any]) -> tuple[int, int, int, int] |
         max(1, int(round(right - left))),
         max(1, int(round(bottom - top))),
     )
+
+
+def _chin_offset_x_from_landmarks(row: dict[str, Any]) -> float:
+    xs: list[float] = []
+    for index in range(66):
+        x_key = f"Landmark[{index}].X"
+        if x_key in row:
+            xs.append(_float(row.get(x_key)))
+    if not xs:
+        return 0.0
+    chin_key = "Landmark[8].X"
+    if chin_key not in row:
+        return 0.0
+    left, right = min(xs), max(xs)
+    width = max(1.0, right - left)
+    center_x = (left + right) * 0.5
+    return _clamp((_float(row.get(chin_key)) - center_x) / width, -1.0, 1.0)
 
 
 def _optional_shoulder_roll(row: dict[str, Any], default: float) -> float:

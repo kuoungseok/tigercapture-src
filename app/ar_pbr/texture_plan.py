@@ -19,6 +19,10 @@ CANONICAL_TEXTURE_MAPS: tuple[str, ...] = (
     "roughness",
     "metallic",
     "specular",
+    "diffuse_albedo",
+    "f0",
+    "f90",
+    "f90_mask",
     "normal",
     "occlusion",
     "emissive",
@@ -29,6 +33,7 @@ SCALAR_TEXTURE_MAPS: tuple[str, ...] = (
     "roughness",
     "metallic",
     "specular",
+    "f90_mask",
     "occlusion",
     "opacity",
     "height",
@@ -40,6 +45,11 @@ MATERIAL_TEXTURE_METADATA: tuple[str, ...] = (
     "uv_v_flip",
     "shader_model",
     "source_shader",
+    "substrate_enabled",
+    "substrate_mode",
+    "substrate_f90_color",
+    "substrate_f90_strength",
+    "substrate_f90_mask_strength",
     "render_queue",
     "mtoon_render_queue",
     "mtoon_cull_mode",
@@ -79,6 +89,20 @@ MAP_ALIASES: dict[str, tuple[str, ...]] = {
     "roughness": ("roughness_map", "roughness_texture"),
     "metallic": ("metallic_map", "metallic_texture", "metalness_map", "metalness_texture"),
     "specular": ("specular_map", "specular_texture", "reflectance_map", "reflectance_texture"),
+    "diffuse_albedo": (
+        "diffuse_albedo_map",
+        "diffuse_albedo_texture",
+        "substrate_diffuse_albedo_map",
+        "substrate_diffuse_albedo_texture",
+    ),
+    "f0": ("f0_map", "f0_texture", "substrate_f0_map", "substrate_f0_texture"),
+    "f90": ("f90_map", "f90_texture", "substrate_f90_map", "substrate_f90_texture"),
+    "f90_mask": (
+        "f90_mask_map",
+        "f90_mask_texture",
+        "substrate_f90_mask_map",
+        "substrate_f90_mask_texture",
+    ),
     "normal": ("normal_map", "normal_texture", "bump_map", "bump_texture"),
     "occlusion": (
         "occlusion_map",
@@ -116,6 +140,58 @@ MAP_ALIASES: dict[str, tuple[str, ...]] = {
 
 _PLAN_CACHE: dict[tuple[str, str, str], tuple[dict[str, dict[str, str]], dict[str, Any]]] = {}
 _AVERAGE_CACHE: dict[tuple[str, int, int], tuple[int, int, int]] = {}
+
+
+def _srgb_channel_to_linear(value: float) -> float:
+    c = max(0.0, min(1.0, float(value)))
+    if c <= 0.04045:
+        return c / 12.92
+    return ((c + 0.055) / 1.055) ** 2.4
+
+
+def _linear_channel_to_srgb(value: float) -> float:
+    c = max(0.0, min(1.0, float(value)))
+    if c <= 0.0031308:
+        return c * 12.92
+    return 1.055 * (c ** (1.0 / 2.4)) - 0.055
+
+
+def material_base_color_factor(material: Mapping[str, Any]) -> tuple[float, float, float, float]:
+    raw = material.get("base_color")
+    values = list(raw) if isinstance(raw, (list, tuple)) else [1.0, 1.0, 1.0, 1.0]
+    values += [1.0, 1.0, 1.0, 1.0]
+    rgb: list[float] = []
+    for value in values[:3]:
+        try:
+            rgb.append(max(0.0, min(16.0, float(value))))
+        except Exception:
+            rgb.append(1.0)
+    try:
+        alpha = max(0.0, min(1.0, float(values[3])))
+    except Exception:
+        alpha = 1.0
+    return (rgb[0], rgb[1], rgb[2], alpha)
+
+
+def _base_color_factor(material: Mapping[str, Any]) -> tuple[float, float, float]:
+    factor = material_base_color_factor(material)
+    return (factor[0], factor[1], factor[2])
+
+
+def apply_material_base_color_factor(
+    rgb: tuple[int, int, int],
+    material: Mapping[str, Any],
+    *,
+    alpha: int = 255,
+) -> tuple[int, int, int, int]:
+    """Apply a linear base-color factor to an sRGB texture sample."""
+
+    factor = _base_color_factor(material)
+    out = []
+    for channel, scale in zip(rgb, factor):
+        linear = _srgb_channel_to_linear(float(channel) / 255.0) * scale
+        out.append(max(0, min(255, int(round(_linear_channel_to_srgb(linear) * 255.0)))))
+    return (out[0], out[1], out[2], max(0, min(255, int(alpha))))
 
 
 def _material_signature(descriptor: Mapping[str, Any]) -> str:
@@ -502,7 +578,7 @@ def material_base_texture_color(
     rgb = _average_rgb(str(base))
     if rgb is None:
         return None
-    return (rgb[0], rgb[1], rgb[2], max(0, min(255, int(alpha))))
+    return apply_material_base_color_factor(rgb, material, alpha=alpha)
 
 
 def material_base_texture_path(

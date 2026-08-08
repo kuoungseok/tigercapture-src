@@ -135,7 +135,7 @@ def _set_transport_speed_label(self, rate: float) -> None:
         value = 0.0
     label.setText(f"{value:g}x")
     if hasattr(label, "setToolTip"):
-        label.setToolTip(tr("veditor.current_speed", speed=f"{value:g}"))
+        label.setToolTip(f"{tr('veditor.current_speed', speed=f'{value:g}')} - click for speed menu")
     popout = getattr(self, "_preview_popout", None)
     if popout is not None and hasattr(popout, "set_speed_label"):
         try:
@@ -149,6 +149,7 @@ def _show_viewer_speed_menu(self) -> None:
     if button is None:
         return
     menu = QMenu(self)
+    menu.addSection("Playback speed")
     rates = (0.25, 0.5, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0)
     current = float(getattr(self, "_jkl_transport_rate", 0.0) or 0.0)
     if current <= 0.0:
@@ -179,6 +180,41 @@ def _set_viewer_playback_rate(self, rate: float) -> None:
     self._set_transport_speed_label(rate)
     try:
         self._flash_status(f"Playback speed {rate:g}x")
+    except Exception:
+        pass
+
+
+def _fit_viewer_preview_from_button(self) -> None:
+    fit = getattr(self, "_scale_preview_to_fit", None)
+    if callable(fit):
+        fit()
+    sync_gl = getattr(self, "_sync_preview_gl_geometry", None)
+    if callable(sync_gl):
+        try:
+            sync_gl()
+        except Exception:
+            pass
+    gl = getattr(self, "_preview_gl", None)
+    if gl is not None:
+        try:
+            gl.update()
+        except Exception:
+            pass
+    canvas = getattr(self, "_drawing_canvas", None)
+    if canvas is not None:
+        try:
+            canvas.update()
+        except Exception:
+            pass
+    popout = getattr(self, "_preview_popout", None)
+    fit_popout = getattr(popout, "fit_to_view", None) if popout is not None else None
+    if callable(fit_popout):
+        try:
+            fit_popout()
+        except Exception:
+            pass
+    try:
+        self._flash_status("Viewer fit applied")
     except Exception:
         pass
 
@@ -305,10 +341,14 @@ def _sync_ar_pbr_depth_view_button(self) -> None:
     try:
         button.blockSignals(True)
         button.setChecked(mode != "off")
+        try:
+            button.setText(_depth_view_button_text(mode))
+        except Exception:
+            pass
         button.setToolTip(
-            "Show AR/PBR depth map only"
+            "Show AR/PBR depth matte"
             if mode == "off"
-            else f"Depth map view enabled ({mode}); click to return to normal preview"
+            else f"Depth view: {_depth_view_button_label(mode)}; click to cycle Matte / Distance / Plane / Off"
         )
         button.setProperty("active", mode != "off")
         button.style().unpolish(button)
@@ -323,10 +363,17 @@ def _sync_ar_pbr_depth_view_button(self) -> None:
 
 
 def _toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
+    del checked
     player = getattr(self, "_player", None)
     if player is None:
         return
-    mode = "grayscale" if bool(checked) else "off"
+    mode = _next_depth_view_mode("off")
+    getter = getattr(player, "ar_pbr_depth_view_mode", None)
+    if callable(getter):
+        try:
+            mode = _next_depth_view_mode(str(getter() or "off"))
+        except Exception:
+            mode = "matte"
     setter = getattr(player, "set_ar_pbr_depth_view_mode", None)
     if callable(setter):
         try:
@@ -357,9 +404,56 @@ def _toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
     except Exception:
         pass
     try:
-        self._flash_status("Depth map view on" if mode != "off" else "Depth map view off")
+        self._flash_status(
+            f"Depth view: {_depth_view_button_label(mode)}"
+            if mode != "off"
+            else "Depth view off"
+        )
     except Exception:
         pass
+
+
+def _next_depth_view_mode(current: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    mode = normalize_depth_view_mode(current)
+    if mode == "off":
+        return "matte"
+    if mode == "matte":
+        return "distance"
+    if mode == "distance":
+        return "plane"
+    return "off"
+
+
+def _depth_view_button_text(mode: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    canonical = normalize_depth_view_mode(mode)
+    if canonical == "off":
+        return "Depth"
+    if canonical == "distance":
+        return "Dist"
+    if canonical == "plane":
+        return "Plane"
+    if canonical == "heat":
+        return "Heat"
+    return "Matte"
+
+
+def _depth_view_button_label(mode: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    canonical = normalize_depth_view_mode(mode)
+    labels = {
+        "off": "Off",
+        "matte": "Matte",
+        "distance": "Distance",
+        "plane": "Plane",
+        "heat": "Heat",
+        "inverted_grayscale": "Inverted",
+    }
+    return labels.get(canonical, canonical)
 
 
 def _apply_jkl_transport(self, command: str) -> bool:

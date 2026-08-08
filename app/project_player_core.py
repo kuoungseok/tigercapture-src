@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
+import time
 
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -104,7 +105,7 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
         from app.node_mask import evaluate_node_masks
         mask = evaluate_node_masks(masks, rgb, frame_idx) if masks else None
         invert = bool(getattr(node_item, "blur_invert_mask", True))
-        return bp.apply_with_mask(rgb, mask, invert_mask=invert)
+        return _preserve_encoded_matte(rgb, bp.apply_with_mask(rgb, mask, invert_mask=invert))
     ep = getattr(node_item, "effect_params", None)
     if ep is not None:
         if ep.is_identity():
@@ -117,7 +118,7 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
                 mf = mask[..., None]
                 result = np.clip(mf * result.astype(np.float32) +
                                  (1.0 - mf) * rgb.astype(np.float32), 0, 255).astype(np.uint8)
-        return result
+        return _preserve_encoded_matte(rgb, result)
     grade = getattr(node_item, "color_grade", None)
     if grade is None or grade.is_identity():
         return rgb
@@ -129,19 +130,69 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
             graded = apply_to_rgb(rgb, grade).astype(np.float32)
             mf = mask[..., None]
             blended = mf * graded + (1.0 - mf) * rgb.astype(np.float32)
-            return np.clip(blended, 0, 255).astype(np.uint8)
-    return apply_to_rgb(rgb, grade)
+            return _preserve_encoded_matte(rgb, np.clip(blended, 0, 255).astype(np.uint8))
+    return _preserve_encoded_matte(rgb, apply_to_rgb(rgb, grade))
+
+
+def _preserve_encoded_matte(source_rgb: np.ndarray, processed_rgb: np.ndarray) -> np.ndarray:
+    try:
+        from app.video_letterbox import preserve_letterbox_matte
+
+        return preserve_letterbox_matte(source_rgb, processed_rgb)
+    except Exception:
+        return processed_rgb
 
 
 def _is_preview_color_grade_node(node_item) -> bool:
-    """Return True for nodes that should disappear in color Before preview."""
+    """Return True for nodes that should disappear in Before preview."""
+    if getattr(node_item, "bypassed", False):
+        return False
     kind = getattr(node_item, "NODE_KIND", "serial")
     if kind == "blur":
-        return False
+        blur_params = getattr(node_item, "blur_params", None)
+        if blur_params is None:
+            return False
+        try:
+            return not blur_params.is_identity()
+        except Exception:
+            return True
     if getattr(node_item, "effect_params", None) is not None:
-        return False
+        effect_params = getattr(node_item, "effect_params", None)
+        try:
+            return not effect_params.is_identity()
+        except Exception:
+            return True
     grade = getattr(node_item, "color_grade", None)
     return grade is not None and not grade.is_identity()
+
+
+def _preview_compare_content_bounds(rgb: np.ndarray) -> tuple[int, int, int, int]:
+    """Return the non-letterbox content bounds for preview comparison.
+
+    The compare renderer is preview-only. If the source frame contains encoded
+    letterbox/pillarbox matte, grading the whole right half makes the matte
+    look like it changed too. Detect only very dark, low-variance edge strips
+    and keep them outside the Before/After replacement area.
+    """
+    try:
+        arr = np.asarray(rgb)
+        h, w = arr.shape[:2]
+        from app.video_letterbox import detect_letterbox_bands
+
+        detection = detect_letterbox_bands(
+            arr,
+            settings={
+                "letterbox_max_matte_fraction": 0.82,
+                "letterbox_max_edge_fraction": 0.48,
+                "letterbox_max_one_sided_fraction": 0.20,
+            },
+        )
+        if bool(detection.get("ok")):
+            x, y, cw, ch = detection.get("content_rect") or [0, 0, w, h]
+            return int(y), int(y + ch), int(x), int(x + cw)
+        return 0, h, 0, w
+    except Exception:
+        return 0, 0, 0, 0
 
 
 def _apply_node_chain_preview_compare(
@@ -181,9 +232,11 @@ def _apply_node_chain_preview_compare(
         h, w = after.shape[:2]
         if h <= 0 or w <= 2:
             return after
-        split_x = max(1, min(w - 2, w // 2))
-        mixed = after.copy()
-        mixed[:, :split_x] = before[:, :split_x]
+        y0, y1, x0, x1 = _preview_compare_content_bounds(before)
+        split_x = max(x0 + 1, min(x1 - 1, (x0 + x1) // 2))
+        mixed = before.copy()
+        if y1 > y0 and x1 > split_x:
+            mixed[y0:y1, split_x:x1] = after[y0:y1, split_x:x1]
         return mixed
     except Exception:
         return after
@@ -266,11 +319,18 @@ class ProjectPlayer(QObject):
         self._last_rendered_clip_path: "Path | None" = None
         self._last_preview_frame_cache: dict | None = None
         self._position_ms: int = 0
+        self._seek_retry_serial: int = 0
         self._duration_ms: int = 0
         self._state: PlayerState = PlayerState.STOPPED
         self._current_segment_speed: float = 1.0
         self._bounded_play_end_ms: int | None = None
         self._bounded_play_return_ms: int | None = None
+        self._last_playback_wall_s: float | None = None
+        self._playback_fractional_ms: float = 0.0
+        self._preview_quality_mode: str = "auto"
+        self._preview_frame_drop_allowed: bool = True
+        self._preview_frame_drop_count: int = 0
+        self._last_tick_advance_ms: int = 0
         # Phase 7: shuttle gear set by the Sony jog/shuttle dial.
         # Multiplied INTO the per-segment speed so e.g. a 4× shuttle
         # over a 2× speed segment plays at 8×. ``1.0`` is the neutral
@@ -294,6 +354,9 @@ class ProjectPlayer(QObject):
         self._live2d_actor_tracks: list = []  # list[Live2DActorTrack]
         self._ar_pbr_tracks: list[dict] = []
         self._mmd_tracks: list[dict] = []
+        self._motion_compositions: dict = {}
+        self._motion_clips: list = []
+        self._motion_renderer = None
         self._mmd_model_cache: dict[str, object] = {}
         self._mmd_motion_cache: dict[str, object | None] = {}
         self._mmd_physics_cache: dict[str, object] = {}
@@ -334,7 +397,43 @@ class ProjectPlayer(QObject):
 
     def set_project_settings(self, settings: dict | None) -> None:
         self._project_settings = dict(settings or {})
+        self._preview_quality_mode = self._preview_quality_mode_from_settings(
+            self._project_settings
+        )
+        self._preview_frame_drop_allowed = self._preview_frame_drop_allowed_from_settings(
+            self._project_settings
+        )
         self._last_preview_frame_cache = None
+
+    @staticmethod
+    def _preview_quality_mode_from_settings(settings: dict | None) -> str:
+        try:
+            from app.preview_performance_policy import normalize_preview_quality_mode
+        except Exception:
+            normalize_preview_quality_mode = lambda value: "auto"
+        if not isinstance(settings, dict):
+            return "auto"
+        preview = settings.get("preview")
+        raw = None
+        if isinstance(preview, dict):
+            raw = preview.get("quality_mode") or preview.get("mode")
+        if raw is None:
+            raw = settings.get("preview_quality_mode")
+        return normalize_preview_quality_mode(raw)
+
+    @classmethod
+    def _preview_frame_drop_allowed_from_settings(cls, settings: dict | None) -> bool:
+        if not isinstance(settings, dict):
+            return True
+        preview = settings.get("preview")
+        raw = None
+        if isinstance(preview, dict):
+            raw = preview.get("frame_drop_allowed")
+        if raw is None:
+            raw = settings.get("preview_frame_drop_allowed")
+        if raw is not None:
+            return bool(raw)
+        return cls._preview_quality_mode_from_settings(settings) != "quality"
 
     @staticmethod
     def _preview_decode_height_from_settings(settings: dict | None) -> int | None:
@@ -347,6 +446,7 @@ class ProjectPlayer(QObject):
         """
         if not isinstance(settings, dict):
             return None
+        mode = ProjectPlayer._preview_quality_mode_from_settings(settings)
         candidates: list[object] = [
             settings.get("preview_decode_height"),
             settings.get("preview_height"),
@@ -368,7 +468,20 @@ class ProjectPlayer(QObject):
             if value <= 0:
                 return 0
             return max(240, min(2160, value))
+        if mode == "quality":
+            return 0
+        if mode == "performance":
+            return 540
         return None
+
+    def preview_playback_diagnostics(self) -> dict[str, object]:
+        return {
+            "quality_mode": str(getattr(self, "_preview_quality_mode", "auto")),
+            "frame_drop_allowed": bool(getattr(self, "_preview_frame_drop_allowed", True)),
+            "frame_drop_count": int(getattr(self, "_preview_frame_drop_count", 0) or 0),
+            "last_tick_advance_ms": int(getattr(self, "_last_tick_advance_ms", 0) or 0),
+            "preview_decode_height": self._preview_decode_height_hint(),
+        }
 
     def _preview_decode_height_hint(self) -> int | None:
         return self._preview_decode_height_from_settings(
@@ -428,6 +541,7 @@ class ProjectPlayer(QObject):
         playback continues (showing blank) until the audio ends.
         """
         from app.video_decoder import open_decoder
+        from app.image_media import DEFAULT_IMAGE_DURATION_MS, is_image_path
 
         def _sync_track_decoder_metadata(track, decoder) -> None:
             fps = float(getattr(decoder, "fps", 0.0) or 0.0)
@@ -460,11 +574,14 @@ class ProjectPlayer(QObject):
                 sp = getattr(clip, "source_path", None)
                 if sp is not None:
                     clip_path = Path(sp)
+                    if is_image_path(clip_path):
+                        continue
                     active_paths.add(clip_path)
                     if track_source is None or clip_path != track_source:
                         eager_clip_paths.add(clip_path)
             if track_source is not None:
-                active_paths.add(track_source)
+                if not is_image_path(track_source):
+                    active_paths.add(track_source)
         # Release per-path decoders whose source is no longer referenced.
         for p in list(self._path_caps.keys()):
             if p not in active_paths:
@@ -499,6 +616,8 @@ class ProjectPlayer(QObject):
                     if sp is None:
                         continue
                     sp = Path(sp)
+                    if is_image_path(sp):
+                        continue
                     if sp in self._path_caps:
                         continue  # already open
                     hdr_info = getattr(t, "hdr_info", None)
@@ -519,6 +638,11 @@ class ProjectPlayer(QObject):
             # Callers re-call ``refresh_tracks`` after any change that
             # would invalidate the decoder.
             sp = Path(t.source_path)
+            if is_image_path(sp):
+                self._release_cap(t.id)
+                if int(getattr(t, "duration_ms", 0) or 0) <= 0:
+                    t.duration_ms = DEFAULT_IMAGE_DURATION_MS
+                continue
             if sp in self._path_caps and self._caps.get(t.id) is None:
                 decoder = self._path_caps[sp]
                 self._caps[t.id] = decoder
@@ -632,6 +756,7 @@ class ProjectPlayer(QObject):
             is_performance_source_clip,
             is_performance_source_track,
         )
+        from app.image_media import is_image_path
 
         for t in reversed(self._tracks):
             # PIP tracks are overlay-only — skip them for the base render.
@@ -641,10 +766,10 @@ class ProjectPlayer(QObject):
                 continue
             track_clips = self._clips_view.get(t.id, ())
             if t.source_path is None:
-                # Multi-source track: only active if it has clips with decoders.
+                # Multi-source track: active if it has clips with decoders or static images.
                 if not any(
                     getattr(c, "source_path", None) is not None
-                    and Path(c.source_path) in self._path_caps
+                    and (is_image_path(c.source_path) or Path(c.source_path) in self._path_caps)
                     for c in _source_clips_for_track(t)
                 ):
                     continue
@@ -652,7 +777,7 @@ class ProjectPlayer(QObject):
                 # Legacy single-source: decoder may be in _caps or _path_caps.
                 if t.id not in self._caps and not (
                     t.source_path is not None
-                    and Path(t.source_path) in self._path_caps
+                    and (is_image_path(t.source_path) or Path(t.source_path) in self._path_caps)
                 ):
                     continue
             for clip in track_clips:
@@ -663,7 +788,7 @@ class ProjectPlayer(QObject):
                         return t, clip
                     # For multi-source clips, also verify a decoder exists.
                     sp = getattr(clip, "source_path", None)
-                    if sp is not None and Path(sp) not in self._path_caps:
+                    if sp is not None and not is_image_path(sp) and Path(sp) not in self._path_caps:
                         continue
                     return t, clip
         return None
@@ -686,6 +811,8 @@ class ProjectPlayer(QObject):
             return
         if self._shuttle_rate <= 0.0:
             self._shuttle_rate = 1.0
+        self._last_playback_wall_s = time.monotonic()
+        self._playback_fractional_ms = 0.0
         self._update_interval()
         self._timer.start()
         self._set_state(PlayerState.PLAYING)
@@ -706,6 +833,8 @@ class ProjectPlayer(QObject):
 
     def pause(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         self._bounded_play_end_ms = None
         self._bounded_play_return_ms = None
         self._set_state(PlayerState.PAUSED)
@@ -718,10 +847,14 @@ class ProjectPlayer(QObject):
 
     def stop(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         self._set_state(PlayerState.STOPPED)
 
     def release(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         for tid in list(self._caps.keys()):
             self._release_cap(tid)
         executor = getattr(self, "_ar_pbr_asset_import_executor", None)
@@ -787,6 +920,8 @@ class ProjectPlayer(QObject):
             return
         self._shuttle_rate = float(rate)
         if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
             self._update_interval()
 
     def set_speed(self, speed: float) -> None:
@@ -796,13 +931,70 @@ class ProjectPlayer(QObject):
         except Exception:
             self._current_segment_speed = 1.0
         if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
             self._update_interval()
+
+    def _playback_advance_ms(self) -> int:
+        """Return wall-clock playback advance for one preview tick.
+
+        Video rendering can be slower than the timer interval for heavy sources
+        such as 1080p AV1.  Project time must follow elapsed wall time so audio
+        keeps playing continuously and late video frames are skipped instead of
+        forcing repeated audio seeks.  Direct unit-test calls that happen
+        earlier than the nominal frame interval still advance by one reference
+        frame to preserve deterministic tick semantics.
+        """
+        reference_ms = 1000.0 / self.REFERENCE_FPS
+        now = time.monotonic()
+        last = self._last_playback_wall_s
+        self._last_playback_wall_s = now
+        elapsed_ms = reference_ms if last is None else max(reference_ms, (now - last) * 1000.0)
+        elapsed_ms = min(elapsed_ms, 1000.0)
+        if not bool(getattr(self, "_preview_frame_drop_allowed", True)):
+            elapsed_ms = min(elapsed_ms, reference_ms)
+        effective = max(0.0, float(self._current_segment_speed) * max(0.0, float(self._shuttle_rate)))
+        advance = elapsed_ms * max(0.05, effective) + float(self._playback_fractional_ms)
+        whole = max(1, int(advance))
+        self._playback_fractional_ms = max(0.0, advance - whole)
+        self._last_tick_advance_ms = whole
+        return whole
+
+    def _record_playback_frame_drop(self, advance_ms: int) -> None:
+        if not bool(getattr(self, "_preview_frame_drop_allowed", True)):
+            return
+        reference_ms = 1000.0 / self.REFERENCE_FPS
+        if float(advance_ms) < reference_ms * 1.5:
+            return
+        dropped = max(1, int(round(float(advance_ms) / max(1.0, reference_ms))) - 1)
+        self._preview_frame_drop_count += dropped
+        count = int(getattr(self, "_preview_frame_drop_count", 0) or 0)
+        if count != dropped and count % 30 != 0:
+            return
+        try:
+            from app.loading_performance import record_loading_event
+
+            record_loading_event(
+                "preview.playback",
+                "frame_drop",
+                status="ok",
+                detail=f"advance_ms={int(advance_ms)}",
+                metadata={
+                    "advance_ms": int(advance_ms),
+                    "dropped_frames": dropped,
+                    "total_dropped_frames": count,
+                    "quality_mode": str(getattr(self, "_preview_quality_mode", "auto")),
+                },
+            )
+        except Exception:
+            pass
 
     def _tick(self) -> None:
         if self._duration_ms <= 0:
             self.pause()
             return
-        advance_ms = int(round(1000.0 / self.REFERENCE_FPS))
+        advance_ms = self._playback_advance_ms()
+        self._record_playback_frame_drop(advance_ms)
         new_pos = self._position_ms + advance_ms
         bounded_end = self._bounded_play_end_ms
         playback_end = self._duration_ms if bounded_end is None else min(int(bounded_end), int(self._duration_ms))
@@ -844,13 +1036,45 @@ class ProjectPlayer(QObject):
         ms = max(0, min(int(ms), self._duration_ms))
         same_position = ms == self._position_ms
         self._position_ms = ms
+        if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
+        self._seek_retry_serial += 1
+        retry_serial = self._seek_retry_serial
         if __debug__:
             from app.perf_monitor import perf_span
             with perf_span("preview.seek.render", detail=f"pos={ms}"):
-                self._render_frame_at(ms, force_seek=not same_position, allow_cached=same_position)
+                rendered = self._render_frame_at(
+                    ms,
+                    force_seek=not same_position,
+                    allow_cached=same_position,
+                )
         else:
-            self._render_frame_at(ms, force_seek=not same_position, allow_cached=same_position)
+            rendered = self._render_frame_at(
+                ms,
+                force_seek=not same_position,
+                allow_cached=same_position,
+            )
         self.position_changed.emit(ms)
+        if not rendered:
+            self._schedule_seek_render_retry(ms, retry_serial, attempt=0)
+
+    def _schedule_seek_render_retry(self, ms: int, serial: int, *, attempt: int) -> None:
+        delays = (45, 120, 260, 520)
+        if attempt >= len(delays):
+            return
+        delay_ms = delays[attempt]
+
+        def _retry() -> None:
+            if serial != self._seek_retry_serial:
+                return
+            if int(ms) != int(self._position_ms):
+                return
+            rendered = self._render_frame_at(int(ms), force_seek=True, allow_cached=True)
+            if not rendered:
+                self._schedule_seek_render_retry(int(ms), serial, attempt=attempt + 1)
+
+        QTimer.singleShot(delay_ms, _retry)
 
     def refresh_current_frame(self) -> None:
         """Re-render at the current playhead — used when the grade
@@ -1329,15 +1553,8 @@ class ProjectPlayer(QObject):
     def _emit_blank(self) -> None:
         from app.perf_monitor import stage_threshold_ms
 
-        try:
-            from app.vtuber.performance_source import GREEN_CHROMA_RGBA
-
-            color = tuple(int(v) for v in GREEN_CHROMA_RGBA[:3])
-        except Exception:
-            color = (0, 255, 0)
         rgb = np.zeros((9, 16, 3), dtype=np.uint8)
-        rgb[:, :] = color
-        detail = f"pos={self._position_ms} green_chroma=1"
+        detail = f"pos={self._position_ms} blank_black=1"
         self._emit_rgb_frame(rgb, None, detail, stage_threshold_ms())
 
 
@@ -1382,6 +1599,7 @@ ProjectPlayer._ar_pbr_apply_cached_runtime_anchor = staticmethod(_project_player
 ProjectPlayer._ar_pbr_runtime_tracks_for_frame = _project_player_ar_pbr_workflow._ar_pbr_runtime_tracks_for_frame
 ProjectPlayer._ar_pbr_camera_solution_for_tracks = _project_player_ar_pbr_workflow._ar_pbr_camera_solution_for_tracks
 ProjectPlayer._ar_pbr_depth_frame_for_tracks = _project_player_ar_pbr_workflow._ar_pbr_depth_frame_for_tracks
+ProjectPlayer._ar_pbr_depth_view_context_for_frame = _project_player_ar_pbr_workflow._ar_pbr_depth_view_context_for_frame
 ProjectPlayer._ar_pbr_gpu_preview_enabled = staticmethod(_project_player_ar_pbr_workflow._ar_pbr_gpu_preview_enabled)
 ProjectPlayer._ar_pbr_preview_renderer_mode = staticmethod(_project_player_ar_pbr_workflow._ar_pbr_preview_renderer_mode)
 ProjectPlayer._ar_pbr_should_use_full_gpu_preview = _project_player_ar_pbr_workflow._ar_pbr_should_use_full_gpu_preview
@@ -1442,6 +1660,12 @@ ProjectPlayer._render_live2d_only = _project_player_actor_workflow._render_live2
 ProjectPlayer._render_pip_overlays = _project_player_actor_workflow._render_pip_overlays
 
 from app import project_player_render_workflow as _project_player_render_workflow
+
+from app import project_player_motion_workflow as _project_player_motion_workflow
+
+ProjectPlayer.set_motion_state = _project_player_motion_workflow.set_motion_state
+ProjectPlayer.motion_state = _project_player_motion_workflow.motion_state
+ProjectPlayer._apply_motion_clips = _project_player_motion_workflow._apply_motion_clips
 
 ProjectPlayer._emit_rgb_frame = _project_player_render_workflow._emit_rgb_frame
 ProjectPlayer._decode_clip_rgb_for_nested = _project_player_render_workflow._decode_clip_rgb_for_nested

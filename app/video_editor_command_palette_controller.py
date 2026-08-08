@@ -114,7 +114,18 @@ def _refresh_command_bar_responsive(self) -> None:
         widget = getattr(self, attr, None)
         if widget is not None:
             widget.setVisible(False if catalog_grouped else not tight)
-    for attr in ("language_btn", "proxy_btn", "proxy_manage_btn"):
+    language_btn = getattr(self, "language_btn", None)
+    if language_btn is not None:
+        language_btn.setVisible(True)
+        if catalog_grouped:
+            apply_catalog_command_button_size(language_btn, left_rail=left_rail)
+        else:
+            language_btn.setFixedSize(42, 40)
+            try:
+                language_btn.setIconSize(icon_size(18))
+            except Exception:
+                pass
+    for attr in ("proxy_btn", "proxy_manage_btn"):
         widget = getattr(self, attr, None)
         if widget is not None:
             widget.setVisible(False if catalog_grouped else not tiny)
@@ -292,6 +303,7 @@ def _compact_command_bar(self, toolbar: QHBoxLayout) -> None:
         ("Standard Workspace", lambda: self._on_workspace_mode_selected(False)),
         ("Simple Workspace", lambda: self._on_workspace_mode_selected(True)),
         ("Toggle Secondary Panels", lambda: self.screenstudio_advanced_btn.toggle()),
+        ("Reset Editor Layout", self._reset_editor_layout_to_default),
         None,
         ("Viewer Popout", self._toggle_preview_popout),
         ("Timeline Popout", self._toggle_timeline_popout),
@@ -381,7 +393,6 @@ def _compact_command_bar(self, toolbar: QHBoxLayout) -> None:
         self.relink_project_btn,
         self.media_health_btn,
         self.command_palette_btn,
-        self.language_btn,
         self.template_browser_btn,
         self.creator_assist_btn,
         self.script_edit_btn,
@@ -470,6 +481,7 @@ def _open_command_palette(self) -> None:
         {"kind": "command", "label": "Run preset application corpus", "search": "preset application corpus real project qa export parity", "command": self._show_preset_application_corpus_report, "icon": "scope", "shortcut": "Corpus", "detail": "Scan real project fixtures and verify one-click preset plans plus export-bake parity."},
         {"kind": "command", "label": "Manage preset preview cache", "search": "preset preview cache warm clear thumbnail", "command": self._manage_preset_preview_cache, "icon": "proxy", "shortcut": "Cache", "detail": "Warm or clear static/current-frame preset thumbnail caches."},
         {"kind": "command", "label": "Open visual QA viewer", "search": "visual qa screenshot baseline regression layout", "command": self._open_visual_qa_viewer, "icon": "camera", "shortcut": "Visual", "detail": "Browse QA captures and approve a selected capture as a baseline."},
+        {"kind": "command", "label": "Reset Editor Layout", "search": "view workspace splitter layout reset default panels resize", "command": self._reset_editor_layout_to_default, "icon": "grid", "shortcut": "View", "detail": "Restore the editor panel splitters to the default resizable workspace proportions."},
         {"kind": "command", "label": "Run productization loop", "search": "productization commercial polish screen studio ui render media recovery starter template qa", "command": self._show_productization_loop_report, "icon": "spark", "shortcut": "Product", "detail": "Build one consolidated report for UI, presets, render queue, media pool, Color/Audio, actor QA, recovery, and starter templates."},
         {"kind": "command", "label": "Open QA Dashboard", "search": "qa dashboard trends baseline failures timeline fuzzer color audio actor render", "command": self._open_qa_dashboard, "icon": "scope", "shortcut": "QA", "detail": "Open the product QA dashboard with recent reports, failing areas, and baseline comparisons."},
         {"kind": "command", "label": "Open Health Center", "search": "health center crash qa media proxy render actor diagnostic", "command": self._open_health_center, "icon": "scope", "shortcut": "Health", "detail": "Open the unified diagnostic center for crash, QA, render, media/proxy, and actor risks."},

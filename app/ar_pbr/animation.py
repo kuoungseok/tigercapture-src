@@ -94,8 +94,7 @@ def animated_vertices_for_geometry(
 
     model = _model_by_id(descriptor).get(model_id, {})
     models = _model_by_id(descriptor)
-    units = descriptor.get("units") if isinstance(descriptor.get("units"), Mapping) else {}
-    unit_scale = _float(units.get("scale_to_meters"), 1.0)
+    unit_scale = _animation_unit_scale(descriptor)
     center = _bounds_center(geometry.get("bounds"))
     out_vertices: Sequence[Any] | list[Any] = vertices
 
@@ -191,6 +190,17 @@ def _apply_skin_animation(
     )
     if matrix_skinned is not None:
         return matrix_skinned
+    reference_pose_skinned = _apply_reference_pose_skin_animation(
+        vertices,
+        geometry=geometry,
+        descriptor=descriptor,
+        model_curves_by_id=model_curves_by_id,
+        models=models,
+        unit_scale=unit_scale,
+        local_ms=local_ms,
+    )
+    if reference_pose_skinned is not None:
+        return reference_pose_skinned
     parent_by_id = _model_parent_map(descriptor)
     bind_poses: dict[str, dict[str, list[float]]] = {}
     anim_poses: dict[str, dict[str, list[float]]] = {}
@@ -198,13 +208,9 @@ def _apply_skin_animation(
     changed = False
     for idx, raw_vertex in enumerate(vertices):
         v = _vec3(raw_vertex, (0.0, 0.0, 0.0))
-        rows = weights[idx] if idx < len(weights) else []
-        if not isinstance(rows, list):
-            rows = []
+        rows = _normalized_weight_rows(weights[idx] if idx < len(weights) else [])
         delta = [0.0, 0.0, 0.0]
         for row in rows[:8]:
-            if not isinstance(row, Mapping):
-                continue
             bone_id = str(row.get("bone_id") or row.get("model_id") or "")
             try:
                 weight = max(0.0, min(1.0, float(row.get("weight", 0.0) or 0.0)))
@@ -244,6 +250,99 @@ def _apply_skin_animation(
         else:
             out.append(v)
     return out if changed else vertices
+
+
+def _apply_reference_pose_skin_animation(
+    vertices: Sequence[Any],
+    *,
+    geometry: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    model_curves_by_id: Mapping[str, Any],
+    models: Mapping[str, Mapping[str, Any]],
+    unit_scale: float,
+    local_ms: float,
+) -> list[list[float]] | None:
+    weights = geometry.get("skin_weights")
+    if not isinstance(weights, list) or not weights:
+        return None
+    try:
+        import numpy as np
+    except Exception:
+        return None
+
+    vertices_np = np.asarray(vertices, dtype=np.float64)
+    if vertices_np.ndim != 2 or vertices_np.shape[1] != 3:
+        return None
+    joint_keys, joint_indices, weight_values = _skin_weight_arrays(geometry, len(vertices_np))
+    if not joint_keys:
+        return None
+
+    parent_by_id = _model_parent_map(descriptor)
+    identity = np.eye(4, dtype=np.float64)
+    skin_mats: list[Any] = []
+    animated_matrix_count = 0
+    for joint_id in joint_keys:
+        try:
+            bind = _global_matrix(
+                joint_id,
+                models=models,
+                parent_by_id=parent_by_id,
+                model_curves_by_id=model_curves_by_id,
+                unit_scale=unit_scale,
+                local_ms=local_ms,
+                animated=False,
+            )
+            anim = _global_matrix(
+                joint_id,
+                models=models,
+                parent_by_id=parent_by_id,
+                model_curves_by_id=model_curves_by_id,
+                unit_scale=unit_scale,
+                local_ms=local_ms,
+                animated=True,
+            )
+            mat = anim @ np.linalg.inv(bind)
+        except Exception:
+            mat = identity
+        if not np.allclose(mat, identity, atol=1.0e-8):
+            animated_matrix_count += 1
+        skin_mats.append(mat)
+    if animated_matrix_count <= 0:
+        return list(vertices)
+
+    hv = np.concatenate(
+        [vertices_np, np.ones((len(vertices_np), 1), dtype=np.float64)],
+        axis=1,
+    )
+    accum = np.zeros((len(vertices_np), 4), dtype=np.float64)
+    total = np.zeros((len(vertices_np),), dtype=np.float64)
+    slot_count = joint_indices.shape[1]
+    for slot in range(slot_count):
+        ids = joint_indices[:, slot]
+        ws = weight_values[:, slot].astype(np.float64, copy=False)
+        valid = (ids >= 0) & (ws > 1.0e-8)
+        if not np.any(valid):
+            continue
+        for joint_index_raw in np.unique(ids[valid]):
+            joint_index = int(joint_index_raw)
+            mat = skin_mats[joint_index]
+            mask = valid & (ids == joint_index)
+            transformed = hv[mask] @ mat.T
+            accum[mask] += transformed * ws[mask, None]
+            total[mask] += ws[mask]
+
+    out = vertices_np.copy()
+    valid_total = total > 1.0e-8
+    if np.any(valid_total):
+        skinned = accum[valid_total]
+        w = skinned[:, 3:4]
+        nonzero_w = np.abs(w[:, 0]) > 1.0e-8
+        skinned_xyz = skinned[:, :3]
+        skinned_xyz[nonzero_w] = skinned_xyz[nonzero_w] / w[nonzero_w]
+        out[valid_total] = skinned_xyz
+    if not np.any(np.abs(out - vertices_np) > 1.0e-8):
+        return list(vertices)
+    return out.astype(float).tolist()
 
 
 def _apply_matrix_skin_animation(
@@ -296,14 +395,10 @@ def _apply_matrix_skin_animation(
     for idx, raw_vertex in enumerate(vertices):
         v = _vec3(raw_vertex, (0.0, 0.0, 0.0))
         hv = np.asarray([v[0], v[1], v[2], 1.0], dtype=np.float64)
-        rows = weights[idx] if idx < len(weights) else []
-        if not isinstance(rows, list):
-            rows = []
+        rows = _normalized_weight_rows(weights[idx] if idx < len(weights) else [])
         accum = np.zeros(4, dtype=np.float64)
         total = 0.0
         for row in rows[:8]:
-            if not isinstance(row, Mapping):
-                continue
             bone_id = str(row.get("bone_id") or row.get("model_id") or "")
             mat = skin_mats.get(bone_id)
             if mat is None:
@@ -338,6 +433,113 @@ def descriptor_animation_diagnostics(descriptor: Mapping[str, Any]) -> dict[str,
         "has_static_mesh_animation": any(bool((clip.get("model_curves") or {})) for clip in clips),
         "has_skeletal_animation": bool(bones) and bool(clips),
     }
+
+
+def skin_matrices_for_clip(
+    descriptor: Mapping[str, Any],
+    track: Mapping[str, Any],
+    time_ms: int,
+) -> dict[str, Any] | None:
+    """Build a bone palette for GPU skinning at the requested timeline time."""
+
+    descriptor = _unwrap_descriptor(descriptor)
+    clip = select_animation_clip(descriptor, track)
+    if clip is None:
+        return None
+    local_ms = animation_time_ms(track, int(time_ms), clip)
+    if local_ms is None:
+        return None
+    try:
+        import numpy as np
+    except Exception:
+        return None
+
+    bones = [bone for bone in descriptor.get("bones", []) or [] if isinstance(bone, Mapping)]
+    if not bones:
+        return None
+    curves = clip.get("model_curves") if isinstance(clip.get("model_curves"), Mapping) else {}
+    if not curves:
+        return None
+
+    models = _model_by_id(descriptor)
+    parent_by_id = _model_parent_map(descriptor)
+    unit_scale = _animation_unit_scale(descriptor)
+    max_index = max(_int(bone.get("index"), idx) for idx, bone in enumerate(bones))
+    matrices = np.repeat(np.eye(4, dtype=np.float32)[None, :, :], max_index + 1, axis=0)
+    animated_count = 0
+    identity = np.eye(4, dtype=np.float64)
+    global_cache: dict[tuple[str, bool], Any] = {}
+
+    def global_matrix_cached(model_id: str, *, animated: bool, stack: tuple[str, ...] = ()):
+        key = (model_id, animated)
+        if key in global_cache:
+            return global_cache[key]
+        local = _local_matrix(
+            model_id,
+            models=models,
+            model_curves_by_id=curves,
+            unit_scale=unit_scale,
+            local_ms=local_ms,
+            animated=animated,
+        )
+        parent_id = str(parent_by_id.get(model_id) or "")
+        if parent_id and parent_id not in stack:
+            value = global_matrix_cached(parent_id, animated=animated, stack=(*stack, model_id)) @ local
+        else:
+            value = local
+        global_cache[key] = value
+        return value
+
+    for idx, bone in enumerate(bones):
+        bone_id = str(bone.get("id") or f"bone_{idx}")
+        bone_index = _int(bone.get("index"), idx)
+        if bone_index < 0 or bone_index >= len(matrices):
+            continue
+        try:
+            bind = global_matrix_cached(bone_id, animated=False)
+            anim = global_matrix_cached(bone_id, animated=True)
+            mat = anim @ np.linalg.inv(bind)
+        except Exception:
+            mat = identity
+        if not np.allclose(mat, identity, atol=1.0e-8):
+            animated_count += 1
+        matrices[bone_index] = np.asarray(mat, dtype=np.float32)
+
+    return {
+        "matrices": matrices,
+        "clip": str(clip.get("id") or clip.get("name") or ""),
+        "local_ms": float(local_ms),
+        "bone_count": int(len(matrices)),
+        "animated_bone_count": int(animated_count),
+    }
+
+
+def _unwrap_descriptor(descriptor: Mapping[str, Any]) -> Mapping[str, Any]:
+    nested = descriptor.get("descriptor") if isinstance(descriptor, Mapping) else None
+    return nested if isinstance(nested, Mapping) else descriptor
+
+
+def _animation_unit_scale(descriptor: Mapping[str, Any]) -> float:
+    """Return the transform scale to use for animation bone translations.
+
+    Unreal skeletal exports already store vertex and reference-bone positions in
+    Tiger Studio runtime meters. The `units.scale_to_meters` field still records
+    the original source unit, so applying it again folds the Manny skeleton down
+    to 1/100 scale during animation. Action Sequencer A/B stage-pair descriptors
+    wrap that same Unreal skeletal payload, so they must preserve the same rule.
+    """
+
+    schema = str(descriptor.get("schema") or "")
+    source_format = str(descriptor.get("source_format") or "")
+    if (
+        schema == "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1"
+        or schema == "tigerstudio.ar_pbr.action_sequencer_stage_pair.v1"
+        or source_format == "unreal_skeletal_mesh"
+        or source_format == "action_sequencer_stage_pair"
+    ):
+        return 1.0
+    units = descriptor.get("units") if isinstance(descriptor.get("units"), Mapping) else {}
+    return _float(units.get("scale_to_meters"), 1.0)
 
 
 def _int(value: Any, default: int) -> int:
@@ -387,11 +589,18 @@ def _bounds_center(value: Any) -> list[float]:
 
 
 def _model_by_id(descriptor: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
-    return {
+    out = {
         str(model.get("id") or ""): model
         for model in descriptor.get("models", []) or []
         if isinstance(model, Mapping)
     }
+    for bone in descriptor.get("bones", []) or []:
+        if not isinstance(bone, Mapping):
+            continue
+        bone_id = str(bone.get("id") or "")
+        if bone_id and bone_id not in out:
+            out[bone_id] = bone
+    return out
 
 
 def _model_parent_map(descriptor: Mapping[str, Any]) -> dict[str, str]:
@@ -403,14 +612,96 @@ def _model_parent_map(descriptor: Mapping[str, Any]) -> dict[str, str]:
         parent_id = str(model.get("parent_id") or "")
         if model_id and parent_id:
             out[model_id] = parent_id
-    for bone in descriptor.get("bones", []) or []:
-        if not isinstance(bone, Mapping):
-            continue
+    bones = [bone for bone in descriptor.get("bones", []) or [] if isinstance(bone, Mapping)]
+    bone_id_by_index = {
+        _int(bone.get("index"), -1): str(bone.get("id") or "")
+        for bone in bones
+        if str(bone.get("id") or "")
+    }
+    for bone in bones:
         bone_id = str(bone.get("id") or "")
         parent_id = str(bone.get("parent_id") or "")
+        if not parent_id:
+            parent_index = _int(bone.get("parent_index"), -1)
+            parent_id = bone_id_by_index.get(parent_index, "")
         if bone_id and parent_id:
             out[bone_id] = parent_id
     return out
+
+
+def _normalized_weight_rows(value: Any) -> list[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        joints = value.get("joints")
+        weights = value.get("weights")
+        if isinstance(joints, (list, tuple)) and isinstance(weights, (list, tuple)):
+            rows: list[Mapping[str, Any]] = []
+            for idx, joint in enumerate(joints):
+                weight = weights[idx] if idx < len(weights) else 0.0
+                rows.append({"bone_id": f"bone_{_int(joint, 0)}", "weight": weight})
+            return rows
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, Mapping)]
+    return []
+
+
+def _skin_weight_arrays(
+    geometry: Mapping[str, Any],
+    vertex_count: int,
+    *,
+    max_influences: int = 8,
+):
+    try:
+        import numpy as np
+    except Exception:
+        return [], None, None
+    cache_key = "_runtime_skin_weight_arrays_v1"
+    if isinstance(geometry, dict):
+        cache = geometry.get(cache_key)
+        if isinstance(cache, dict) and cache.get("vertex_count") == vertex_count and cache.get("max_influences") == max_influences:
+            return cache.get("joint_keys") or [], cache.get("joint_indices"), cache.get("weights")
+    weights_raw = geometry.get("skin_weights")
+    if not isinstance(weights_raw, list):
+        return [], None, None
+
+    joint_keys: list[str] = []
+    joint_index_by_key: dict[str, int] = {}
+    joint_indices = np.full((vertex_count, max_influences), -1, dtype=np.int32)
+    weight_values = np.zeros((vertex_count, max_influences), dtype=np.float32)
+
+    for vertex_index in range(min(vertex_count, len(weights_raw))):
+        rows = _normalized_weight_rows(weights_raw[vertex_index])
+        slot = 0
+        for row in rows:
+            if slot >= max_influences:
+                break
+            bone_id = str(row.get("bone_id") or row.get("model_id") or "")
+            if not bone_id:
+                continue
+            try:
+                weight = float(row.get("weight", 0.0) or 0.0)
+            except Exception:
+                weight = 0.0
+            if weight <= 1.0e-8:
+                continue
+            if bone_id not in joint_index_by_key:
+                joint_index_by_key[bone_id] = len(joint_keys)
+                joint_keys.append(bone_id)
+            joint_indices[vertex_index, slot] = joint_index_by_key[bone_id]
+            weight_values[vertex_index, slot] = max(0.0, min(1.0, weight))
+            slot += 1
+
+    totals = weight_values.sum(axis=1, keepdims=True)
+    valid = totals[:, 0] > 1.0e-8
+    weight_values[valid] = weight_values[valid] / totals[valid]
+    if isinstance(geometry, dict):
+        geometry[cache_key] = {
+            "vertex_count": vertex_count,
+            "max_influences": max_influences,
+            "joint_keys": joint_keys,
+            "joint_indices": joint_indices,
+            "weights": weight_values,
+        }
+    return joint_keys, joint_indices, weight_values
 
 
 def _local_pose(
@@ -425,14 +716,19 @@ def _local_pose(
     base_t = _vec3(model.get("translation"), (0.0, 0.0, 0.0))
     base_r = _vec3(model.get("rotation"), (0.0, 0.0, 0.0))
     base_s = _vec3(model.get("scale"), (1.0, 1.0, 1.0))
+    base_q = _vec4(model.get("rotation_quat"), (0.0, 0.0, 0.0, 1.0))
     curves = model_curves_by_id.get(model_id) if animated else None
     if isinstance(curves, Mapping):
+        q = _sample_quat(curves.get("rotation_quat"), local_ms, base_q)
+        if not isinstance(curves.get("rotation_quat"), Mapping):
+            q = _quat_from_euler_deg(*_sample_vec3(curves.get("rotation"), local_ms, base_r))
         return {
             "translation": _sample_vec3(curves.get("translation"), local_ms, base_t),
             "rotation": _sample_vec3(curves.get("rotation"), local_ms, base_r),
+            "rotation_quat": q,
             "scale": _sample_vec3(curves.get("scale"), local_ms, base_s),
         }
-    return {"translation": base_t, "rotation": base_r, "scale": base_s}
+    return {"translation": base_t, "rotation": base_r, "rotation_quat": base_q, "scale": base_s}
 
 
 def _local_matrix(
@@ -526,10 +822,11 @@ def _global_pose(
     )
     local_t = [value * unit_scale for value in local["translation"]]
     local_r = list(local["rotation"])
+    local_q = list(local.get("rotation_quat") or _quat_from_euler_deg(local_r[0], local_r[1], local_r[2]))
     local_s = list(local["scale"])
     parent_id = str(parent_by_id.get(model_id) or "")
     if not parent_id or parent_id in stack:
-        return {"translation": local_t, "rotation": local_r, "scale": local_s}
+        return {"translation": local_t, "rotation": local_r, "rotation_quat": local_q, "scale": local_s}
     parent = _global_pose(
         parent_id,
         models=models,
@@ -542,12 +839,13 @@ def _global_pose(
     )
     parent_s = parent["scale"]
     parent_r = parent["rotation"]
+    parent_q = list(parent.get("rotation_quat") or _quat_from_euler_deg(parent_r[0], parent_r[1], parent_r[2]))
     scaled_t = (
         local_t[0] * parent_s[0],
         local_t[1] * parent_s[1],
         local_t[2] * parent_s[2],
     )
-    rotated_t = _mat_mul_vec(_rotation_matrix(parent_r[0], parent_r[1], parent_r[2]), scaled_t)
+    rotated_t = _mat_mul_vec(_quat_to_mat3(parent_q), scaled_t)
     return {
         "translation": [
             parent["translation"][0] + rotated_t[0],
@@ -559,6 +857,7 @@ def _global_pose(
             parent_r[1] + local_r[1],
             parent_r[2] + local_r[2],
         ],
+        "rotation_quat": _quat_multiply(parent_q, local_q),
         "scale": [
             parent_s[0] * local_s[0],
             parent_s[1] * local_s[1],
@@ -576,6 +875,8 @@ def _deform_by_pose_delta(
     anim_t = _vec3(anim_pose.get("translation"), (0.0, 0.0, 0.0))
     bind_r = _vec3(bind_pose.get("rotation"), (0.0, 0.0, 0.0))
     anim_r = _vec3(anim_pose.get("rotation"), (0.0, 0.0, 0.0))
+    bind_q = _vec4(bind_pose.get("rotation_quat"), tuple(_quat_from_euler_deg(bind_r[0], bind_r[1], bind_r[2])))
+    anim_q = _vec4(anim_pose.get("rotation_quat"), tuple(_quat_from_euler_deg(anim_r[0], anim_r[1], anim_r[2])))
     bind_s = _vec3(bind_pose.get("scale"), (1.0, 1.0, 1.0))
     anim_s = _vec3(anim_pose.get("scale"), (1.0, 1.0, 1.0))
     ratio_s = [
@@ -588,7 +889,11 @@ def _deform_by_pose_delta(
         (vertex[1] - bind_t[1]) * ratio_s[1],
         (vertex[2] - bind_t[2]) * ratio_s[2],
     )
-    rotated = _mat_mul_vec(_rotation_matrix(delta_r[0], delta_r[1], delta_r[2]), local)
+    if bind_pose.get("rotation_quat") is not None or anim_pose.get("rotation_quat") is not None:
+        delta_q = _quat_multiply(anim_q, _quat_conjugate(bind_q))
+        rotated = _mat_mul_vec(_quat_to_mat3(delta_q), local)
+    else:
+        rotated = _mat_mul_vec(_rotation_matrix(delta_r[0], delta_r[1], delta_r[2]), local)
     return [
         anim_t[0] + rotated[0],
         anim_t[1] + rotated[1],
@@ -706,6 +1011,22 @@ def _quat_from_euler_deg(rx_deg: float, ry_deg: float, rz_deg: float) -> list[fl
         cx * cy * sz - sx * sy * cz,
         cx * cy * cz + sx * sy * sz,
     ])
+
+
+def _quat_multiply(left: Sequence[Any], right: Sequence[Any]) -> list[float]:
+    ax, ay, az, aw = _normalize_quat(left)
+    bx, by, bz, bw = _normalize_quat(right)
+    return _normalize_quat([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ])
+
+
+def _quat_conjugate(value: Sequence[Any]) -> list[float]:
+    x, y, z, w = _normalize_quat(value)
+    return [-x, -y, -z, w]
 
 
 def _quat_to_mat3(q: Sequence[Any]):

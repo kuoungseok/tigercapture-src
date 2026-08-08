@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 
 from app.audio_tracks import AudioClip, AudioTrack, probe_audio_duration_ms
 from app.i18n import tr
-from app.sound_editor_panel import SoundEditorDockWindow
 from app.video_editor_audio_widgets import SoundEditorWindow, _block_signals
 from app.video_editor_transport_workflow import _format_ms
 
@@ -144,6 +143,8 @@ def _open_sound_editor(self, tid: int, cid: int) -> None:
     track, clip = self._find_audio_clip(tid, cid)
     if clip is None or clip.source_path is None:
         return
+    from app.sound_editor_panel import SoundEditorDockWindow
+
     editor = SoundEditorDockWindow(
         clip,
         track=track,
@@ -315,6 +316,10 @@ def _on_workbench_sound_editor_changed(self) -> None:
         source = getattr(clip, "source_path", None)
         if store is not None and source is not None:
             store.touch(store.media_key(source))
+    elif target[0] == "video":
+        refresh = getattr(self, "_refresh_player_tracks", None)
+        if callable(refresh):
+            refresh()
 
 
 def _on_workbench_sound_editor_mixer_track_changed(self, track) -> None:
@@ -372,8 +377,15 @@ def _on_workbench_music_lab_action_requested(self, action_id: str, params) -> No
         render_params = {"composition_id": composition_id, "update_existing": True}
         if action_params.get("backend"):
             render_params["backend"] = action_params.get("backend")
+        if action_params.get("ai_provider"):
+            render_params["ai_provider"] = action_params.get("ai_provider")
+            render_params["create_mix"] = True
         if action_params.get("soundfont_path"):
             render_params["soundfont_path"] = action_params.get("soundfont_path")
+        if action_params.get("drum_kit_path"):
+            render_params["drum_kit_path"] = action_params.get("drum_kit_path")
+        if action_params.get("sample_library_policy"):
+            render_params["sample_library_policy"] = action_params.get("sample_library_policy")
         render = registry.execute(
             "music.render_to_timeline",
             render_params,

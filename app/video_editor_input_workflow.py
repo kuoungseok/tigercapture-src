@@ -9,7 +9,11 @@ from PySide6.QtWidgets import QMenu
 from app.audio_tracks import is_audio_path, is_video_path
 from app.effect_cards import SPINE_MIME_TYPE
 from app.i18n import tr
+from app.media_asset_routing import motion_project_paths_from_mime
 from app import video_editor_timeline_operations as _timeline_operations
+from app import video_editor_frame_repair_workflow as _frame_repair_workflow
+from app.video_editor_media_import_controller import dispatch_import_decision, route_tracks_host_drop
+from app.video_editor_timeline_pan import handle_timeline_pan_event
 from app.video_editor_transport_workflow import _bounded_seek_position
 from app.live2d.actor_lane_row import Live2DActorLaneRow
 from app.spine_editor.actor_lane_row import SpineActorLaneRow
@@ -33,6 +37,7 @@ def _tracks_drop_accepts_mime(self, mime) -> bool:
         or SpineActorLaneRow._accepts(mime)
         or self._performance_source_paths_from_mime(mime)
         or self._mmd_paths_from_mime(mime)
+        or motion_project_paths_from_mime(mime)
         or self._ar_pbr_paths_from_mime(mime)
         or self._timeline_media_paths_from_mime(mime)
     )
@@ -44,6 +49,16 @@ def dragEnterEvent(self, event) -> None:
         event.acceptProposedAction()
         return
     if self._mmd_paths_from_mime(md):
+        event.acceptProposedAction()
+        return
+    if motion_project_paths_from_mime(md):
+        event.acceptProposedAction()
+        return
+    if (
+        self._performance_source_paths_from_mime(md)
+        or self._ar_pbr_paths_from_mime(md)
+        or self._timeline_media_paths_from_mime(md)
+    ):
         event.acceptProposedAction()
         return
     if md.hasUrls():
@@ -60,6 +75,9 @@ def dragMoveEvent(self, event) -> None:
 
 
 def eventFilter(self, obj, event):
+    if handle_timeline_pan_event(self, obj, event):
+        return True
+
     # Live2D / Spine actor drag-and-drop onto the tracks host
     if _is_tracks_drop_surface(self, obj):
         if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
@@ -69,38 +87,8 @@ def eventFilter(self, obj, event):
         elif event.type() == QEvent.Type.Drop:
             mime = event.mimeData()
             drop_x = event.position().x()
-            mmd_paths = self._mmd_paths_from_mime(mime)
-            if mmd_paths:
-                margin = self._timeline_content_margin()
-                start_ms = max(0, int(
-                    (drop_x - margin) / max(1.0, self._px_per_sec) * 1000
-                ))
-                self._add_mmd_asset_to_timeline(mmd_paths, start_ms=start_ms)
-                event.acceptProposedAction()
-                return True
-            perf_paths = self._performance_source_paths_from_mime(mime)
-            if perf_paths:
-                margin = self._timeline_content_margin()
-                start_ms = max(0, int(
-                    (drop_x - margin) / max(1.0, self._px_per_sec) * 1000
-                ))
-                self._add_performance_source_clip(perf_paths[0], start_ms)
-                event.acceptProposedAction()
-                return True
-            ar_paths = self._ar_pbr_paths_from_mime(mime)
-            if ar_paths:
-                margin = self._timeline_content_margin()
-                start_ms = max(0, int(
-                    (drop_x - margin) / max(1.0, self._px_per_sec) * 1000
-                ))
-                self._add_ar_pbr_asset_to_preview(
-                    ar_paths[0],
-                    image_point=(0.5, 0.62),
-                    start_ms=start_ms,
-                )
-                event.acceptProposedAction()
-                return True
-            if self._add_timeline_media_from_mime(mime):
+            decision = route_tracks_host_drop(self, mime, drop_x=drop_x)
+            if decision.handled and dispatch_import_decision(self, decision):
                 event.acceptProposedAction()
                 return True
             if mime.hasFormat(SPINE_MIME_TYPE):
@@ -163,6 +151,8 @@ def eventFilter(self, obj, event):
 
     if obj is getattr(self, "_preview_label", None) or \
             obj is getattr(self, "_preview_gl", None):
+        if _frame_repair_workflow._handle_frame_repair_preview_event(self, obj, event):
+            return True
         if event.type() == event.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 if not self._ensure_preview_pixmap_for_paint():
@@ -188,11 +178,17 @@ def eventFilter(self, obj, event):
     # Guard: eventFilter may fire during UI build before the scroll area
     # has been constructed.
     scroll = getattr(self, "_tracks_scroll", None)
-    if (
-        scroll is not None
-        and obj is scroll.viewport()
-        and event.type() == event.Type.Wheel
-    ):
+    is_timeline_wheel_surface = False
+    if scroll is not None:
+        try:
+            is_timeline_wheel_surface = obj in (
+                scroll.viewport(),
+                getattr(self, "_tracks_host", None),
+                getattr(self, "_timeline_ruler", None),
+            )
+        except Exception:
+            is_timeline_wheel_surface = False
+    if scroll is not None and is_timeline_wheel_surface and event.type() == event.Type.Wheel:
         delta = event.angleDelta().y()
         if delta > 0:
             self._change_zoom(1.2)

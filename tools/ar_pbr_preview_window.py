@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication
 from app.actions import build_default_action_registry
 from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow
 from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
+from app.window_placement import install_global_window_placement
 
 
 DEFAULT_ASSET = default_ar_pbr_preview_asset()
@@ -115,6 +116,7 @@ def main() -> int:
 
     _configure_gl()
     app = QApplication(sys.argv)
+    install_global_window_placement(app)
     window = ArPbrAssetPreviewWindow(Path(args.asset))
     window.resize(max(640, int(args.width)), max(480, int(args.height)))
     window.show()

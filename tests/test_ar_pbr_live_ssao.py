@@ -15,6 +15,8 @@ def test_editor_preview_pbr_shader_consumes_screen_ao_uniforms() -> None:
 
     assert "uniform float u_screen_ao_strength;" in source
     assert "float screen_space_ao_factor(vec3 normal, vec3 view_dir, vec3 world_pos)" in source
+    assert "float contact = smoothstep" in source
+    assert "float micro = pow(clamp(curvature" in source
     assert "float ambient_ao = ao * (u_screen_ao_ambient == 1 ? screen_ao : 1.0);" in source
     assert "normalize_packet_ambient_occlusion_settings(item, lighting)" in source
     assert '_set_pbr_uniform1f_gl(gl, "u_screen_ao_strength", ao_strength)' in source
@@ -26,10 +28,79 @@ def test_standalone_ar_pbr_viewer_shader_consumes_screen_ao_uniforms() -> None:
 
     assert "uniform float u_screen_ao_strength;" in source
     assert "float screen_space_ao_factor(vec3 normal, vec3 view_dir, vec3 world_pos)" in source
+    assert "float contact = smoothstep" in source
+    assert "float micro = pow(clamp(curvature" in source
     assert "float ambient_ao = ao * (u_screen_ao_ambient == 1 ? screen_ao : 1.0);" in source
     assert 'ambient_occlusion = ambient_occlusion_diagnostics(self.state)' in source
-    assert 'GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_strength"), ao_strength)' in source
-    assert 'GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_diffuse")' in source
+    assert 'GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_strength"), ao_strength)' in source
+    assert 'GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_diffuse")' in source
+
+
+def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> None:
+    source = _read_repo_file("tools/ar_pbr_gpu_window.py")
+
+    assert "POST_BLOOM_FRAG_SHADER" in source
+    assert "uniform float u_bloom_strength;" in source
+    assert "uniform float u_bloom_boost;" in source
+    assert "uniform float u_anamorphic_strength;" in source
+    assert "uniform float u_anamorphic_threshold;" in source
+    assert "uniform float u_anamorphic_ratio;" in source
+    assert "uniform sampler2D u_scene_color;" in source
+    assert "uniform sampler2D u_bloom_source;" in source
+    assert "uniform sampler2D u_peak_source;" in source
+    assert "vec3 sample_anamorphic_lens_sprite" in source
+    assert "vec3 lens_sprite = sample_anamorphic_lens_sprite();" in source
+    assert 'GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_peak_source"), 13)' in source
+    assert "BLOOM_BLUR_FRAG_SHADER" in source
+    assert "self.bloom_blur_texture_a" in source
+    assert "self._blurred_bloom_texture(width, height, post_effects)" in source
+    assert "layout(location = 1) out vec4 bloom_source;" in source
+    assert "self.scene_bloom_texture" in source
+    assert "GL.GL_COLOR_ATTACHMENT1" in source
+    assert "float excess = max(lum - threshold, 0.0);" in source
+    assert "return rgb * contribution * soft_mask * source_mask * boost;" in source
+    assert "vec3 sample_blur" in source
+    assert "vec3 peak_pass" in source
+    assert "vec3 sample_peak_streak" in source
+    assert "bloom += streak * clamp(u_anamorphic_strength" in source
+    assert "bloom_anamorphic_strength" in source
+    assert "GL.glFramebufferTexture2D(" in source
+    assert "u_extract_bright" in source
+    assert "raw_threshold - min(0.34" in source
+    assert 'getattr(GL, "GL_RGBA16F", 0x881A)' in source
+    assert "vec3 bloom_rgb = max(" in source
+    assert "texture(u_bloom_source" in source
+    assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source
+    assert "GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)" in source
+    assert "vec3 apply_preview_bloom" not in source
+    assert "post_effects = post_effects_diagnostics(self.state)" in source
+    assert 'GL.glUniform1f(self._uniform_location(self.post_bloom_program, "u_bloom_strength"), float(bloom_strength))' in source
+
+
+def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
+    from app.ar_pbr.preview_window import preview_look_preset_settings
+
+    bloomed = preview_look_preset_settings("bloomed")
+
+    assert bloomed["post_effects_mode"] == "post_effects"
+    assert bloomed["bloom_enabled"] is True
+    assert 1.0 <= bloomed["bloom_strength"] <= 1.4
+    assert bloomed["bloom_radius"] >= 12.0
+    assert 0.35 <= bloomed["bloom_threshold"] <= 0.55
+    assert bloomed["bloom_kernel"] == "cinematic"
+    assert bloomed["bloom_boost"] >= 0.8
+    assert bloomed["bloom_anamorphic_strength"] >= 1.0
+    assert bloomed["bloom_anamorphic_ratio"] >= 5.0
+
+
+def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:
+    source = _read_repo_file("app/ar_pbr/preview_window.py")
+
+    assert 'self._top_bloom_strength = _TopSliderRow("Bloom"' in source
+    assert 'self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 4.0' in source
+    assert 'self._top_bloom_threshold = _TopSliderRow("Threshold"' in source
+    assert "def _set_bloom_threshold" in source
+    assert 'enabled = self._active_look_preset == "bloomed"' in source
 
 
 def test_packet_ambient_occlusion_lookup_matches_live_and_export_payloads() -> None:
@@ -181,6 +252,80 @@ def test_gpu_preview_packet_ssao_bakes_into_export_rasterizer(tmp_path) -> None:
     assert ao_diag["pbr_ambient_occlusion_changed_pixels"] > 0
     assert no_ao_diag["pbr_ambient_occlusion_applied"] is False
     assert np.any(np.asarray(ao_out) != np.asarray(no_ao_out))
+
+
+def test_gpu_preview_can_suppress_bloom_for_program_preview(tmp_path) -> None:
+    from PIL import Image
+
+    from app.ar_pbr.gpu_preview import build_gpu_preview_items
+
+    asset = tmp_path / "bloom_guard_model.glb"
+    texture = tmp_path / "bloom_guard_base.png"
+    asset.write_bytes(b"glTF")
+    Image.new("RGB", (4, 4), (245, 232, 190)).save(texture)
+    descriptor = {
+        "geometries": [
+            {
+                "vertices": [[-1, -1, 0], [1, -1, 0], [0, 1, 0]],
+                "uvs": [[0, 0], [1, 0], [0.5, 1]],
+                "triangles": [[0, 1, 2]],
+                "bounds": {"center": [0, 0, 0], "size": [2, 2, 1]},
+            }
+        ],
+        "materials": [
+            {
+                "name": "BloomGuard",
+                "base_color": [0.95, 0.82, 0.46, 1.0],
+                "base_texture": str(texture),
+                "roughness": 0.38,
+                "metallic": 0.0,
+                "reflectance": 0.52,
+            }
+        ],
+    }
+    track = {
+        "id": "bloom_guard_track",
+        "type": "ar_pbr_object",
+        "asset_path": str(asset),
+        "start_ms": 0,
+        "end_ms": 1000,
+        "render": {
+            "render_profile": "marmoset_pbr",
+            "lighting": {
+                "bloom_strength": 0.72,
+                "bloom_radius": 6.0,
+                "bloom_threshold": 0.34,
+                "vignette_strength": 0.18,
+                "direct_strength": 0.8,
+                "ibl_exposure": 1.0,
+            },
+        },
+    }
+
+    items, diag = build_gpu_preview_items(
+        frame_size=(96, 96),
+        time_ms=100,
+        ar_tracks=[track],
+        camera_solution={
+            "id": "cam_001",
+            "frame_size": [96, 96],
+            "intrinsics": {"fx": 90, "fy": 90, "cx": 48, "cy": 48},
+        },
+        settings={
+            "asset_descriptors": {str(asset): descriptor},
+            "camera_z": 3.0,
+            "preview_disable_bloom": True,
+        },
+    )
+
+    assert diag["pbr_triangle_count"] == 1
+    assert items[0]["post_effects_rendering"]["preview_bloom_suppressed"] is True
+    assert items[0]["post_effects_rendering"]["bloom_enabled"] is False
+    assert items[0]["post_effects_rendering"]["bloom_strength"] == 0.0
+    assert items[0]["post_effects_rendering"]["vignette_enabled"] is True
+    assert items[0]["pbr_lighting"]["bloom_enabled"] is False
+    assert items[0]["pbr_lighting"]["bloom_strength"] == 0.0
+    assert diag["gpu_renderer"]["bloom"] == "off"
 
 
 def test_video_exporter_bakes_ar_pbr_ssao_into_export_frame(tmp_path, monkeypatch) -> None:

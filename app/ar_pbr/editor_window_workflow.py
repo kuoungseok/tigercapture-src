@@ -193,6 +193,12 @@ def _insert_ar_pbr_actor_lane(self, track: dict) -> ArPbrActorLaneRow | None:
     if not hasattr(self, "_tracks_layout") or not hasattr(self, "_timeline_ruler"):
         return None
     row = ArPbrActorLaneRow(track)
+    try:
+        row.installEventFilter(self)
+    except RuntimeError:
+        # Unit tests sometimes exercise the workflow against a duck-typed
+        # VideoEditorWindow allocated with __new__ rather than QWidget init.
+        pass
     row.set_px_per_sec(getattr(self, "_px_per_sec", 52.0))
     row.set_lane_index(len(getattr(self, "_ar_pbr_lane_rows", []) or []) + 1)
     row.track_selected.connect(self._select_ar_pbr_track)

@@ -154,9 +154,10 @@ def run_screenstudio_gui_flow_qa(*, out_dir: Path = DEFAULT_OUT_DIR) -> dict[str
 
         mini_cards = launcher.findChildren(QPushButton, "LauncherMiniCard")
         start_cards = launcher.findChildren(QPushButton, "LauncherStartCard")
+        visible_start_cards = [card for card in start_cards if card.isVisible()]
         template_panels = launcher.findChildren(QFrame, "LauncherTemplatePanel")
         checks["launcher_is_compact"] = len(mini_cards) == 0 and len(template_panels) == 0
-        checks["launcher_quick_start_cards"] = len(start_cards) == 2 and all(card.isVisible() for card in start_cards)
+        checks["launcher_quick_start_cards"] = len(visible_start_cards) == 1
         checks["launcher_workspace_default_standard"] = (
             hasattr(launcher, "launcher_workspace_standard_btn")
             and launcher.launcher_workspace_standard_btn.isChecked()
@@ -177,8 +178,12 @@ def run_screenstudio_gui_flow_qa(*, out_dir: Path = DEFAULT_OUT_DIR) -> dict[str
             and launcher._pro_editor_label.text() == launcher._quick_start_title_text()
             and not _looks_mojibake(launcher._pro_editor_label.text())
         )
-        checks["launcher_has_editor_header_shortcut"] = hasattr(launcher, "templates_btn") and launcher.templates_btn.isVisible()
-        checks["launcher_has_editor_entry"] = hasattr(launcher, "pro_editor_btn") and launcher.pro_editor_btn.isVisible()
+        checks["launcher_studio_entry_hidden_by_default"] = (
+            hasattr(launcher, "templates_btn")
+            and hasattr(launcher, "pro_editor_btn")
+            and not launcher.templates_btn.isVisible()
+            and not launcher.pro_editor_btn.isVisible()
+        )
         checks["launcher_no_template_first_cards"] = (
             not hasattr(launcher, "quick_template_btn")
             and len(template_panels) == 0
@@ -189,6 +194,7 @@ def run_screenstudio_gui_flow_qa(*, out_dir: Path = DEFAULT_OUT_DIR) -> dict[str
             "size": [launcher.width(), launcher.height()],
             "mini_cards": len(mini_cards),
             "start_cards": len(start_cards),
+            "visible_start_cards": len(visible_start_cards),
             "start_card_texts": quick_texts,
             "start_card_tooltips": quick_tooltips,
             "template_panels": len(template_panels),
@@ -223,6 +229,48 @@ def run_screenstudio_gui_flow_qa(*, out_dir: Path = DEFAULT_OUT_DIR) -> dict[str
         metrics["launcher_events"] = launcher_events
     finally:
         launcher.close()
+
+    old_studio_env = os.environ.get("TIGERCAPTURE_CAPTURE_TO_STUDIO")
+    os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = "1"
+    studio_launcher_events: list[dict[str, Any]] = []
+    studio_launcher = MainWindow()
+    try:
+        studio_launcher.open_video_editor_requested.connect(
+            lambda payload: studio_launcher_events.append({
+                "event": "open_video_editor",
+                "payload": payload if isinstance(payload, dict) else {"source_path": str(payload), "workspace_mode": "standard"},
+            })
+        )
+        studio_launcher.resize(560, 660)
+        studio_launcher.show()
+        app.processEvents()
+        checks["launcher_studio_entry_opt_in_visible"] = (
+            hasattr(studio_launcher, "templates_btn")
+            and hasattr(studio_launcher, "pro_editor_btn")
+            and studio_launcher.templates_btn.isVisible()
+            and studio_launcher.pro_editor_btn.isVisible()
+        )
+        QTest.mouseClick(studio_launcher.pro_editor_btn, Qt.MouseButton.LeftButton)
+        QTest.qWait(90)
+        app.processEvents()
+        checks["launcher_editor_signal"] = any(event.get("event") == "open_video_editor" for event in studio_launcher_events)
+        checks["launcher_editor_signal_uses_workspace_payload"] = any(
+            event.get("event") == "open_video_editor"
+            and isinstance(event.get("payload"), dict)
+            and dict(event.get("payload") or {}).get("workspace_mode") in {"standard", "simple"}
+            for event in studio_launcher_events
+        )
+        opening_text = str(getattr(studio_launcher.pro_editor_btn, "text", lambda: "")())
+        checks["launcher_inline_opening_feedback"] = "여는 중" in opening_text or "Opening" in opening_text
+        checks["launcher_no_busy_popup_for_editor_open"] = bool(studio_launcher._startup_busy.isHidden())
+        screenshot("launcher_studio_opt_in_opening", studio_launcher, "launcher_studio_opt_in_opening.png")
+        metrics["launcher_studio_opt_in_events"] = studio_launcher_events
+    finally:
+        studio_launcher.close()
+        if old_studio_env is None:
+            os.environ.pop("TIGERCAPTURE_CAPTURE_TO_STUDIO", None)
+        else:
+            os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = old_studio_env
 
     project = NewProjectDialog()
     try:

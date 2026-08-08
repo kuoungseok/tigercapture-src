@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from app.ar_pbr.pbr_math import linear_to_srgb, srgb_to_linear
 from app.ar_pbr.udim import decode_udim_tiles, local_uv_from_udim, udim_tile_id_from_uv
 
 
@@ -489,17 +490,18 @@ def _collect_pbr_packet_data(width: int, height: int, items: list[dict[str, Any]
                 alpha = np.clip(interp(16), 0.0, 1.0) if stride > 16 else np.ones_like(w0, dtype=np.float32)
                 u = interp(2)
                 v = interp(3)
+                base_factor = np.dstack([
+                    np.clip(interp(13), 0.0, 16.0),
+                    np.clip(interp(14), 0.0, 16.0),
+                    np.clip(interp(15), 0.0, 16.0),
+                ]).astype(np.float32) if stride > 15 else np.ones((box_y1 - box_y0, box_x1 - box_x0, 3), dtype=np.float32)
                 base_sample = _sample_texture_udim(base_udim, base_arr, u, v)
                 if base_sample is not None:
-                    albedo = np.clip(np.asarray(base_sample[:, :, :3], dtype=np.float32), 0.0, 1.0)
+                    albedo = linear_to_srgb(srgb_to_linear(base_sample[:, :, :3]) * base_factor)
                     if base_sample.shape[2] >= 4:
                         alpha = alpha * np.clip(base_sample[:, :, 3], 0.0, 1.0)
                 else:
-                    albedo = np.dstack([
-                        np.clip(interp(13), 0.0, 1.0),
-                        np.clip(interp(14), 0.0, 1.0),
-                        np.clip(interp(15), 0.0, 1.0),
-                    ]).astype(np.float32)
+                    albedo = np.clip(base_factor, 0.0, 1.0)
                 opacity_sample = _sample_texture_udim(opacity_udim, opacity_arr, u, v)
                 if opacity_sample is not None:
                     alpha = alpha * np.clip(opacity_sample[:, :, _map_channel(maps, "opacity", 0)], 0.0, 1.0)

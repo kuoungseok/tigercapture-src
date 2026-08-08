@@ -21,6 +21,14 @@ LOG_DIR = runtime_log_dir()
 LOG_FILE = LOG_DIR / "tigercapture.log"
 
 
+def _consume_studio_flag(argv: list[str]) -> bool:
+    studio_flags = {"--studio", "--tiger-studio", "/studio"}
+    found = any(str(arg).strip().lower() in studio_flags for arg in argv[1:])
+    if found:
+        argv[:] = [argv[0], *[arg for arg in argv[1:] if str(arg).strip().lower() not in studio_flags]]
+    return found
+
+
 class _TeeStream(io.TextIOBase):
     """Write-only duplicator: each ``write`` goes to both the original
     stream and a second one. Used to copy stderr into a file while
@@ -89,11 +97,21 @@ def _install_logging() -> None:
 
 
 def main() -> int:
+    if _consume_studio_flag(sys.argv):
+        from studio_main import main as studio_main
+
+        return studio_main()
     _install_logging()
     try:
         from app.preview_acceleration import configure_preview_acceleration_defaults
 
         configure_preview_acceleration_defaults()
+    except Exception:
+        pass
+    try:
+        from app.qt_opengl_policy import configure_qt_opengl_application_attributes
+
+        configure_qt_opengl_application_attributes()
     except Exception:
         pass
     QCoreApplication.setApplicationName("TigerCapture")
@@ -102,6 +120,10 @@ def main() -> int:
     app.setStyle("Fusion")
     app.setApplicationName("TigerCapture")
     app.setOrganizationName("TigerCapture")
+
+    from app.window_placement import install_global_window_placement
+
+    install_global_window_placement(app)
 
     from app.font_fallback import apply_ui_font
     apply_ui_font(app)

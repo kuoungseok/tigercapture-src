@@ -680,7 +680,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "Texte",
     "subtitle.edit.placeholder": "Saisir le texte du sous-titre…",
     "subtitle.edit.show_box": "Afficher la zone de fond (désactivé = contour/ombre seulement)",
-    "paint.title": "Dessin — TigerCapture",
+    "paint.title": "Dessin — Tiger Studio",
     "paint.hint": "Clic : ouvrir le dessin · Clic droit : tout effacer",
     "paint.btn.pen": "🖌 Stylo",
     "paint.btn.eraser": "🧹 Gomme",

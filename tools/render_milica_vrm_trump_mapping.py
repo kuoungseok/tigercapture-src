@@ -25,6 +25,7 @@ from app.ar_pbr.software_renderer import _project, _transform_vertices  # noqa: 
 from app.ar_pbr.animation import animated_vertices_for_geometry  # noqa: E402
 from app.ar_pbr.export_packet_renderer import render_offscreen_gpu_export_frame  # noqa: E402
 from app.vtuber.openseeface_motion import load_openseeface_motion_csv, summarize_openseeface_motion  # noqa: E402
+from app.vtuber.vrm_motion_mapping import source_pitch_to_vrm_pitch  # noqa: E402
 from app.vtuber.vrm_renderer import load_vrm_avatar_descriptor  # noqa: E402
 
 
@@ -43,7 +44,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-out", default="")
     parser.add_argument("--view", choices=("full", "closeup"), default="full")
     parser.add_argument("--upper-body-mode", choices=("seated", "none"), default="seated")
-    parser.add_argument("--single-slot", choices=("neutral", "head", "mouth", "blink"), default="")
+    parser.add_argument(
+        "--single-slot",
+        choices=("neutral", "head", "yaw", "pitch", "mouth", "blink"),
+        default="",
+    )
+    parser.add_argument(
+        "--slots",
+        default="",
+        help="Comma-separated local QA slots. Supported: neutral,head,yaw,pitch,mouth,blink.",
+    )
     parser.add_argument("--renderer", choices=("vrm-mtoon-gpu", "full-gpu"), default="vrm-mtoon-gpu")
     args = parser.parse_args(argv)
 
@@ -59,17 +69,17 @@ def main(argv: list[str] | None = None) -> int:
     base_descriptor = _attach_vrm_textures(descriptor, texture_paths)
     base_descriptor = _attach_pose_animation(base_descriptor, frames, upper_body_mode=args.upper_body_mode)
 
-    selected = _selected_frame_indices(frames, single_slot=args.single_slot)
+    selected = _selected_frame_slots(frames, single_slot=args.single_slot, slots=args.slots)
     panels: list[Image.Image] = []
     panel_reports: list[dict[str, Any]] = []
-    for slot, frame_index in enumerate(selected):
+    for slot, (slot_name, frame_index) in enumerate(selected):
         frame = frames[frame_index]
         frame_descriptor = _apply_face_morphs(base_descriptor, morph_targets, frame)
         panel, diagnostics = _render_panel(
             descriptor=frame_descriptor,
             asset_path=vrm_path,
             time_ms=frame.time_ms,
-            label=_frame_label_for_selection(args.single_slot, slot, frame),
+            label=_frame_label_for_selection(slot_name, slot, frame),
             view=args.view,
             renderer=args.renderer,
         )
@@ -77,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         panel_reports.append(
             {
                 "slot": slot,
+                "slot_name": slot_name,
                 "frame_index": frame_index,
                 "time_ms": frame.time_ms,
                 "yaw_deg": frame.yaw_deg,
@@ -111,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         "view": args.view,
         "upper_body_mode": args.upper_body_mode,
         "single_slot": args.single_slot,
+        "slots": [slot_name for slot_name, _frame_index in selected],
         "renderer": args.renderer,
         "openseeface": summarize_openseeface_motion(frames),
         "selected_frames": panel_reports,
@@ -254,7 +266,7 @@ def _attach_pose_animation(
         wx, wy, w_shoulder_z, w_face_z = weights
         curves[node_id] = {
             "rotation": {
-                "x": [[float(frame.time_ms), float(frame.pitch_deg) * wx] for frame in frames],
+                "x": [[float(frame.time_ms), source_pitch_to_vrm_pitch(frame.pitch_deg) * wx] for frame in frames],
                 "y": [[float(frame.time_ms), float(frame.yaw_deg) * wy] for frame in frames],
                 "z": [
                     [
@@ -267,6 +279,8 @@ def _attach_pose_animation(
         }
     if str(upper_body_mode or "").casefold() == "seated":
         curves.update(_seated_arm_curves(frames))
+    elif str(upper_body_mode or "").casefold() in {"standing", "full_body", "relaxed"}:
+        curves.update(_standing_arm_curves(frames))
     out["animation_count"] = 1
     out["animation_clips"] = [
         {
@@ -294,7 +308,31 @@ def _seated_arm_curves(frames: tuple[Any, ...]) -> dict[str, dict[str, Any]]:
     for node_id, (base, follow) in arm_nodes.items():
         curves[node_id] = {
             "rotation": {
-                "x": [[float(frame.time_ms), float(base[0]) + float(frame.pitch_deg) * float(follow[0])] for frame in frames],
+                "x": [[float(frame.time_ms), float(base[0]) + source_pitch_to_vrm_pitch(frame.pitch_deg) * float(follow[0])] for frame in frames],
+                "y": [[float(frame.time_ms), float(base[1]) + float(frame.yaw_deg) * float(follow[1])] for frame in frames],
+                "z": [[float(frame.time_ms), float(base[2]) + _frame_shoulder_roll(frame) * float(follow[2])] for frame in frames],
+            }
+        }
+    return curves
+
+
+def _standing_arm_curves(frames: tuple[Any, ...]) -> dict[str, dict[str, Any]]:
+    """Relax the imported humanoid T-pose while preserving subtle torso follow."""
+    arm_nodes = {
+        "node_53": ((1.0, -2.0, 3.0), (0.02, 0.02, 0.04)),
+        "node_54": ((-4.0, 4.0, 68.0), (0.08, 0.03, 0.06)),
+        "node_55": ((-5.0, 1.0, 8.0), (0.04, 0.02, 0.00)),
+        "node_56": ((0.0, 0.0, 0.0), (0.00, 0.00, 0.00)),
+        "node_72": ((1.0, 2.0, -3.0), (0.02, 0.02, 0.04)),
+        "node_73": ((-4.0, -4.0, -68.0), (0.08, 0.03, 0.06)),
+        "node_74": ((-5.0, -1.0, -8.0), (0.04, 0.02, 0.00)),
+        "node_75": ((0.0, 0.0, 0.0), (0.00, 0.00, 0.00)),
+    }
+    curves: dict[str, dict[str, Any]] = {}
+    for node_id, (base, follow) in arm_nodes.items():
+        curves[node_id] = {
+            "rotation": {
+                "x": [[float(frame.time_ms), float(base[0]) + source_pitch_to_vrm_pitch(frame.pitch_deg) * float(follow[0])] for frame in frames],
                 "y": [[float(frame.time_ms), float(base[1]) + float(frame.yaw_deg) * float(follow[1])] for frame in frames],
                 "z": [[float(frame.time_ms), float(base[2]) + _frame_shoulder_roll(frame) * float(follow[2])] for frame in frames],
             }
@@ -510,9 +548,9 @@ def _render_full_gpu_panel(
             str(track.get("id") or ""): descriptor,
             str(asset_path): descriptor,
         },
-        "texture_max_size": 1024,
-        "fit_padding": 0.03,
-        "enable_shadow_map": False,
+        "texture_max_size": int((settings or {}).get("texture_max_size", 1024) or 1024),
+        "fit_padding": float((settings or {}).get("fit_padding", 0.03) or 0.03),
+        "enable_shadow_map": bool((settings or {}).get("enable_shadow_map", False)),
     }
     out, diagnostics = render_offscreen_gpu_export_frame(
         base,
@@ -810,41 +848,69 @@ def _compose_contact(
     return canvas
 
 
-def _selected_frame_indices(frames: tuple[Any, ...], *, single_slot: str = "") -> list[int]:
+def _selected_frame_slots(
+    frames: tuple[Any, ...],
+    *,
+    single_slot: str = "",
+    slots: str = "",
+) -> list[tuple[str, int]]:
+    if not frames:
+        return []
     candidates = {
         "neutral": 0,
         "head": max(range(len(frames)), key=lambda i: abs(frames[i].yaw_deg) + abs(frames[i].roll_deg) * 0.7),
+        "yaw": max(range(len(frames)), key=lambda i: abs(frames[i].yaw_deg)),
+        "pitch": max(range(len(frames)), key=lambda i: abs(frames[i].pitch_deg)),
         "mouth": max(range(len(frames)), key=lambda i: frames[i].mouth_open),
         "blink": max(range(len(frames)), key=lambda i: max(frames[i].blink_l, frames[i].blink_r)),
     }
     wanted = str(single_slot or "").casefold()
     if wanted in candidates:
-        return [candidates[wanted]]
-    ordered = [
-        candidates["neutral"],
-        candidates["head"],
-        max(range(len(frames)), key=lambda i: frames[i].mouth_open + max(frames[i].blink_l, frames[i].blink_r)),
-    ]
-    out: list[int] = []
-    for idx in ordered:
-        if idx not in out:
-            out.append(idx)
+        return [(wanted, candidates[wanted])]
+    requested = _normalize_slots(slots) or ("neutral", "yaw", "pitch", "blink", "mouth")
+    out: list[tuple[str, int]] = []
+    seen: set[int] = set()
+    for slot in requested:
+        idx = candidates.get(slot)
+        if idx is None or idx in seen:
+            continue
+        out.append((slot, idx))
+        seen.add(idx)
     while len(out) < min(3, len(frames)):
         pick = round((len(frames) - 1) * len(out) / 2)
-        if pick not in out:
-            out.append(pick)
+        if pick not in seen:
+            out.append((f"pose{len(out) + 1}", pick))
+            seen.add(pick)
         else:
             break
-    return out[:3]
+    return out[:6]
+
+
+def _selected_frame_indices(frames: tuple[Any, ...], *, single_slot: str = "") -> list[int]:
+    """Compatibility wrapper for older tests/tools that expect indices only."""
+    return [index for _slot, index in _selected_frame_slots(frames, single_slot=single_slot)]
+
+
+def _normalize_slots(slots: str) -> tuple[str, ...]:
+    out: list[str] = []
+    for raw in str(slots or "").replace(";", ",").split(","):
+        slot = raw.strip().casefold().replace("-", "_")
+        if slot == "turn":
+            slot = "yaw"
+        elif slot in {"nod", "head_pitch"}:
+            slot = "pitch"
+        if slot in {"neutral", "head", "yaw", "pitch", "mouth", "blink"} and slot not in out:
+            out.append(slot)
+    return tuple(out)
 
 
 def _frame_label(slot: int, frame: Any) -> str:
-    names = ["neutral", "head", "mouth", "blink"]
+    names = ["neutral", "yaw", "pitch", "blink", "mouth"]
     return f"{names[slot] if slot < len(names) else 'pose'}  {frame.time_ms / 1000.0:.2f}s"
 
 
-def _frame_label_for_selection(single_slot: str, slot: int, frame: Any) -> str:
-    wanted = str(single_slot or "").casefold()
+def _frame_label_for_selection(slot_name: str, slot: int, frame: Any) -> str:
+    wanted = str(slot_name or "").casefold()
     if wanted:
         return f"{wanted}  {frame.time_ms / 1000.0:.2f}s"
     return _frame_label(slot, frame)

@@ -40,8 +40,8 @@ def build_ai_command_dock(owner, parent: QWidget) -> QWidget:
     dock.setStyleSheet(AI_COMMAND_DOCK_QSS)
 
     root = QVBoxLayout(dock)
-    root.setContentsMargins(4, 0, 4, 0)
-    root.setSpacing(0)
+    root.setContentsMargins(6, 5, 6, 5)
+    root.setSpacing(5)
 
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
@@ -141,18 +141,16 @@ def build_ai_command_dock(owner, parent: QWidget) -> QWidget:
 
     owner._ai_command_status = QLabel(tr("veditor.ai_command.status.default"), dock)
     owner._ai_command_status.setObjectName("AICommandStatus")
-    owner._ai_command_status.setWordWrap(False)
-    owner._ai_command_status.setMaximumHeight(0)
+    owner._ai_command_status.setWordWrap(True)
+    owner._ai_command_status.setMaximumHeight(30)
     owner._ai_command_status.setText(tr("veditor.ai_command.status.default"))
     root.addWidget(owner._ai_command_status)
-    owner._ai_command_status.hide()
 
     owner._ai_command_provider_status = QLabel("", dock)
     owner._ai_command_provider_status.setObjectName("AICommandStatus")
     owner._ai_command_provider_status.setWordWrap(False)
-    owner._ai_command_provider_status.setMaximumHeight(0)
+    owner._ai_command_provider_status.setMaximumHeight(18)
     root.addWidget(owner._ai_command_provider_status)
-    owner._ai_command_provider_status.hide()
     owner._refresh_ai_command_provider_status()
     return dock
 

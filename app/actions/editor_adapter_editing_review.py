@@ -276,6 +276,121 @@ class EditingReviewAdapterMixin:
             out = method(path=str(path or ""), target=str(target or "editor"), duration_ms=max(1, _int(duration_ms, 3000)), fps=max(1, _int(fps, 8)))
             return {"path": str(out or path), "target": str(target or "editor"), "duration_ms": max(1, _int(duration_ms, 3000))}
 
+    def list_capture_windows(
+            self,
+            *,
+            title_contains: str = "",
+            process_contains: str = "",
+            pid: int = 0,
+            include_invisible: bool = False,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            from app.window_capture import list_capture_windows
+
+            return list_capture_windows(
+                title_contains=str(title_contains or ""),
+                process_contains=str(process_contains or ""),
+                pid=_int(pid, 0),
+                include_invisible=_bool(include_invisible, False),
+                limit=_int(limit, 100),
+            )
+
+    def capture_window_screenshot(
+            self,
+            *,
+            path: str = "",
+            title_contains: str = "",
+            process_contains: str = "",
+            pid: int = 0,
+            hwnd: int = 0,
+            backend: str = "auto",
+            activate: bool = False,
+        ) -> dict[str, Any]:
+            from app.window_capture import save_window_screenshot
+
+            return save_window_screenshot(
+                path=path,
+                title_contains=str(title_contains or ""),
+                process_contains=str(process_contains or ""),
+                pid=_int(pid, 0),
+                hwnd=_int(hwnd, 0),
+                backend=str(backend or "auto"),
+                activate=_bool(activate, False),
+            )
+
+    def capture_window_video(
+            self,
+            *,
+            path: str = "",
+            title_contains: str = "",
+            process_contains: str = "",
+            pid: int = 0,
+            hwnd: int = 0,
+            duration_ms: int = 3000,
+            fps: int = 15,
+            backend: str = "auto",
+            activate: bool = False,
+            crf: int = 23,
+        ) -> dict[str, Any]:
+            from app.window_capture import record_window_video
+
+            return record_window_video(
+                path=path,
+                title_contains=str(title_contains or ""),
+                process_contains=str(process_contains or ""),
+                pid=_int(pid, 0),
+                hwnd=_int(hwnd, 0),
+                duration_ms=_int(duration_ms, 3000),
+                fps=_int(fps, 15),
+                backend=str(backend or "auto"),
+                activate=_bool(activate, False),
+                crf=_int(crf, 23),
+            )
+
+    def capture_window_video_start(
+            self,
+            *,
+            session_id: str = "",
+            path: str = "",
+            title_contains: str = "",
+            process_contains: str = "",
+            pid: int = 0,
+            hwnd: int = 0,
+            max_duration_ms: int = 600_000,
+            fps: int = 15,
+            backend: str = "auto",
+            activate: bool = False,
+            crf: int = 23,
+        ) -> dict[str, Any]:
+            from app.window_capture import start_window_video_capture
+
+            return start_window_video_capture(
+                session_id=str(session_id or ""),
+                path=path,
+                title_contains=str(title_contains or ""),
+                process_contains=str(process_contains or ""),
+                pid=_int(pid, 0),
+                hwnd=_int(hwnd, 0),
+                max_duration_ms=_int(max_duration_ms, 600_000),
+                fps=_int(fps, 15),
+                backend=str(backend or "auto"),
+                activate=_bool(activate, False),
+                crf=_int(crf, 23),
+            )
+
+    def capture_window_video_status(self, *, session_id: str = "") -> dict[str, Any]:
+            from app.window_capture import window_video_capture_status
+
+            return window_video_capture_status(session_id=str(session_id or ""))
+
+    def capture_window_video_stop(self, *, session_id: str = "", wait_ms: int = 30_000) -> dict[str, Any]:
+            from app.window_capture import stop_window_video_capture
+
+            return stop_window_video_capture(
+                session_id=str(session_id or ""),
+                wait_ms=_int(wait_ms, 30_000),
+            )
+
     def run_review_scenario(self, *, scenario: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
             owner = self.owner
             method = getattr(owner, "_run_review_scenario", None) if owner is not None else None

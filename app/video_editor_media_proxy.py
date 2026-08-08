@@ -82,6 +82,49 @@ def _generate_proxy(path: Path, force: bool = False) -> "Path | None":
         return None
 
 
+def _probe_video_metadata(path: Path) -> dict[str, object]:
+    """Return cheap video metadata used by proxy and preview policies."""
+    source = Path(path)
+    try:
+        size = int(source.stat().st_size)
+    except Exception:
+        size = 0
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+
+        from app.native_worker import native_media_probe
+
+        probe = native_media_probe(source, ffmpeg_path=get_ffmpeg_exe())
+        if probe is not None and probe.has_video:
+            return {
+                "path": str(source),
+                "size": size or int(getattr(probe, "size", 0) or 0),
+                "duration_ms": int(getattr(probe, "duration_ms", 0) or 0),
+                "width": int(getattr(probe, "width", 0) or 0),
+                "height": int(getattr(probe, "height", 0) or 0),
+                "fps": float(getattr(probe, "fps", 0.0) or 0.0),
+            }
+    except Exception:
+        pass
+    try:
+        import cv2 as _cv2
+        cap = _cv2.VideoCapture(str(source))
+        if cap.isOpened():
+            try:
+                return {
+                    "path": str(source),
+                    "size": size,
+                    "width": int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH) or 0),
+                    "height": int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT) or 0),
+                    "fps": float(cap.get(_cv2.CAP_PROP_FPS) or 0.0),
+                }
+            finally:
+                cap.release()
+    except Exception:
+        pass
+    return {"path": str(source), "size": size}
+
+
 def _is_high_resolution(path: Path) -> bool:
     """Return True if the video is high-resolution (>1920x1080 or >500 MB)."""
     try:
@@ -116,6 +159,14 @@ def _is_high_resolution(path: Path) -> bool:
 
 def _probe_video_dimensions(path: Path) -> tuple:
     """Return (width, height) of the video, or (0, 0) on failure."""
+    metadata = _probe_video_metadata(path)
+    try:
+        w = int(metadata.get("width") or 0)
+        h = int(metadata.get("height") or 0)
+        if w > 0 and h > 0:
+            return (w, h)
+    except Exception:
+        pass
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
 

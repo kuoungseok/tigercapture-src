@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -33,18 +34,20 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSlider,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app.i18n import tr
-from app.icons import app_icon, icon_size
-from app.sound_editor_panel import SoundEditorPanel
+from app.i18n import current_language, tr
+from app.icons import app_icon, icon_size, unreal_engine_icon
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.video_editor_actor_evidence import ArPbrEvidenceCard, Live2DActorEvidenceCard
+from app.workbench_scroll import forward_wheel_to_scroll_area
 from app.workbench_vfx_graph import (
     vfx_node_graph_detail_text_for_track,
     vfx_node_graph_overview_for_track,
@@ -58,6 +61,90 @@ from app.workbench_cards import (
     _NodeRow,
     _TypographyEvidenceCard,
 )
+
+
+_INSPECTOR_TAB_SIZE = (62, 48)
+_INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
+_PROGRAM_LAUNCHER_BASE_SIZE = 72
+_PROGRAM_LAUNCHER_MIN_SIZE = 66
+_PROGRAM_LAUNCHER_MAX_SIZE = 84
+_INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "programs", "meta")
+_AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
+    "Select an audio clip, or select a video clip with embedded audio, "
+    "to edit sound here."
+)
+_PROGRAMS_EMPTY_TEXT = (
+    "Open Tiger Studio's focused production rooms. These are launchers, "
+    "not selected-clip properties."
+)
+_INSPECTOR_TAB_ICONS = {
+    "clip": "video",
+    "fx": "sliders",
+    "mask": "scope",
+    "audio": "audio",
+    "programs": "grid",
+    "meta": "list",
+}
+_INSPECTOR_TAB_LABELS_EN = {
+    "clip": "Clip",
+    "fx": "Effects",
+    "mask": "Mask",
+    "audio": "Audio",
+    "programs": "Programs",
+    "meta": "Info",
+}
+_INSPECTOR_TAB_LABELS_KO = {
+    "clip": "\ud074\ub9bd",
+    "fx": "\ud6a8\uacfc",
+    "mask": "\ub9c8\uc2a4\ud06c",
+    "audio": "\uc624\ub514\uc624",
+    "programs": "\ud504\ub85c\uadf8\ub7a8",
+    "meta": "\uc815\ubcf4",
+}
+_INSPECTOR_TAB_TOOLTIPS_EN = {
+    "clip": "Basic clip or track properties",
+    "fx": "Effects, color, and VFX stack",
+    "mask": "Mask and rotoscope controls",
+    "audio": "Audio clip and mixer controls",
+    "programs": "Open Composer, Voice Lab, VTuber Studio, PPT Maker, and other focused rooms",
+    "meta": "Source and diagnostic information",
+}
+_INSPECTOR_TAB_TOOLTIPS_KO = {
+    "clip": "\uae30\ubcf8 \uc18d\uc131: \uc774\ub984, \uc704\uce58, \uae38\uc774, \ud398\uc774\ub4dc",
+    "fx": "\ud544\ud130, \uc0c9\ubcf4\uc815, VFX \uc2a4\ud0dd",
+    "mask": "\ub9c8\uc2a4\ud06c / \ub85c\ud1a0\uc2a4\ucf54\ud504 \uc81c\uc5b4",
+    "audio": "\uc624\ub514\uc624 \ud074\ub9bd\uacfc \ubbf9\uc11c \uc81c\uc5b4",
+    "programs": "Composer, Voice Lab, VTuber Studio, PPT Maker \ub4f1 \uc81c\uc791 \uacf5\uac04\uc744 \uc5fd\uae30",
+    "meta": "\uc18c\uc2a4 / \uc9c4\ub2e8 \uc815\ubcf4",
+}
+
+
+def _inspector_tab_copy(tab_id: str) -> tuple[str, str]:
+    if current_language() == "ko":
+        label = _INSPECTOR_TAB_LABELS_KO.get(tab_id, tab_id)
+        tooltip = _INSPECTOR_TAB_TOOLTIPS_KO.get(tab_id, label)
+    else:
+        label = _INSPECTOR_TAB_LABELS_EN.get(tab_id, tab_id.title())
+        tooltip = _INSPECTOR_TAB_TOOLTIPS_EN.get(tab_id, label)
+    return label, tooltip
+
+
+def _inspector_tabs_caption() -> str:
+    if current_language() == "ko":
+        return "\uc18d\uc131 \ubcf4\uae30"
+    return "Properties"
+
+
+def _inspector_tabs_caption_tooltip() -> str:
+    if current_language() == "ko":
+        return "\uc120\ud0dd\ud55c \ud074\ub9bd/\ud2b8\ub799\uc758 \uc18d\uc131 \uc885\ub958\ub97c \ubc14\uafb9\ub2c8\ub2e4."
+    return "Switch which selected-item properties are shown."
+
+
+def _fx_back_button_copy() -> tuple[str, str]:
+    if current_language() == "ko":
+        return "\u2190 \uae30\ubcf8 \uc18d\uc131", "\uc774\ub984, \uae38\uc774, \ud398\uc774\ub4dc \ub4f1 \uae30\ubcf8 \uc18d\uc131\uc73c\ub85c \ub3cc\uc544\uac11\ub2c8\ub2e4."
+    return "\u2190 Properties", "Return to basic clip and track properties."
 
 
 def _format_ms(ms: int) -> str:
@@ -286,6 +373,7 @@ class WorkbenchPanel(QWidget):
     # of the node rows. Editor wires this to scroll/expand the
     # corresponding panel (currently only "color" → Color section).
     node_focused = Signal(str)
+    node_graph_ready = Signal(object)
 
     # Slider ranges — picked to cover practical use without ceding
     # screen real-estate to extreme values.
@@ -320,33 +408,62 @@ class WorkbenchPanel(QWidget):
             "background:rgba(255,255,255,5);"
             "border:1px solid rgba(178,186,202,18); border-radius:6px;"
             "}"
-            "QWidget#InspectorTabs {"
+            "QLabel#AudioCreationToolsHint {"
+            "color:#8D96A5; font-size:8px; padding:1px 6px 2px 6px;"
             "background:transparent; border:none; border-radius:0px;"
+            "}"
+            "QWidget#InspectorTabs {"
+            "background:#0D1016; border-top:1px solid rgba(178,186,202,16);"
+            "border-bottom:1px solid rgba(178,186,202,16); border-radius:0px;"
             "}"
             "QWidget#InspectorTabs[fxMode='true'] {"
             "background:#101112; border:none; border-bottom:1px solid #202225;"
             "}"
+            "QLabel#InspectorTabsCaption {"
+            "color:#C8D0DD; background:transparent; border:none;"
+            "font-size:11px; font-weight:700; padding:0px 4px 0px 2px;"
+            "}"
+            "QWidget#FxBackBar {"
+            "background:#0D1016; border:none; border-bottom:1px solid rgba(178,186,202,18);"
+            "}"
+            "QPushButton#FxBackButton {"
+            "background:#15181C; color:#DCE3EF; border:1px solid rgba(178,186,202,34);"
+            "border-radius:6px; padding:0px 10px; font-size:11px; font-weight:750;"
+            "min-height:30px;"
+            "}"
+            "QPushButton#FxBackButton:hover {"
+            "background:#20252B; color:#FFFFFF; border-color:rgba(238,242,250,96);"
+            "}"
             "QWidget#InspectorPaletteStrip {"
             "background:transparent; border:none; border-radius:0px;"
             "}"
-            "QPushButton#InspectorTab {"
-            "background:#15181C; color:#9EA4AD; border:1px solid rgba(178,186,202,20);"
-            "border-radius:5px; padding:0px; font-size:1px; font-weight:600;"
-            "min-width:21px; min-height:17px;"
+            "QPushButton#InspectorTab, QToolButton#InspectorTab {"
+            "background:#15181C; color:#C7CDD7; border:1px solid rgba(178,186,202,28);"
+            "border-radius:6px; padding:2px 4px; font-size:9px; font-weight:700;"
+            "min-width:58px; min-height:46px;"
             "}"
-            "QPushButton#InspectorTab:hover { background:#20252B; color:#FFFFFF; border-color:rgba(220,225,238,74); }"
-            "QPushButton#InspectorTab:checked {"
-            "background:#252A31;"
-            "color:#FFFFFF; border-color:rgba(238,242,250,92);"
+            "QPushButton#InspectorTab:hover, QToolButton#InspectorTab:hover {"
+            "background:#20252B; color:#FFFFFF; border-color:rgba(220,225,238,74);"
             "}"
-            "QPushButton#InspectorTab[fxMode='true'] {"
+            "QPushButton#InspectorTab:checked, QToolButton#InspectorTab:checked {"
+            "background:#263140;"
+            "color:#FFFFFF; border-color:rgba(238,242,250,110);"
+            "}"
+            "QWidget#ProgramLauncherGrid {"
+            "background:transparent; border:none;"
+            "}"
+            "QToolButton#ProgramLauncherButton {"
+            "color:#FFFFFF; border-radius:17px; padding:8px 4px 6px 4px;"
+            "font-size:8px; font-weight:820;"
+            "}"
+            "QPushButton#InspectorTab[fxMode='true'], QToolButton#InspectorTab[fxMode='true'] {"
             "background:transparent; color:#8E949C; border:1px solid transparent;"
-            "border-radius:3px; min-width:16px; min-height:14px;"
+            "border-radius:3px; min-width:16px; min-height:21px;"
             "}"
-            "QPushButton#InspectorTab[fxMode='true']:hover {"
+            "QPushButton#InspectorTab[fxMode='true']:hover, QToolButton#InspectorTab[fxMode='true']:hover {"
             "background:#20252B; color:#ECEFF4; border-color:rgba(220,225,238,54);"
             "}"
-            "QPushButton#InspectorTab[fxMode='true']:checked {"
+            "QPushButton#InspectorTab[fxMode='true']:checked, QToolButton#InspectorTab[fxMode='true']:checked {"
             "background:#1B1E23; color:#FFFFFF; border-color:rgba(238,242,250,78);"
             "}"
             "QFrame#InspectorSwatch {"
@@ -364,7 +481,7 @@ class WorkbenchPanel(QWidget):
             "QPushButton#FxSummaryButton {"
             "background:rgba(255,255,255,6); color:#DCE1EA;"
             "border:1px solid rgba(178,186,202,24); border-radius:5px; padding:0px;"
-            "min-width:23px; min-height:20px;"
+            "min-width:23px; min-height:30px;"
             "}"
             "QPushButton#FxSummaryButton:hover {"
             "background:rgba(255,255,255,12); border-color:rgba(220,225,238,68); color:#FFFFFF;"
@@ -476,12 +593,12 @@ class WorkbenchPanel(QWidget):
 
         self._title = QLabel(tr("workbench.empty.title"), self)
         self._title.setStyleSheet(
-            "color: #F2F0EA; font-weight: 680; font-size: 11px;"
+            "color: #F2F0EA; font-weight: 700; font-size: 12px;"
         )
 
         self._subtitle = QLabel(tr("workbench.empty.subtitle"), self)
         self._subtitle.setStyleSheet(
-            "color: #8F95A8; font-size: 10px;"
+            "color: #A6AFC0; font-size: 11px; padding: 0px 6px 2px 6px;"
         )
         self._subtitle.setWordWrap(True)
 
@@ -511,7 +628,7 @@ class WorkbenchPanel(QWidget):
 
         self._title_row = QWidget(self)
         self._title_row.setObjectName("InspectorTitleRow")
-        self._title_row.setFixedHeight(17)
+        self._title_row.setFixedHeight(24)
         title_row_layout = QHBoxLayout(self._title_row)
         title_row_layout.setContentsMargins(5, 0, 8, 0)
         title_row_layout.setSpacing(8)
@@ -524,35 +641,32 @@ class WorkbenchPanel(QWidget):
         self._inspector_tab = "clip"
         self._inspector_tabs = QWidget(self)
         self._inspector_tabs.setObjectName("InspectorTabs")
+        self._inspector_tabs.setFixedHeight(58)
         tabs_layout = QHBoxLayout(self._inspector_tabs)
-        tabs_layout.setContentsMargins(5, 1, 5, 0)
-        tabs_layout.setSpacing(2)
+        tabs_layout.setContentsMargins(6, 5, 6, 5)
+        tabs_layout.setSpacing(5)
         tabs_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._inspector_tabs_caption = QLabel(_inspector_tabs_caption(), self._inspector_tabs)
+        self._inspector_tabs_caption.setObjectName("InspectorTabsCaption")
+        self._inspector_tabs_caption.setToolTip(_inspector_tabs_caption_tooltip())
+        tabs_layout.addWidget(self._inspector_tabs_caption)
         self._inspector_tab_group = QButtonGroup(self)
         self._inspector_tab_group.setExclusive(True)
-        self._inspector_tab_buttons: dict[str, QPushButton] = {}
-        for tab_id, label in (
-            ("clip", "Clip"),
-            ("fx", "FX"),
-            ("mask", "Mask"),
-            ("audio", "Audio"),
-            ("meta", "Meta"),
-        ):
-            btn = QPushButton("", self._inspector_tabs)
+        self._inspector_tab_buttons: dict[str, QToolButton] = {}
+        for tab_id in _INSPECTOR_TAB_IDS:
+            label, tooltip = _inspector_tab_copy(tab_id)
+            btn = QToolButton(self._inspector_tabs)
+            btn.setText(label)
             btn.setObjectName("InspectorTab")
             btn.setCheckable(True)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip(label)
+            btn.setToolTip(tooltip)
             btn.setAccessibleName(label)
-            btn.setFixedSize(24, 18)
-            btn.setIcon(app_icon({
-                "clip": "video",
-                "fx": "sliders",
-                "mask": "scope",
-                "audio": "audio",
-                "meta": "list",
-            }.get(tab_id, "list"), size=15))
-            btn.setIconSize(icon_size(13))
+            btn.setAccessibleDescription(tooltip)
+            btn.setFixedSize(*_INSPECTOR_TAB_SIZE)
+            btn.setIcon(app_icon(_INSPECTOR_TAB_ICONS.get(tab_id, "list"), size=15))
+            btn.setIconSize(icon_size(16))
             btn.clicked.connect(lambda _checked=False, t=tab_id: self._set_inspector_tab(t))
             if tab_id == "clip":
                 btn.setChecked(True)
@@ -562,6 +676,25 @@ class WorkbenchPanel(QWidget):
         tabs_layout.addStretch(1)
         root.addWidget(self._inspector_tabs)
 
+        self._fx_back_bar = QWidget(self)
+        self._fx_back_bar.setObjectName("FxBackBar")
+        self._fx_back_bar.setFixedHeight(40)
+        fx_back_layout = QHBoxLayout(self._fx_back_bar)
+        fx_back_layout.setContentsMargins(6, 4, 6, 4)
+        fx_back_layout.setSpacing(6)
+        back_text, back_tip = _fx_back_button_copy()
+        self._fx_back_btn = QPushButton(back_text, self._fx_back_bar)
+        self._fx_back_btn.setObjectName("FxBackButton")
+        self._fx_back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fx_back_btn.setToolTip(back_tip)
+        self._fx_back_btn.setAccessibleName(back_text)
+        self._fx_back_btn.setAccessibleDescription(back_tip)
+        self._fx_back_btn.clicked.connect(lambda _checked=False: self._set_inspector_tab("clip"))
+        fx_back_layout.addWidget(self._fx_back_btn, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        fx_back_layout.addStretch(1)
+        self._fx_back_bar.hide()
+        root.addWidget(self._fx_back_bar)
+
         self._tab_stack = QStackedWidget(self)
         self._tab_stack.setObjectName("InspectorStack")
         self._tab_pages: dict[str, QWidget] = {}
@@ -570,17 +703,24 @@ class WorkbenchPanel(QWidget):
             ("clip", "Select a clip or track to edit clip properties."),
             ("fx", "Select a video track to edit its effect graph."),
             ("mask", "Select a mask-capable node to edit tracking and masks."),
-            ("audio", "Select an audio clip to edit audio properties."),
+            ("audio", _AUDIO_CREATION_TOOLS_EMPTY_TEXT),
+            ("programs", _PROGRAMS_EMPTY_TEXT),
             ("meta", "Selection metadata appears here."),
         ):
             page = QWidget(self._tab_stack)
             page.setObjectName("InspectorPage")
             layout = QVBoxLayout(page)
             layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(4)
+            layout.setSpacing(1 if tab_id == "audio" else 4)
+            if tab_id == "audio":
+                layout.setAlignment(Qt.AlignmentFlag.AlignTop)
             empty = QLabel(empty_text, page)
-            empty.setObjectName("InspectorEmpty")
+            empty.setObjectName("AudioCreationToolsHint" if tab_id in {"audio", "programs"} else "InspectorEmpty")
             empty.setWordWrap(True)
+            if tab_id in {"audio", "programs"}:
+                empty.setContentsMargins(0, 0, 0, 0)
+                empty.setMinimumHeight(12)
+                empty.setMaximumHeight(24 if tab_id == "programs" else 18)
             layout.addWidget(empty)
             setattr(self, f"_{tab_id}_empty_label", empty)
             layout.addStretch(1)
@@ -588,6 +728,7 @@ class WorkbenchPanel(QWidget):
             self._tab_layouts[tab_id] = layout
             self._tab_stack.addWidget(page)
         root.addWidget(self._tab_stack, stretch=1)
+        self._build_program_launcher_page()
 
         # Property rows always live in the layout; they switch their
         # text contents between "selection placeholder" and concrete
@@ -697,7 +838,7 @@ class WorkbenchPanel(QWidget):
             button.setText("")
             button.setIcon(app_icon(icon_name, size=13, color="#D7DAE7"))
             button.setIconSize(icon_size(12))
-            button.setFixedSize(24, 21)
+            button.setFixedSize(24, 32)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
             button.setAccessibleName(tooltip)
@@ -772,20 +913,6 @@ class WorkbenchPanel(QWidget):
         self._audio_evidence_card = _AudioEvidenceCard(self._tab_pages["audio"])
         self._audio_evidence_card.hide()
         self._tab_layouts["audio"].insertWidget(1, self._audio_evidence_card)
-        self._sound_editor_panel = SoundEditorPanel(self._tab_pages["audio"])
-        self._sound_editor_panel.changed.connect(self._on_sound_editor_changed)
-        self._sound_editor_panel.mixer_track_changed.connect(self._on_sound_editor_mixer_track_changed)
-        self._sound_editor_panel.advanced_lab_requested.connect(
-            self.advanced_sound_lab_requested.emit
-        )
-        self._sound_editor_panel.music_lab_action_requested.connect(
-            self.music_lab_action_requested.emit
-        )
-        self._sound_editor_panel.music_lab_selection_changed.connect(
-            self.music_lab_selection_changed.emit
-        )
-        self._sound_editor_panel.hide()
-        self._tab_layouts["audio"].insertWidget(2, self._sound_editor_panel, stretch=1)
 
         self._typography_evidence_card = _TypographyEvidenceCard(self._tab_pages["fx"])
         self._typography_evidence_card.hide()
@@ -826,7 +953,7 @@ class WorkbenchPanel(QWidget):
             button.setText("")
             button.setIcon(app_icon(icon_name, size=13, color="#D7DAE7"))
             button.setIconSize(icon_size(12))
-            button.setFixedSize(24, 21)
+            button.setFixedSize(24, 32)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
             button.setAccessibleName(tooltip)
@@ -864,19 +991,9 @@ class WorkbenchPanel(QWidget):
         # vertical real estate (``stretch=1``). Section header + pop-out
         # popout button live INSIDE the NodeGraphWidget so the panel
         # stays self-contained when reparented to the popout window.
-        from app.workbench.node_graph.widget import NodeGraphWidget
-        self._node_graph_widget = NodeGraphWidget(self._tab_pages["fx"])
-        self._node_graph_widget.popout_requested.connect(
-            self._toggle_node_graph_popout,
-        )
-        self._node_graph_widget.node_selection_changed.connect(
-            self._on_node_graph_selection_changed,
-        )
         # Hidden until the user selects a video track — audio clips
         # don't carry a node graph yet (Phase 2D+).
-        self._node_graph_widget.hide()
         fx_layout = self._tab_layouts["fx"]
-        fx_layout.insertWidget(1, self._node_graph_widget, stretch=1)
         for idx in range(fx_layout.count() - 1, -1, -1):
             item = fx_layout.itemAt(idx)
             if item is not None and item.spacerItem() is not None:
@@ -888,6 +1005,704 @@ class WorkbenchPanel(QWidget):
         self._node_graph_root_layout = fx_layout
         self._node_graph_popout = None
         self._node_graph_placeholder = None
+
+    def _build_program_launcher_page(self) -> None:
+        page = self._tab_pages.get("programs")
+        layout = self._tab_layouts.get("programs")
+        if page is None or layout is None:
+            return
+        host = QWidget(page)
+        host.setObjectName("ProgramLauncherGrid")
+        grid = QGridLayout(host)
+        grid.setContentsMargins(6, 4, 6, 8)
+        programs = (
+            (
+                "Composer",
+                "Open Music Lab and AI-assisted composition tools",
+                "music-note",
+                ("#42C7BA", "#4C64E8"),
+                self._open_composer_program,
+            ),
+            (
+                "Voice\nLab",
+                "Open TTS, voice generation, and voice production tools",
+                "voice-lab",
+                ("#9C65E6", "#D65C93"),
+                self._open_voice_lab_program,
+            ),
+            (
+                "Motion\nDesigner",
+                "Open motion graphics, keyframes, and character performance tools",
+                "motion-designer",
+                ("#7EB250", "#2FAE83"),
+                lambda: self._open_editor_program("_open_motion_designer_entry", "Motion Designer"),
+            ),
+            (
+                "VTuber\nStudio",
+                "Open Program Output, Source Tracking, and Avatar Mapping",
+                "video",
+                ("#40BBC2", "#7367D7"),
+                self.open_vtuber_studio_requested.emit,
+            ),
+            (
+                "Painter",
+                "Open a standalone blank canvas painter",
+                "paint-brush",
+                ("#56BBD4", "#6F6AE4"),
+                self._open_painter_program,
+            ),
+            (
+                "3D PBR\nTexture",
+                "Create Normal, Height, AO, Roughness, and material maps from an image",
+                "pbr-texture",
+                ("#E2763A", "#8F4FD6"),
+                self._open_pbr_texture_program,
+            ),
+            (
+                "PPT\nMaker",
+                "Open the presentation and catalog deck maker",
+                "project",
+                ("#E1A94C", "#D95658"),
+                lambda: self._open_editor_program("_open_ppt_generator", "PPT Maker"),
+            ),
+            (
+                "Character\nHub",
+                "Open character assets, models, and actor libraries",
+                "actors",
+                ("#DE7AAE", "#7B70D8"),
+                lambda: self._open_editor_program("_open_character_asset_hub", "Character Hub"),
+            ),
+            (
+                "Engine\nLink",
+                "Open the Unreal Engine Link bridge",
+                "unreal",
+                ("#6F8DD8", "#2C71E8"),
+                lambda: self._open_editor_program("_open_unreal_engine_link", "Unreal Engine Link"),
+            ),
+        )
+        for idx, (label, tooltip, icon_name, colors, callback) in enumerate(programs):
+            button = self._program_launcher_button(label, tooltip, icon_name, colors, callback)
+            row, col = divmod(idx, 3)
+            grid.addWidget(button, row, col)
+        for col in range(3):
+            grid.setColumnStretch(col, 1)
+        layout.insertWidget(1, host, stretch=0)
+        self._program_launcher_grid = host
+        self._program_launcher_layout = grid
+        self._program_launcher_buttons = []
+        for idx in range(grid.count()):
+            item = grid.itemAt(idx)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QToolButton):
+                self._program_launcher_buttons.append(widget)
+        self._update_program_launcher_metrics()
+
+    def _program_launcher_button(
+        self,
+        label: str,
+        tooltip: str,
+        icon_name: str,
+        colors: tuple[str, str],
+        callback,
+    ) -> QToolButton:
+        button = QToolButton(self._tab_pages["programs"])
+        button.setObjectName("ProgramLauncherButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setText(label)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        button.setToolTip(tooltip)
+        button.setAccessibleName(label.replace("\n", " "))
+        button.setAccessibleDescription(tooltip)
+        setattr(button, "_program_launcher_icon_name", icon_name)
+        setattr(button, "_program_launcher_colors", colors)
+        button.clicked.connect(lambda _checked=False, cb=callback: cb())
+        return button
+
+    def _update_program_launcher_metrics(self) -> None:
+        buttons = getattr(self, "_program_launcher_buttons", None)
+        if not buttons:
+            return
+        page = self._tab_pages.get("programs") if hasattr(self, "_tab_pages") else None
+        width = page.width() if page is not None and page.width() > 0 else self.width()
+        scale = max(0.90, min(1.20, float(width or 520) / 520.0))
+        tile_px = max(
+            _PROGRAM_LAUNCHER_MIN_SIZE,
+            min(_PROGRAM_LAUNCHER_MAX_SIZE, round(_PROGRAM_LAUNCHER_BASE_SIZE * scale)),
+        )
+        tile_h = max(tile_px + 14, round(tile_px * 1.18))
+        icon_px = max(20, min(27, round(tile_px * 0.36)))
+        radius_px = max(12, min(16, round(tile_px * 0.20)))
+        font_px = max(9, min(10, round(tile_px * 0.14)))
+        spacing_px = max(8, min(12, round(tile_px * 0.13)))
+        layout = getattr(self, "_program_launcher_layout", None)
+        if layout is not None:
+            layout.setHorizontalSpacing(spacing_px)
+            layout.setVerticalSpacing(spacing_px)
+        for button in buttons:
+            self._style_program_launcher_button(button, tile_px, tile_h, icon_px, radius_px, font_px)
+
+    def _style_program_launcher_button(
+        self,
+        button: QToolButton,
+        tile_px: int,
+        tile_h: int,
+        icon_px: int,
+        radius_px: int,
+        font_px: int,
+    ) -> None:
+        start_color, end_color = getattr(button, "_program_launcher_colors", ("#42C7BA", "#4C64E8"))
+        icon_name = getattr(button, "_program_launcher_icon_name", "grid")
+        top_padding = max(5, round(tile_px * 0.08))
+        side_padding = max(3, round(tile_px * 0.05))
+        bottom_padding = max(6, round(tile_px * 0.09))
+        button.setStyleSheet(
+            "QToolButton#ProgramLauncherButton {"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {start_color},stop:1 {end_color});"
+            "color:#FFFFFF; border-top:1px solid rgba(255,255,255,74);"
+            "border-left:1px solid rgba(255,255,255,48);"
+            "border-right:1px solid rgba(0,0,0,76);"
+            "border-bottom:1px solid rgba(0,0,0,104);"
+            f"border-radius:{radius_px}px;"
+            f"padding:{top_padding}px {side_padding}px {bottom_padding}px {side_padding}px;"
+            f"font-size:{font_px}px; font-weight:820; text-align:center;"
+            "}"
+            "QToolButton#ProgramLauncherButton:hover {"
+            "border-top-color:rgba(255,255,255,112); border-left-color:rgba(255,255,255,74);"
+            "}"
+            "QToolButton#ProgramLauncherButton:pressed {"
+            "border-top-color:rgba(0,0,0,130); border-left-color:rgba(0,0,0,82);"
+            "border-right-color:rgba(255,255,255,40); border-bottom-color:rgba(255,255,255,54);"
+            "}"
+        )
+        button.setFixedSize(tile_px, tile_h)
+        icon = unreal_engine_icon(icon_px, color="#FFFFFF") if icon_name == "unreal" else app_icon(icon_name, size=icon_px, color="#FFFFFF")
+        button.setIcon(icon)
+        button.setIconSize(icon_size(icon_px))
+
+    def _show_program_window(self, window):
+        window.show()
+        try:
+            window.raise_()
+            window.activateWindow()
+        except Exception:
+            pass
+        return window
+
+    def _open_composer_program(self):
+        return self._show_program_window(self._ensure_composer_window())
+
+    def _open_voice_lab_program(self):
+        return self._show_program_window(self._ensure_voice_lab_window())
+
+    def _open_painter_program(self) -> None:
+        from app.drawing import NewCanvasDialog, PaintDialog, create_blank_paint_pixmap
+
+        owner = self.window()
+        setup = NewCanvasDialog(owner)
+        if setup.exec() != setup.DialogCode.Accepted:
+            return
+        request = setup.canvas_request()
+        background = create_blank_paint_pixmap(
+            int(request.get("width") or 1920),
+            int(request.get("height") or 1080),
+            str(request.get("background") or "transparent"),
+        )
+        painter = PaintDialog(
+            background_pixmap=background,
+            initial_strokes=[],
+            time_ms=0,
+            parent=owner,
+            initial_bubbles=[],
+            initial_stickers=[],
+            editor_object_provider=None,
+            standalone=True,
+            output_settings=request.get("output"),
+        )
+        painter.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        windows = [w for w in getattr(self, "_painter_windows", []) if w is not None]
+        windows.append(painter)
+        self._painter_windows = windows
+
+        def _forget_window(_result=0, window=painter) -> None:
+            self._painter_windows = [w for w in getattr(self, "_painter_windows", []) if w is not window]
+
+        painter.finished.connect(_forget_window)
+        self._show_program_window(painter)
+
+    def _open_pbr_texture_program(self, image_path: str | Path | None = None) -> None:
+        selected = str(image_path or "").strip()
+        # The lab takes its source from a clipboard paste, so it opens without
+        # demanding an image up front.
+        path: Path | None = None
+        if selected:
+            path = Path(selected).expanduser()
+            if not path.is_file():
+                QMessageBox.warning(self, "3D PBR Texture", f"Image file was not found:\n{path}")
+                return
+        try:
+            from app.ar_pbr.texture_lab_entry import open_texture_lab_window
+
+            open_texture_lab_window(self.window(), path)
+        except Exception as exc:
+            QMessageBox.warning(self, "3D PBR Texture", f"Could not open 3D PBR Texture:\n{exc}")
+
+    def _open_editor_program(self, method_name: str, title: str) -> None:
+        owner = self.window()
+        method = getattr(owner, method_name, None)
+        if not callable(method):
+            QMessageBox.information(self, title, f"{title} is not available in this build.")
+            return
+        try:
+            method()
+        except Exception as exc:
+            QMessageBox.warning(self, title, f"Could not open {title}:\n{exc}")
+
+    def _ensure_sound_editor_panel(self):
+        panel = getattr(self, "_sound_editor_panel", None)
+        if panel is not None:
+            return panel
+        from app.sound_editor_panel import SoundEditorPanel
+
+        audio_layout = self._tab_layouts["audio"]
+        for idx in range(audio_layout.count() - 1, -1, -1):
+            item = audio_layout.itemAt(idx)
+            if item is not None and item.spacerItem() is not None:
+                audio_layout.takeAt(idx)
+        scroll = QScrollArea(self._tab_pages["audio"])
+        scroll.setObjectName("SoundEditorScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        panel = SoundEditorPanel(scroll)
+        panel.changed.connect(self._on_sound_editor_changed)
+        panel.mixer_track_changed.connect(self._on_sound_editor_mixer_track_changed)
+        panel.advanced_lab_requested.connect(self.advanced_sound_lab_requested.emit)
+        panel.layout_height_changed.connect(self._on_sound_editor_layout_height_changed)
+        scroll.setWidget(panel)
+        scroll.hide()
+        composer_dock = getattr(self, "_composer_dock", None)
+        insert_index = audio_layout.indexOf(composer_dock) if composer_dock is not None else 1
+        audio_layout.insertWidget(max(1, insert_index), scroll, stretch=1)
+        self._sound_editor_scroll = scroll
+        self._sound_editor_panel = panel
+        return panel
+
+    def _ensure_composer_dock(self):
+        self._composer_dock = None
+        self._composer_button = None
+        self._voice_lab_button = None
+        self._composer_scroll = None
+        return None
+
+    def _ensure_composer_window(self):
+        window = getattr(self, "_composer_window", None)
+        if window is not None:
+            return window
+        from app.composer_panel import ComposerWindow
+
+        window = ComposerWindow(self.window())
+        window.music_lab_action_requested.connect(self.music_lab_action_requested.emit)
+        window.music_lab_selection_changed.connect(self.music_lab_selection_changed.emit)
+        self._composer_window = window
+        self._composer_panel = window.composer_panel()
+        return window
+
+    def _ensure_composer_panel(self):
+        panel = getattr(self, "_composer_panel", None)
+        if panel is not None:
+            return panel
+        return self._ensure_composer_window().composer_panel()
+
+    def _open_composer_window(self):
+        window = self._ensure_composer_window()
+        button = getattr(self, "_composer_button", None)
+        if button is not None:
+            button.setChecked(False)
+        self._set_inspector_tab("audio")
+        self._set_tab_empty_visible("audio", False)
+        window.show()
+        try:
+            window.raise_()
+            window.activateWindow()
+        except Exception:
+            pass
+        return window
+
+    def _ensure_voice_lab_window(self):
+        window = getattr(self, "_voice_lab_window", None)
+        if window is not None:
+            return window
+        from app.tts_lab import TtsLabWindow
+
+        editor_owner = self.window()
+        window = TtsLabWindow(editor_owner)
+        setattr(window, "_editor", editor_owner)
+        self._voice_lab_window = window
+        return window
+
+    def _open_voice_lab(self):
+        window = self._ensure_voice_lab_window()
+        self._set_inspector_tab("audio")
+        self._set_tab_empty_visible("audio", False)
+        window.show()
+        try:
+            window.raise_()
+            window.activateWindow()
+        except Exception:
+            pass
+        return window
+
+    def _set_composer_expanded(self, expanded: bool) -> None:
+        if expanded:
+            self._open_composer_window()
+        elif self._target and self._target[0] in {"audio", "audio_source"}:
+            window = getattr(self, "_composer_window", None)
+            if window is not None:
+                window.hide()
+            self._show_sound_editor_panel()
+
+    def _on_sound_editor_layout_height_changed(self, panel_min_height: int) -> None:
+        panel = getattr(self, "_sound_editor_panel", None)
+        scroll = getattr(self, "_sound_editor_scroll", None)
+        expanded = bool(panel_min_height and getattr(panel, "_advanced_expanded", False)) if panel is not None else False
+        parent = self.parentWidget()
+        if parent is not None and parent.property("_soundEditorBaseMinHeight") is None:
+            parent.setProperty("_soundEditorBaseMinHeight", int(parent.minimumHeight()))
+        base_parent_min = int(parent.property("_soundEditorBaseMinHeight") or 0) if parent is not None else 0
+        pane = parent.parentWidget() if parent is not None else None
+        if pane is not None and pane.property("_soundEditorBaseMinHeight") is None:
+            pane.setProperty("_soundEditorBaseMinHeight", int(pane.minimumHeight()))
+        base_pane_min = int(pane.property("_soundEditorBaseMinHeight") or 0) if pane is not None else 0
+        if expanded:
+            visible_hint = 0
+            if panel is not None and hasattr(panel, "advanced_visible_scroll_height_hint"):
+                try:
+                    visible_hint = int(panel.advanced_visible_scroll_height_hint())
+                except Exception:
+                    visible_hint = 0
+            target_scroll_height = max(0, visible_hint or int(panel_min_height or 0))
+            target_stack_height = target_scroll_height + 10
+            target_panel_height = target_stack_height + 112
+            if scroll is not None:
+                scroll.setMinimumHeight(target_scroll_height)
+            self._tab_stack.setMinimumHeight(target_stack_height)
+            self.setMinimumHeight(max(260, target_panel_height))
+            if parent is not None:
+                parent.setMinimumHeight(max(base_parent_min, target_panel_height + 24))
+            if pane is not None:
+                pane.setMinimumHeight(max(base_pane_min, target_panel_height + 28))
+        else:
+            if scroll is not None:
+                scroll.setMinimumHeight(0)
+            self._tab_stack.setMinimumHeight(0)
+            self.setMinimumHeight(260)
+            if parent is not None and base_parent_min:
+                parent.setMinimumHeight(base_parent_min)
+            if pane is not None and base_pane_min:
+                pane.setMinimumHeight(base_pane_min)
+        if scroll is not None:
+            scroll.updateGeometry()
+        self._tab_stack.updateGeometry()
+        self.updateGeometry()
+        if pane is not None:
+            pane.updateGeometry()
+        if parent is not None:
+            parent.updateGeometry()
+
+    def _show_sound_editor_panel(self) -> None:
+        composer_dock = getattr(self, "_composer_dock", None)
+        if composer_dock is not None:
+            composer_dock.show()
+        panel = getattr(self, "_sound_editor_panel", None)
+        if panel is not None:
+            panel.show()
+        scroll = getattr(self, "_sound_editor_scroll", None)
+        if scroll is not None:
+            scroll.show()
+
+    def _hide_sound_editor_panel(self) -> None:
+        self._on_sound_editor_layout_height_changed(0)
+        panel = getattr(self, "_sound_editor_panel", None)
+        if panel is not None:
+            panel.hide()
+        scroll = getattr(self, "_sound_editor_scroll", None)
+        if scroll is not None:
+            scroll.hide()
+        composer_dock = getattr(self, "_composer_dock", None)
+        if composer_dock is not None:
+            composer_dock.show()
+
+    def _ensure_node_graph_widget(self):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            return widget
+        from app.workbench.node_graph.widget import NodeGraphWidget
+
+        widget = NodeGraphWidget(self._tab_pages["fx"])
+        widget.popout_requested.connect(self._toggle_node_graph_popout)
+        widget.node_selection_changed.connect(self._on_node_graph_selection_changed)
+        widget.hide()
+        self._node_graph_root_layout.insertWidget(1, widget, stretch=1)
+        self._node_graph_widget = widget
+        self.node_graph_ready.emit(widget)
+        return widget
+
+    def _hide_node_graph_widget(self) -> None:
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            widget.hide()
+
+    def _video_picture_sync_markers(self, track, selected_clip=None) -> list[dict[str, Any]]:
+        anchor = selected_clip if selected_clip is not None else track
+        timeline_start = int(
+            getattr(anchor, "timeline_in_ms", getattr(track, "offset_ms", 0))
+            or getattr(track, "offset_ms", 0)
+            or 0
+        )
+        source_start = max(0, int(getattr(anchor, "source_in_ms", 0) or 0))
+        source_end = int(
+            getattr(anchor, "effective_source_out_ms", getattr(anchor, "source_out_ms", 0))
+            or 0
+        )
+        if source_end <= source_start:
+            source_end = int(
+                getattr(anchor, "source_duration_ms", getattr(track, "duration_ms", 0))
+                or getattr(track, "duration_ms", 0)
+                or source_start
+            )
+        if source_end <= source_start:
+            return []
+
+        markers: list[dict[str, Any]] = []
+        seen: set[tuple[int, str, str]] = set()
+
+        def _add_source(source_ms: int, kind: str, label: str, *, priority: int = 0) -> None:
+            ms = max(source_start, min(source_end, int(source_ms)))
+            if not (source_start <= ms <= source_end):
+                return
+            label_text = str(label or kind).strip()[:32]
+            key = (ms, str(kind or "clip"), label_text)
+            if key in seen:
+                return
+            seen.add(key)
+            markers.append(
+                {
+                    "source_ms": ms,
+                    "local_ms": max(0, ms - source_start),
+                    "project_ms": timeline_start + max(0, ms - source_start),
+                    "kind": str(kind or "clip"),
+                    "label": label_text,
+                    "priority": int(priority),
+                }
+            )
+
+        def _add_project(project_ms: int, kind: str, label: str, *, priority: int = 0) -> None:
+            source_ms = source_start + (int(project_ms) - timeline_start)
+            _add_source(source_ms, kind, label, priority=priority)
+
+        _add_source(source_start, "clip", "Clip In", priority=100)
+        _add_source(source_end, "clip", "Clip Out", priority=96)
+
+        transition_type = str(getattr(anchor, "transition_out_type", "") or "")
+        if transition_type:
+            transition_ms = max(1, int(getattr(anchor, "transition_out_ms", 0) or 0))
+            _add_source(source_end - transition_ms, "transition", f"{transition_type} start", priority=88)
+            _add_source(source_end, "transition", f"{transition_type} end", priority=87)
+
+        for owner in (track, anchor):
+            for fade in getattr(owner, "fades", []) or []:
+                try:
+                    start = int(getattr(fade, "start_ms", 0) or 0)
+                    end = int(getattr(fade, "end_ms", start) or start)
+                    kind = str(getattr(fade, "kind", "fade") or "fade")
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "fade", f"Fade {kind} start", priority=72)
+                _add_source(end, "fade", f"Fade {kind} end", priority=71)
+
+            for speed in getattr(owner, "speed_segments", []) or []:
+                try:
+                    start = int(getattr(speed, "start_ms", 0) or 0)
+                    end = int(getattr(speed, "end_ms", start) or start)
+                    value = float(getattr(speed, "speed", 1.0) or 1.0)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "speed", f"Speed {value:.2f}x start", priority=66)
+                _add_source(end, "speed", f"Speed {value:.2f}x end", priority=65)
+
+            for actor in getattr(owner, "zoom_actors", []) or []:
+                try:
+                    start = int(getattr(actor, "start_ms", 0) or 0)
+                    end = int(getattr(actor, "end_ms", start) or start)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "motion", "Zoom start", priority=82)
+                _add_source(end, "motion", "Zoom end", priority=81)
+
+            for repair in getattr(owner, "frame_repairs", []) or []:
+                if not isinstance(repair, dict):
+                    continue
+                start = int(repair.get("start_ms", 0) or 0)
+                end = int(repair.get("end_ms", start) or start)
+                if end <= start:
+                    continue
+                _add_source(start, "repair", "Frame fix start", priority=62)
+                _add_source(end, "repair", "Frame fix end", priority=61)
+
+        for actor in getattr(anchor, "typography_actors", []) or []:
+            try:
+                start = int(getattr(actor, "start_ms", 0) or 0)
+                end = int(getattr(actor, "end_ms", start) or start)
+            except Exception:
+                continue
+            if end <= start:
+                continue
+            title = str(getattr(actor, "text", "") or "Title").strip()[:18]
+            _add_source(start, "title", f"{title} in", priority=76)
+            _add_source(end, "title", f"{title} out", priority=75)
+            raw_keys = getattr(actor, "keyframes", None)
+            if not isinstance(raw_keys, dict):
+                animation = getattr(actor, "animation", None)
+                custom = getattr(animation, "custom_params", {}) if animation is not None else {}
+                raw_keys = custom.get("action_keyframes") if isinstance(custom, dict) else {}
+            if isinstance(raw_keys, dict):
+                for key_name, rows in raw_keys.items():
+                    for row in rows if isinstance(rows, list) else []:
+                        if isinstance(row, dict) and "time_ms" in row:
+                            _add_source(
+                                start + int(row.get("time_ms", 0) or 0),
+                                "title",
+                                f"{str(key_name)[:12]} key",
+                                priority=74,
+                            )
+
+        if selected_clip is None:
+            for actor in getattr(track, "typography_actors", []) or []:
+                try:
+                    start = int(getattr(actor, "start_ms", 0) or 0)
+                    end = int(getattr(actor, "end_ms", start) or start)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                title = str(getattr(actor, "text", "") or "Title").strip()[:18]
+                _add_project(start, "title", f"{title} in", priority=76)
+                _add_project(end, "title", f"{title} out", priority=75)
+
+        markers.sort(key=lambda row: (int(row["source_ms"]), -int(row.get("priority", 0))))
+        return markers[:96]
+
+    def _video_embedded_audio_proxy_clip(self, track, selected_clip=None):
+        """Return a transient AudioClip for a video's embedded audio stream."""
+        anchor = selected_clip if selected_clip is not None else track
+        source = getattr(anchor, "source_path", None) or getattr(track, "source_path", None)
+        if source in (None, ""):
+            return None
+        try:
+            source_path = Path(source)
+        except Exception:
+            return None
+        try:
+            cache_key = str(source_path.resolve()).casefold()
+        except Exception:
+            cache_key = str(source_path).casefold()
+        duration_cache = getattr(self, "_video_embedded_audio_duration_cache", None)
+        if duration_cache is None:
+            duration_cache = {}
+            self._video_embedded_audio_duration_cache = duration_cache
+        duration_ms = duration_cache.get(cache_key)
+        if duration_ms is None:
+            try:
+                from app.audio_tracks import probe_audio_duration_ms
+
+                duration_ms = int(probe_audio_duration_ms(source_path) or 0)
+            except Exception:
+                duration_ms = 0
+            duration_cache[cache_key] = duration_ms
+        if duration_ms <= 0:
+            return None
+
+        fallback_offset = int(getattr(track, "offset_ms", 0) or 0)
+        timeline_in = int(getattr(anchor, "timeline_in_ms", fallback_offset) or fallback_offset)
+        source_in = max(0, int(getattr(anchor, "source_in_ms", 0) or 0))
+        source_duration = max(
+            0,
+            int(
+                getattr(
+                    anchor,
+                    "source_duration_ms",
+                    getattr(track, "duration_ms", 0),
+                )
+                or 0
+            ),
+        )
+        source_out = int(
+            getattr(anchor, "effective_source_out_ms", getattr(anchor, "source_out_ms", 0))
+            or 0
+        )
+        if source_out <= 0:
+            source_out = source_duration or duration_ms
+        if source_out <= source_in:
+            length = int(getattr(anchor, "effective_length_ms", 0) or 0)
+            if length <= 0:
+                length = int(getattr(track, "duration_ms", duration_ms) or duration_ms)
+            source_out = source_in + length
+        trim_start = min(source_in, duration_ms)
+        trim_end = min(max(source_out, trim_start), duration_ms)
+        if trim_end <= trim_start:
+            return None
+
+        proxy = getattr(anchor, "_embedded_audio_proxy_clip", None)
+        if proxy is None:
+            from app.audio_tracks import AudioClip
+
+            raw_id = int(getattr(anchor, "id", getattr(track, "id", 0)) or 0)
+            proxy = AudioClip(id=-300000 - abs(raw_id))
+            setattr(anchor, "_embedded_audio_proxy_clip", proxy)
+        proxy.source_path = source_path
+        proxy.duration_ms = int(duration_ms)
+        proxy.offset_ms = int(timeline_in)
+        proxy.trim_start_ms = int(trim_start)
+        proxy.trim_end_ms = int(trim_end)
+        setattr(proxy, "preview_embedded_video_audio", True)
+        setattr(proxy, "workbench_embedded_video_audio", True)
+        setattr(
+            proxy,
+            "_embedded_video_audio_signature",
+            (cache_key, int(timeline_in), int(trim_start), int(trim_end)),
+        )
+        setattr(proxy, "_picture_sync_markers", self._video_picture_sync_markers(track, selected_clip))
+        return proxy
+
+    def _prepare_video_embedded_audio_panel(self, track, selected_clip=None) -> bool:
+        clip = self._video_embedded_audio_proxy_clip(track, selected_clip)
+        if clip is None:
+            self._hide_sound_editor_panel()
+            self._set_tab_empty_visible(
+                "audio",
+                True,
+                "This video selection has no detected embedded audio stream.",
+            )
+            return False
+        sound_panel = self._ensure_sound_editor_panel()
+        context_id = getattr(selected_clip, "id", getattr(track, "id", "none"))
+        sound_panel.set_clip(
+            clip,
+            track=None,
+            context_label="Embedded Video Audio",
+            context_key=f"video-embedded:{context_id}:{getattr(clip, 'source_path', '')}",
+        )
+        sound_panel.set_mixer_tracks([], active_track_id=None)
+        self._show_sound_editor_panel()
+        self._set_tab_empty_visible("audio", False)
+        return True
 
     # ---- public API ----
 
@@ -1108,7 +1923,10 @@ class WorkbenchPanel(QWidget):
         if effect_node is None:
             self._effect_section.hide()
             self._effect_node_ref = None
-            if hasattr(self, "_fx_empty_label") and not self._node_graph_widget.isVisible():
+            node_graph = getattr(self, "_node_graph_widget", None)
+            if hasattr(self, "_fx_empty_label") and (
+                node_graph is None or not node_graph.isVisible()
+            ):
                 self._fx_empty_label.show()
             return
         self._effect_node_ref = effect_node
@@ -1481,15 +2299,17 @@ class WorkbenchPanel(QWidget):
         NodeGraph so every node renders a DaVinci-style live
         thumbnail. Throttling lives in the editor — this call is
         just a scale + setattr per node."""
-        if hasattr(self, "_node_graph_widget"):
-            self._node_graph_widget.set_source_pixmap(pix)
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            widget.set_source_pixmap(pix)
 
     def selected_node(self):
         """Return the currently-selected NodeItem (or None) so the
         editor can route the Color panel to that node's grade."""
-        if not hasattr(self, "_node_graph_widget"):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is None:
             return None
-        items = self._node_graph_widget.scene.selectedItems()
+        items = widget.scene.selectedItems()
         from app.workbench.node_graph.items.node_item import NodeItem
         for it in items:
             if isinstance(it, NodeItem):
@@ -1500,9 +2320,10 @@ class WorkbenchPanel(QWidget):
         """Return the first Serial node (the default Node 1) so the
         editor has a sensible grade target before the user clicks
         anything. None when the graph is empty."""
-        if not hasattr(self, "_node_graph_widget"):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is None:
             return None
-        nodes = self._node_graph_widget.scene._serial_nodes
+        nodes = widget.scene._serial_nodes
         from app.workbench.node_graph.items.node_item import NodeItem
         for n in nodes:
             if isinstance(n, NodeItem):
@@ -1523,6 +2344,12 @@ class WorkbenchPanel(QWidget):
         if page is not None:
             self._tab_stack.setCurrentWidget(page)
         self._sync_inspector_chrome()
+        if self._inspector_tab == "audio" and self._target and self._target[0] == "video":
+            track = self._target[1]
+            selected_clip = self._target[2] if len(self._target) > 2 else None
+            self._prepare_video_embedded_audio_panel(track, selected_clip)
+        if self._inspector_tab == "programs":
+            self._update_program_launcher_metrics()
 
     def _sync_inspector_chrome(self) -> None:
         """Keep the FX graph visually close to the reference layout.
@@ -1547,15 +2374,48 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_inspector_tabs"):
             self._inspector_tabs.setProperty("fxMode", bool(is_fx))
             self._inspector_tabs.setVisible(not is_fx)
-            self._inspector_tabs.setFixedHeight(0 if is_fx else 22)
+            self._inspector_tabs.setFixedHeight(0 if is_fx else 58)
             self._inspector_tabs.style().unpolish(self._inspector_tabs)
             self._inspector_tabs.style().polish(self._inspector_tabs)
-        for button in self._inspector_tab_buttons.values():
+        if hasattr(self, "_inspector_tabs_caption"):
+            self._inspector_tabs_caption.setVisible(not is_fx)
+        if hasattr(self, "_fx_back_bar"):
+            self._fx_back_bar.setVisible(is_fx)
+        for tab_id, button in self._inspector_tab_buttons.items():
             button.setProperty("fxMode", bool(is_fx))
-            button.setFixedSize(17 if is_fx else 24, 14 if is_fx else 18)
-            button.setIconSize(icon_size(10 if is_fx else 12))
+            if is_fx:
+                button.setText("")
+                button.setFixedSize(*_INSPECTOR_TAB_COMPACT_SIZE)
+                button.setIconSize(icon_size(10))
+            else:
+                label, tooltip = _inspector_tab_copy(tab_id)
+                button.setText(label)
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                button.setToolTip(tooltip)
+                button.setAccessibleName(label)
+                button.setAccessibleDescription(tooltip)
+                button.setFixedSize(*_INSPECTOR_TAB_SIZE)
+                button.setIconSize(icon_size(16))
             button.style().unpolish(button)
             button.style().polish(button)
+
+    def _refresh_inspector_tab_copy(self) -> None:
+        if hasattr(self, "_inspector_tabs_caption"):
+            self._inspector_tabs_caption.setText(_inspector_tabs_caption())
+            self._inspector_tabs_caption.setToolTip(_inspector_tabs_caption_tooltip())
+        if hasattr(self, "_fx_back_btn"):
+            back_text, back_tip = _fx_back_button_copy()
+            self._fx_back_btn.setText(back_text)
+            self._fx_back_btn.setToolTip(back_tip)
+            self._fx_back_btn.setAccessibleName(back_text)
+            self._fx_back_btn.setAccessibleDescription(back_tip)
+        for tab_id, button in getattr(self, "_inspector_tab_buttons", {}).items():
+            label, tooltip = _inspector_tab_copy(tab_id)
+            if self._inspector_tab != "fx":
+                button.setText(label)
+            button.setToolTip(tooltip)
+            button.setAccessibleName(label)
+            button.setAccessibleDescription(tooltip)
 
     def _move_rows_to_tab(self, tab: str) -> None:
         target = self._tab_layouts.get(tab)
@@ -1575,6 +2435,10 @@ class WorkbenchPanel(QWidget):
         if text is not None:
             label.setText(text)
         label.setVisible(bool(visible))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_program_launcher_metrics()
 
     @staticmethod
     def _param_active(value) -> bool:
@@ -1854,7 +2718,7 @@ class WorkbenchPanel(QWidget):
             self._audio_evidence_card.hide()
         if hasattr(self, "_sound_editor_panel"):
             self._sound_editor_panel.set_clip(None)
-            self._sound_editor_panel.hide()
+            self._hide_sound_editor_panel()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_edit_point_evidence_card"):
@@ -1867,17 +2731,23 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
         if hasattr(self, "_fx_vfx_graph_btn"):
             self._fx_vfx_graph_btn.hide()
         self._set_tab_empty_visible("clip", True, "Select a timeline clip or track to edit properties.")
-        self._set_tab_empty_visible("audio", True, "Select an audio clip to edit gain, fades, and cleanup.")
+        self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
+        self._set_tab_empty_visible("programs", True, _PROGRAMS_EMPTY_TEXT)
         self._set_tab_empty_visible("fx", True, "Select a video track to edit its effect graph.")
         self._set_tab_empty_visible("mask", True, "Select a mask-capable node to edit tracking and masks.")
         self._set_tab_empty_visible("meta", True, "Selection metadata appears here.")
+
+    def wheelEvent(self, event) -> None:
+        if forward_wheel_to_scroll_area(self, event):
+            return
+        super().wheelEvent(event)
 
     def set_live2d_clip(self, track, clip) -> None:
         if clip is None:
@@ -1905,8 +2775,7 @@ class WorkbenchPanel(QWidget):
         self._rows_host.show()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.hide()
+        self._hide_sound_editor_panel()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_live2d_mapping_host"):
@@ -1946,12 +2815,12 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
         self._set_tab_empty_visible("clip", False)
-        self._set_tab_empty_visible("audio", True, "Live2D actor clips do not use audio controls here.")
+        self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
         self._set_tab_empty_visible("fx", True, "Live2D model/motion editing opens in the Live2D viewer.")
         self._set_tab_empty_visible("mask", True, "Performance Source tracking is an input-only VTuber mapping workflow.")
         self._set_tab_empty_visible(
@@ -2005,8 +2874,7 @@ class WorkbenchPanel(QWidget):
 
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.hide()
+        self._hide_sound_editor_panel()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_edit_point_evidence_card"):
@@ -2019,12 +2887,12 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.show()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
         self._set_tab_empty_visible("clip", False)
-        self._set_tab_empty_visible("audio", True, "MMD model tracks do not use audio controls here.")
+        self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
         self._set_tab_empty_visible("fx", True, "MMD toon shading controls live on the model track.")
         self._set_tab_empty_visible("mask", True, "MMD model masks are not exposed in the editor yet.")
         self._set_tab_empty_visible(
@@ -2076,8 +2944,7 @@ class WorkbenchPanel(QWidget):
         self._rows_host.show()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.hide()
+        self._hide_sound_editor_panel()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_live2d_mapping_host"):
@@ -2089,12 +2956,12 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.set_track(track)
             self._ar_pbr_evidence_card.show()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
         self._set_tab_empty_visible("clip", False)
-        self._set_tab_empty_visible("audio", True, "3D object tracks do not use audio controls here.")
+        self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
         self._set_tab_empty_visible("fx", True, "3D material and lighting controls are shown in the object workspace.")
         self._set_tab_empty_visible("mask", True, "Scene anchors, shadow catcher, and occlusion are handled by the 3D placement tools.")
         self._set_tab_empty_visible(
@@ -2150,8 +3017,6 @@ class WorkbenchPanel(QWidget):
         self._rows_host.show()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.hide()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_edit_point_evidence_card"):
@@ -2160,7 +3025,8 @@ class WorkbenchPanel(QWidget):
                 self._edit_point_evidence_card.set_context(track, selected_clip)
             self._edit_point_evidence_card.setVisible(show_edit_point)
         self._set_tab_empty_visible("clip", False)
-        self._set_tab_empty_visible("audio", True, "Select an audio clip to edit gain, fades, and cleanup.")
+        self._hide_sound_editor_panel()
+        self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
 
         if hasattr(self, "_live2d_mapping_host"):
             self._live2d_mapping_host.hide()
@@ -2203,9 +3069,11 @@ class WorkbenchPanel(QWidget):
             self._typography_evidence_card.setVisible(has_typography_actor)
         # NodeGraph is primary for node/effect work. Hide the empty default graph
         # when this selection is really a typography workspace.
-        self._node_graph_widget.set_track(track)
         show_node_graph = bool(vfx_summary != "VFX graph: none" or not has_typography_actor)
-        self._node_graph_widget.setVisible(show_node_graph)
+        node_graph = self._ensure_node_graph_widget() if show_node_graph else getattr(self, "_node_graph_widget", None)
+        if node_graph is not None:
+            node_graph.set_track(track)
+            node_graph.setVisible(show_node_graph)
         self._set_tab_empty_visible("fx", False)
         if has_selected_clip_fx or has_typography_actor or vfx_summary != "VFX graph: none":
             self._set_inspector_tab("fx")
@@ -2268,18 +3136,18 @@ class WorkbenchPanel(QWidget):
         self._hide_mmd_physics_rows()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.set_clip(
-                clip,
-                track=track,
-                context_label="Timeline Audio",
-                context_key=f"timeline:{getattr(track, 'id', 'none')}:{getattr(clip, 'id', 'none')}",
-            )
-            self._sound_editor_panel.set_mixer_tracks(
-                self._audio_tracks_for_sound_editor(track),
-                active_track_id=getattr(track, "id", None),
-            )
-            self._sound_editor_panel.show()
+        sound_panel = self._ensure_sound_editor_panel()
+        sound_panel.set_clip(
+            clip,
+            track=track,
+            context_label="Timeline Audio",
+            context_key=f"timeline:{getattr(track, 'id', 'none')}:{getattr(clip, 'id', 'none')}",
+        )
+        sound_panel.set_mixer_tracks(
+            self._audio_tracks_for_sound_editor(track),
+            active_track_id=getattr(track, "id", None),
+        )
+        self._show_sound_editor_panel()
         self._set_tab_empty_visible("audio", False)
         self._set_tab_empty_visible("clip", True, "Select a video clip or track to edit clip properties.")
         self._set_tab_empty_visible("fx", True, "Audio clips do not carry video effect graphs yet.")
@@ -2295,7 +3163,7 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
         # Audio clips don't carry a NodeGraph yet — hide the section.
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         if hasattr(self, "_fx_empty_label"):
@@ -2337,14 +3205,14 @@ class WorkbenchPanel(QWidget):
         self._rows_host.hide()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.set_clip(
-                clip,
-                track=None,
-                context_label="Media Pool Audio",
-                context_key=f"media:{src}",
-            )
-            self._sound_editor_panel.show()
+        sound_panel = self._ensure_sound_editor_panel()
+        sound_panel.set_clip(
+            clip,
+            track=None,
+            context_label="Media Pool Audio",
+            context_key=f"media:{src}",
+        )
+        self._show_sound_editor_panel()
         if hasattr(self, "_live2d_mapping_host"):
             self._live2d_mapping_host.hide()
         if hasattr(self, "_live2d_evidence_card"):
@@ -2353,7 +3221,7 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_tab_empty_visible("audio", False)
@@ -2382,17 +3250,13 @@ class WorkbenchPanel(QWidget):
         self.sound_editor_mixer_track_changed.emit(track)
 
     def refresh_music_lab_status(self, text: str) -> None:
-        panel = getattr(self, "_sound_editor_panel", None)
-        label = getattr(panel, "_music_status", None) if panel is not None else None
-        if label is not None and hasattr(label, "setText"):
-            label.setText(str(text or ""))
+        panel = getattr(self, "_composer_panel", None)
+        if panel is not None and hasattr(panel, "refresh_music_lab_status"):
+            panel.refresh_music_lab_status(str(text or ""))
 
     def set_music_lab_composition(self, composition: dict | None) -> None:
-        panel = getattr(self, "_sound_editor_panel", None)
-        if panel is not None and hasattr(panel, "set_music_composition"):
-            panel.set_music_composition(composition)
-            if hasattr(panel, "open_music_lab"):
-                panel.open_music_lab()
+        window = self._open_composer_window()
+        window.set_music_composition(composition)
 
     def _audio_tracks_for_sound_editor(self, selected_track) -> list:
         seen: set[int] = set()
@@ -2456,6 +3320,7 @@ class WorkbenchPanel(QWidget):
     def retranslate(self) -> None:
         self._title.setText(tr("workbench.empty.title"))
         self._subtitle.setText(tr("workbench.empty.subtitle"))
+        self._refresh_inspector_tab_copy()
         self._row_name.set_label(tr("workbench.row.name"))
         self._row_source.set_label(tr("workbench.row.source"))
         self._row_duration.set_label(tr("workbench.row.duration"))
@@ -2464,7 +3329,9 @@ class WorkbenchPanel(QWidget):
         self._row_fade_out.set_label(tr("workbench.row.fade_out"))
         self._row_volume.set_label(tr("workbench.row.volume"))
         self._row_speed.set_label(tr("workbench.row.speed"))
-        self._node_graph_widget.retranslate()
+        node_graph = getattr(self, "_node_graph_widget", None)
+        if node_graph is not None:
+            node_graph.retranslate()
 
     # ---- NodeGraph popout (Phase 2A) ----
 
@@ -2482,6 +3349,7 @@ class WorkbenchPanel(QWidget):
         ):
             self._node_graph_popout.close()
             return
+        node_graph = self._ensure_node_graph_widget()
         from app.workbench.node_graph.popout import NodeGraphPopoutWindow
         self._node_graph_popout = NodeGraphPopoutWindow(self)
         self._node_graph_popout.closed.connect(
@@ -2490,9 +3358,9 @@ class WorkbenchPanel(QWidget):
         # Reparent the widget into the popout. Save the index so we
         # can re-insert at the same spot when the window closes.
         self._node_graph_popout_index = self._node_graph_root_layout.indexOf(
-            self._node_graph_widget,
+            node_graph,
         )
-        self._node_graph_root_layout.removeWidget(self._node_graph_widget)
+        self._node_graph_root_layout.removeWidget(node_graph)
         # Drop a placeholder so the dock layout doesn't collapse.
         self._node_graph_placeholder = QLabel(
             tr("workbench.node_graph_popout.placeholder"),
@@ -2513,7 +3381,7 @@ class WorkbenchPanel(QWidget):
             self._node_graph_placeholder,
             stretch=1,
         )
-        self._node_graph_popout.install(self._node_graph_widget)
+        self._node_graph_popout.install(node_graph)
         self._node_graph_popout.show()
         self._node_graph_popout.raise_()
         self._node_graph_popout.activateWindow()
@@ -2530,17 +3398,20 @@ class WorkbenchPanel(QWidget):
             self._node_graph_placeholder = None
         else:
             idx = self._node_graph_popout_index
-        self._node_graph_widget.setParent(self)
+        node_graph = getattr(self, "_node_graph_widget", None)
+        if node_graph is None:
+            return
+        node_graph.setParent(self)
         self._node_graph_root_layout.insertWidget(
-            max(0, idx), self._node_graph_widget, stretch=1,
+            max(0, idx), node_graph, stretch=1,
         )
         # Only reveal if a video track is currently selected — keeps
         # the panel hidden after re-dock when the user switched to an
         # audio clip while the popout was open.
         if self._target is not None and self._target[0] == "video":
-            self._node_graph_widget.show()
+            node_graph.show()
         else:
-            self._node_graph_widget.hide()
+            self._hide_node_graph_widget()
         if self._node_graph_popout is not None:
             self._node_graph_popout.deleteLater()
             self._node_graph_popout = None

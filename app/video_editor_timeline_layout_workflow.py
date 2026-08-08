@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.audio_tracks import is_audio_path, is_video_path
+from app.media_asset_routing import motion_project_paths_from_mime
+from app.video_editor_media_import_controller import (
+    TARGET_WINDOW,
+    dispatch_import_decision,
+    route_mime_drop,
+)
 
 MIN_TRACK_WIDTH = 300
 
@@ -25,7 +31,30 @@ def dropEvent(self, event: QDropEvent) -> None:
         self._add_mmd_asset_to_timeline(mmd_paths)
         event.acceptProposedAction()
         return
+    motion_paths = motion_project_paths_from_mime(md)
+    if motion_paths:
+        self._import_motion_actor_from_path(
+            motion_paths[0],
+            start_ms=int(getattr(self._player, "position", lambda: 0)()),
+        )
+        event.acceptProposedAction()
+        return
     if not md.hasUrls():
+        try:
+            start_ms = int(getattr(self._player, "position", lambda: 0)())
+        except Exception:
+            start_ms = 0
+        decision = route_mime_drop(
+            self,
+            md,
+            target=TARGET_WINDOW,
+            start_ms=start_ms,
+            image_point=(0.5, 0.62),
+            open_audio_editor=True,
+        )
+        if decision.handled and dispatch_import_decision(self, decision):
+            event.acceptProposedAction()
+            return
         event.ignore()
         return
     ar_paths = self._ar_pbr_paths_from_mime(md)
@@ -93,6 +122,10 @@ def _update_tracks_host_width(self) -> None:
         pref_fn = getattr(row, "_preferred_width", None)
         row_pref = pref_fn() if callable(pref_fn) else MIN_TRACK_WIDTH
         max_w = max(max_w, max(MIN_TRACK_WIDTH, row_pref))
+    for row in getattr(self, "_motion_lane_rows", []):
+        pref_fn = getattr(row, "_preferred_width", None)
+        row_pref = pref_fn() if callable(pref_fn) else MIN_TRACK_WIDTH
+        max_w = max(max_w, max(MIN_TRACK_WIDTH, row_pref))
     # Also honor the viewport width so the divider / stripes can extend
     # the full visible area even when clips are short.
     vp_w = self._tracks_scroll.viewport().width() if hasattr(self, "_tracks_scroll") else 0
@@ -111,6 +144,8 @@ def _update_tracks_host_width(self) -> None:
     for row in getattr(self, "_ar_pbr_lane_rows", []):
         row.setFixedWidth(max_w)
     for row in getattr(self, "_mmd_lane_rows", []):
+        row.setFixedWidth(max_w)
+    for row in getattr(self, "_motion_lane_rows", []):
         row.setFixedWidth(max_w)
     # Subtitle lane must match so its background fills the full timeline.
     if hasattr(self, "_subtitle_lane"):
@@ -161,14 +196,10 @@ def _refresh_timeline_mixer_geometry(self, mixer_visible: bool | None = None) ->
                     if 0 <= color_idx < len(sizes) and not color_container.isVisible():
                         sizes[color_idx] = 0
                 else:
-                    sizes[timeline_idx] = min(
-                        max(sizes[timeline_idx], 260),
-                        int(getattr(self, "_timeline_compact_max_height", 310)),
-                    )
+                    sizes[timeline_idx] = max(sizes[timeline_idx], 260)
                 splitter.setSizes(sizes)
                 splitter.updateGeometry()
     if tracks_scroll is not None:
         tracks_scroll.updateGeometry()
     host.updateGeometry()
     self.updateGeometry()
-

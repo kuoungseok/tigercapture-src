@@ -10,9 +10,12 @@ __pycache__/
 build/
 dist/
 *.manifest
+/TigerCapture.exe
+/TigerStudio.exe
 
 # Rust native helpers
 native/**/target/
+bundled/unreal_plugins/
 
 # NSIS / installer
 installer_output/
@@ -23,11 +26,26 @@ release/
 # IDE / editor
 .vscode/
 .idea/
+.vs/
 *.swp
 *.swo
 
+# Local publication/reference workspaces
+.codex-gh-pages/
+external/assets/figma/
+external/tools/scroll-world/
+docs/motion-user-guide.pdf
+
 # Claude Code local state
 .claude/
+
+# Other agent / linter local state
+.agents/
+.codex/
+.ruff_cache/
+
+# Local agent-to-agent mailbox state
+.agent_mailbox/
 
 # OS
 Thumbs.db
@@ -42,6 +60,14 @@ logs/
 .pytest_cache/
 *.log
 _test_*.py
+outputs/
+output/
+
+# QA corpora and scratch artifacts (scripts under tmp/ stay tracked)
+qa_corpus/
+tmp/**
+!tmp/**/
+!tmp/**/*.py
 
 # Debug captures / scratch zips (not part of the project)
 debugCapture/
@@ -53,8 +79,38 @@ local_resources/
 external/tools/vseeface/
 external/tools/lmms/
 external/tools/fluidsynth/
+external/tools/tts/kokoro/
+external/tools/tts/gpt-sovits/
+external/tools/motion_references/
+external/tools/remotion_tsx_runtime/
+external/tools/ar_pbr_dxr/
+native/ar_pbr_dxr_helper/bin/
+native/ar_pbr_dxr_helper/obj/
+external/assets/motion_reference_corpus/
+external/assets/paint_clipboard/
 external/assets/vtuber/
 external/assets/music/soundfonts/*.sf2
 external/assets/music/soundfonts/*.sf3
 external/assets/music/soundfonts/*.sfz
+external/assets/music/**/*.wav
+external/assets/music/**/*.flac
+external/assets/music/**/*.aif
+external/assets/music/**/*.aiff
+external/assets/music/**/*.ogg
+external/assets/music/**/*.sf2
+external/assets/music/**/*.sf3
+external/assets/music/**/*.sfz
+external/assets/music/**/*.dspreset
+external/assets/music/drum_kits/*
+!external/assets/music/drum_kits/README.md
+external/assets/music/drum_kits/**/*.wav
+external/assets/music/drum_kits/**/*.flac
+external/assets/music/drum_kits/**/*.aif
+external/assets/music/drum_kits/**/*.aiff
+external/assets/music/drum_kits/**/*.ogg
+external/assets/music/drum_kits/**/*.sfz
+external/assets/music/drum_kits/**/*.dspreset
 resources/live2d_samples/CubismWebSamples/
+tools/unreal_asset_bridge/**/bin/
+tools/unreal_asset_bridge/**/obj/
+tools/unreal_asset_bridge/vendor/CUE4Parse/CUE4Parse-Natives/builddir/

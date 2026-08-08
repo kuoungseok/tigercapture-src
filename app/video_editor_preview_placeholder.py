@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import QFileDialog
 
 from app.audio_tracks import AUDIO_EXTS, VIDEO_EXTS, is_audio_path, is_video_path
+from app.image_media import IMAGE_EXTS, is_image_path
 from app.icons import app_icon, icon_size
 from app.style import COLOR_TEXT_TERTIARY
 
@@ -241,7 +242,7 @@ def _update_preview_placeholder(self) -> None:
 
 
 def _import_media_from_empty_preview(self) -> None:
-        all_exts = sorted(set(VIDEO_EXTS) | set(AUDIO_EXTS))
+        all_exts = sorted(set(VIDEO_EXTS) | set(AUDIO_EXTS) | set(IMAGE_EXTS))
         filter_exts = " ".join(f"*{ext}" for ext in all_exts)
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -265,6 +266,16 @@ def _import_media_from_empty_preview(self) -> None:
             self._add_track_with_source(media_path)
             if not template_status_expected:
                 self._flash_status(f"Imported video: {media_path.name}")
+            return
+        if is_image_path(media_path):
+            try:
+                from app.video_editor_media_import_controller import add_image_track_with_source
+
+                add_image_track_with_source(self, media_path)
+            except Exception:
+                self._add_track_with_source(media_path)
+            if not template_status_expected:
+                self._flash_status(f"Imported image: {media_path.name}")
             return
         if is_audio_path(media_path):
             self._add_audio_track_with_source(media_path, open_editor=True)

@@ -5,7 +5,12 @@ import json
 from typing import Any
 
 from app.effect_cards import FADE_MIME_TYPE, SPEED_MIME_TYPE, ZOOM_MIME_TYPE
-from app.media_asset_routing import ar_pbr_paths_from_mime, mmd_paths_from_mime
+from app.media_asset_routing import (
+    ar_pbr_paths_from_mime,
+    mmd_paths_from_mime,
+    motion_project_paths_from_mime,
+    timeline_media_paths_from_mime,
+)
 from app.typography import TEXT_CLIP_MIME
 from app.video_editor_preset_cards import (
     EDITOR_PRESET_MIME_TYPE,
@@ -30,6 +35,7 @@ DROP_GUIDE_PALETTE = {
     "speed": "#A79A85",
     "zoom": "#8D90A6",
     "3d": "#5B8CFF",
+    "motion_actor": "#27C2A0",
 }
 
 
@@ -45,6 +51,10 @@ def _has_urls(mime: Any) -> bool:
         return bool(mime is not None and mime.hasUrls())
     except Exception:
         return False
+
+
+def _has_timeline_media(mime: Any) -> bool:
+    return bool(timeline_media_paths_from_mime(mime) or _has_urls(mime))
 
 
 def _data_text(mime: Any, mime_type: str) -> str:
@@ -72,7 +82,21 @@ def _entry(kind: str, label: str, start_ms: int, duration_ms: int, color: str) -
     }
 
 
+def _motion_project_duration_ms(mime: Any) -> int:
+    paths = motion_project_paths_from_mime(mime)
+    if not paths:
+        return 0
+    try:
+        from app.motion_designer.project_io import load_motion_project
+
+        return max(1, int(load_motion_project(paths[0]).duration_ms))
+    except Exception:
+        return 5_000
+
+
 def drop_guide_text(mime: Any) -> str:
+    if motion_project_paths_from_mime(mime):
+        return "Motion Actor"
     if mmd_paths_from_mime(mime):
         return "MMD"
     if ar_pbr_paths_from_mime(mime):
@@ -91,7 +115,7 @@ def drop_guide_text(mime: Any) -> str:
         return "FX"
     if _has(mime, EDITOR_PRESET_MIME_TYPE):
         return "Preset"
-    if _has_urls(mime):
+    if _has_timeline_media(mime):
         return "Media"
     return "Drop"
 
@@ -140,17 +164,29 @@ def drop_guide_width_for_mime(mime: Any, *, px_per_sec: float = 40.0) -> int:
         return 128
     if _has(mime, EFFECT_PRESET_MIME_TYPE):
         return 92
+    if motion_project_paths_from_mime(mime):
+        return _ms_to_px(_motion_project_duration_ms(mime), minimum=96, maximum=420)
     if mmd_paths_from_mime(mime):
         return _ms_to_px(10_000, minimum=96)
     if ar_pbr_paths_from_mime(mime):
         return _ms_to_px(10_000, minimum=96)
-    if _has_urls(mime):
+    if _has_timeline_media(mime):
         return 160
     return 68
 
 
 def drop_guide_segments_for_mime(mime: Any) -> list[dict]:
     palette = DROP_GUIDE_PALETTE
+    if motion_project_paths_from_mime(mime):
+        return [
+            _entry(
+                "motion_actor",
+                "Motion Actor",
+                0,
+                _motion_project_duration_ms(mime),
+                palette["motion_actor"],
+            )
+        ]
     if ar_pbr_paths_from_mime(mime):
         return [_entry("3d", "3D", 0, 10_000, palette["3d"])]
     if _has(mime, FADE_MIME_TYPE):
@@ -209,7 +245,7 @@ def drop_guide_segments_for_mime(mime: Any) -> list[dict]:
         return [_entry(kind, str(payload.get("name", kind) or kind), 0, dur, palette.get(kind, "#7E6FFF"))]
     if _has(mime, EFFECT_PRESET_MIME_TYPE):
         return [_entry("effect", "FX", 0, 1200, palette["effect"])]
-    if _has_urls(mime):
+    if _has_timeline_media(mime):
         return [_entry("media", "Media", 0, 2500, palette["media"])]
     return []
 

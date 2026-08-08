@@ -36,7 +36,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 EXTENSION = ".tgp"
-FORMAT_VERSION = "1.1"
+FORMAT_VERSION = "1.2"
 
 # QSettings key under the shared TigerCapture / TigerCapture
 # organisation/app pair used by app/i18n.py. Keeps "last project" in
@@ -224,6 +224,12 @@ def _video_clip_to_dict(c) -> dict:
             }
         except Exception:
             pass
+    try:
+        from app.frame_repair import normalize_frame_repairs
+
+        frame_repairs = normalize_frame_repairs(getattr(c, "frame_repairs", []) or [])
+    except Exception:
+        frame_repairs = list(getattr(c, "frame_repairs", []) or [])
     return {
         "id": int(c.id),
         "source_path": _p(c.source_path),
@@ -246,6 +252,7 @@ def _video_clip_to_dict(c) -> dict:
         "transition_preset_meta": dict(getattr(c, "transition_preset_meta", {}) or {}),
         "cursor_events": list(getattr(c, "cursor_events", []) or []),
         "screenstudio_polish": dict(getattr(c, "screenstudio_polish", {}) or {}),
+        "frame_repairs": frame_repairs,
         "video_filters": _effect_param_to_dict(getattr(c, "video_filters", None)),
         "chroma_key": _effect_param_to_dict(getattr(c, "chroma_key", None)),
         "stabilizer": (
@@ -635,6 +642,18 @@ def save_project(editor, path: str | Path) -> None:
     except Exception:
         doc["live2d_actor_tracks"] = []
     try:
+        from app.motion_designer.project_io import serialize_compositions
+
+        motion_store = getattr(editor, "_motion_compositions", None) or {}
+        motion_values = motion_store.values() if isinstance(motion_store, dict) else motion_store
+        doc["motion_compositions"] = serialize_compositions(motion_values)
+    except Exception:
+        doc["motion_compositions"] = []
+    try:
+        doc["motion_clips"] = [dict(item) for item in (getattr(editor, "_motion_clips", None) or [])]
+    except Exception:
+        doc["motion_clips"] = []
+    try:
         from app.ar_pbr.schema import normalize_ar_tracks
 
         doc["ar_pbr_tracks"] = normalize_ar_tracks(
@@ -745,6 +764,17 @@ def load_project(editor, path: str | Path) -> None:
                 editor._music_compositions[composition.id] = composition
     except Exception:
         editor._music_compositions = {}
+    try:
+        from app.motion_designer.project_io import load_motion_document
+
+        motion_load = load_motion_document(doc)
+        editor._motion_compositions = {item.id: item for item in motion_load.compositions}
+        editor._motion_project_issues = [item.to_dict() for item in motion_load.issues]
+        editor._motion_clips = [dict(item) for item in (doc.get("motion_clips") or []) if isinstance(item, dict)]
+    except Exception:
+        editor._motion_compositions = {}
+        editor._motion_clips = []
+        editor._motion_project_issues = []
 
     # 4. Restore subtitles.
     _load_subtitles(editor, doc.get("subtitles", []))
@@ -834,6 +864,72 @@ def load_project(editor, path: str | Path) -> None:
                     color=tuple(sd.get("color") or (255, 50, 50)),
                     opacity=int(sd.get("opacity", 255)),
                     width_px=float(sd.get("width_px", 4.0)),
+                    brush_style=str(sd.get("brush_style", "round") or "round"),
+                    brush_hardness=int(sd.get("brush_hardness", 100)),
+                    brush_spacing=int(sd.get("brush_spacing", 25)),
+                    brush_angle=int(sd.get("brush_angle", 0)),
+                    brush_roundness=int(sd.get("brush_roundness", 100)),
+                    brush_flip_x=bool(sd.get("brush_flip_x", False)),
+                    brush_flip_y=bool(sd.get("brush_flip_y", False)),
+                    closed_path=bool(sd.get("closed_path", False)),
+                    layer_id=str(sd.get("layer_id", "paint-layer-1") or "paint-layer-1"),
+                    source_tool=str(sd.get("source_tool", "pen") or "pen"),
+                    brush_engine_version=max(1, min(2, int(sd.get("brush_engine_version", 1) or 1))),
+                    point_pressure=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_pressure") or [])
+                    ],
+                    point_tilt=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt") or [])
+                    ],
+                    point_tilt_x=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt_x") or [])
+                    ],
+                    point_tilt_y=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt_y") or [])
+                    ],
+                    point_rotation=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_rotation") or [])
+                    ],
+                    point_tangential_pressure=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tangential_pressure") or [])
+                    ],
+                    point_load=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_load") or [])
+                    ],
+                    bristle_count=max(0, min(64, int(sd.get("bristle_count", 0) or 0))),
+                    brush_seed=int(sd.get("brush_seed", 0) or 0),
+                    load_depletion=max(
+                        0.0, min(1.0, float(sd.get("load_depletion", 0.28) or 0.0))
+                    ),
+                    material_enabled=bool(sd.get("material_enabled", False)),
+                    material_load=max(0.0, min(1.0, float(sd.get("material_load", 0.0) or 0.0))),
+                    material_thickness=max(
+                        0.0, min(1.0, float(sd.get("material_thickness", 0.0) or 0.0))
+                    ),
+                    material_wetness=max(
+                        0.0, min(1.0, float(sd.get("material_wetness", 0.0) or 0.0))
+                    ),
+                    material_gloss=max(
+                        0.0, min(1.0, float(sd.get("material_gloss", 0.0) or 0.0))
+                    ),
+                    material_roughness=max(
+                        0.0, min(1.0, float(sd.get("material_roughness", 0.56)))
+                    ),
+                    material_plow=max(
+                        0.0, min(1.0, float(sd.get("material_plow", 0.0) or 0.0))
+                    ),
+                    material_resaturation=max(
+                        0.0,
+                        min(1.0, float(sd.get("material_resaturation", 0.0) or 0.0)),
+                    ),
+                    material_negative_depth=bool(sd.get("material_negative_depth", False)),
                     start_ms=int(sd.get("start_ms", 0)),
                     end_ms=sd.get("end_ms"),
                 ))
@@ -1029,6 +1125,13 @@ def load_project(editor, path: str | Path) -> None:
         except Exception:
             pass
 
+    if hasattr(editor, "_rebuild_motion_lanes"):
+        try:
+            editor._rebuild_motion_lanes()
+            editor._sync_motion_state_to_player()
+        except Exception:
+            pass
+
     try:
         editor._refresh_player_tracks()
         if hasattr(editor, "_update_tracks_host_width"):
@@ -1219,6 +1322,15 @@ def _clear_editor(editor) -> None:
             pass
     if hasattr(editor, "_mmd_lane_rows"):
         editor._mmd_lane_rows = []
+    for row in list(getattr(editor, "_motion_lane_rows", []) or []):
+        try:
+            editor._tracks_layout.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        except Exception:
+            pass
+    if hasattr(editor, "_motion_lane_rows"):
+        editor._motion_lane_rows = []
     if hasattr(editor, "_spine_actor_tracks"):
         editor._spine_actor_tracks = []
     if hasattr(editor, "_live2d_actor_tracks"):
@@ -1231,6 +1343,12 @@ def _clear_editor(editor) -> None:
         editor._mmd_tracks = []
     if hasattr(editor, "_next_mmd_id"):
         editor._next_mmd_id = 1
+    if hasattr(editor, "_motion_compositions"):
+        editor._motion_compositions = {}
+    if hasattr(editor, "_motion_clips"):
+        editor._motion_clips = []
+    if hasattr(editor, "_motion_project_issues"):
+        editor._motion_project_issues = []
     try:
         editor._player.set_spine_actor_tracks([])
         editor._player.set_live2d_actor_tracks([])
@@ -1289,6 +1407,18 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
             clip.vtuber_performance_source = True
             clip.track_type = "vtuber_performance_source"
             clip.program_output = False
+    else:
+        track_type = str(cd.get("track_type") or "").strip()
+        if track_type:
+            try:
+                clip.track_type = track_type
+            except Exception:
+                pass
+        if "program_output" in cd:
+            try:
+                clip.program_output = bool(cd.get("program_output"))
+            except Exception:
+                pass
 
     try:
         ng_data = cd.get("node_graph") or {}
@@ -1337,6 +1467,12 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
     clip.transition_preset_meta = dict(cd.get("transition_preset_meta", {}) or {})
     clip.cursor_events = list(cd.get("cursor_events", []) or [])
     clip.screenstudio_polish = dict(cd.get("screenstudio_polish", {}) or {})
+    try:
+        from app.frame_repair import normalize_frame_repairs
+
+        clip.frame_repairs = normalize_frame_repairs(cd.get("frame_repairs", []) or [])
+    except Exception:
+        clip.frame_repairs = list(cd.get("frame_repairs", []) or [])
 
     clip.video_filters = _restore_clip_effect_param("video_filters", cd.get("video_filters", None))
     clip.chroma_key = _restore_clip_effect_param("chroma_key", cd.get("chroma_key", None))

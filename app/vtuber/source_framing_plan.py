@@ -149,6 +149,7 @@ def build_source_framing_plan(
                     "mouth_open": float(frame.mouth_open),
                     "blink": float(max(frame.blink_l, frame.blink_r)),
                     "confidence": float(frame.confidence),
+                    "chin_offset_x_norm": float(getattr(frame, "chin_offset_x_norm", 0.0)),
                 },
                 "framing": solution.to_dict(),
                 "framing_control": controlled,

@@ -16,6 +16,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QMenu, QWidget
 
+from app.ar_pbr.anchor_status import ar_pbr_anchor_status
 from app.studio_theme import (
     STUDIO_ACTION_HI,
     paint_studio_clip_block,
@@ -199,14 +200,20 @@ class ArPbrActorLaneRow(QWidget):
         )
         paint_studio_clip_label(painter, clip_rect.adjusted(-2, -8, 0, 0), ar_pbr_track_label(self._track))
 
-        badge_rect = QRect(max(clip_rect.left() + 5, clip_rect.right() - 34), 6, min(30, clip_rect.width() - 10), 13)
+        status = ar_pbr_anchor_status(self._track)
+        badge_text = str(status.get("badge") or "3D")
+        painter.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
+        badge_w = min(max(30, painter.fontMetrics().horizontalAdvance(badge_text) + 12), max(18, clip_rect.width() - 10))
+        badge_rect = QRect(max(clip_rect.left() + 5, clip_rect.right() - badge_w - 4), 6, badge_w, 13)
         if badge_rect.width() > 18:
+            badge_color = QColor(str(status.get("color") or "#669EFF"))
+            badge_fill = QColor(badge_color)
+            badge_fill.setAlpha(168)
             painter.setPen(QPen(QColor(255, 255, 255, 34), 1))
-            painter.setBrush(QColor(102, 158, 255, 160))
+            painter.setBrush(badge_fill)
             painter.drawRoundedRect(badge_rect, 3, 3)
             painter.setPen(QColor("#FFFFFF"))
-            painter.setFont(QFont("Segoe UI", 6, QFont.Weight.Bold))
-            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "3D")
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
 
         paint_studio_playhead(painter, self._ms_to_x(self._playhead_ms), 0, h, show_handle=False)
         painter.end()

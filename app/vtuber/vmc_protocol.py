@@ -7,6 +7,8 @@ import socket
 import struct
 from typing import Any, Iterable, Mapping
 
+from app.vtuber.vrm_motion_mapping import source_pitch_to_vrm_pitch
+
 
 VMC_DEFAULT_HOST = "127.0.0.1"
 VMC_VSEEFACE_RECEIVER_PORT = 39539
@@ -83,7 +85,8 @@ def build_vmc_messages_from_face_frame(
     """Build VMC messages that drive a VRM avatar from one face-motion frame."""
     time_ms = _frame_value(frame, "time_ms", 0.0)
     yaw = _clamp(_frame_value(frame, "yaw_deg", 0.0), -45.0, 45.0)
-    pitch = _clamp(_frame_value(frame, "pitch_deg", 0.0), -35.0, 35.0)
+    source_pitch = _clamp(_frame_value(frame, "pitch_deg", 0.0), -35.0, 35.0)
+    pitch = _clamp(source_pitch_to_vrm_pitch(source_pitch), -35.0, 35.0)
     roll = _clamp(_frame_value(frame, "roll_deg", 0.0), -25.0, 25.0)
     shoulder_roll = _clamp(_frame_value(frame, "shoulder_roll_deg", 0.0), -25.0, 25.0)
     mouth_open = _clamp01(_frame_value(frame, "mouth_open", 0.0))

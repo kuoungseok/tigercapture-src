@@ -65,6 +65,7 @@ class AudioTrackRow(QWidget):
     track_changed = Signal(int)           # track_id ??clips were mutated
     clip_selection_changed = Signal(int, int, int, int)  # track_id, clip_id, start, end
     open_editor_requested = Signal(int, int)  # track_id, clip_id
+    position_requested = Signal(int, int)  # track_id, project ms
 
     MARGIN = 180
     CLIP_LEFT = 180   # same as MARGIN, left meters removed (now in mixer panel)
@@ -79,6 +80,7 @@ class AudioTrackRow(QWidget):
     BAR_COLOR_ACTIVE = QColor("#303830")
 
     FADE_EDGE_GRAB_PX = 6
+    PLAYHEAD_GRAB_PX = 9
 
     def __init__(self, track: AudioTrack) -> None:
         super().__init__()
@@ -89,6 +91,7 @@ class AudioTrackRow(QWidget):
         self._march_offset: int = 0   # marching-ants animation offset
         self._position_ms: int = 0
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        self._dragging_playhead: bool = False
 
         # Active interaction state. ``_interaction_clip`` points to the
         # AudioClip the user is currently manipulating (drag / select /
@@ -215,6 +218,13 @@ class AudioTrackRow(QWidget):
         if self._px_per_sec <= 0:
             return 0
         return max(0, int((x - self.CLIP_LEFT) / self._px_per_sec * 1000))
+
+    def _playhead_hit(self, pos: QPoint) -> bool:
+        row_bottom = self.LABEL_H + self.BAR_H + self.SPECTRUM_H
+        if pos.y() < self.LABEL_H - 8 or pos.y() > row_bottom + 8:
+            return False
+        px = self._project_ms_to_x(self._position_ms)
+        return abs(pos.x() - px) <= self.PLAYHEAD_GRAB_PX
 
     # ---- per-clip hit testing ----
 
@@ -369,6 +379,14 @@ class AudioTrackRow(QWidget):
             self.load_source_requested.emit(self.track.id)
             return
 
+        if self._playhead_hit(pos):
+            self._dragging_playhead = True
+            self._drag_start_x = x
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self.position_requested.emit(self.track.id, self._x_to_project_ms(x))
+            event.accept()
+            return
+
         clip = self._clip_at_pos(pos)
         if clip is None:
             return
@@ -434,6 +452,12 @@ class AudioTrackRow(QWidget):
         x = pos.x()
         clip = self._interaction_clip
 
+        if self._dragging_playhead:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self.position_requested.emit(self.track.id, self._x_to_project_ms(x))
+            event.accept()
+            return
+
         # Volume envelope drag
         if self._env_drag_active and self._env_drag_clip is not None:
             ec = self._env_drag_clip
@@ -485,6 +509,13 @@ class AudioTrackRow(QWidget):
         prev_key = self._hover_audio_fade_key
         prev_side = self._hover_audio_fade_side
         hover_clip = self._clip_at_pos(pos)
+        if self._playhead_hit(pos):
+            self._hover_audio_fade_key = None
+            self._hover_audio_fade_side = ""
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            if prev_key is not None:
+                self.update()
+            return
         if hover_clip is not None:
             fade, side = self._fade_edge_at(hover_clip, x, pos.y())
             if fade is not None:
@@ -511,6 +542,7 @@ class AudioTrackRow(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         self._dragging_offset = False
+        self._dragging_playhead = False
         self._resizing_fade = None
         self._resizing_clip = None
         self._resize_side = ""

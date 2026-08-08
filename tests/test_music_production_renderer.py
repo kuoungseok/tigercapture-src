@@ -189,6 +189,44 @@ def test_production_router_explicit_stable_audio_overrides_disabled_default(tmp_
     assert meta["provider"] == "stable_audio_3"
 
 
+def test_production_router_reads_ai_provider_from_request(tmp_path: Path, monkeypatch) -> None:
+    request = _request(tmp_path)
+    row = json.loads(request.read_text(encoding="utf-8"))
+    row["ai_provider"] = "stable_audio_3"
+    request.write_text(json.dumps(row), encoding="utf-8")
+    output = tmp_path / "stable_request.wav"
+    config = tmp_path / "provider.json"
+    config.write_text(
+        json.dumps(
+            {
+                "preferred_provider": "auto",
+                "providers": {
+                    "stable_audio_3": {
+                        "enabled": False,
+                        "mode": "huggingface_space",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_stable(_request_row, output_wav, _config):
+        output_wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+        return {
+            "provider": "stable_audio_3",
+            "provider_engine": "Stable Audio 3.0 HF Space/small-music",
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(renderer, "render_stable_audio_3_hf_space", fake_stable)
+
+    meta = renderer.render_production_music(request, output, config_path=config)
+
+    assert output.exists()
+    assert meta["provider"] == "stable_audio_3"
+
+
 def test_production_router_falls_back_to_lmms_when_acestep_is_unavailable(tmp_path: Path, monkeypatch) -> None:
     request = _request(tmp_path)
     output = tmp_path / "fallback.wav"

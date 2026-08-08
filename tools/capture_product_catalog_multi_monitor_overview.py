@@ -145,11 +145,29 @@ def _build_side_monitor_slots() -> dict[str, list[Path]]:
 
     from tools.build_review_catalog_preview_pages import _label, _load, _make_right_monitor_screen, _rounded_paste
 
+    def first_existing(*paths: Path) -> Path:
+        for candidate in paths:
+            if candidate.exists():
+                return candidate
+        return paths[0]
+
     left = MULTI / "left_monitor_actor_3d_vtuber_action.png"
     right = MULTI / "right_monitor_node_audio_action.png"
-    ar = FRESH / "ar_pbr_statue_composite" / "ar_pbr_statue_standalone_action.png"
-    live2d = FRESH / "live2d_simple_bg" / "live2d_viewer_action.png"
-    mmd = FRESH / "mmd_character_motion" / "mmd_player_cantarella_action.png"
+    ar = first_existing(
+        FRESH / "ar_pbr_statue_composite" / "ar_pbr_statue_standalone_action.png",
+        FRESH / "ar_pbr_statue_composite" / "workbench_ar_pbr_object_action.png",
+        FRESH / "ar_pbr_statue_composite" / "viewer_ar_pbr_composited_frame.png",
+    )
+    live2d = first_existing(
+        FRESH / "live2d_actor_composite" / "live2d_actor_detail_action.png",
+        FRESH / "live2d_actor_composite" / "live2d_viewer_action.png",
+        FRESH / "live2d_actor_composite" / "workbench_live2d_actor_action.png",
+    )
+    mmd = first_existing(
+        FRESH / "mmd_character_composite" / "mmd_character_detail_action.png",
+        FRESH / "mmd_character_composite" / "editor_mmd_character_composite_action.png",
+        FRESH / "mmd_character_motion" / "mmd_player_cantarella_action.png",
+    )
     screen = Image.new("RGB", (1440, 1000), "#0d1117")
     draw = ImageDraw.Draw(screen, "RGBA")
     _rounded_paste(screen, _load(ar), (28, 34, 850, 966), radius=18)

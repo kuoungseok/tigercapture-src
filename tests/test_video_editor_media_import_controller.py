@@ -22,9 +22,10 @@ class _FakeMediaPool:
 
 
 class _RoutingOwner:
-    def __init__(self, *, vrm=(), mmd=(), ar=(), perf=(), media=()) -> None:
+    def __init__(self, *, vrm=(), mmd=(), motion=(), ar=(), perf=(), media=()) -> None:
         self.vrm = tuple(Path(p) for p in vrm)
         self.mmd = tuple(Path(p) for p in mmd)
+        self.motion = tuple(Path(p) for p in motion)
         self.ar = tuple(Path(p) for p in ar)
         self.perf = tuple(Path(p) for p in perf)
         self.media = tuple(Path(p) for p in media)
@@ -34,6 +35,9 @@ class _RoutingOwner:
 
     def _mmd_paths_from_mime(self, _mime):
         return list(self.mmd)
+
+    def _motion_project_paths_from_mime(self, _mime):
+        return list(self.motion)
 
     def _ar_pbr_paths_from_mime(self, _mime):
         return list(self.ar)
@@ -98,6 +102,23 @@ def test_tracks_host_route_preserves_mmd_perf_ar_media_order(tmp_path):
 
     owner.perf = ()
     assert route_mime_drop(owner, _FakeMime(), target=TARGET_TRACKS_HOST).route == ROUTE_AR_PBR
+
+
+def test_tracks_host_routes_motion_project_as_actor(tmp_path):
+    from app.video_editor_media_import_controller import (
+        ROUTE_MOTION,
+        route_tracks_host_drop,
+    )
+
+    owner = _RoutingOwner(motion=(tmp_path / "title.tgmotion",))
+    owner._px_per_sec = 100.0
+    owner._timeline_content_margin = lambda: 180
+
+    decision = route_tracks_host_drop(owner, _FakeMime(), drop_x=680.0)
+
+    assert decision.route == ROUTE_MOTION
+    assert decision.path == tmp_path / "title.tgmotion"
+    assert decision.start_ms == 5000
 
 
 def test_video_row_route_prefers_ar_then_performance_then_media(tmp_path):
@@ -213,3 +234,63 @@ def test_append_clip_to_track_uses_video_clip_tail_position(tmp_path, monkeypatc
     assert clip.source_duration_ms == 2200
     assert clip.timeline_in_ms == first.timeline_out_ms
     assert track.clips == [first, clip]
+
+
+def test_add_timeline_media_dispatches_image_track(tmp_path):
+    from app.timeline_model import VideoClip
+    from app.video_editor_media_import_controller import add_timeline_media_from_mime
+    from app.video_track_legacy import VideoTrack
+
+    image = tmp_path / "poster.png"
+    owner = _RoutingOwner(media=(image,))
+    owner._tracks = []
+    owner._audio_tracks = []
+    owner._next_track_id = 9
+    owner._next_video_clip_id = 90
+    owner._player = SimpleNamespace(position=lambda: 1500)
+    owner._media_pool = _FakeMediaPool()
+
+    assert add_timeline_media_from_mime(owner, _FakeMime()) is True
+
+    assert len(owner._tracks) == 1
+    track = owner._tracks[0]
+    assert isinstance(track, VideoTrack)
+    assert track.source_path is None
+    assert getattr(track, "track_type") == "image"
+    assert len(track.clips) == 1
+    clip = track.clips[0]
+    assert isinstance(clip, VideoClip)
+    assert clip.source_path == image
+    assert getattr(clip, "track_type") == "image"
+    assert clip.timeline_in_ms == 1500
+    assert clip.source_duration_ms == 5000
+
+
+def test_append_image_clip_uses_tail_and_marks_track(tmp_path):
+    from app.timeline_model import VideoClip
+    from app.video_editor_media_import_controller import append_image_clip_to_track
+    from app.video_track_legacy import VideoTrack
+
+    first = VideoClip(
+        id=1,
+        source_path=tmp_path / "first.png",
+        source_duration_ms=3000,
+        timeline_in_ms=250,
+        source_in_ms=0,
+        source_out_ms=3000,
+    )
+    first.track_type = "image"
+    track = VideoTrack(id=5, source_path=None, clips=[first], clips_explicit=True)
+    track.track_type = "image"
+    owner = SimpleNamespace(_tracks=[track], _next_video_clip_id=50)
+    second = tmp_path / "second.jpg"
+
+    clip = append_image_clip_to_track(owner, track, second, duration_ms=1800)
+
+    assert isinstance(clip, VideoClip)
+    assert clip.id == 50
+    assert clip.source_path == second
+    assert clip.source_duration_ms == 1800
+    assert clip.timeline_in_ms == first.timeline_out_ms
+    assert getattr(track, "track_type") == "image"
+    assert getattr(clip, "track_type") == "image"

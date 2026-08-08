@@ -35,6 +35,7 @@ from app.i18n import tr
 from app.media_asset_routing import (
     ar_pbr_paths_from_mime as _shared_ar_pbr_paths_from_mime,
     mmd_paths_from_mime as _shared_mmd_paths_from_mime,
+    motion_project_paths_from_mime as _shared_motion_project_paths_from_mime,
     performance_source_paths_from_mime as _shared_performance_source_paths_from_mime,
     timeline_media_paths_from_mime as _shared_timeline_media_paths_from_mime,
 )
@@ -53,6 +54,12 @@ from app.studio_theme import (
 )
 from app.style import COLOR_ACCENT_ORANGE
 from app.timeline_cursor import _timeline_tool_cursor
+from app.timeline_track_colors import (
+    catalog_track_palette as _catalog_track_palette,
+    is_image_track as _is_image_track,
+    is_performance_source_track as _is_performance_source_track,
+    track_palette_for_track as _track_palette_for_track,
+)
 from app.timeline_drop_guides import (
     drop_guide_detail_for_mime as _shared_drop_guide_detail_for_mime,
     drop_guide_segments_for_mime as _shared_drop_guide_segments_for_mime,
@@ -90,7 +97,7 @@ from app.video_track_legacy import VideoTrack
 
 
 TRACK_HEIGHT = 44
-TRACK_V_PADDING = 2
+TRACK_V_PADDING = 0
 DEFAULT_PX_PER_SEC = 52.0
 MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
@@ -124,7 +131,12 @@ def _append_ux_event(event: str, **payload) -> None:
         pass
 
 
-def _draw_marching_ants(painter: "QPainter", rect: "QRect", offset: int) -> None:
+def _draw_marching_ants(
+    painter: "QPainter",
+    rect: "QRect",
+    offset: int,
+    accent: "QColor | None" = None,
+) -> None:
     """Draw the selected-clip outline."""
     r = rect.adjusted(1, 1, -2, -2)
     if r.width() <= 0 or r.height() <= 0:
@@ -136,7 +148,9 @@ def _draw_marching_ants(painter: "QPainter", rect: "QRect", offset: int) -> None
     painter.drawRoundedRect(r.adjusted(0, 0, 0, 0), 3, 3)
     painter.setPen(QPen(QColor(226, 230, 236, 118), 1.1))
     painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 2, 2)
-    painter.setPen(QPen(QColor(255, 91, 76, 150), 1.2))
+    accent_color = QColor(accent) if accent is not None else QColor(255, 91, 76)
+    accent_color.setAlpha(156)
+    painter.setPen(QPen(accent_color, 1.2))
     painter.drawLine(r.left() + 5, r.top() + 2, r.right() - 5, r.top() + 2)
     painter.restore()
 
@@ -157,11 +171,9 @@ class TrackRow(QWidget):
     context_menu = Signal(int, QPoint)  # track_id, global_pos
 
     MARGIN = 180
-    # Slim header strip ??paints the active dot + track name above the
-    # timeline body. Trimmed from 18 ??14 to narrow the visual gap
-    # between the subtitle lane and the first track (users were trying
-    # to drop clips into the header area and missing).
-    LABEL_H = 13
+    # Track identity now lives in the left lane header and clip color strip.
+    # Keep no extra body header so stacked video clips read as dense lanes.
+    LABEL_H = 0
     TIMELINE_H = TRACK_HEIGHT
     FADE_EDGE_GRAB_PX = 6  # resize handle hit area in pixels
     TYPO_EDGE_GRAB_PX = 8
@@ -174,6 +186,7 @@ class TrackRow(QWidget):
     SPEED_MIN_DURATION_MS = 200
     CLIP_EDGE_GRAB_PX = 8        # clip trim / roll edit handle hit area
     CLIP_MIN_DURATION_MS = 100   # minimum clip duration after trim
+    PLAYHEAD_GRAB_PX = 9         # grab zone around the drawn playhead line
 
     offset_changed = Signal(int, int)  # track_id, new_offset_ms
     drag_committed = Signal(int)       # track_id ??emitted ONLY on mouseRelease
@@ -727,6 +740,12 @@ class TrackRow(QWidget):
         self._position_ms = ms
         self.update()
 
+    def _playhead_hit(self, pos: QPoint) -> bool:
+        if pos.y() < self.LABEL_H - 8 or pos.y() > self.LABEL_H + self.TIMELINE_H + 8:
+            return False
+        px = self._project_ms_to_x(self._position_ms)
+        return abs(pos.x() - px) <= self.PLAYHEAD_GRAB_PX
+
     def _track_span_ms(self) -> int:
         """Total occupied span on the project timeline in ms.
 
@@ -1210,6 +1229,8 @@ class TrackRow(QWidget):
             badges.append(("COL", "#716C7B", "#5A5664"))
         if (getattr(clip, "screenstudio_polish", {}) or {}).get("auto_zoom_actor_ids"):
             badges.append(("AP", "#75645C", "#5C596A"))
+        if getattr(clip, "frame_repairs", None):
+            badges.append(("Fix", "#6F7C61", "#4F5C58"))
 
         clip_start = int(getattr(clip, "timeline_in_ms", 0) or 0)
         clip_end = int(getattr(clip, "timeline_out_ms", clip_start) or clip_start)
@@ -1307,6 +1328,10 @@ class TrackRow(QWidget):
             entries.append(("COL", "Color Grade", "#716C7B", "#5A5664"))
         if (getattr(clip, "screenstudio_polish", {}) or {}).get("auto_zoom_actor_ids"):
             entries.append(("AP", "Auto Zoom", "#75645C", "#5C596A"))
+        if getattr(clip, "frame_repairs", None):
+            count = len(getattr(clip, "frame_repairs", []) or [])
+            label = "Frame Fix" if count <= 1 else f"Frame Fix x{count}"
+            entries.append(("FIX", label, "#6F7C61", "#4F5C58"))
         clip_start = int(getattr(clip, "timeline_in_ms", 0) or 0)
         clip_end = int(getattr(clip, "timeline_out_ms", clip_start) or clip_start)
         for actor in getattr(self.track, "typography_actors", []) or []:
@@ -1459,6 +1484,8 @@ class TrackRow(QWidget):
             return "color"
         if text == "ap":
             return "motion"
+        if text == "fix":
+            return "inspect"
         if text == "t":
             return "title"
         if text == "mot":
@@ -1782,30 +1809,13 @@ class TrackRow(QWidget):
         painter.restore()
 
     def _catalog_track_palette(self) -> tuple[QColor, QColor, QColor]:
-        palettes = (
-            ("#5A432F", "#75583A", "#D99B5D"),
-            ("#38495D", "#4B627A", "#89B4D6"),
-            ("#41533F", "#536C52", "#9ACB8C"),
-            ("#51405D", "#665179", "#BE98D8"),
-            ("#564B35", "#6D6042", "#D5B36A"),
-        )
-        try:
-            idx = max(0, int(getattr(self.track, "id", 0) or 0) - 1) % len(palettes)
-        except Exception:
-            idx = 0
-        return tuple(QColor(c) for c in palettes[idx])
+        return _catalog_track_palette(self.track)
 
     def _is_performance_source_track(self) -> bool:
-        try:
-            from app.vtuber.performance_source import is_performance_source_track
+        return _is_performance_source_track(self.track)
 
-            return bool(is_performance_source_track(self.track))
-        except Exception:
-            return bool(
-                getattr(self.track, "vtuber_performance_source", False)
-                or getattr(self.track, "performance_source", False)
-                or str(getattr(self.track, "track_type", "") or "").casefold() == "vtuber_performance_source"
-            )
+    def _is_image_track(self) -> bool:
+        return _is_image_track(self.track)
 
     @staticmethod
     def _is_performance_source_clip(clip) -> bool:
@@ -1821,9 +1831,7 @@ class TrackRow(QWidget):
             )
 
     def _track_palette_for_role(self) -> tuple[QColor, QColor, QColor]:
-        if self._is_performance_source_track():
-            return QColor("#303440"), QColor("#3C4251"), QColor("#868CA0")
-        return self._catalog_track_palette()
+        return _track_palette_for_track(self.track)
 
     @staticmethod
     def _duration_chip_text(duration_ms: int) -> str:

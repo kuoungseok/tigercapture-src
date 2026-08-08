@@ -670,7 +670,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "Text",
     "subtitle.edit.placeholder": "Untertiteltext eingeben…",
     "subtitle.edit.show_box": "Hintergrundfeld anzeigen (aus = nur Umriss/Schatten)",
-    "paint.title": "Zeichnen — TigerCapture",
+    "paint.title": "Zeichnen — Tiger Studio",
     "paint.hint": "Klick: Zeichnen öffnen · Rechtsklick: Alles löschen",
     "paint.btn.pen": "🖌 Stift",
     "paint.btn.eraser": "🧹 Radierer",

@@ -1,0 +1,10 @@
+{
+  "name": "tigerstudio-remotion-tsx-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "esbuild": "0.25.11",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}

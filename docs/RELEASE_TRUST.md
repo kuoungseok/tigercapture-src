@@ -46,12 +46,17 @@ keeps public packaging claims separate from feature-parity claims.
 - Local AI, local media analysis, Live2D/Spine rendering, and AR/PBR preview
   paths should be described as local processing unless an optional external
   provider is explicitly selected by the user.
+- Voice Lab subtitle-to-voice generation should be described as an optional
+  local sidecar workflow. Style-Bert-VITS2 and user-trained voice models stay
+  outside the closed TigerCapture editor build unless the user connects that
+  local install.
 - Optional providers such as Claude, Codex, upload/share providers, or future
   cloud integrations must be opt-in and labeled before use.
 
 ## Public Claim Boundary
 
 - Say Screen Studio-inspired or CapCut-style when describing workflow polish.
+- Say optional local Voice Lab sidecar when describing subtitle-to-voice.
 - Do not claim full Screen Studio, CapCut, Resolve, Fairlight, Fusion, Descript,
   Premiere/Resolve-class professional NLE, or universal actor compatibility
   until the corresponding corpus, readiness, and parity gates pass.

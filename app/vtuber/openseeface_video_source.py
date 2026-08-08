@@ -6,6 +6,7 @@ frames into the external ``facetracker.exe`` process and records diagnostics.
 from __future__ import annotations
 
 from pathlib import Path
+import csv
 import socket
 import subprocess
 import sys
@@ -271,10 +272,11 @@ def _count_tracking_rows(path: Path) -> int:
     if not path.is_file():
         return 0
     try:
-        line_count = sum(1 for _line in path.open("r", encoding="utf-8", errors="replace"))
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as fh:
+            reader = csv.DictReader(fh)
+            return sum(1 for row in reader if row and any(str(value or "").strip() for value in row.values()))
     except OSError:
         return 0
-    return max(0, line_count - 1)
 
 
 def _read_tail_bytes(path: Path, limit: int = 4096) -> bytes:

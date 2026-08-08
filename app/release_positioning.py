@@ -77,6 +77,13 @@ PUBLIC_POSITIONING_RULES: tuple[PositioningRule, ...] = (
         ("AI Script Edit MVP", "review-first text edit planning", "safe transcript workflow"),
     ),
     PositioningRule(
+        "tts_hosted_or_universal_voice_claim",
+        "Voice Lab / TTS",
+        r"\b(hosted\s+tts\s+platform|universal\s+voice[-\s]+clon(?:e|ing)|voice\s+marketplace|bundled\s+style-bert-vits2|built-in\s+style-bert-vits2|guaranteed\s+commercial\s+voice\s+rights)\b",
+        "Do not present Voice Lab as a hosted TTS platform, universal voice-cloning product, or bundled Style-Bert-VITS2 engine.",
+        ("optional local Voice Lab sidecar", "subtitle-to-voice generation", "local Style-Bert-VITS2 connection"),
+    ),
+    PositioningRule(
         "resolve_fairlight_fusion_replacement_claim",
         "Resolve/Fairlight/Fusion",
         r"\b(resolve\s+replacement|fairlight\s+replacement|fusion\s+replacement|full\s+resolve|full\s+fairlight|full\s+fusion|resolve\s+대체|fairlight\s+대체|fusion\s+대체)\b",
@@ -206,6 +213,7 @@ def build_release_positioning_report(
     safe_term_hits = {
         "screenstudio_inspired": False,
         "capcut_style": False,
+        "voice_lab_sidecar": False,
         "professional_foundations": False,
         "not_replacement": False,
     }
@@ -217,6 +225,11 @@ def build_release_positioning_report(
             text = ""
         safe_term_hits["screenstudio_inspired"] |= "screen studio-style" in text or "screen studio-inspired" in text
         safe_term_hits["capcut_style"] |= "capcut-style" in text
+        safe_term_hits["voice_lab_sidecar"] |= (
+            ("voice lab" in text and "sidecar" in text)
+            or "optional local tts" in text
+            or "subtitle-to-voice" in text
+        )
         safe_term_hits["professional_foundations"] |= "professional" in text and "foundation" in text
         safe_term_hits["not_replacement"] |= "not a full" in text or "not a replacement" in text or "remain far deeper" in text
 
@@ -225,6 +238,7 @@ def build_release_positioning_report(
         "no_blocking_overclaims": not findings,
         "safe_screenstudio_language_present": bool(safe_term_hits["screenstudio_inspired"]),
         "safe_capcut_language_present": bool(safe_term_hits["capcut_style"]),
+        "safe_voice_lab_language_present": bool(safe_term_hits["voice_lab_sidecar"]),
         "professional_foundation_language_present": bool(safe_term_hits["professional_foundations"]),
         "replacement_caveat_present": bool(safe_term_hits["not_replacement"]),
         "public_surface_coverage": len(scanned) >= 4,

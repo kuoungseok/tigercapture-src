@@ -2,6 +2,34 @@
 from __future__ import annotations
 
 SPINE_PREVIEW_FIT_MARGIN = 0.78
+SPINE_EDITOR_FRAME_MARGIN = 0.76
+
+
+def _fit_aspect_rect(
+    width: int,
+    height: int,
+    aspect_ratio: float,
+    margin: float,
+) -> tuple[float, float, float, float]:
+    """Fit a fixed-aspect output frame inside the editor viewport."""
+    viewport_w = max(1.0, float(width))
+    viewport_h = max(1.0, float(height))
+    aspect = max(0.05, min(20.0, float(aspect_ratio)))
+    margin = max(0.05, min(1.0, float(margin)))
+    available_w = viewport_w * margin
+    available_h = viewport_h * margin
+    if available_w / available_h >= aspect:
+        frame_h = available_h
+        frame_w = frame_h * aspect
+    else:
+        frame_w = available_w
+        frame_h = frame_w / aspect
+    return (
+        (viewport_w - frame_w) / 2.0,
+        (viewport_h - frame_h) / 2.0,
+        frame_w,
+        frame_h,
+    )
 
 
 def compute_spine_screen_layout(
@@ -51,66 +79,43 @@ def compute_spine_editor_view_transform(
     *,
     mode: str = "work",
     margin: float = SPINE_PREVIEW_FIT_MARGIN,
-    work_margin: float = 0.76,
+    work_margin: float = SPINE_EDITOR_FRAME_MARGIN,
+    frame_aspect_ratio: float | None = None,
 ) -> tuple[float, float, float, tuple[float, float, float, float]]:
     """Return editor camera transform and visible final-frame rectangle.
 
-    ``final`` mode maps the Spine actor exactly as the preview/export frame does.
-    ``work`` mode keeps that final placement, then zooms the editor camera out
-    only when needed so oversized or off-frame actors stay inspectable while the
-    final output frame remains visible as an overlay rectangle.
+    The frame is fitted independently from the actor, so placement and scale
+    controls move only the actor. ``work`` leaves breathing room around the
+    frame; ``final`` uses the largest frame that fits the viewport.
     """
     width = max(1, int(width))
     height = max(1, int(height))
-    final_scale, final_offset_x, final_offset_y = compute_spine_screen_layout(
-        bounds,
+    aspect = float(frame_aspect_ratio or (float(width) / float(height)))
+    normalized_mode = str(mode or "work").lower()
+    frame_margin = work_margin if normalized_mode in {"work", "safe", "canvas"} else 1.0
+    frame_x, frame_y, frame_w, frame_h = _fit_aspect_rect(
         width,
         height,
+        aspect,
+        frame_margin,
+    )
+    final_scale, final_offset_x, final_offset_y = compute_spine_screen_layout(
+        bounds,
+        max(1, round(frame_w)),
+        max(1, round(frame_h)),
         pos_x,
         pos_y,
         scale,
         margin=margin,
     )
-    if str(mode or "work").lower() not in {"work", "safe", "canvas"} or not bounds:
-        return final_scale, final_offset_x, final_offset_y, (
-            0.0,
-            0.0,
-            float(width),
-            float(height),
-        )
-
-    min_x, min_y, max_x, max_y = bounds
-    actor_left = final_offset_x + float(min_x) * final_scale
-    actor_right = final_offset_x + float(max_x) * final_scale
-    actor_top = final_offset_y - float(max_y) * final_scale
-    actor_bottom = final_offset_y - float(min_y) * final_scale
-
-    union_left = min(0.0, actor_left)
-    union_top = min(0.0, actor_top)
-    union_right = max(float(width), actor_right)
-    union_bottom = max(float(height), actor_bottom)
-    union_w = max(1.0, union_right - union_left)
-    union_h = max(1.0, union_bottom - union_top)
-
-    view_scale = min(
-        1.0,
-        float(width) * float(work_margin) / union_w,
-        float(height) * float(work_margin) / union_h,
-    )
-    view_scale = max(0.02, min(1.0, view_scale))
-    union_cx = (union_left + union_right) / 2.0
-    union_cy = (union_top + union_bottom) / 2.0
-    view_offset_x = float(width) / 2.0 - union_cx * view_scale
-    view_offset_y = float(height) / 2.0 - union_cy * view_scale
-
-    return (
-        final_scale * view_scale,
-        final_offset_x * view_scale + view_offset_x,
-        final_offset_y * view_scale + view_offset_y,
-        (
-            view_offset_x,
-            view_offset_y,
-            float(width) * view_scale,
-            float(height) * view_scale,
-        ),
+    # Timeline/offscreen renderers receive offsets relative to the frame centre.
+    # The editor viewport stores the world origin directly in widget pixels, so
+    # convert the shared renderer placement before applying the work-view camera.
+    final_origin_x = frame_x + frame_w / 2.0 + final_offset_x
+    final_origin_y = frame_y + frame_h / 2.0 - final_offset_y
+    return final_scale, final_origin_x, final_origin_y, (
+        frame_x,
+        frame_y,
+        frame_w,
+        frame_h,
     )

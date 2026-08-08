@@ -20,6 +20,14 @@ class _PopoutSpec:
     aliases: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _SectionSpec:
+    target: str
+    attr: str
+    group: str = ""
+    aliases: tuple[str, ...] = ()
+
+
 _POPOUT_SPECS: tuple[_PopoutSpec, ...] = (
     _PopoutSpec("preview", "_preview_popout", "_toggle_preview_popout", aliases=("viewer",)),
     _PopoutSpec("timeline", "_timeline_popout", "_toggle_timeline_popout"),
@@ -43,11 +51,35 @@ _POPOUT_SPECS: tuple[_PopoutSpec, ...] = (
     _PopoutSpec("audio_mixer", "_popout_win", "_toggle_popout", "_audio_mixer_panel", ("mixer", "scopes")),
 )
 
+_SECTION_SPECS: tuple[_SectionSpec, ...] = (
+    _SectionSpec("media_pool", "_media_pool_section_host", "left", ("media", "pool")),
+    _SectionSpec("actor_library", "_actor_library_section_host", "left", ("actors", "actor")),
+    _SectionSpec("effects_library", "_effects_library_section_host", "left", ("effects", "effect_library")),
+    _SectionSpec("title_presets", "_title_presets_section_host", "left", ("titles", "title")),
+    _SectionSpec("transitions", "_transitions_section_host", "left", ("transition_presets",)),
+    _SectionSpec("workflow_presets", "_workflow_presets_section_host", "left", ("workflows",)),
+    _SectionSpec("workbench", "_workbench_section_host", "right", ("inspector",)),
+    _SectionSpec("creator_assist", "_creator_assist_section_host", "right", ("creator",)),
+    _SectionSpec("ai_command", "_ai_command_section_host", "right", ("ai", "command")),
+    _SectionSpec("script_edit", "_ai_script_edit_section_host", "right", ("ai_script_edit", "script")),
+    _SectionSpec("render_queue", "_render_queue_section_host", "right", ("render", "queue")),
+    _SectionSpec("audio_workspace", "_audio_workspace_section_host", "right", ("audio", "voice", "voice_lab")),
+    _SectionSpec("subtitle", "_subtitle_section_host", "right", ("subtitles",)),
+    _SectionSpec("pip", "_pip_section_host", "right", ("picture_in_picture",)),
+    _SectionSpec("timeline", "_timeline_section_host", "timeline", ()),
+)
+
 _ALIASES: dict[str, _PopoutSpec] = {}
 for _spec in _POPOUT_SPECS:
     _ALIASES[_spec.target] = _spec
     for _alias in _spec.aliases:
         _ALIASES[_alias] = _spec
+
+_SECTION_ALIASES: dict[str, _SectionSpec] = {}
+for _spec in _SECTION_SPECS:
+    _SECTION_ALIASES[_spec.target] = _spec
+    for _alias in _spec.aliases:
+        _SECTION_ALIASES[_alias] = _spec
 
 
 def _norm_target(value: Any) -> str:
@@ -99,6 +131,10 @@ def _process_events() -> None:
         pass
 
 
+def _widget_geometry(widget: Any) -> dict[str, int]:
+    return _geometry(widget)
+
+
 def _is_visible(widget: Any) -> bool:
     method = getattr(widget, "isVisible", None)
     if callable(method):
@@ -107,6 +143,237 @@ def _is_visible(widget: Any) -> bool:
         except Exception:
             return False
     return widget is not None
+
+
+def _safe_widget_bool(widget: Any, name: str) -> bool:
+    method = getattr(widget, name, None)
+    if not callable(method):
+        return False
+    try:
+        return bool(method())
+    except Exception:
+        return False
+
+
+def _safe_widget_text(widget: Any, name: str) -> str:
+    method = getattr(widget, name, None)
+    try:
+        value = method() if callable(method) else getattr(widget, name, "")
+    except Exception:
+        value = ""
+    return str(value or "")
+
+
+def _qapplication_top_level_state() -> list[dict[str, Any]]:
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        widgets = list(app.topLevelWidgets() or []) if app is not None else []
+    except Exception:
+        widgets = []
+    rows: list[dict[str, Any]] = []
+    for widget in widgets:
+        rows.append(
+            {
+                "id": id(widget),
+                "type": type(widget).__name__,
+                "object_name": _safe_widget_text(widget, "objectName"),
+                "window_title": _safe_widget_text(widget, "windowTitle"),
+                "visible": _is_visible(widget),
+                "minimized": _safe_widget_bool(widget, "isMinimized"),
+                "active": _safe_widget_bool(widget, "isActiveWindow"),
+                "geometry": _widget_geometry(widget),
+            }
+        )
+    return rows
+
+
+def _count_media_pool_items(owner: Any) -> int:
+    pool = getattr(owner, "_media_pool", None)
+    view = getattr(pool, "_list", None)
+    count = getattr(view, "count", None)
+    if callable(count):
+        try:
+            return int(count())
+        except Exception:
+            return 0
+    return 0
+
+
+def _timeline_drop_target(owner: Any) -> Any:
+    scroll = getattr(owner, "_tracks_scroll", None)
+    viewport = getattr(scroll, "viewport", None)
+    if callable(viewport):
+        try:
+            target = viewport()
+            if target is not None:
+                return target
+        except Exception:
+            pass
+    target = getattr(owner, "_tracks_host", None)
+    if target is not None:
+        return target
+    raise RuntimeError("timeline drop surface is not available")
+
+
+def _editor_window_state(owner: Any) -> dict[str, Any]:
+    tracks = list(getattr(owner, "_tracks", []) or [])
+    audio_tracks = list(getattr(owner, "_audio_tracks", []) or [])
+    top_level_windows = _qapplication_top_level_state()
+    player = getattr(owner, "_player", None)
+    position = getattr(player, "position", None)
+    try:
+        position_ms = int(position()) if callable(position) else 0
+    except Exception:
+        position_ms = 0
+    project_settings = getattr(owner, "_project_settings", None)
+    if not isinstance(project_settings, dict):
+        project_settings = {}
+    state = {
+        "owner_id": id(owner),
+        "owner_type": type(owner).__name__,
+        "object_name": _safe_widget_text(owner, "objectName"),
+        "window_title": _safe_widget_text(owner, "windowTitle"),
+        "visible": _is_visible(owner),
+        "hidden": _safe_widget_bool(owner, "isHidden"),
+        "minimized": _safe_widget_bool(owner, "isMinimized"),
+        "active": _safe_widget_bool(owner, "isActiveWindow"),
+        "geometry": _widget_geometry(owner),
+        "top_level_count": len(top_level_windows),
+        "visible_top_level_count": len([row for row in top_level_windows if row.get("visible")]),
+        "top_level_windows": top_level_windows,
+        "media_pool_count": _count_media_pool_items(owner),
+        "video_track_count": len(tracks),
+        "audio_track_count": len(audio_tracks),
+        "active_track_id": getattr(owner, "_active_track_id", None),
+        "player_position_ms": position_ms,
+        "project_path": str(getattr(owner, "_current_project_path", "") or ""),
+        "starter_template_id": str(project_settings.get("starter_template_id") or ""),
+        "startup_template_id": str(getattr(owner, "_startup_template_id", "") or ""),
+        "tracks_host": _surface_state(getattr(owner, "_tracks_host", None)),
+        "tracks_viewport": _surface_state(_timeline_drop_target_or_none(owner)),
+        "media_pool": _surface_state(getattr(owner, "_media_pool", None)),
+        "preview": _surface_state(
+            getattr(owner, "_preview_gl", None)
+            or getattr(owner, "_preview_label", None)
+            or getattr(owner, "_preview_host", None)
+        ),
+        "workbench": _surface_state(getattr(owner, "_workbench_panel", None)),
+    }
+    return state
+
+
+def _timeline_drop_target_or_none(owner: Any) -> Any | None:
+    try:
+        return _timeline_drop_target(owner)
+    except Exception:
+        return None
+
+
+def _surface_state(widget: Any) -> dict[str, Any]:
+    if widget is None:
+        return {"available": False, "id": 0, "type": "", "visible": False, "geometry": _geometry(None)}
+    return {
+        "available": True,
+        "id": id(widget),
+        "type": type(widget).__name__,
+        "object_name": _safe_widget_text(widget, "objectName"),
+        "visible": _is_visible(widget),
+        "geometry": _widget_geometry(widget),
+    }
+
+
+def _resolve_section_spec(value: Any) -> _SectionSpec:
+    key = _norm_target(value)
+    spec = _SECTION_ALIASES.get(key)
+    if spec is None:
+        allowed = ", ".join(sorted(_SECTION_ALIASES))
+        raise RuntimeError(f"unknown section target: {value!r}; allowed: {allowed}")
+    return spec
+
+
+def _section_open_state(host: Any) -> bool:
+    if host is None:
+        return False
+    buttons: list[Any] = []
+    try:
+        from PySide6.QtWidgets import QPushButton
+
+        finder = getattr(host, "findChildren", None)
+        buttons = list(finder(QPushButton, "SectionDisclosure") or []) if callable(finder) else []
+    except Exception:
+        try:
+            finder = getattr(host, "findChildren", None)
+            buttons = list(finder(object, "SectionDisclosure") or []) if callable(finder) else []
+        except Exception:
+            buttons = []
+    for button in list(buttons or []):
+        checked = getattr(button, "isChecked", None)
+        if callable(checked):
+            try:
+                return bool(checked())
+            except Exception:
+                pass
+    try:
+        return bool(host.isVisible())
+    except Exception:
+        return False
+
+
+def _refresh_section_group(owner: Any, group: str) -> None:
+    if group == "left":
+        try:
+            from app.video_editor_ui_left_dock import _refresh_left_secondary_sections_height
+
+            _refresh_left_secondary_sections_height(owner)
+        except Exception:
+            pass
+    elif group == "right":
+        try:
+            from app.video_editor_ui_right_dock import _refresh_right_secondary_sections_height
+
+            _refresh_right_secondary_sections_height(owner)
+        except Exception:
+            pass
+    _process_events()
+
+
+def _window_state_changes(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "owner_id",
+        "owner_type",
+        "object_name",
+        "window_title",
+        "visible",
+        "hidden",
+        "minimized",
+        "geometry",
+        "top_level_count",
+        "visible_top_level_count",
+        "project_path",
+        "starter_template_id",
+        "startup_template_id",
+        "media_pool_count",
+        "video_track_count",
+        "audio_track_count",
+        "active_track_id",
+    )
+    changed: dict[str, Any] = {}
+    for key in keys:
+        if before.get(key) != after.get(key):
+            changed[key] = {"before": before.get(key), "after": after.get(key)}
+    for key in ("tracks_host", "tracks_viewport", "media_pool", "preview", "workbench"):
+        b = before.get(key) if isinstance(before.get(key), dict) else {}
+        a = after.get(key) if isinstance(after.get(key), dict) else {}
+        surface_changes = {
+            name: {"before": b.get(name), "after": a.get(name)}
+            for name in ("id", "type", "visible", "geometry")
+            if b.get(name) != a.get(name)
+        }
+        if surface_changes:
+            changed[key] = surface_changes
+    return changed
 
 
 def _geometry(widget: Any) -> dict[str, int]:
@@ -177,6 +444,171 @@ def _apply_geometry(widget: Any, *, x: Any = None, y: Any = None, width: Any = N
 
 class UiAdapterMixin:
     """Action-facing helpers for detached editor windows."""
+
+    def list_ui_sections(self) -> dict[str, Any]:
+        owner = self._require_owner()
+        rows: list[dict[str, Any]] = []
+        for spec in _SECTION_SPECS:
+            host = getattr(owner, spec.attr, None)
+            rows.append(
+                {
+                    "target": spec.target,
+                    "attr": spec.attr,
+                    "group": spec.group,
+                    "available": host is not None,
+                    "open": _section_open_state(host),
+                    "surface": _surface_state(host),
+                    "aliases": list(spec.aliases),
+                }
+            )
+        return {"schema": "tigerstudio.actions.ui_sections.v1", "sections": rows}
+
+    def set_ui_section_open(
+        self,
+        *,
+        target: str = "",
+        section: str = "",
+        open: bool = True,
+        scroll: bool = True,
+    ) -> dict[str, Any]:
+        owner = self._require_owner()
+        spec = _resolve_section_spec(target or section)
+        host = getattr(owner, spec.attr, None)
+        if host is None:
+            raise RuntimeError(f"section is not available: {spec.target}")
+
+        before = {"open": _section_open_state(host), "surface": _surface_state(host)}
+        opened = _bool(open, True)
+        setter = getattr(owner, "_set_collapsible_host_open", None)
+        if callable(setter):
+            setter(host, opened)
+        else:
+            set_visible = getattr(host, "setVisible", None)
+            if callable(set_visible):
+                set_visible(opened)
+
+        if scroll:
+            scroll_area = getattr(owner, "_right_dock_scroll", None) if spec.group == "right" else getattr(owner, "_left_dock_scroll", None)
+            ensure_visible = getattr(scroll_area, "ensureWidgetVisible", None)
+            if callable(ensure_visible):
+                try:
+                    ensure_visible(host, 0, 8)
+                except Exception:
+                    pass
+
+        _refresh_section_group(owner, spec.group)
+        after = {"open": _section_open_state(host), "surface": _surface_state(host)}
+        return {
+            "schema": "tigerstudio.actions.ui_section_open.v1",
+            "target": spec.target,
+            "requested_open": opened,
+            "before": before,
+            "after": after,
+        }
+
+    def media_pool_drop_to_timeline(
+        self,
+        *,
+        path: str,
+        drop_x: int = 190,
+        drop_y: int = 36,
+        settle_ms: int = 300,
+    ) -> dict[str, Any]:
+        owner = self._require_owner()
+        media_path = Path(str(path or "")).expanduser()
+        if not media_path.is_file():
+            raise ValueError(f"media path does not exist: {media_path}")
+
+        before = _editor_window_state(owner)
+        pool = getattr(owner, "_media_pool", None)
+        if pool is None:
+            raise RuntimeError("media pool is not available")
+        add_path = getattr(pool, "add_path", None)
+        select_path = getattr(pool, "select_path", None)
+        added = bool(add_path(media_path)) if callable(add_path) else False
+        selected = bool(select_path(media_path)) if callable(select_path) else False
+
+        item = None
+        finder = getattr(pool, "_find_item_for_path", None)
+        if callable(finder):
+            try:
+                item = finder(media_path)
+            except Exception:
+                item = None
+        media_list = getattr(pool, "_list", None)
+        mime_method = getattr(media_list, "mimeData", None)
+        internal_mime_method = getattr(media_list, "_mime_data_for_items", None)
+        if item is not None and callable(internal_mime_method):
+            mime = internal_mime_method([item], include_file_urls=False)
+        elif item is not None and callable(mime_method):
+            mime = mime_method([item])
+        else:
+            from PySide6.QtCore import QMimeData
+
+            from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+
+            mime = QMimeData()
+            mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(media_path.resolve()).encode("utf-8"))
+
+        target = _timeline_drop_target(owner)
+        from PySide6.QtCore import QPointF, Qt
+        from PySide6.QtGui import QDragEnterEvent, QDropEvent
+        from PySide6.QtWidgets import QApplication
+
+        x = max(0, int(drop_x or 0))
+        y = max(0, int(drop_y or 0))
+        point = QPointF(float(x), float(y))
+        drag = QDragEnterEvent(
+            point.toPoint(),
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(target, drag)
+        _process_events()
+        drop = QDropEvent(
+            point,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(target, drop)
+        deadline = time.monotonic() + max(0, int(settle_ms or 0)) / 1000.0
+        while time.monotonic() < deadline:
+            _process_events()
+            time.sleep(0.02)
+        _process_events()
+
+        after = _editor_window_state(owner)
+        changes = _window_state_changes(before, after)
+        window_stable = bool(
+            before.get("owner_id") == after.get("owner_id")
+            and after.get("visible")
+            and not after.get("hidden")
+            and not after.get("minimized")
+            and before.get("project_path") == after.get("project_path")
+            and before.get("starter_template_id") == after.get("starter_template_id")
+            and before.get("startup_template_id") == after.get("startup_template_id")
+            and before.get("tracks_host", {}).get("id") == after.get("tracks_host", {}).get("id")
+            and before.get("media_pool", {}).get("id") == after.get("media_pool", {}).get("id")
+        )
+        return {
+            "schema": "tigerstudio.actions.media_pool_drop_to_timeline.v1",
+            "path": str(media_path.resolve()),
+            "pool_add_return": added,
+            "pool_select_return": selected,
+            "mime_formats": list(mime.formats()),
+            "mime_has_urls": bool(mime.hasUrls()),
+            "drop_target": _surface_state(target),
+            "drag_enter_accepted": bool(drag.isAccepted()),
+            "drop_accepted": bool(drop.isAccepted()),
+            "window_stable": window_stable,
+            "before_window": before,
+            "after_window": after,
+            "window_changes": changes,
+        }
 
     def _viewer_compare_track(self, track_id: Any = None) -> Any:
         owner = self.owner

@@ -269,7 +269,16 @@ class LiveTargetProfile:
         preset = live_target_preset(target_id)
         audio_data = data.get("audio_input") if isinstance(data.get("audio_input"), Mapping) else data
         audio_input = BroadcastAudioInput.from_mapping(audio_data)
+        explicit_audio_choice = (
+            "include_audio" in data
+            or "audio_input" in data
+            or "audio_source_kind" in data
+            or "source_kind" in data
+        )
         include_audio = bool(data.get("include_audio", False))
+        if preset.output_kind == OUTPUT_RTMP and not explicit_audio_choice and audio_input.kind == AUDIO_SOURCE_NONE:
+            audio_input = BroadcastAudioInput(kind=AUDIO_SOURCE_SILENCE)
+            include_audio = True
         if audio_input.kind != AUDIO_SOURCE_NONE:
             include_audio = True
         auto_reconnect = bool(data.get("auto_reconnect", preset.output_kind == OUTPUT_RTMP))
@@ -397,8 +406,10 @@ def live_target_preflight(
 ) -> dict[str, Any]:
     target_obj = target if isinstance(target, LiveTargetProfile) else LiveTargetProfile.from_mapping(target)
     preset = live_target_preset(target_obj.target_id)
+    secret = str(target_obj.stream_key or "").strip()
     output_profile = live_target_to_output_profile(target_obj)
     diag = broadcast_output_preflight(output_profile, canvas, ffmpeg_exe=ffmpeg_exe)
+    diag = _redact_secret(diag, secret)
     errors = list(diag.get("errors") or [])
     warnings = list(diag.get("warnings") or [])
 
@@ -420,7 +431,6 @@ def live_target_preflight(
     if preset.output_kind == OUTPUT_VIRTUAL_CAMERA:
         warnings.append("Virtual camera output requires a backend device; no FFmpeg RTMP command is generated.")
 
-    secret = str(target_obj.stream_key or "").strip()
     virtual_camera = {}
     if preset.output_kind in {OUTPUT_WINDOW_SHARE, OUTPUT_VIRTUAL_CAMERA}:
         try:
@@ -579,6 +589,17 @@ def build_ffmpeg_broadcast_command(
         cmd.extend(["-an"])
     if profile_obj.low_latency:
         cmd.extend(["-tune", "zerolatency"])
+    if profile_obj.kind == OUTPUT_RTMP:
+        cmd.extend(
+            [
+                "-profile:v",
+                "main",
+                "-bf",
+                "0",
+                "-x264-params",
+                f"keyint={keyint}:min-keyint={keyint}:scenecut=0",
+            ]
+        )
     cmd.extend([
         "-pix_fmt",
         "yuv420p",
@@ -592,7 +613,7 @@ def build_ffmpeg_broadcast_command(
         str(keyint),
     ])
     if profile_obj.kind == OUTPUT_RTMP:
-        cmd.extend(["-f", "flv", profile_obj.target])
+        cmd.extend(["-f", "flv", "-flvflags", "no_duration_filesize", profile_obj.target])
     else:
         target = str(Path(profile_obj.target))
         cmd.extend(["-y", "-movflags", "+faststart", target])

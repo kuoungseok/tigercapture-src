@@ -29,6 +29,7 @@ Final export (``build_audio_filter``):
 from __future__ import annotations
 
 import sys
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +54,10 @@ WAVEFORM_BUCKETS_PER_SEC = 40
 _AUDIO_CACHE_LIMIT = 32
 _WAVEFORM_CACHE: "OrderedDict[tuple[str, int, int], object]" = OrderedDict()
 _SPECTRUM_CACHE: "OrderedDict[tuple[str, int, int], object]" = OrderedDict()
+PLAYING_DRIFT_CORRECTION_MS = 220
+PLAYING_DRIFT_CORRECTION_INTERVAL_MS = 500
+AUDIO_PRELOAD_WINDOW_MS = 1200
+AUDIO_PRELOAD_SEEK_TOLERANCE_MS = 80
 
 
 def audio_file_cache_key(path: Path | str) -> tuple[str, int, int]:
@@ -684,6 +689,8 @@ class AudioMixer(QObject):
         self._players: dict[int, tuple[QMediaPlayer, QAudioOutput, int]] = {}
         self._project_playing: bool = False
         self._project_position_ms: int = 0
+        self._active_clip_ids: set[int] = set()
+        self._last_drift_correction_ms: dict[int, int] = {}
         self._volume_timer = QTimer(self)
         self._volume_timer.setInterval(30)
         self._volume_timer.timeout.connect(self._apply_volumes)
@@ -747,13 +754,15 @@ class AudioMixer(QObject):
             player.setAudioOutput(output)
             self._players[clip.id] = (player, output, track_id)
 
-    def _ensure_source_loaded(self, player: QMediaPlayer, clip: AudioClip) -> None:
+    def _ensure_source_loaded(self, player: QMediaPlayer, clip: AudioClip) -> bool:
         if clip.source_path is None:
-            return
+            return False
         safe_path = _qmedia_safe_path(clip.source_path)
         new_url = QUrl.fromLocalFile(safe_path)
         if player.source() != new_url:
             player.setSource(new_url)
+            return True
+        return False
 
     def _remove_player(self, clip_id: int) -> None:
         entry = self._players.pop(clip_id, None)
@@ -767,6 +776,8 @@ class AudioMixer(QObject):
             pass
         player.deleteLater()
         output.deleteLater()
+        self._active_clip_ids.discard(clip_id)
+        self._last_drift_correction_ms.pop(clip_id, None)
 
     # ---------- ProjectPlayer sync ----------
 
@@ -776,8 +787,8 @@ class AudioMixer(QObject):
 
         if state is PlayerState.PLAYING:
             self._project_playing = True
-            for cid in self._players:
-                self._sync_clip_to_project(cid)
+            for cid in list(self._players):
+                self._sync_clip_to_project(cid, force_seek=True)
             self._volume_timer.start()
         else:
             self._project_playing = False
@@ -786,16 +797,28 @@ class AudioMixer(QObject):
                     player.pause()
                 except Exception:
                     pass
+            self._active_clip_ids.clear()
             self._volume_timer.stop()
 
     @Slot(int)
     def on_position_changed(self, ms: int) -> None:
-        self._project_position_ms = max(0, int(ms))
-        if not self._project_playing:
-            for cid in self._players:
-                self._sync_clip_to_project(cid)
+        next_position_ms = max(0, int(ms))
+        jumped = abs(next_position_ms - int(self._project_position_ms)) > 160
+        self._project_position_ms = next_position_ms
+        for cid in list(self._players):
+            self._sync_clip_to_project(
+                cid,
+                playing_tick=self._project_playing and not jumped,
+                force_seek=jumped,
+            )
 
-    def _sync_clip_to_project(self, clip_id: int) -> None:
+    def _sync_clip_to_project(
+        self,
+        clip_id: int,
+        *,
+        playing_tick: bool = False,
+        force_seek: bool = False,
+    ) -> None:
         entry = self._players.get(clip_id)
         if entry is None:
             return
@@ -808,26 +831,45 @@ class AudioMixer(QObject):
             return
         project_ms = self._project_position_ms
         if not self._is_within_window(clip, project_ms):
-            try:
-                player.pause()
-            except Exception:
-                pass
+            if self._project_playing:
+                self._preload_upcoming_clip(player, clip, project_ms)
+            if clip_id in self._active_clip_ids or player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                try:
+                    player.pause()
+                except Exception:
+                    pass
+            self._active_clip_ids.discard(clip_id)
+            self._last_drift_correction_ms.pop(clip_id, None)
             return
         # Load the source now — the user just put the playhead inside
         # this clip's window, so we know preview is imminent. By this
         # point any drop-time extractor threads are settled, so Qt's
         # FFmpeg backend can safely spin up its demuxer.
-        self._ensure_source_loaded(player, clip)
+        source_changed = self._ensure_source_loaded(player, clip)
         src_ms = clip.trim_start_ms + (project_ms - clip.offset_ms)
         src_ms = max(0, min(src_ms, clip.effective_trim_end_ms))
         try:
-            if abs(player.position() - src_ms) > 80:
+            is_playing = player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+            is_active = clip_id in self._active_clip_ids and is_playing
+            drift = abs(int(player.position()) - int(src_ms))
+            should_seek = bool(force_seek or source_changed or not is_active)
+            if not should_seek and not playing_tick:
+                should_seek = drift > 80
+            if not should_seek and playing_tick and drift > PLAYING_DRIFT_CORRECTION_MS:
+                now_ms = int(time.monotonic() * 1000)
+                last_ms = int(self._last_drift_correction_ms.get(clip_id, 0) or 0)
+                if now_ms - last_ms >= PLAYING_DRIFT_CORRECTION_INTERVAL_MS:
+                    should_seek = True
+                    self._last_drift_correction_ms[clip_id] = now_ms
+            if should_seek:
                 player.setPosition(int(src_ms))
             if (
                 self._project_playing
                 and player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
             ):
                 player.play()
+            if self._project_playing:
+                self._active_clip_ids.add(clip_id)
         except Exception:
             pass
 
@@ -836,6 +878,26 @@ class AudioMixer(QObject):
         start = clip.offset_ms
         end = clip.offset_ms + clip.effective_length_ms
         return start <= project_ms < end
+
+    def _preload_upcoming_clip(
+        self,
+        player: QMediaPlayer,
+        clip: AudioClip,
+        project_ms: int,
+    ) -> None:
+        if clip.source_path is None:
+            return
+        lead_ms = int(clip.offset_ms) - int(project_ms)
+        if lead_ms < 0 or lead_ms > AUDIO_PRELOAD_WINDOW_MS:
+            return
+        try:
+            source_changed = self._ensure_source_loaded(player, clip)
+            target_ms = int(max(0, clip.trim_start_ms))
+            drift = abs(int(player.position()) - target_ms)
+            if source_changed or drift > AUDIO_PRELOAD_SEEK_TOLERANCE_MS:
+                player.setPosition(target_ms)
+        except Exception:
+            pass
 
     def _apply_volumes(self) -> None:
         solo_active = any(bool(getattr(track, "solo", False)) for track in self._tracks.values())

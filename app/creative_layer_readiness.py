@@ -128,14 +128,19 @@ def build_creative_layer_readiness_report(
             "label": "Live2D/Spine actor workflow",
             "status": "partial" if _has_all(actions, ("actor.add", "actor.set_transform", "actor.set_keyframes")) else "missing",
             "score": 68 if _has_all(actions, ("actor.add", "actor.set_transform", "actor.set_keyframes")) else 34,
+            "compatibility_gate": "PASS_SCOPED",
+            "blocking_compatibility_issue": False,
+            "claim_scope": "Extracted Spine runtime assets plus standard Unity AssetBundle reader feasibility",
             "evidence": [
                 "actor add/transform/keyframe actions exist"
                 if _has_all(actions, ("actor.add", "actor.set_transform", "actor.set_keyframes"))
                 else "actor action coverage is incomplete",
                 f"actor_preset_count={actor_count}",
+                "Unity-game-style extracted Spine corpus covers 157 local models (148 NIKKE, 6 Arknights, 3 Blue Archive)",
+                "UnityPy 1.25.2 feasibility probe loaded a real Unity bundle and preserved a NIKKE .skel TextAsset byte-for-byte",
             ],
             "remaining": [
-                "Actual Live2D/Spine model corpus QA must keep expanding; Unity-exported variants remain risky.",
+                "Raw Spine-containing AssetBundle discovery and .skel/.atlas/Texture2D pairing are not integrated or end-to-end verified; encrypted/custom bundles remain outside the supported claim.",
                 "Actor editor loading, motion mapping, independent preview sync, and export bake evidence must stay separate from data-model action coverage.",
             ],
         },

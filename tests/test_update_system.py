@@ -222,3 +222,80 @@ def test_prepare_update_workflow_writes_apply_plan(tmp_path, monkeypatch) -> Non
     assert report["integrity"]["ok"] is True
     assert report["updater_command"][0].endswith("TigerCaptureUpdater.exe")
     assert (tmp_path / "plan.json").exists()
+
+
+def test_prepare_update_workflow_uses_default_source_updater_command(tmp_path, monkeypatch) -> None:
+    from app.update.manifest import build_manifest, manifest_to_json
+    from app.update.verifier import sha256_file
+    from app.update.workflow import prepare_update_from_manifest
+
+    monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path / "data"))
+    artifact = tmp_path / "TigerCapture-1.4.4.zip"
+    manifest_path = tmp_path / "latest.json"
+    artifact.write_bytes(b"payload")
+    manifest = build_manifest(
+        version="1.4.4",
+        artifact_url=str(artifact),
+        sha256=sha256_file(artifact),
+        kind="portable_zip",
+        filename=artifact.name,
+    )
+    manifest_path.write_text(manifest_to_json(manifest), encoding="utf-8")
+
+    report = prepare_update_from_manifest(
+        manifest_path,
+        current_version="1.4.2",
+        install_dir=tmp_path / "install",
+        cache_dir=tmp_path / "cache",
+        plan_path=tmp_path / "plan.json",
+        kind="portable_zip",
+    )
+
+    command = report["updater_command"]
+    assert report["ok"] is True
+    assert command
+    assert any("tigercapture_updater.py" in part or "TigerCaptureUpdater.exe" in part for part in command)
+    assert "--wait-pid" in command
+
+
+def test_build_portable_update_package_cli_writes_zip_and_manifest(tmp_path) -> None:
+    from tools.build_portable_update_package import main
+
+    dist = tmp_path / "dist" / "TigerCapture"
+    dist.mkdir(parents=True)
+    (dist / "TigerCapture.exe").write_text("app", encoding="utf-8")
+    (dist / "TigerStudio.exe").write_text("studio", encoding="utf-8")
+    (dist / "TigerCaptureUpdater.exe").write_text("updater", encoding="utf-8")
+    (dist / "resources.dat").write_text("resource", encoding="utf-8")
+    output = tmp_path / "TigerCapture-Portable-1.4.4.zip"
+    manifest = tmp_path / "latest.json"
+
+    import sys
+
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "build_portable_update_package.py",
+            "--dist-dir",
+            str(dist),
+            "--version",
+            "1.4.4",
+            "--output",
+            str(output),
+            "--manifest-output",
+            str(manifest),
+            "--artifact-url",
+            "https://example.test/TigerCapture-Portable-1.4.4.zip",
+        ]
+        assert main() == 0
+    finally:
+        sys.argv = old_argv
+
+    with zipfile.ZipFile(output, "r") as zf:
+        names = set(zf.namelist())
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert "TigerCapture/TigerCapture.exe" in names
+    assert "TigerCapture/TigerCaptureUpdater.exe" in names
+    assert data["artifacts"][0]["kind"] == "portable_zip"
+    assert data["artifacts"][0]["sha256"]

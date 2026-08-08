@@ -9,6 +9,7 @@ the input frame unchanged with diagnostics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,50 @@ import numpy as np
 from app.color_management import ColorManagementSettings
 
 
-OCIO_COLORSPACE_CANDIDATES = {
-    "rec709": ("Rec.709", "Output - Rec.709", "Utility - Rec.709 - Texture", "sRGB - Display"),
-    "srgb": ("sRGB", "Utility - sRGB - Texture", "Output - sRGB", "sRGB - Display"),
-    "rec2020": ("Rec.2020", "Output - Rec.2020", "Utility - Rec.2020 - Texture"),
-    "p3-d65": ("P3-D65", "Display P3", "Output - P3-D65"),
+BUILTIN_OCIO_PREFIX = "ocio://"
+PREFERRED_ACES_STUDIO_CONFIG = "studio-config-v2.2.0_aces-v1.3_ocio-v2.4"
+
+OCIO_INPUT_COLORSPACE_CANDIDATES = {
+    "rec709": (
+        "Camera Rec.709",
+        "Gamma 2.4 Encoded Rec.709",
+        "sRGB Encoded Rec.709 (sRGB)",
+        "Utility - Rec.709 - Texture",
+        "Rec.709",
+    ),
+    "srgb": (
+        "sRGB Encoded Rec.709 (sRGB)",
+        "sRGB - Texture",
+        "Utility - sRGB - Texture",
+        "sRGB",
+    ),
+    "rec2020": ("Linear Rec.2020", "Utility - Rec.2020 - Texture", "Rec.2020"),
+    "p3-d65": ("sRGB Encoded P3-D65", "Linear P3-D65", "P3-D65"),
+    "acescg": ("ACEScg", "ACES - ACEScg"),
+    "acescct": ("ACEScct", "ACES - ACEScct"),
+}
+
+OCIO_OUTPUT_COLORSPACE_CANDIDATES = {
+    "rec709": (
+        "Rec.1886 Rec.709 - Display",
+        "Output - Rec.709",
+        "sRGB - Display",
+        "Gamma 2.4 Encoded Rec.709",
+        "Rec.709",
+    ),
+    "srgb": (
+        "sRGB - Display",
+        "Output - sRGB",
+        "sRGB Encoded Rec.709 (sRGB)",
+        "sRGB",
+    ),
+    "rec2020": (
+        "Rec.2100-HLG - Display",
+        "Output - Rec.2020",
+        "Linear Rec.2020",
+        "Rec.2020",
+    ),
+    "p3-d65": ("P3-D65 - Display", "Display P3 - Display", "Output - P3-D65", "P3-D65"),
     "acescg": ("ACEScg", "ACES - ACEScg"),
     "acescct": ("ACEScct", "ACES - ACEScct"),
 }
@@ -65,8 +105,74 @@ def ocio_available() -> bool:
     return _import_ocio() is not None
 
 
-def _candidate_name(config: Any, key: str) -> str:
-    candidates = OCIO_COLORSPACE_CANDIDATES.get(key, (key,))
+def builtin_ocio_uri(name: str) -> str:
+    return f"{BUILTIN_OCIO_PREFIX}{str(name or '').strip()}"
+
+
+def list_builtin_ocio_configs() -> list[dict[str, Any]]:
+    ocio = _import_ocio()
+    if ocio is None:
+        return []
+    try:
+        rows = []
+        for name, description, is_default, is_recommended in ocio.BuiltinConfigRegistry().getBuiltinConfigs():
+            rows.append({
+                "name": str(name),
+                "uri": builtin_ocio_uri(str(name)),
+                "description": str(description),
+                "default": bool(is_default),
+                "recommended": bool(is_recommended),
+                "studio": str(name).startswith("studio-config-"),
+            })
+        return rows
+    except Exception:
+        return []
+
+
+def preferred_aces_ocio_uri() -> str:
+    names = {row["name"] for row in list_builtin_ocio_configs()}
+    if PREFERRED_ACES_STUDIO_CONFIG in names:
+        return builtin_ocio_uri(PREFERRED_ACES_STUDIO_CONFIG)
+    studio = [row for row in list_builtin_ocio_configs() if row["studio"]]
+    if studio:
+        recommended = next((row for row in studio if row["recommended"]), studio[-1])
+        return str(recommended["uri"])
+    return ""
+
+
+def _builtin_config_name(spec: str) -> str:
+    value = str(spec or "").strip()
+    return value[len(BUILTIN_OCIO_PREFIX):] if value.startswith(BUILTIN_OCIO_PREFIX) else ""
+
+
+@lru_cache(maxsize=12)
+def _load_config(spec: str):
+    ocio = _import_ocio()
+    if ocio is None:
+        raise RuntimeError("PyOpenColorIO is not installed.")
+    builtin_name = _builtin_config_name(spec)
+    if builtin_name:
+        return ocio.Config.CreateFromBuiltinConfig(builtin_name)
+    return ocio.Config.CreateFromFile(str(spec))
+
+
+def ocio_config_exists(spec: str) -> bool:
+    value = str(spec or "").strip()
+    if not value:
+        return False
+    if value.startswith(BUILTIN_OCIO_PREFIX):
+        name = _builtin_config_name(value)
+        return any(row["name"] == name for row in list_builtin_ocio_configs())
+    return Path(value).is_file()
+
+
+def _candidate_name(config: Any, key: str, *, destination: bool) -> str:
+    table = (
+        OCIO_OUTPUT_COLORSPACE_CANDIDATES
+        if destination
+        else OCIO_INPUT_COLORSPACE_CANDIDATES
+    )
+    candidates = table.get(key, (key,))
     for name in candidates:
         try:
             if config.getColorSpace(name) is not None:
@@ -91,13 +197,23 @@ def build_ocio_plan(
     if not cm.ocio_config_path:
         warnings.append("No OCIO config path is configured.")
         return OcioPlan(True, False, "", source or cm.input_space, destination or cm.working_space, tuple(warnings))
-    if not Path(cm.ocio_config_path).is_file():
-        warnings.append("OCIO config path does not exist.")
+    if not ocio_config_exists(cm.ocio_config_path):
+        warnings.append("OCIO config is unavailable.")
         return OcioPlan(True, False, cm.ocio_config_path, source or cm.input_space, destination or cm.working_space, tuple(warnings))
     try:
-        config = ocio.Config.CreateFromFile(cm.ocio_config_path)
-        src = source or _candidate_name(config, cm.input_space)
-        dst = destination or _candidate_name(config, cm.working_space)
+        config = _load_config(cm.ocio_config_path)
+        source_key = str(source or cm.input_space)
+        destination_key = str(destination or cm.working_space)
+        src = (
+            _candidate_name(config, source_key, destination=False)
+            if source_key in OCIO_INPUT_COLORSPACE_CANDIDATES
+            else source_key
+        )
+        dst = (
+            _candidate_name(config, destination_key, destination=True)
+            if destination_key in OCIO_OUTPUT_COLORSPACE_CANDIDATES
+            else destination_key
+        )
         return OcioPlan(True, True, cm.ocio_config_path, src, dst, tuple(warnings))
     except Exception as exc:
         warnings.append(f"Could not load OCIO config: {exc}")
@@ -125,7 +241,7 @@ def apply_ocio_transform_rgb(
     if ocio is None:
         return rgb, report
     try:
-        config = ocio.Config.CreateFromFile(plan.config_path)
+        config = _load_config(plan.config_path)
         processor = config.getProcessor(plan.source, plan.destination)
         cpu = processor.getDefaultCPUProcessor()
         arr = rgb.astype(np.float32) / 255.0
@@ -138,3 +254,16 @@ def apply_ocio_transform_rgb(
     except Exception as exc:
         report.setdefault("warnings", []).append(f"OCIO transform failed: {exc}")
         return rgb, report
+
+
+__all__ = [
+    "BUILTIN_OCIO_PREFIX",
+    "OcioPlan",
+    "apply_ocio_transform_rgb",
+    "build_ocio_plan",
+    "builtin_ocio_uri",
+    "list_builtin_ocio_configs",
+    "ocio_available",
+    "ocio_config_exists",
+    "preferred_aces_ocio_uri",
+]

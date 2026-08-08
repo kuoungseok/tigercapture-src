@@ -226,3 +226,34 @@ def test_start_thumbnail_extraction_connects_owner_wrappers(tmp_path, monkeypatc
     assert extractor.count_determined.slots == [owner._on_thumb_count]
     assert extractor.thumb_ready.slots == [owner._on_thumb_ready]
     assert extractor.finished_extracting.slots == [owner._on_extractor_done]
+
+
+def test_start_thumbnail_extraction_for_image_sets_thumb_without_extractor(tmp_path, monkeypatch):
+    FakeExtractor.instances = []
+    source = tmp_path / "poster.png"
+    track = SimpleNamespace(id=41, source_path=source, thumbnails=[], clips=[])
+    owner = FakeOwner(track)
+    monkeypatch.setattr(thumbs, "ThumbnailExtractor", FakeExtractor)
+    monkeypatch.setattr(thumbs, "image_timeline_thumbnails", lambda *args: ["image-thumb"])
+
+    thumbs.start_thumbnail_extraction(owner, track)
+
+    assert track.thumbnails == ["image-thumb"]
+    assert FakeExtractor.instances == []
+    assert owner._track_rows[track.id].updates == 1
+
+
+def test_start_clip_thumbnail_extraction_for_image_sets_thumb_without_extractor(tmp_path, monkeypatch):
+    FakeExtractor.instances = []
+    source = tmp_path / "poster.jpg"
+    clip = SimpleNamespace(id=8, source_path=source, thumbnails=[])
+    track = SimpleNamespace(id=42, source_path=None, thumbnails=[], clips=[clip])
+    owner = FakeOwner(track)
+    monkeypatch.setattr(thumbs, "ThumbnailExtractor", FakeExtractor)
+    monkeypatch.setattr(thumbs, "image_timeline_thumbnails", lambda *args: ["clip-image-thumb"])
+
+    thumbs.start_thumbnail_extraction_for_clip(owner, clip, track.id)
+
+    assert clip.thumbnails == ["clip-image-thumb"]
+    assert FakeExtractor.instances == []
+    assert owner._track_rows[track.id].updates == 1

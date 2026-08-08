@@ -1,0 +1,6059 @@
+"""Paint / drawing action registrations."""
+from __future__ import annotations
+
+from typing import Any
+
+from app.actions.schema import schema_object
+from app.painter_action_contract import (
+    PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+    PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+    PAINT_ACTION_PBR_PREVIEW_MAX_PX,
+    PAINT_ACTION_PBR_PREVIEW_MIN_PX,
+    PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+    PAINT_ACTION_MAX_POINTS_PER_STROKE,
+    PAINT_ACTION_PATH_MIN_POINTS,
+    PAINT_ACTION_PATH_SELECTION_MIN_POINTS,
+    PAINT_ACTION_PATH_COORDINATE_MIN_NORM,
+    PAINT_ACTION_PATH_COORDINATE_MAX_NORM,
+    PAINT_ACTION_PATH_INDEX_MIN,
+    PAINT_ACTION_PATH_NAME_MIN_CHARACTERS,
+    PAINT_ACTION_MAX_REFERENCE_COLORS,
+    PAINT_ACTION_MAX_STROKES_PER_REQUEST,
+    PAINT_ACTION_MAX_STUDY_STROKES,
+    PAINT_ACTION_BRUSH_STYLES,
+    PAINT_ACTION_STROKE_BRISTLE_COUNT_MAX,
+    PAINT_ACTION_STROKE_BRISTLE_COUNT_MIN,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MAX,
+    PAINT_ACTION_STROKE_ENGINE_VERSION_MIN,
+    PAINT_ACTION_STROKE_MIN_WIDTH_PX,
+    PAINT_ACTION_STROKE_OPACITY_MAX_PERCENT,
+    PAINT_ACTION_STROKE_OPACITY_MIN_PERCENT,
+    PAINT_ACTION_STROKE_SEED_MAX,
+    PAINT_ACTION_STROKE_SEED_MIN,
+    PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM,
+    PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM,
+    PAINT_ACTION_BRUSH_OPACITY_MAX_PERCENT,
+    PAINT_ACTION_BRUSH_OPACITY_MIN_PERCENT,
+    PAINT_ACTION_QPOINT_COORDINATE_MAX,
+    PAINT_ACTION_QPOINT_COORDINATE_MIN,
+)
+from app.painter_brush_domains import (
+    BRUSH_ANGLE_RANGE,
+    BRUSH_HARDNESS_RANGE,
+    BRUSH_ROUNDNESS_RANGE,
+    BRUSH_SPACING_RANGE,
+    BRUSH_WIDTH_RANGE_PX,
+)
+from app.painter_action_inputs import (
+    PAINTER_COLOR_SELECTION_PHASES,
+    PAINTER_DOCUMENT_EXPORT_BIT_DEPTHS,
+    PAINTER_DOCUMENT_EXPORT_FORMATS,
+    PAINTER_DOCUMENT_EXPORT_QUALITY_MAX,
+    PAINTER_DOCUMENT_EXPORT_QUALITY_MIN,
+    PAINTER_DOCUMENT_RENDERING_INTENT_MAX,
+    PAINTER_DOCUMENT_RENDERING_INTENT_MIN,
+    PAINTER_LAYER_OPACITY_MAX_PERCENT,
+    PAINTER_LAYER_OPACITY_MIN_PERCENT,
+    PAINTER_LAYER_MASK_ALPHA_MAX,
+    PAINTER_LAYER_MASK_ALPHA_MIN,
+    PAINTER_LAYER_MASK_RADIUS_MIN_PX,
+    PAINTER_PERSPECTIVE_MODE_MAX,
+    PAINTER_PERSPECTIVE_MODE_MIN,
+    PAINTER_SELECTION_ASPECTS,
+    PAINTER_SELECTION_MODIFY_OPERATIONS,
+    PAINTER_SELECTION_MODES,
+    PAINTER_SELECTION_SKEW_MAX_DEGREES,
+    PAINTER_SELECTION_SKEW_MIN_DEGREES,
+    PAINTER_SELECTION_TRANSFORM_PHASES,
+    PAINTER_SELECTION_TRANSFORM_TARGETS,
+    PAINTER_SYMMETRY_AXES,
+)
+from app.painter_large_canvas import (
+    MAX_TILE_BUDGET_MB,
+    MAX_TILE_SIZE,
+    MAX_UNDO_BUDGET_MB,
+    MIN_TILE_BUDGET_MB,
+    MIN_TILE_SIZE,
+    MIN_UNDO_BUDGET_MB,
+)
+from app.painter_layer_compositor import BLEND_MODES
+from app.painter_layer_contract import (
+    PAINTER_LAYER_COLOR_LABEL_IDS,
+    PAINTER_LAYER_ID_MIN_CHARACTERS,
+    PAINTER_LAYER_NAME_MAX_CHARACTERS,
+    PAINTER_LAYER_TYPES,
+)
+from app.painter_channel_contract import PAINTER_CHANNEL_IDS
+from app.painter_reference_board import (
+    REFERENCE_NAME_MAX_CHARACTERS,
+    REFERENCE_OPACITY_MAX,
+    REFERENCE_OPACITY_MIN,
+    REFERENCE_POSITION_MAX_NORM,
+    REFERENCE_POSITION_MIN_NORM,
+    REFERENCE_ROTATION_MAX_DEGREES,
+    REFERENCE_ROTATION_MIN_DEGREES,
+    REFERENCE_SIZE_MAX_NORM,
+    REFERENCE_SIZE_MIN_NORM,
+    REFERENCE_TARGET_ID_MIN_CHARACTERS,
+)
+from app.painter_selection_mask import (
+    PAINTER_COLOR_SELECTION_TOLERANCE_MAX,
+    PAINTER_COLOR_SELECTION_TOLERANCE_MIN,
+)
+from app.painter_output import (
+    PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+    PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+)
+from app.painter_grid import PAINTER_GRID_SIZE_MAX_PX, PAINTER_GRID_SIZE_MIN_PX
+from app.painter_zoom import PAINTER_ZOOM_MAX_PERCENT, PAINTER_ZOOM_MIN_PERCENT
+from app.painter_wet_canvas import (
+    WET_CANVAS_DRYING_MAX_SECONDS,
+    WET_CANVAS_DRYING_MIN_SECONDS,
+)
+from app.painter_material_paint import (
+    MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES,
+    MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES,
+    MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES,
+    MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES,
+)
+from app.painter_3d_blockout import (
+    BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+    BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+    BLOCKOUT_CAMERA_MAX_DISTANCE,
+    BLOCKOUT_CAMERA_MIN_DISTANCE,
+    BLOCKOUT_CAMERA_PITCH_MAX_DEGREES,
+    BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+    BLOCKOUT_CAMERA_TARGET_MAX,
+    BLOCKOUT_CAMERA_TARGET_MIN,
+    BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+    BLOCKOUT_CAMERA_YAW_MIN_DEGREES,
+    BLOCKOUT_CAMERA_PRESETS,
+    BLOCKOUT_LIGHT_PITCH_MAX_DEGREES,
+    BLOCKOUT_LIGHT_PITCH_MIN_DEGREES,
+    BLOCKOUT_LIGHT_YAW_MAX_DEGREES,
+    BLOCKOUT_LIGHT_YAW_MIN_DEGREES,
+    BLOCKOUT_PRIMITIVE_OPACITY_MAX,
+    BLOCKOUT_PRIMITIVE_OPACITY_MIN,
+    BLOCKOUT_PRIMITIVE_POSITION_MAX,
+    BLOCKOUT_PRIMITIVE_POSITION_MIN,
+    BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES,
+    BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES,
+    BLOCKOUT_PRIMITIVE_SCALE_MAX,
+    BLOCKOUT_PRIMITIVE_SCALE_MIN,
+)
+from app.painter_ui_document import (
+    UI_DELIVERY_TARGETS,
+    UI_INTERACTION_ACTIONS,
+    UI_INTERACTION_TRIGGERS,
+    UI_OBJECT_KINDS,
+    UI_TOKEN_KINDS,
+)
+from app.painter_ui_object_scale import UI_SCALE_ORIGINS
+from app.painter_ui_prototype_authoring import (
+    UI_PROTOTYPE_EASINGS,
+    UI_PROTOTYPE_TRANSITIONS,
+)
+from app.painter_ui_styles import UI_STYLE_KINDS
+from app.painter_ui_variables import (
+    UI_VARIABLE_COLLECTION_KINDS,
+    UI_VARIABLE_TYPES,
+)
+
+
+def _paint_optional_export_size_schema(
+    properties: dict[str, Any],
+) -> dict[str, Any]:
+    schema = schema_object(properties)
+    schema["oneOf"] = [
+        {
+            "not": {
+                "anyOf": [
+                    {"required": ["width"]},
+                    {"required": ["height"]},
+                ]
+            }
+        },
+        {
+            "required": ["width", "height"],
+            "properties": {
+                "width": {"const": 0},
+                "height": {"const": 0},
+            },
+        },
+        {
+            "required": ["width", "height"],
+            "properties": {
+                "width": {"minimum": 1},
+                "height": {"minimum": 1},
+            },
+        },
+    ]
+    return schema
+
+
+def register_paint_actions(registry: Any) -> None:
+    any_object = {"type": "object", "additionalProperties": True}
+    registry.register_adapter_action(
+        "paint.state",
+        "Read the active Painter document, layer, channel, selection, path, and history state.",
+        "paint",
+        "paint_state",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="active Painter state would be read",
+    )
+    registry.register_adapter_action(
+        "paint.gpu.status",
+        "Report Painter OpenGL readiness, active/fallback renderer state, and remote-safe fallback policy.",
+        "paint",
+        "paint_gpu_status",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter GPU/OpenGL status would be read",
+    )
+    registry.register_adapter_action(
+        "paint.performance.status",
+        "Report Painter retained tiles, GPU uploads, async material tasks, and Undo memory budget.",
+        "paint", "paint_performance_status",
+        params_schema=schema_object({}), mutating=False, changed=False,
+        dry_summary="Painter large-canvas telemetry would be read",
+    )
+    registry.register_adapter_action(
+        "paint.performance.configure",
+        "Configure bounded Painter tile and Undo memory budgets.",
+        "paint", "paint_performance_configure",
+        params_schema=schema_object({
+            "tile_size": {"type": "integer", "minimum": MIN_TILE_SIZE, "maximum": MAX_TILE_SIZE},
+            "tile_budget_mb": {"type": "integer", "minimum": MIN_TILE_BUDGET_MB, "maximum": MAX_TILE_BUDGET_MB},
+            "undo_budget_mb": {"type": "integer", "minimum": MIN_UNDO_BUDGET_MB, "maximum": MAX_UNDO_BUDGET_MB},
+        }),
+        undo_label="Configure Painter performance budgets",
+        dry_summary="Painter large-canvas budgets would change",
+    )
+    registry.register_adapter_action(
+        "paint.document.new",
+        "Replace the active Painter document with a new blank canvas.",
+        "paint",
+        "paint_document_new",
+        params_schema=schema_object(
+            {
+                "width": {"type": "integer", "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "background": {"type": "string"},
+            }
+        ),
+        undo_label="New Painter canvas",
+        dry_summary="active Painter canvas would be replaced",
+    )
+    registry.register_adapter_action(
+        "paint.document.save",
+        (
+            "Save the complete editable Painter document, including layers, "
+            "Wet Canvas, references, and 3D blockout scene, as .tspaint."
+        ),
+        "paint",
+        "paint_document_save",
+        params_schema=schema_object({"path": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="active Painter document would be saved as .tspaint",
+    )
+    registry.register_adapter_action(
+        "paint.document.open",
+        (
+            "Open a .tspaint document and restore editable 2D and 3D Painter "
+            "state."
+        ),
+        "paint",
+        "paint_document_open",
+        params_schema=schema_object(
+            {"path": {"type": "string"}},
+            required=("path",),
+        ),
+        undo_label="Open Painter document",
+        dry_summary="active Painter document would be replaced from .tspaint",
+    )
+    registry.register_adapter_action(
+        "paint.ui.document.inspect",
+        "Inspect the provider-neutral Painter UI document, validation, artboards, objects, and delivery targets.",
+        "paint",
+        "paint_ui_document_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI document would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.responsive.preview_matrix.inspect",
+        (
+            "Inspect the non-destructive desktop, tablet, and mobile "
+            "portrait/landscape preview matrix."
+        ),
+        "paint",
+        "paint_ui_responsive_preview_matrix_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the six responsive preview contexts would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.template.catalog.inspect",
+        "Inspect built-in complete-document templates, categories, tags, sources, and licenses.",
+        "paint",
+        "paint_ui_template_catalog_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI template catalog would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.template.apply",
+        "Replace the active UI document with an editable template copy while preserving source provenance.",
+        "paint",
+        "paint_ui_template_apply",
+        params_schema=schema_object(
+            {"template_id": {"type": "string", "minLength": 1}},
+            required=("template_id",),
+        ),
+        required=("template_id",),
+        undo_label="Apply UI template",
+        dry_summary="a complete Painter UI template would replace the active document",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.library.inspect",
+        "Inspect component families, Variants, stable roots, and Instance usage.",
+        "paint",
+        "paint_ui_component_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter component library would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.playground.inspect",
+        "Inspect a Component with preview-only property values.",
+        "paint",
+        "paint_ui_component_playground_inspect",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_values": any_object,
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a Component property combination would be previewed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.library.inspect",
+        "Inspect design tokens, theme values, aliases, stable bindings, and unused-token status.",
+        "paint",
+        "paint_ui_token_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter design-token library would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.library.export",
+        "Export the typed design-token library as deterministic JSON.",
+        "paint",
+        "paint_ui_token_library_export",
+        params_schema=schema_object(
+            {"path": {"type": "string", "minLength": 1}},
+            required=("path",),
+        ),
+        required=("path",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter token library would be exported to JSON",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.library.import",
+        "Import a token JSON library with explicit stable-ID conflict handling.",
+        "paint",
+        "paint_ui_token_library_import",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string", "minLength": 1},
+                "conflict_policy": {
+                    "type": "string",
+                    "enum": ["update", "skip", "regenerate"],
+                },
+            },
+            required=("path",),
+        ),
+        required=("path",),
+        undo_label="Import UI tokens",
+        dry_summary="a token JSON library would be imported",
+    )
+    registry.register_adapter_action(
+        "paint.ui.workspace.set",
+        "Switch Painter between Paint, UI Design, and 3D Place canvas workspaces.",
+        "paint",
+        "paint_ui_workspace_set",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["paint", "ui_design", "3d_place"],
+                }
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the visible Painter canvas workspace would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.inspector.presentation",
+        "Show the Painter UI inspector as an auto-hidden overlay, pinned panel, or floating window.",
+        "paint",
+        "paint_ui_inspector_presentation",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto_hide", "pinned", "floating"],
+                }
+            },
+            required=("mode",),
+        ),
+        required=("mode",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI inspector presentation would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.navigator.presentation",
+        "Show Painter UI layers and assets as an auto-hidden overlay, pinned panel, or floating window.",
+        "paint",
+        "paint_ui_navigator_presentation",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto_hide", "pinned", "floating"],
+                }
+            },
+            required=("mode",),
+        ),
+        required=("mode",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI navigator presentation would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.fit",
+        "Fit all UI artboards, the active artboard, or the current selection in the Painter canvas.",
+        "paint",
+        "paint_ui_view_fit",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["all", "artboard", "selection"],
+                }
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas camera would be fitted",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.focus",
+        "Focus an object, artboard, selection, or all artboards without changing the UI document.",
+        "paint",
+        "paint_ui_view_focus",
+        params_schema=schema_object(
+            {
+                "target": {
+                    "type": "string",
+                    "enum": ["all", "artboard", "selection"],
+                },
+                "object_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas would focus the requested target",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.zoom",
+        "Zoom the Painter UI canvas around an optional canvas-space anchor.",
+        "paint",
+        "paint_ui_view_zoom",
+        params_schema=schema_object(
+            {
+                "percent": {
+                    "type": "number",
+                    "minimum": 3,
+                    "maximum": 800,
+                },
+                "anchor_x": {"type": "number"},
+                "anchor_y": {"type": "number"},
+            },
+            required=("percent",),
+        ),
+        required=("percent",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas zoom would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.pan",
+        "Pan the Painter UI canvas by a delta or set its absolute view offset.",
+        "paint",
+        "paint_ui_view_pan",
+        params_schema=schema_object(
+            {
+                "dx": {"type": "number"},
+                "dy": {"type": "number"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas view would pan",
+    )
+    registry.register_adapter_action(
+        "paint.ui.quick_action.search",
+        "Search context-aware Painter UI commands, layers, pages, components, and variables.",
+        "paint",
+        "paint_ui_quick_action_search",
+        params_schema=schema_object(
+            {
+                "query": {"type": "string"},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI Quick Actions would be searched",
+    )
+    image_fit_schema = {
+        "type": "string",
+        "enum": ["fit", "fill", "stretch", "tile"],
+    }
+    registry.register_adapter_action(
+        "paint.ui.image.place",
+        "Place a decoded image on a Painter UI artboard at intrinsic or explicit dimensions.",
+        "paint",
+        "paint_ui_image_place",
+        params_schema=schema_object(
+            {
+                "source_path": {"type": "string", "minLength": 1},
+                "artboard_id": {"type": "string"},
+                "parent_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 1},
+                "height": {"type": "number", "minimum": 1},
+                "image_fit": image_fit_schema,
+            },
+            required=("source_path",),
+        ),
+        required=("source_path",),
+        undo_label="Place UI image",
+        dry_summary="an image would be placed on the active UI artboard",
+    )
+    registry.register_adapter_action(
+        "paint.ui.image.fill.set",
+        "Set or replace a selected UI shape image fill with fit, focal-point, tile, and original-size controls.",
+        "paint",
+        "paint_ui_image_fill_set",
+        params_schema=schema_object(
+            {
+                "source_path": {"type": "string", "minLength": 1},
+                "object_id": {"type": "string"},
+                "image_fit": image_fit_schema,
+                "focal_x": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "focal_y": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "tile_scale": {
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 16,
+                },
+                "restore_original_size": {"type": "boolean"},
+            },
+            required=("source_path",),
+        ),
+        required=("source_path",),
+        undo_label="Set UI image fill",
+        dry_summary="the selected UI object image fill would be replaced",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout.diagnostics",
+        "Inspect deterministic Auto Layout, constraint, grid, and safe-area conflicts.",
+        "paint",
+        "paint_ui_layout_diagnostics",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI layout diagnostics would be returned",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout.stress_preview",
+        "Preview content stress on one UI object without changing the document or Undo history.",
+        "paint",
+        "paint_ui_layout_stress_preview",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "preset": {
+                    "type": "string",
+                    "enum": [
+                        "none",
+                        "long_ko",
+                        "long_en",
+                        "large_type",
+                        "missing_image",
+                        "empty_list",
+                    ],
+                },
+            },
+            required=("preset",),
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="a non-destructive Painter UI content stress preview would be shown",
+    )
+    registry.register_adapter_action(
+        "paint.ui.responsive.override.set",
+        "Set an object override for a breakpoint and orientation context.",
+        "paint",
+        "paint_ui_responsive_override_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "breakpoint": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["any", "portrait", "landscape"],
+                },
+                "changes": any_object,
+            },
+            required=("object_id", "changes"),
+        ),
+        undo_label="Set UI responsive override",
+        dry_summary="a responsive object override would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.responsive.override.remove",
+        "Remove an object override for a breakpoint and orientation context.",
+        "paint",
+        "paint_ui_responsive_override_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "breakpoint": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["any", "portrait", "landscape"],
+                },
+            },
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI responsive override",
+        dry_summary="a responsive object override would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.theme.set",
+        "Set the Light, Dark, or High Contrast preview theme for an artboard.",
+        "paint",
+        "paint_ui_theme_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+            },
+            required=("theme",),
+        ),
+        required=("theme",),
+        undo_label="Set UI theme",
+        dry_summary="the artboard preview theme would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.theme.inspect",
+        "Inspect resolved design-token bindings for an artboard theme.",
+        "paint",
+        "paint_ui_theme_inspect",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="resolved UI theme bindings would be returned",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.theme.set",
+        "Set one theme-specific value on a design token.",
+        "paint",
+        "paint_ui_token_theme_set",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+                "value": {},
+            },
+            required=("token_id", "theme", "value"),
+        ),
+        required=("token_id", "theme", "value"),
+        undo_label="Set UI token theme value",
+        dry_summary="a theme-specific token value would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.theme.remove",
+        "Remove one theme-specific value from a design token.",
+        "paint",
+        "paint_ui_token_theme_remove",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+            },
+            required=("token_id", "theme"),
+        ),
+        required=("token_id", "theme"),
+        undo_label="Remove UI token theme value",
+        dry_summary="a theme-specific token value would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.add",
+        "Add a stable Painter UI page with an initial artboard.",
+        "paint",
+        "paint_ui_page_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+            }
+        ),
+        undo_label="Add UI page",
+        dry_summary="a UI page and initial artboard would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.update",
+        "Rename or update a stable Painter UI page.",
+        "paint",
+        "paint_ui_page_update",
+        params_schema=schema_object(
+            {
+                "page_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("page_id", "changes"),
+        ),
+        required=("page_id", "changes"),
+        undo_label="Update UI page",
+        dry_summary="a UI page would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.activate",
+        "Switch the active Painter UI page and restore its canvas view.",
+        "paint",
+        "paint_ui_page_activate",
+        params_schema=schema_object(
+            {"page_id": {"type": "string"}},
+            required=("page_id",),
+        ),
+        required=("page_id",),
+        undo_label="Activate UI page",
+        dry_summary="the active UI page would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.page.remove",
+        "Remove a Painter UI page and its artboards while keeping one page.",
+        "paint",
+        "paint_ui_page_remove",
+        params_schema=schema_object(
+            {"page_id": {"type": "string"}},
+            required=("page_id",),
+        ),
+        required=("page_id",),
+        undo_label="Remove UI page",
+        dry_summary="a UI page and its owned content would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.add",
+        "Add a general UI artboard to the active Painter document.",
+        "paint",
+        "paint_ui_artboard_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "breakpoint": {"type": "string"},
+            }
+        ),
+        undo_label="Add UI artboard",
+        dry_summary="a UI artboard would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.update",
+        "Update a general UI artboard without introducing target-runtime types.",
+        "paint",
+        "paint_ui_artboard_update",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("artboard_id", "changes"),
+        ),
+        required=("artboard_id", "changes"),
+        undo_label="Update UI artboard",
+        dry_summary="a UI artboard would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.activate",
+        "Set the active Painter UI artboard for editing and preview.",
+        "paint",
+        "paint_ui_artboard_activate",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Activate UI artboard",
+        dry_summary="the active UI artboard would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.layout.set",
+        "Set provider-neutral grids, columns, rows, guides, and safe area on a Painter UI artboard.",
+        "paint",
+        "paint_ui_artboard_layout_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "layout_grid": any_object,
+                "layout_grids": {
+                    "type": "array",
+                    "items": any_object,
+                },
+                "safe_area": any_object,
+                "safe_area_visible": {"type": "boolean"},
+                "guides": any_object,
+            },
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Set UI artboard layout",
+        dry_summary="the artboard grid, guides, and safe area would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.add",
+        "Create a reusable named ordered layout-grid style.",
+        "paint",
+        "paint_ui_layout_grid_style_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "layout_grids": {
+                    "type": "array",
+                    "items": any_object,
+                },
+                "description": {"type": "string"},
+            },
+            required=("name", "layout_grids"),
+        ),
+        required=("name", "layout_grids"),
+        undo_label="Add UI layout-grid style",
+        dry_summary="a reusable layout-grid style would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.update",
+        "Update a named layout-grid style and every linked artboard.",
+        "paint",
+        "paint_ui_layout_grid_style_update",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("style_id", "changes"),
+        ),
+        required=("style_id", "changes"),
+        undo_label="Update UI layout-grid style",
+        dry_summary="a layout-grid style and linked artboards would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.apply",
+        "Apply a reusable layout-grid style to an artboard by stable ID.",
+        "paint",
+        "paint_ui_layout_grid_style_apply",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "style_id": {"type": "string"},
+            },
+            required=("artboard_id", "style_id"),
+        ),
+        required=("artboard_id", "style_id"),
+        undo_label="Apply UI layout-grid style",
+        dry_summary="the selected artboard would link to a layout-grid style",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.remove",
+        "Remove a layout-grid style, blocking references unless detachment is explicit.",
+        "paint",
+        "paint_ui_layout_grid_style_remove",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("style_id",),
+        ),
+        required=("style_id",),
+        undo_label="Remove UI layout-grid style",
+        dry_summary="a reusable layout-grid style would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.remove",
+        "Remove a UI artboard and its owned objects while keeping at least one artboard.",
+        "paint",
+        "paint_ui_artboard_remove",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Remove UI artboard",
+        dry_summary="a UI artboard and its owned objects would be removed",
+    )
+    for action_name, adapter_method, description, undo_label in (
+        (
+            "paint.ui.guide.create",
+            "paint_ui_guide_create",
+            "Create a horizontal or vertical guide on a Painter UI artboard.",
+            "Create UI guide",
+        ),
+        (
+            "paint.ui.guide.remove",
+            "paint_ui_guide_remove",
+            "Remove a guide near a provider-neutral artboard coordinate.",
+            "Remove UI guide",
+        ),
+    ):
+        properties = {
+            "artboard_id": {"type": "string"},
+            "orientation": {
+                "type": "string",
+                "enum": ["horizontal", "vertical"],
+            },
+            "position": {"type": "number", "minimum": 0},
+        }
+        if action_name.endswith(".remove"):
+            properties["tolerance"] = {
+                "type": "number",
+                "minimum": 0.01,
+                "maximum": 100,
+            }
+        registry.register_adapter_action(
+            action_name,
+            description,
+            "paint",
+            adapter_method,
+            params_schema=schema_object(
+                properties,
+                required=("orientation", "position"),
+            ),
+            required=("orientation", "position"),
+            undo_label=undo_label,
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.ui.guide.update",
+        "Move an existing Painter UI guide to a new artboard coordinate.",
+        "paint",
+        "paint_ui_guide_update",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["horizontal", "vertical"],
+                },
+                "position": {"type": "number", "minimum": 0},
+                "next_position": {"type": "number", "minimum": 0},
+                "tolerance": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 100,
+                },
+            },
+            required=("orientation", "position", "next_position"),
+        ),
+        required=("orientation", "position", "next_position"),
+        undo_label="Move UI guide",
+        dry_summary="an existing Painter UI guide would move",
+    )
+    registry.register_adapter_action(
+        "paint.ui.guide.clear",
+        "Clear horizontal, vertical, or all guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_clear",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["", "horizontal", "vertical"],
+                },
+            }
+        ),
+        undo_label="Clear UI guides",
+        dry_summary="the requested Painter UI guides would be cleared",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.visibility.set",
+        "Show or hide the Painter UI canvas rulers.",
+        "paint",
+        "paint_ui_ruler_visibility_set",
+        params_schema=schema_object(
+            {"visible": {"type": "boolean"}},
+            required=("visible",),
+        ),
+        required=("visible",),
+        dry_summary="the Painter UI ruler visibility would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.guide.visibility.set",
+        "Show or hide persistent guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_visibility_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "visible": {"type": "boolean"},
+            },
+            required=("visible",),
+        ),
+        required=("visible",),
+        undo_label="Set UI guide visibility",
+        dry_summary="the persistent Painter UI guides would show or hide",
+    )
+    registry.register_adapter_action(
+        "paint.ui.guide.lock.set",
+        "Lock or unlock persistent guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_lock_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "locked": {"type": "boolean"},
+            },
+            required=("locked",),
+        ),
+        required=("locked",),
+        undo_label="Set UI guide lock",
+        dry_summary="the persistent Painter UI guides would lock or unlock",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.origin.set",
+        "Set the ruler label origin for a Painter UI artboard.",
+        "paint",
+        "paint_ui_ruler_origin_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            },
+            required=("x", "y"),
+        ),
+        required=("x", "y"),
+        undo_label="Set UI ruler origin",
+        dry_summary="the Painter UI ruler label origin would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.origin.reset",
+        "Reset the Painter UI ruler label origin to the artboard origin.",
+        "paint",
+        "paint_ui_ruler_origin_reset",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+        ),
+        undo_label="Reset UI ruler origin",
+        dry_summary="the Painter UI ruler label origin would reset",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.add",
+        "Add a provider-neutral UI object to a Painter artboard.",
+        "paint",
+        "paint_ui_object_add",
+        params_schema=schema_object(
+            {
+                "kind": {
+                    "type": "string",
+                    "enum": sorted(UI_OBJECT_KINDS),
+                },
+                "name": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "parent_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 1},
+                "height": {"type": "number", "minimum": 1},
+                "style": any_object,
+                "content": any_object,
+            }
+        ),
+        undo_label="Add UI object",
+        dry_summary="a provider-neutral UI object would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.update",
+        "Update a Painter UI object and validate parent/artboard references.",
+        "paint",
+        "paint_ui_object_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("object_id", "changes"),
+        ),
+        required=("object_id", "changes"),
+        undo_label="Update UI object",
+        dry_summary="a UI object would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.node.add",
+        "Add a stable-ID node to a Painter UI vector path.",
+        "paint",
+        "paint_ui_vector_node_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "after_node_id": {"type": "string"},
+            },
+            required=("x", "y"),
+        ),
+        required=("x", "y"),
+        undo_label="Add UI vector node",
+        dry_summary="a vector node would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.node.update",
+        "Move a vector node or edit its Bezier handles and continuity.",
+        "paint",
+        "paint_ui_vector_node_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "node_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("node_id", "changes"),
+        ),
+        required=("node_id", "changes"),
+        undo_label="Update UI vector node",
+        dry_summary="a vector node or its handles would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.node.remove",
+        "Remove a vector node and its connected segments.",
+        "paint",
+        "paint_ui_vector_node_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "node_id": {"type": "string"},
+            },
+            required=("node_id",),
+        ),
+        required=("node_id",),
+        undo_label="Remove UI vector node",
+        dry_summary="a vector node would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.segment.set",
+        "Convert a Painter UI vector segment between straight and Bezier.",
+        "paint",
+        "paint_ui_vector_segment_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "segment_id": {"type": "string"},
+                "kind": {"type": "string", "enum": ["line", "cubic"]},
+            },
+            required=("segment_id", "kind"),
+        ),
+        required=("segment_id", "kind"),
+        undo_label="Set UI vector segment",
+        dry_summary="a vector segment would be converted",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.segment.split",
+        "Split a Painter UI vector segment while preserving its curve.",
+        "paint",
+        "paint_ui_vector_segment_split",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "segment_id": {"type": "string"},
+                "position": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 0.99,
+                },
+            },
+            required=("segment_id",),
+        ),
+        required=("segment_id",),
+        undo_label="Split UI vector segment",
+        dry_summary="a vector segment would be split",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.closed.set",
+        "Open or close a Painter UI vector path.",
+        "paint",
+        "paint_ui_vector_path_closed_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "closed": {"type": "boolean"},
+            },
+            required=("closed",),
+        ),
+        required=("closed",),
+        undo_label="Set UI vector path closure",
+        dry_summary="the vector path open/closed state would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.join",
+        "Join two stable-ID vector nodes with a straight or Bezier segment.",
+        "paint",
+        "paint_ui_vector_path_join",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "start_node_id": {"type": "string"},
+                "end_node_id": {"type": "string"},
+                "kind": {"type": "string", "enum": ["line", "cubic"]},
+            },
+            required=("start_node_id", "end_node_id"),
+        ),
+        required=("start_node_id", "end_node_id"),
+        undo_label="Join UI vector nodes",
+        dry_summary="two vector nodes would be joined",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.reverse",
+        "Reverse vector path traversal while preserving stable node and segment IDs.",
+        "paint",
+        "paint_ui_vector_path_reverse",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+        ),
+        undo_label="Reverse UI vector path",
+        dry_summary="the vector path direction would be reversed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.simplify",
+        "Remove redundant straight anchors without flattening Bezier geometry.",
+        "paint",
+        "paint_ui_vector_path_simplify",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "tolerance": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 0.25,
+                },
+            }
+        ),
+        undo_label="Simplify UI vector path",
+        dry_summary="redundant straight vector nodes would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.vector.path.outline",
+        "Convert a visible vector stroke into editable closed fill geometry.",
+        "paint",
+        "paint_ui_vector_path_outline",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "stroke_width": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 256.0,
+                },
+            }
+        ),
+        undo_label="Outline UI vector stroke",
+        dry_summary="the vector stroke would become editable fill geometry",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.properties.copy",
+        "Copy stable-ID-safe appearance and layout properties from one UI object.",
+        "paint",
+        "paint_ui_object_properties_copy",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="UI object properties would be copied",
+    )
+    property_paste_schema = schema_object(
+        {
+            "target_object_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "clipboard": any_object,
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.properties.paste",
+        "Paste copied appearance and layout properties without replacing identity or content.",
+        "paint",
+        "paint_ui_object_properties_paste",
+        params_schema=property_paste_schema,
+        undo_label="Paste UI object properties",
+        dry_summary="copied UI properties would be applied to selected objects",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.paste_replace",
+        "Replace selected UI object presentation while preserving stable IDs, hierarchy, position, and z-order.",
+        "paint",
+        "paint_ui_object_paste_replace",
+        params_schema=property_paste_schema,
+        undo_label="Paste replace UI objects",
+        dry_summary="selected UI objects would be replaced without breaking references",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.scale",
+        "Scale selected Painter UI objects and their visual geometry around one shared pivot.",
+        "paint",
+        "paint_ui_object_scale",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                },
+                "scale_x": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "scale_y": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                },
+                "origin": {
+                    "type": "string",
+                    "enum": sorted(UI_SCALE_ORIGINS),
+                },
+                "scale_visuals": {"type": "boolean"},
+            },
+            required=("scale_x",),
+        ),
+        required=("scale_x",),
+        undo_label="Scale UI objects",
+        dry_summary="selected UI objects and visual geometry would be scaled",
+    )
+    registry.register_adapter_action(
+        "paint.ui.text.content.set",
+        "Set the editable plain-text content of one Painter UI text object.",
+        "paint",
+        "paint_ui_text_content_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "text": {"type": "string"},
+            },
+            required=("object_id", "text"),
+        ),
+        required=("object_id", "text"),
+        undo_label="Edit UI text",
+        dry_summary="a UI text object's content would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.typography.variable_axis.set",
+        "Set one named four-character OpenType axis on a Painter UI text object.",
+        "paint",
+        "paint_ui_typography_variable_axis_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "axis": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 4,
+                    "pattern": "^[A-Za-z0-9]{4}$",
+                },
+                "value": {"type": "number"},
+            },
+            required=("object_id", "axis", "value"),
+        ),
+        required=("object_id", "axis", "value"),
+        undo_label="Set variable-font axis",
+        dry_summary="one Painter UI variable-font axis would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.typography.variable_axis.reset",
+        "Reset one named OpenType axis, or all axes when axis is omitted.",
+        "paint",
+        "paint_ui_typography_variable_axis_reset",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "axis": {
+                    "type": "string",
+                    "maxLength": 4,
+                    "pattern": "^$|^[A-Za-z0-9]{4}$",
+                },
+            },
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Reset variable-font axis",
+        dry_summary="Painter UI variable-font axes would be reset",
+    )
+    registry.register_adapter_action(
+        "paint.ui.property.inspect",
+        "Inspect one normalized Painter UI property, its default, token binding, and layout diagnostics.",
+        "paint",
+        "paint_ui_property_inspect",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("object_id", "property_path"),
+        ),
+        required=("object_id", "property_path"),
+        mutating=False,
+        changed=False,
+        dry_summary="one normalized UI property would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.property.reset",
+        "Reset one supported Painter UI property through the normal object mutation and Undo path.",
+        "paint",
+        "paint_ui_property_reset",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("object_id", "property_path"),
+        ),
+        required=("object_id", "property_path"),
+        undo_label="Reset UI property",
+        dry_summary="one UI property would be reset to its normalized default",
+    )
+    registry.register_adapter_action(
+        "paint.ui.property.batch_set",
+        "Apply one undoable property mutation to multiple Painter UI objects.",
+        "paint",
+        "paint_ui_property_batch_set",
+        params_schema=schema_object(
+            {"changes_by_id": any_object},
+            required=("changes_by_id",),
+        ),
+        required=("changes_by_id",),
+        undo_label="Edit UI objects",
+        dry_summary="multiple UI object properties would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.inspect",
+        "Read the editable fill gradient and ordered effect stack for one UI object.",
+        "paint",
+        "paint_ui_appearance_inspect",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a UI object's appearance would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.gradient.set",
+        "Set an editable linear or radial fill gradient on one UI object.",
+        "paint",
+        "paint_ui_appearance_gradient_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "gradient": any_object,
+            },
+            required=("object_id", "gradient"),
+        ),
+        required=("object_id", "gradient"),
+        undo_label="Set UI fill gradient",
+        dry_summary="an editable UI fill gradient would be set",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.gradient.remove",
+        "Remove the fill gradient while preserving the object's solid fill.",
+        "paint",
+        "paint_ui_appearance_gradient_remove",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI fill gradient",
+        dry_summary="the UI fill gradient would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.add",
+        "Add an editable Drop Shadow or Inner Shadow to an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "effect": any_object,
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "effect"),
+        ),
+        required=("object_id", "effect"),
+        undo_label="Add UI appearance effect",
+        dry_summary="a UI appearance effect would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.update",
+        "Update one entry in an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "changes": any_object,
+            },
+            required=("object_id", "index", "changes"),
+        ),
+        required=("object_id", "index", "changes"),
+        undo_label="Update UI appearance effect",
+        dry_summary="a UI appearance effect would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.remove",
+        "Remove one entry from an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index"),
+        ),
+        required=("object_id", "index"),
+        undo_label="Remove UI appearance effect",
+        dry_summary="a UI appearance effect would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.reorder",
+        "Move one UI appearance effect to another stack index.",
+        "paint",
+        "paint_ui_appearance_effect_reorder",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "target_index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index", "target_index"),
+        ),
+        required=("object_id", "index", "target_index"),
+        undo_label="Reorder UI appearance effects",
+        dry_summary="the UI appearance effect stack would be reordered",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.add",
+        "Add an editable Layer Blur or Background Blur to an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_blur_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "blur_type": {
+                    "type": "string",
+                    "enum": ["layer_blur", "background_blur"],
+                },
+                "radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 256,
+                },
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "blur_type"),
+        ),
+        required=("object_id", "blur_type"),
+        undo_label="Add UI blur",
+        dry_summary="a UI blur effect would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.update",
+        "Update the radius of a Layer Blur or Background Blur stack entry.",
+        "paint",
+        "paint_ui_appearance_blur_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 256,
+                },
+            },
+            required=("object_id", "index", "radius"),
+        ),
+        required=("object_id", "index", "radius"),
+        undo_label="Update UI blur",
+        dry_summary="a UI blur radius would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.remove",
+        "Remove a Layer Blur or Background Blur stack entry.",
+        "paint",
+        "paint_ui_appearance_blur_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index"),
+        ),
+        required=("object_id", "index"),
+        undo_label="Remove UI blur",
+        dry_summary="a UI blur effect would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.reorder",
+        "Move a UI blur effect to another stack index.",
+        "paint",
+        "paint_ui_appearance_blur_reorder",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "target_index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index", "target_index"),
+        ),
+        required=("object_id", "index", "target_index"),
+        undo_label="Reorder UI blur",
+        dry_summary="a UI blur effect would be reordered",
+    )
+    registry.register_adapter_action(
+        "paint.ui.clip.inspect",
+        "Inspect Frame Clip content support, state, and direct child IDs.",
+        "paint",
+        "paint_ui_clip_inspect",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a UI frame clipping state would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.clip.set",
+        "Enable or disable Clip content on a Painter UI Frame.",
+        "paint",
+        "paint_ui_clip_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "clip_content": {"type": "boolean"},
+            },
+            required=("object_id", "clip_content"),
+        ),
+        required=("object_id", "clip_content"),
+        undo_label="Set frame clipping",
+        dry_summary="a UI frame clipping state would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout.set",
+        "Set deterministic Horizontal or Vertical Auto Layout on a Painter UI container.",
+        "paint",
+        "paint_ui_layout_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["none", "horizontal", "vertical"],
+                },
+                "padding": any_object,
+                "gap": {"type": "number", "minimum": 0},
+                "cross_gap": {"type": "number", "minimum": 0},
+                "main_alignment": {
+                    "type": "string",
+                    "enum": ["start", "center", "end", "space_between"],
+                },
+                "cross_alignment": {
+                    "type": "string",
+                    "enum": ["start", "center", "end", "stretch"],
+                },
+                "wrap": {"type": "boolean"},
+                "width_sizing": {
+                    "type": "string",
+                    "enum": ["fixed", "hug", "fill"],
+                },
+                "height_sizing": {
+                    "type": "string",
+                    "enum": ["fixed", "hug", "fill"],
+                },
+            },
+            required=("object_id", "mode"),
+        ),
+        required=("object_id", "mode"),
+        undo_label="Set UI Auto Layout",
+        dry_summary="Painter UI Auto Layout would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.remove",
+        "Remove a Painter UI object and its child hierarchy.",
+        "paint",
+        "paint_ui_object_remove",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI object",
+        dry_summary="a UI object hierarchy would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.set",
+        "Select one or more UI objects on the active Painter artboard.",
+        "paint",
+        "paint_ui_selection_set",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                },
+                "primary_object_id": {"type": "string"},
+            }
+        ),
+        undo_label="Set UI selection",
+        dry_summary="the active Painter UI selection would change",
+    )
+    select_similar_params = schema_object(
+        {
+            "criterion": {
+                "type": "string",
+                "enum": [
+                    "kind",
+                    "fill",
+                    "stroke",
+                    "text_style",
+                    "component",
+                    "variant",
+                    "token",
+                    "effect",
+                    "interaction",
+                ],
+            },
+            "scope": {
+                "type": "string",
+                "enum": ["active_artboard"],
+            },
+            "object_id": {"type": "string"},
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.similar.inspect",
+        "Preview matching UI objects for a selected property without changing selection.",
+        "paint",
+        "paint_ui_selection_similar_inspect",
+        params_schema=select_similar_params,
+        mutating=False,
+        changed=False,
+        dry_summary="matching Painter UI objects would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.similar.select",
+        "Select UI objects with the same property on the active artboard.",
+        "paint",
+        "paint_ui_selection_similar_select",
+        params_schema=select_similar_params,
+        mutating=False,
+        changed=False,
+        dry_summary="matching Painter UI objects would be selected",
+    )
+    find_replace_params = schema_object(
+        {
+            "find": {"type": "string", "minLength": 1},
+            "replacement": {"type": "string"},
+            "categories": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": [
+                        "text",
+                        "component",
+                        "style",
+                        "variable",
+                        "font",
+                        "asset",
+                    ],
+                },
+            },
+            "case_sensitive": {"type": "boolean"},
+            "whole_value": {"type": "boolean"},
+            "selected_match_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        required=["find"],
+    )
+    registry.register_adapter_action(
+        "paint.ui.find_replace.inspect",
+        "Preview UI text and reference replacements without changing the document.",
+        "paint",
+        "paint_ui_find_replace_inspect",
+        params_schema=find_replace_params,
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI replacements would be previewed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.find_replace.apply",
+        "Apply selected valid UI text and reference replacements as one undo step.",
+        "paint",
+        "paint_ui_find_replace_apply",
+        params_schema=find_replace_params,
+        undo_label="Find / Replace",
+        dry_summary="selected Painter UI replacements would be applied",
+    )
+    batch_rename_params = schema_object(
+        {
+            "object_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "find": {"type": "string"},
+            "replacement": {"type": "string"},
+            "prefix": {"type": "string"},
+            "suffix": {"type": "string"},
+            "numbering": {"type": "boolean"},
+            "number_start": {"type": "integer"},
+            "number_padding": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 8,
+            },
+            "number_separator": {"type": "string"},
+            "case_sensitive": {"type": "boolean"},
+            "selected_match_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.batch_rename.inspect",
+        "Preview batch names for selected Painter UI objects.",
+        "paint",
+        "paint_ui_batch_rename_inspect",
+        params_schema=batch_rename_params,
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI batch names would be previewed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.batch_rename.apply",
+        "Apply reviewed Painter UI object names as one undo step.",
+        "paint",
+        "paint_ui_batch_rename_apply",
+        params_schema=batch_rename_params,
+        undo_label="Batch Rename",
+        dry_summary="reviewed Painter UI names would be applied",
+    )
+    registry.register_adapter_action(
+        "paint.ui.shortcut.inspect",
+        "Search Painter shortcuts and report overlapping key bindings.",
+        "paint",
+        "paint_ui_shortcut_inspect",
+        params_schema=schema_object(
+            {
+                "query": {"type": "string"},
+                "conflicts_only": {"type": "boolean"},
+                "active_scope": {
+                    "type": "string",
+                    "enum": ["ui_design", "paint", "3d_place"],
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter shortcut assignments would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.action_parity.inspect",
+        "Audit live Painter UI Action coverage and orphan candidates.",
+        "paint",
+        "paint_ui_action_parity_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI and Action parity would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.locale_audit.inspect",
+        "Audit critical Painter UI copy for overflow and missing glyphs.",
+        "paint",
+        "paint_ui_locale_audit_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter locale and font fallback would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.focus_audit.inspect",
+        "Audit visible Painter UI controls for keyboard focus coverage.",
+        "paint",
+        "paint_ui_focus_audit_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter keyboard focus coverage would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.release_corpus.run",
+        "Run the Painter UI editable exchange and delivery round-trip corpus.",
+        "paint",
+        "paint_ui_release_corpus_run",
+        params_schema=schema_object(
+            {"output_dir": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI release packages would be verified",
+    )
+    registry.register_adapter_action(
+        "paint.ui.performance_budget.inspect",
+        "Inspect Painter UI document scale against production budgets.",
+        "paint",
+        "paint_ui_performance_budget_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI document performance budgets would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.runtime_performance.run",
+        "Measure core Painter UI document paths on the local machine.",
+        "paint",
+        "paint_ui_runtime_performance_run",
+        params_schema=schema_object(
+            {
+                "object_count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5000,
+                },
+                "iterations": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9,
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI runtime paths would be benchmarked locally",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.inspect",
+        "List crash-safe Painter recovery snapshots.",
+        "paint",
+        "paint_ui_recovery_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter recovery snapshots would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.create",
+        "Create a crash-safe Painter recovery snapshot without changing the document.",
+        "paint",
+        "paint_ui_recovery_create",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="a Painter recovery snapshot would be scheduled",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.restore",
+        "Restore a Painter recovery snapshot as an unsaved document.",
+        "paint",
+        "paint_ui_recovery_restore",
+        params_schema=schema_object(
+            {"session_id": {"type": "string"}},
+            required=("session_id",),
+        ),
+        required=("session_id",),
+        undo_label="Restore Painter recovery",
+        dry_summary="a Painter recovery snapshot would be restored",
+    )
+    registry.register_adapter_action(
+        "paint.ui.recovery.discard",
+        "Permanently discard a Painter recovery snapshot.",
+        "paint",
+        "paint_ui_recovery_discard",
+        params_schema=schema_object(
+            {"session_id": {"type": "string"}},
+            required=("session_id",),
+        ),
+        required=("session_id",),
+        destructive=True,
+        dry_summary="a Painter recovery snapshot would be discarded",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.parent",
+        "Select the immediate parent of a Painter UI object without changing the document.",
+        "paint",
+        "paint_ui_selection_parent",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the parent UI object would be selected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.deep_select",
+        "Select the deepest topmost child, or cycle overlapping objects at a canvas point.",
+        "paint",
+        "paint_ui_selection_deep_select",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the deepest or next overlapping UI object would be selected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.scope.inspect",
+        "Inspect the current non-document-mutating Painter UI group edit scope.",
+        "paint",
+        "paint_ui_selection_scope_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the current Painter UI edit scope would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.scope.enter",
+        "Enter a frame or group edit scope and dim objects outside it.",
+        "paint",
+        "paint_ui_selection_scope_enter",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the requested Painter UI group edit scope would open",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.scope.exit",
+        "Exit one level of the current Painter UI group edit scope.",
+        "paint",
+        "paint_ui_selection_scope_exit",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="one Painter UI group edit scope level would close",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.arrange",
+        "Align or distribute the selected Painter UI objects.",
+        "paint",
+        "paint_ui_object_arrange",
+        params_schema=schema_object(
+            {
+                "command": {
+                    "type": "string",
+                    "enum": [
+                        "left",
+                        "hcenter",
+                        "right",
+                        "top",
+                        "vcenter",
+                        "bottom",
+                        "distribute_h",
+                        "distribute_v",
+                    ],
+                }
+            },
+            required=("command",),
+        ),
+        required=("command",),
+        undo_label="Arrange UI objects",
+        dry_summary="selected Painter UI objects would be aligned or distributed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.tidy",
+        "Make selected Painter UI object spacing uniform.",
+        "paint",
+        "paint_ui_selection_tidy",
+        params_schema=schema_object(
+            {
+                "axis": {
+                    "type": "string",
+                    "enum": ["auto", "horizontal", "vertical"],
+                },
+                "gap": {"type": "number", "minimum": 0},
+            }
+        ),
+        undo_label="Tidy UI selection",
+        dry_summary="selected UI object spacing would be made uniform",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.group",
+        "Create an editable group from two or more Painter UI objects.",
+        "paint",
+        "paint_ui_object_group",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                    "uniqueItems": True,
+                },
+                "name": {"type": "string"},
+            },
+            required=("object_ids",),
+        ),
+        required=("object_ids",),
+        undo_label="Group UI objects",
+        dry_summary="the selected Painter UI objects would be grouped",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.ungroup",
+        "Remove a Painter UI group while preserving its child objects.",
+        "paint",
+        "paint_ui_object_ungroup",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Ungroup UI objects",
+        dry_summary="the selected Painter UI group would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.reorder",
+        "Move selected Painter UI objects through the active artboard stack.",
+        "paint",
+        "paint_ui_object_reorder",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                "command": {
+                    "type": "string",
+                    "enum": ["front", "forward", "backward", "back"],
+                },
+            },
+            required=("object_ids", "command"),
+        ),
+        required=("object_ids", "command"),
+        undo_label="Reorder UI objects",
+        dry_summary="selected Painter UI objects would move in the layer stack",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.reparent",
+        "Move Painter UI objects into a group, beside a sibling, or to root.",
+        "paint",
+        "paint_ui_object_reparent",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                "target_parent_id": {"type": "string"},
+                "anchor_id": {"type": "string"},
+                "placement": {
+                    "type": "string",
+                    "enum": ["inside", "before", "after", "root"],
+                },
+            },
+            required=("object_ids", "placement"),
+        ),
+        required=("object_ids", "placement"),
+        undo_label="Move UI hierarchy",
+        dry_summary="selected Painter UI objects would move in the hierarchy",
+    )
+    for suffix, method, summary in (
+        ("component.update", "paint_ui_component_update", "a UI component would be updated"),
+        ("token.update", "paint_ui_token_update", "a UI token would be updated"),
+        ("interaction.update", "paint_ui_interaction_update", "a UI interaction would be updated"),
+    ):
+        id_key = suffix.split(".", 1)[0] + "_id"
+        registry.register_adapter_action(
+            f"paint.ui.{suffix}",
+            f"Update a typed Painter UI {suffix.split('.', 1)[0]} while preserving its stable ID.",
+            "paint",
+            method,
+            params_schema=schema_object(
+                {id_key: {"type": "string"}, "changes": any_object},
+                required=(id_key, "changes"),
+            ),
+            required=(id_key, "changes"),
+            undo_label=f"Update UI {suffix.split('.', 1)[0]}",
+            dry_summary=summary,
+        )
+    registry.register_adapter_action(
+        "paint.ui.component.create",
+        "Convert a selected UI object subtree into a reusable component definition.",
+        "paint",
+        "paint_ui_component_create",
+        params_schema=schema_object(
+            {
+                "root_object_id": {"type": "string"},
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+            }
+        ),
+        undo_label="Create UI component",
+        dry_summary="the selected UI subtree would become a component definition",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instantiate",
+        "Create an editable instance of a component definition.",
+        "paint",
+        "paint_ui_component_instantiate",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Instantiate UI component",
+        dry_summary="a component instance would be created",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.sync",
+        "Synchronize component instances from their current definition.",
+        "paint",
+        "paint_ui_component_sync",
+        params_schema=schema_object(
+            {"component_id": {"type": "string"}},
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Sync UI component instances",
+        dry_summary="component instances would be synchronized",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.property.define",
+        "Define a typed property exposed by a Painter UI component.",
+        "paint",
+        "paint_ui_component_property_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "definition": any_object,
+            },
+            required=("component_id", "property_name", "definition"),
+        ),
+        required=("component_id", "property_name", "definition"),
+        undo_label="Define UI component property",
+        dry_summary="a typed component property would be defined",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.property.bind",
+        "Bind a component property to a definition sublayer field.",
+        "paint",
+        "paint_ui_component_property_bind",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "target_path": {
+                    "type": "string",
+                    "enum": ["content.text", "visible", "component_id"],
+                },
+            },
+            required=(
+                "component_id",
+                "source_object_id",
+                "property_name",
+                "target_path",
+            ),
+        ),
+        required=(
+            "component_id",
+            "source_object_id",
+            "property_name",
+            "target_path",
+        ),
+        undo_label="Bind UI component property",
+        dry_summary="a component property would control a definition sublayer",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance_swap.preferred.set",
+        "Curate preferred Instance Swap choices without restricting other components.",
+        "paint",
+        "paint_ui_component_instance_swap_preferred_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "preferred_component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            required=(
+                "component_id",
+                "property_name",
+                "preferred_component_ids",
+            ),
+        ),
+        required=("component_id", "property_name", "preferred_component_ids"),
+        undo_label="Set preferred Instance Swap values",
+        dry_summary="preferred Instance Swap choices would be curated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.define",
+        "Define a Figma-compatible Slot on a nested component frame.",
+        "paint",
+        "paint_ui_component_slot_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "description": {"type": "string"},
+                "preferred_component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "slot_settings": any_object,
+            },
+            required=("component_id", "source_object_id", "property_name"),
+        ),
+        required=("component_id", "source_object_id", "property_name"),
+        undo_label="Define UI component Slot",
+        dry_summary="a nested frame would become a component Slot",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.inspect",
+        "Inspect Slot contents and non-blocking limit violations.",
+        "paint",
+        "paint_ui_component_slot_inspect",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+            },
+            required=("instance_root_id", "property_name"),
+        ),
+        required=("instance_root_id", "property_name"),
+        mutating=False,
+        changed=False,
+        dry_summary="Slot contents and limit violations would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.insert",
+        "Insert an existing layer into an instance Slot without detaching it.",
+        "paint",
+        "paint_ui_component_slot_insert",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "object_id": {"type": "string"},
+                "index": {"type": "integer"},
+            },
+            required=("instance_root_id", "property_name", "object_id"),
+        ),
+        required=("instance_root_id", "property_name", "object_id"),
+        undo_label="Insert UI component Slot content",
+        dry_summary="a layer would be inserted into an instance Slot",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.slot.reset",
+        "Reset one instance Slot to its main-component contents.",
+        "paint",
+        "paint_ui_component_slot_reset",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+            },
+            required=("instance_root_id", "property_name"),
+        ),
+        required=("instance_root_id", "property_name"),
+        undo_label="Reset UI component Slot",
+        dry_summary="an instance Slot would reset to its definition contents",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.state.override.set",
+        "Set visual overrides for one interactive component state.",
+        "paint",
+        "paint_ui_component_state_override_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "state": {
+                    "type": "string",
+                    "enum": [
+                        "normal",
+                        "hover",
+                        "pressed",
+                        "focused",
+                        "disabled",
+                        "selected",
+                    ],
+                },
+                "source_object_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=(
+                "component_id",
+                "state",
+                "source_object_id",
+                "changes",
+            ),
+        ),
+        required=("component_id", "state", "source_object_id", "changes"),
+        undo_label="Set UI component state",
+        dry_summary="a component state appearance would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.property.set",
+        "Set a typed property, including preview state, on a component instance.",
+        "paint",
+        "paint_ui_component_instance_property_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "value": {},
+            },
+            required=("instance_root_id", "property_name", "value"),
+        ),
+        required=("instance_root_id", "property_name", "value"),
+        undo_label="Set UI component instance property",
+        dry_summary="a component instance property would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.set.inspect",
+        "Inspect a Component Set's multidimensional Variant combinations and conflicts.",
+        "paint",
+        "paint_ui_component_set_inspect",
+        params_schema=schema_object(
+            {"component_id": {"type": "string"}},
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a Component Set's Variant combinations would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variant.create",
+        "Duplicate a component definition as a linked family Variant.",
+        "paint",
+        "paint_ui_component_variant_create",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "name": {"type": "string"},
+                "variant_key": {"type": "string"},
+                "variant_properties": any_object,
+                "offset_x": {"type": "number"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Create UI component variant",
+        dry_summary="a linked component Variant would be created",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variants.combine",
+        "Combine selected independent components into one Component Set.",
+        "paint",
+        "paint_ui_component_variants_combine",
+        params_schema=schema_object(
+            {
+                "component_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                }
+            },
+            required=("component_ids",),
+        ),
+        required=("component_ids",),
+        undo_label="Combine UI components as variants",
+        dry_summary="independent components would be combined as variants",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variant.property.define",
+        "Define one shared Variant property and its values on a Component Set.",
+        "paint",
+        "paint_ui_component_variant_property_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "values": {"type": "array", "items": {"type": "string"}},
+                "default_value": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            required=("component_id", "property_name", "values"),
+        ),
+        required=("component_id", "property_name", "values"),
+        undo_label="Define UI component Variant property",
+        dry_summary="a Component Set Variant property would be defined",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.variant.values.set",
+        "Set one Component Set member's property/value combination.",
+        "paint",
+        "paint_ui_component_variant_values_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "properties": any_object,
+            },
+            required=("component_id", "properties"),
+        ),
+        required=("component_id", "properties"),
+        undo_label="Set UI component Variant values",
+        dry_summary="a Component Set member's Variant values would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.variant.set",
+        "Switch an Instance to another Variant in the same component family.",
+        "paint",
+        "paint_ui_component_instance_variant_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "component_id": {"type": "string"},
+            },
+            required=("instance_root_id", "component_id"),
+        ),
+        required=("instance_root_id", "component_id"),
+        undo_label="Switch UI component variant",
+        dry_summary="a component Instance would switch Variant",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.variant_values.set",
+        "Switch an Instance by a multidimensional Variant property combination.",
+        "paint",
+        "paint_ui_component_instance_variant_values_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "properties": any_object,
+            },
+            required=("instance_root_id", "properties"),
+        ),
+        required=("instance_root_id", "properties"),
+        undo_label="Switch UI component Variant properties",
+        dry_summary="a component Instance would switch by Variant properties",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.change_to.add",
+        "Add a Figma-style Change to interaction between variants in one Component Set.",
+        "paint",
+        "paint_ui_component_change_to_add",
+        params_schema=schema_object(
+            {
+                "source_component_id": {"type": "string"},
+                "target_component_id": {"type": "string"},
+                "trigger": {"type": "string", "default": "click"},
+                "transition": {"type": "object", "default": {}},
+            },
+            required=("source_component_id", "target_component_id"),
+        ),
+        required=("source_component_id", "target_component_id"),
+        undo_label="Add UI component Change to",
+        dry_summary="an interactive component Change to would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.detach",
+        "Detach an Instance as local objects or convert it into a local component.",
+        "paint",
+        "paint_ui_component_instance_detach",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "create_local_component": {"type": "boolean"},
+                "name": {"type": "string"},
+            },
+            required=("instance_root_id",),
+        ),
+        required=("instance_root_id",),
+        undo_label="Detach UI component instance",
+        dry_summary="a component Instance would become local content",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.override.reset",
+        "Reset one local component Instance override to its definition value.",
+        "paint",
+        "paint_ui_component_override_reset",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("instance_root_id", "object_id", "property_path"),
+        ),
+        required=("instance_root_id", "object_id", "property_path"),
+        undo_label="Reset UI component override",
+        dry_summary="one local component Instance override would be reset",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.override.reset_all",
+        "Reset every local override in a linked component Instance.",
+        "paint",
+        "paint_ui_component_override_reset_all",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+            },
+            required=("instance_root_id",),
+        ),
+        required=("instance_root_id",),
+        undo_label="Reset all UI component overrides",
+        dry_summary="all local component Instance overrides would be reset",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.add",
+        "Create a typed reusable component definition rooted at a Painter UI object.",
+        "paint",
+        "paint_ui_component_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "root_object_id": {"type": "string"},
+                "base_component_id": {"type": "string"},
+                "description": {"type": "string"},
+                "property_definitions": any_object,
+            }
+        ),
+        undo_label="Add UI component",
+        dry_summary="a typed UI component would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.remove",
+        "Remove a component, blocking referenced deletion unless detachment is explicit.",
+        "paint",
+        "paint_ui_component_remove",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Remove UI component",
+        dry_summary="a UI component would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.add",
+        "Create a typed design token with optional theme values or alias reference.",
+        "paint",
+        "paint_ui_token_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": sorted(UI_TOKEN_KINDS)},
+                "value": {},
+                "theme_values": any_object,
+                "collection_id": {"type": "string"},
+                "variable_type": {
+                    "type": "string",
+                    "enum": ["", *UI_VARIABLE_TYPES],
+                },
+                "mode_values": any_object,
+                "scope": {"type": "array", "items": {"type": "string"}},
+                "alias_token_id": {"type": "string"},
+                "description": {"type": "string"},
+            }
+        ),
+        undo_label="Add UI token",
+        dry_summary="a typed UI token would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.remove",
+        "Remove a token, blocking referenced deletion unless detachment is explicit.",
+        "paint",
+        "paint_ui_token_remove",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("token_id",),
+        ),
+        required=("token_id",),
+        undo_label="Remove UI token",
+        dry_summary="a UI token would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.library.inspect",
+        "Inspect named Color, Text, Effect, and Layout Grid styles with usage.",
+        "paint",
+        "paint_ui_style_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the shared UI style library would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.add",
+        "Create a stable named UI style from explicit properties.",
+        "paint",
+        "paint_ui_style_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": list(UI_STYLE_KINDS)},
+                "properties": any_object,
+                "token_bindings": any_object,
+                "description": {"type": "string"},
+            },
+            required=("name", "kind"),
+        ),
+        required=("name", "kind"),
+        undo_label="Add UI style",
+        dry_summary="a stable named UI style would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.update",
+        "Update a named style and propagate it to linked targets.",
+        "paint",
+        "paint_ui_style_update",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("style_id", "changes"),
+        ),
+        required=("style_id", "changes"),
+        undo_label="Update UI style",
+        dry_summary="a named UI style and linked targets would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.remove",
+        "Remove a named style, blocking referenced deletion unless detached.",
+        "paint",
+        "paint_ui_style_remove",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("style_id",),
+        ),
+        required=("style_id",),
+        undo_label="Remove UI style",
+        dry_summary="a named UI style would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.apply",
+        "Apply and link a named style to a UI object or artboard.",
+        "paint",
+        "paint_ui_style_apply",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "target_id": {"type": "string"},
+            },
+            required=("style_id", "target_id"),
+        ),
+        required=("style_id", "target_id"),
+        undo_label="Apply UI style",
+        dry_summary="a named UI style would be linked to a target",
+    )
+    registry.register_adapter_action(
+        "paint.ui.style.unlink",
+        "Detach a style link while preserving materialized target values.",
+        "paint",
+        "paint_ui_style_unlink",
+        params_schema=schema_object(
+            {
+                "kind": {"type": "string", "enum": list(UI_STYLE_KINDS)},
+                "target_id": {"type": "string"},
+            },
+            required=("kind", "target_id"),
+        ),
+        required=("kind", "target_id"),
+        undo_label="Detach UI style",
+        dry_summary="a named UI style link would be detached",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.inspect",
+        "Inspect stable variable collections, modes, token counts, and active artboard modes.",
+        "paint",
+        "paint_ui_variable_collection_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="variable collections and active modes would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.add",
+        "Create a stable variable collection with one default mode.",
+        "paint",
+        "paint_ui_variable_collection_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "enum": list(UI_VARIABLE_COLLECTION_KINDS),
+                },
+                "description": {"type": "string"},
+            },
+            required=("name",),
+        ),
+        required=("name",),
+        undo_label="Add variable collection",
+        dry_summary="a variable collection would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.update",
+        "Rename or reclassify a variable collection without changing its stable ID.",
+        "paint",
+        "paint_ui_variable_collection_update",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("collection_id", "changes"),
+        ),
+        required=("collection_id", "changes"),
+        undo_label="Update variable collection",
+        dry_summary="a variable collection would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.collection.remove",
+        "Remove a variable collection, blocking token references unless detachment is explicit.",
+        "paint",
+        "paint_ui_variable_collection_remove",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "detach_tokens": {"type": "boolean"},
+            },
+            required=("collection_id",),
+        ),
+        required=("collection_id",),
+        undo_label="Remove variable collection",
+        dry_summary="a variable collection would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.add",
+        "Add a stable mode to a variable collection.",
+        "paint",
+        "paint_ui_variable_mode_add",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            required=("collection_id", "name"),
+        ),
+        required=("collection_id", "name"),
+        undo_label="Add variable mode",
+        dry_summary="a variable mode would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.update",
+        "Rename a variable mode while preserving its stable ID.",
+        "paint",
+        "paint_ui_variable_mode_update",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            required=("collection_id", "mode_id", "name"),
+        ),
+        required=("collection_id", "mode_id", "name"),
+        undo_label="Update variable mode",
+        dry_summary="a variable mode would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.remove",
+        "Remove a variable mode, blocking values and active artboards unless detachment is explicit.",
+        "paint",
+        "paint_ui_variable_mode_remove",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "detach_values": {"type": "boolean"},
+            },
+            required=("collection_id", "mode_id"),
+        ),
+        required=("collection_id", "mode_id"),
+        undo_label="Remove variable mode",
+        dry_summary="a variable mode would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.variable.mode.set",
+        "Select a variable mode for one artboard and immediately resolve bound values.",
+        "paint",
+        "paint_ui_variable_mode_set",
+        params_schema=schema_object(
+            {
+                "collection_id": {"type": "string"},
+                "mode_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+            },
+            required=("collection_id", "mode_id"),
+        ),
+        required=("collection_id", "mode_id"),
+        undo_label="Set variable mode",
+        dry_summary="an artboard variable mode would be selected",
+    )
+    token_property_paths = [
+        "style.fill",
+        "style.stroke",
+        "style.text_color",
+        "style.stroke_width",
+        "style.radius",
+        "style.shadow",
+        "style.font_size",
+        "layout.gap",
+        "layout.cross_gap",
+        "layout.padding.left",
+        "layout.padding.top",
+        "layout.padding.right",
+        "layout.padding.bottom",
+        "opacity",
+        "content.source",
+    ]
+    registry.register_adapter_action(
+        "paint.ui.token.suggest",
+        (
+            "Find exact, type-safe design-token matches for raw values on the "
+            "selected UI object without changing the document."
+        ),
+        "paint",
+        "paint_ui_token_suggest",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {
+                    "type": "string",
+                    "enum": ["", *token_property_paths],
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="matching scoped design tokens would be suggested",
+    )
+    token_binding_schema = schema_object(
+        {
+            "object_id": {"type": "string"},
+            "path": {
+                "type": "string",
+                "enum": token_property_paths,
+            },
+            "token_id": {"type": "string"},
+        },
+        required=("object_id", "path", "token_id"),
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.bind",
+        "Bind a selected object property to a design token by stable token ID.",
+        "paint",
+        "paint_ui_token_bind",
+        params_schema=token_binding_schema,
+        required=("object_id", "path", "token_id"),
+        undo_label="Bind UI token",
+        dry_summary="an object property would be bound to a stable UI token",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.unbind",
+        "Remove a design-token binding without changing the token or other properties.",
+        "paint",
+        "paint_ui_token_unbind",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "path": token_binding_schema["properties"]["path"],
+            },
+            required=("object_id", "path"),
+        ),
+        required=("object_id", "path"),
+        undo_label="Unbind UI token",
+        dry_summary="an object property token binding would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.interaction.add",
+        "Create a typed prototype interaction with validated source and target references.",
+        "paint",
+        "paint_ui_interaction_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "trigger": {
+                    "type": "string",
+                    "enum": sorted(UI_INTERACTION_TRIGGERS),
+                },
+                "action": {
+                    "type": "string",
+                    "enum": sorted(UI_INTERACTION_ACTIONS),
+                },
+                "target_artboard_id": {"type": "string"},
+                "target_object_id": {"type": "string"},
+                "component_id": {"type": "string"},
+                "motion_clip_id": {"type": "string"},
+                "parameters": any_object,
+                "enabled": {"type": "boolean"},
+            }
+        ),
+        undo_label="Add UI interaction",
+        dry_summary="a typed UI interaction would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.interaction.remove",
+        "Remove a Painter UI interaction by stable ID.",
+        "paint",
+        "paint_ui_interaction_remove",
+        params_schema=schema_object(
+            {"interaction_id": {"type": "string"}},
+            required=("interaction_id",),
+        ),
+        required=("interaction_id",),
+        undo_label="Remove UI interaction",
+        dry_summary="a UI interaction would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.authoring.inspect",
+        "Inspect ordered connections, transitions, and Flow starting points.",
+        "paint",
+        "paint_ui_prototype_authoring_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="prototype authoring state would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.add",
+        "Create a stable prototype Flow starting point.",
+        "paint",
+        "paint_ui_prototype_flow_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "start_object_id": {"type": "string"},
+                "device_preset": {"type": "string"},
+                "description": {"type": "string"},
+            },
+            required=("name", "artboard_id"),
+        ),
+        required=("name", "artboard_id"),
+        undo_label="Add prototype flow",
+        dry_summary="a prototype Flow starting point would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.update",
+        "Update a prototype Flow without changing its stable ID.",
+        "paint",
+        "paint_ui_prototype_flow_update",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}, "changes": any_object},
+            required=("flow_id", "changes"),
+        ),
+        required=("flow_id", "changes"),
+        undo_label="Update prototype flow",
+        dry_summary="a prototype Flow would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.remove",
+        "Remove a prototype Flow starting point.",
+        "paint",
+        "paint_ui_prototype_flow_remove",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}},
+            required=("flow_id",),
+        ),
+        required=("flow_id",),
+        undo_label="Remove prototype flow",
+        dry_summary="a prototype Flow would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.flow.activate",
+        "Select the Flow used by device preview.",
+        "paint",
+        "paint_ui_prototype_flow_activate",
+        params_schema=schema_object(
+            {"flow_id": {"type": "string"}},
+            required=("flow_id",),
+        ),
+        required=("flow_id",),
+        undo_label="Set active prototype flow",
+        dry_summary="the active prototype Flow would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.connection.reorder",
+        "Move an ordered prototype interaction earlier or later.",
+        "paint",
+        "paint_ui_prototype_connection_reorder",
+        params_schema=schema_object(
+            {
+                "interaction_id": {"type": "string"},
+                "direction": {
+                    "type": "integer",
+                    "minimum": -1,
+                    "maximum": 1,
+                },
+            },
+            required=("interaction_id", "direction"),
+        ),
+        required=("interaction_id", "direction"),
+        undo_label="Reorder prototype connection",
+        dry_summary="a prototype interaction would move in execution order",
+    )
+    registry.register_adapter_action(
+        "paint.ui.prototype.transition.set",
+        "Set a validated transition on an existing interaction.",
+        "paint",
+        "paint_ui_prototype_transition_set",
+        params_schema=schema_object(
+            {
+                "interaction_id": {"type": "string"},
+                "transition": schema_object(
+                    {
+                        "kind": {
+                            "type": "string",
+                            "enum": list(UI_PROTOTYPE_TRANSITIONS),
+                        },
+                        "duration_ms": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                        },
+                        "easing": {
+                            "type": "string",
+                            "enum": list(UI_PROTOTYPE_EASINGS),
+                        },
+                        "direction": {"type": "string"},
+                    }
+                ),
+            },
+            required=("interaction_id", "transition"),
+        ),
+        required=("interaction_id", "transition"),
+        undo_label="Set prototype transition",
+        dry_summary="a prototype transition would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.attach",
+        "Create or synchronize a Motion Designer composition for a Painter UI object without opening a window.",
+        "paint",
+        "paint_ui_motion_attach",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "duration_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600000,
+                },
+            }
+        ),
+        undo_label="Attach UI motion",
+        dry_summary="a Painter UI object would be mapped to a Motion composition",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.open",
+        "Open the selected Painter UI object and its mapped layers in Motion Designer.",
+        "paint",
+        "paint_ui_motion_open",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        changed=False,
+        dry_summary="Motion Designer would open for the selected Painter UI object",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.preview",
+        "Start or stop the linked Motion composition directly on the Painter UI canvas.",
+        "paint",
+        "paint_ui_motion_preview",
+        params_schema=schema_object({"playing": {"type": "boolean"}}),
+        changed=False,
+        dry_summary="Painter UI motion preview playback would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.inspect",
+        "Inspect the stable Painter object to Motion composition mapping and editable composition payload.",
+        "paint",
+        "paint_ui_motion_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI motion mapping would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.delivery.inspect",
+        "Inspect property-level Web, app, and Unreal UMG delivery results for the selected Painter UI motion binding.",
+        "paint",
+        "paint_ui_motion_delivery_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI motion delivery would be inspected by target",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.inspect",
+        "Inspect Painter object, Motion composition, binding ID, revision, and orphan link consistency.",
+        "paint",
+        "paint_ui_motion_binding_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI motion binding links would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.migrate",
+        "Migrate legacy composition-only Painter motion links to canonical binding-ID references.",
+        "paint",
+        "paint_ui_motion_binding_migrate",
+        params_schema=schema_object({}),
+        undo_label="Migrate UI motion bindings",
+        dry_summary="legacy Painter UI motion links would be migrated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.relink",
+        "Relink a Painter UI object to a validated Motion composition and binding.",
+        "paint",
+        "paint_ui_motion_binding_relink",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "composition_id": {"type": "string"},
+                "binding_id": {"type": "string"},
+            },
+            required=("object_id", "composition_id", "binding_id"),
+        ),
+        required=("object_id", "composition_id", "binding_id"),
+        undo_label="Relink UI motion",
+        dry_summary="a Painter UI motion binding would be relinked",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.detach",
+        "Detach a Painter UI motion binding while preserving its Motion composition for recovery.",
+        "paint",
+        "paint_ui_motion_binding_detach",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        destructive=True,
+        undo_label="Detach UI motion",
+        dry_summary="a Painter UI motion link would be detached",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion_actor.import",
+        "Import a .tgmotion project as a selectable, transformable, playable Painter UI animation actor.",
+        "paint",
+        "paint_ui_motion_actor_import",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "name": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 0},
+                "height": {"type": "number", "minimum": 0},
+                "autoplay": {"type": "boolean"},
+                "loop": {"type": "boolean"},
+            },
+            required=("path",),
+        ),
+        required=("path",),
+        undo_label="Import Motion Actor",
+        dry_summary="a Motion project would be placed as a Painter UI actor",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion_actor.list",
+        "List Motion animation actors placed in the Painter UI document.",
+        "paint",
+        "paint_ui_motion_actor_list",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter Motion Actors would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.delivery.profiles",
+        "List general Painter UI delivery adapters and artifact capabilities.",
+        "paint",
+        "paint_ui_delivery_profiles",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI delivery profiles would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.delivery.preflight",
+        "Classify each UI object as native, material, baked, or blocked for a delivery target.",
+        "paint",
+        "paint_ui_delivery_preflight",
+        params_schema=schema_object(
+            {
+                "target": {
+                    "type": "string",
+                    "enum": list(UI_DELIVERY_TARGETS),
+                }
+            },
+            required=("target",),
+        ),
+        required=("target",),
+        mutating=False,
+        changed=False,
+        dry_summary="the selected UI delivery target would be preflighted",
+    )
+    registry.register_adapter_action(
+        "paint.ui.handoff.export",
+        "Export a target-neutral design handoff package with document, tokens, components, interactions, and manifest.",
+        "paint",
+        "paint_ui_handoff_export",
+        params_schema=schema_object(
+            {"output_dir": {"type": "string"}},
+            required=("output_dir",),
+        ),
+        required=("output_dir",),
+        mutating=False,
+        changed=False,
+        dry_summary="a general Painter UI design handoff package would be written",
+    )
+    registry.register_adapter_action(
+        "paint.document.export_png",
+        "Export the active Painter document to PNG.",
+        "paint",
+        "paint_document_export_png",
+        params_schema=_paint_optional_export_size_schema(
+            {
+                "path": {"type": "string"},
+                "include_background": {"type": "boolean"},
+                "width": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="active Painter document would be exported as PNG",
+    )
+    registry.register_adapter_action(
+        "paint.document.exchange.preflight",
+        "Preflight Painter image or layered PSD export without dropping unsupported content.",
+        "paint", "paint_document_exchange_preflight",
+        params_schema=schema_object(
+            {
+                "format": {"type": "string", "enum": ["png", "jpeg", "webp", "tiff", "psd"]},
+                "bit_depth": {"type": "integer", "enum": [8, 16]},
+                "bake_unsupported": {"type": "boolean"},
+                "color_mode": {"type": "string", "enum": ["RGB", "RGBA", "sRGB", "CMYK"]},
+            }, required=("format",),
+        ),
+        mutating=False, changed=False,
+        dry_summary="Painter exchange compatibility would be checked",
+    )
+    registry.register_adapter_action(
+        "paint.document.export",
+        "Export Painter artwork as JPEG, WebP, PNG, TIFF, or layered PSD with preflight.",
+        "paint", "paint_document_export",
+        params_schema={
+            **schema_object(
+                {
+                "path": {"type": "string", "pattern": r".*\S.*"},
+                "format": {"type": "string", "enum": list(PAINTER_DOCUMENT_EXPORT_FORMATS)},
+                "include_background": {"type": "boolean"},
+                "bit_depth": {"type": "integer", "enum": list(PAINTER_DOCUMENT_EXPORT_BIT_DEPTHS)},
+                "bake_unsupported": {"type": "boolean"},
+                "quality": {
+                    "type": "integer",
+                    "minimum": PAINTER_DOCUMENT_EXPORT_QUALITY_MIN,
+                    "maximum": PAINTER_DOCUMENT_EXPORT_QUALITY_MAX,
+                },
+                "source_icc": {"type": "string"},
+                "output_icc": {"type": "string"},
+                "rendering_intent": {
+                    "type": "integer",
+                    "minimum": PAINTER_DOCUMENT_RENDERING_INTENT_MIN,
+                    "maximum": PAINTER_DOCUMENT_RENDERING_INTENT_MAX,
+                },
+                },
+                required=("path", "format"),
+            ),
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"bit_depth": {"const": 16}},
+                        "required": ["bit_depth"],
+                    },
+                    "then": {
+                        "properties": {"format": {"enum": ["png", "tiff"]}}
+                    },
+                }
+            ],
+        },
+        mutating=False, changed=False,
+        dry_summary="active Painter document would be exported with production metadata",
+    )
+    registry.register_adapter_action(
+        "paint.document.import_psd",
+        "Import a layered PSD as a Painter document while preserving supported layer properties.",
+        "paint", "paint_document_import_psd",
+        params_schema=schema_object({"path": {"type": "string"}}, required=("path",)),
+        required=("path",), undo_label="Import layered PSD",
+        dry_summary="a layered PSD would replace the active Painter document",
+    )
+    registry.register_adapter_action(
+        "paint.view.zoom",
+        "Set the active Painter canvas zoom percentage.",
+        "paint",
+        "paint_view_zoom",
+        params_schema=schema_object({"percent": {"type": "integer", "minimum": PAINTER_ZOOM_MIN_PERCENT, "maximum": PAINTER_ZOOM_MAX_PERCENT}}),
+        undo_label="Set Painter zoom",
+        dry_summary="active Painter zoom would change",
+    )
+    registry.register_adapter_action(
+        "paint.view.zoom_area",
+        "Magnify and center a normalized rectangular area of the active Painter canvas.",
+        "paint",
+        "paint_view_zoom_area",
+        params_schema=schema_object(
+            {
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "width": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
+                "height": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 1.0},
+            },
+            required=("x", "y", "width", "height"),
+        ),
+        undo_label="Zoom Painter area",
+        dry_summary="a Painter canvas area would be magnified and centered",
+    )
+    registry.register_adapter_action(
+        "paint.view.pan",
+        "Move or reset the active Painter canvas pan offset.",
+        "paint",
+        "paint_view_pan",
+        params_schema={
+            **schema_object(
+                {
+                    field: {
+                        "type": "integer",
+                        "minimum": PAINT_ACTION_QPOINT_COORDINATE_MIN,
+                        "maximum": PAINT_ACTION_QPOINT_COORDINATE_MAX,
+                    }
+                    for field in ("x", "y", "dx", "dy")
+                }
+                | {"reset": {"type": "boolean"}}
+            ),
+            "oneOf": [
+                {
+                    "required": ["reset"],
+                    "properties": {"reset": {"const": True}},
+                    "not": {"anyOf": [{"required": [field]} for field in ("x", "y", "dx", "dy")]},
+                },
+                {
+                    "anyOf": [{"required": ["x"]}, {"required": ["y"]}],
+                    "not": {"anyOf": [{"required": [field]} for field in ("dx", "dy", "reset")]},
+                },
+                {
+                    "anyOf": [
+                        {"required": ["dx"], "properties": {"dx": {"not": {"const": 0}}}},
+                        {"required": ["dy"], "properties": {"dy": {"not": {"const": 0}}}},
+                    ],
+                    "not": {"anyOf": [{"required": [field]} for field in ("x", "y", "reset")]},
+                },
+            ],
+        },
+        undo_label="Pan Painter canvas",
+        dry_summary="active Painter pan would change",
+    )
+    registry.register_adapter_action(
+        "paint.view.grid",
+        "Set Photoshop-style Painter grid visibility, snapping, and grid size.",
+        "paint",
+        "paint_view_grid",
+        params_schema=schema_object(
+            {
+                "visible": {"type": "boolean"},
+                "snap": {"type": "boolean"},
+                "size_px": {"type": "integer", "minimum": PAINTER_GRID_SIZE_MIN_PX, "maximum": PAINTER_GRID_SIZE_MAX_PX},
+            }
+        ),
+        undo_label="Set Painter grid",
+        dry_summary="active Painter grid or snap state would change",
+    )
+    registry.register_adapter_action(
+        "paint.guide.perspective",
+        "Set a 1/2/3-point Painter perspective ruler and stroke snapping.",
+        "paint",
+        "paint_guide_perspective",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "snap": {"type": "boolean"},
+                "mode": {
+                    "type": "integer",
+                    "minimum": PAINTER_PERSPECTIVE_MODE_MIN,
+                    "maximum": PAINTER_PERSPECTIVE_MODE_MAX,
+                },
+                "horizon": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "center_x": {"type": "number"},
+                "center_y": {"type": "number"},
+                "left_x": {"type": "number"},
+                "left_y": {"type": "number"},
+                "right_x": {"type": "number"},
+                "right_y": {"type": "number"},
+                "vertical_x": {"type": "number"},
+                "vertical_y": {"type": "number"},
+            }
+        ),
+        undo_label="Set Painter perspective guide",
+        dry_summary="active Painter perspective guide would change",
+    )
+    registry.register_adapter_action(
+        "paint.guide.symmetry",
+        "Set Painter symmetry guide overlay for drawing alignment.",
+        "paint",
+        "paint_guide_symmetry",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "axis": {"type": "string", "enum": list(PAINTER_SYMMETRY_AXES)},
+                "position": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            }
+        ),
+        undo_label="Set Painter symmetry guide",
+        dry_summary="active Painter symmetry guide would change",
+    )
+    registry.register_adapter_action(
+        "paint.quick_mask.set",
+        "Toggle Photoshop-style Quick Mask overlay for the active Painter selection.",
+        "paint",
+        "paint_quick_mask_set",
+        params_schema=schema_object({"enabled": {"type": "boolean"}}),
+        undo_label="Set Painter Quick Mask",
+        dry_summary="active Painter Quick Mask overlay would change",
+    )
+    registry.register_adapter_action(
+        "paint.tool.set",
+        "Set the active Painter tool.",
+        "paint",
+        "paint_tool_set",
+        params_schema=schema_object(
+            {
+                "tool": {
+                    "type": "string",
+                    "enum": [
+                        "select",
+                        "move",
+                        "pan",
+                        "hand",
+                        "pen",
+                        "brush",
+                        "eraser",
+                        "path",
+                        "rect_select",
+                        "rectangle",
+                        "ellipse_select",
+                        "ellipse",
+                        "magic_select",
+                        "magic_wand",
+                        "select_color",
+                        "lasso",
+                        "lasso_select",
+                        "polygon_lasso",
+                        "polygonal_lasso",
+                        "crop",
+                        "zoom_in",
+                        "zoom_out",
+                        "zoom_area",
+                    ],
+                }
+            },
+            required=("tool",),
+        ),
+        undo_label="Set Painter tool",
+        dry_summary="active Painter tool would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.set",
+        "Set the active Painter brush preset, style, size, opacity, and brush detail controls.",
+        "paint",
+        "paint_brush_set",
+        params_schema={
+            **schema_object(
+                {
+                "preset": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "style": {
+                    "type": "string",
+                    "enum": list(PAINT_ACTION_BRUSH_STYLES),
+                },
+                "width": {
+                    "type": "integer",
+                    "minimum": int(BRUSH_WIDTH_RANGE_PX[0]),
+                    "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+                },
+                "opacity": {"type": "integer", "minimum": PAINT_ACTION_BRUSH_OPACITY_MIN_PERCENT, "maximum": PAINT_ACTION_BRUSH_OPACITY_MAX_PERCENT},
+                "hardness": {"type": "integer", "minimum": BRUSH_HARDNESS_RANGE[0], "maximum": BRUSH_HARDNESS_RANGE[1]},
+                "spacing": {"type": "integer", "minimum": BRUSH_SPACING_RANGE[0], "maximum": BRUSH_SPACING_RANGE[1]},
+                "angle": {"type": "integer", "minimum": BRUSH_ANGLE_RANGE[0], "maximum": BRUSH_ANGLE_RANGE[1]},
+                "roundness": {"type": "integer", "minimum": BRUSH_ROUNDNESS_RANGE[0], "maximum": BRUSH_ROUNDNESS_RANGE[1]},
+                "flip_x": {"type": "boolean"},
+                "flip_y": {"type": "boolean"},
+                "dynamics": {"type": "object"},
+                }
+            ),
+            "anyOf": [
+                {
+                    "required": ["preset"],
+                    "properties": {
+                        "preset": {"type": "string", "minLength": 1, "pattern": r".*\S.*"}
+                    },
+                },
+                *[
+                    {"required": [field]}
+                    for field in (
+                        "style", "width", "opacity", "hardness", "spacing",
+                        "angle", "roundness", "flip_x", "flip_y", "dynamics",
+                    )
+                ],
+            ],
+        },
+        undo_label="Set Painter brush",
+        dry_summary="active Painter brush preset or brush parameters would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.calibration.set",
+        "Set and persist the pressure calibration curve for a Painter input device.",
+        "paint",
+        "paint_brush_calibration_set",
+        params_schema=schema_object(
+            {
+                "device_id": {"type": "string", "minLength": 1, "pattern": r".*\S.*"},
+                "minimum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "maximum": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "curve": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                },
+            }
+        ),
+        undo_label="Set Painter pressure calibration",
+        dry_summary="Painter device pressure calibration would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.resources.diagnose",
+        "Diagnose missing captured-dab and texture resources for a Painter brush.",
+        "paint",
+        "paint_brush_resources_diagnose",
+        params_schema=schema_object({"preset": {"type": "string"}}),
+        undo_label="Diagnose Painter brush resources",
+        dry_summary="Painter brush resources would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.color.numeric.set",
+        "Set the Painter foreground or background color with RGB or HSB numbers and report sRGB gamut clipping.",
+        "paint", "paint_color_numeric_set",
+        params_schema=schema_object(
+            {
+                "space": {"type": "string", "enum": ["rgb", "hsb", "hsv"]},
+                "values": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "target": {"type": "string", "enum": ["foreground", "background"]},
+            }, required=("space", "values")
+        ),
+        undo_label="Set Painter numeric color",
+        dry_summary="Painter numeric color would change",
+    )
+    adjustment_type_schema = {
+        "type": "string",
+        "enum": ["levels", "curves", "brightness_contrast", "hue_saturation", "color_balance", "blur", "sharpen"],
+    }
+    for action_id, method, description in (
+        ("paint.adjustment.preview", "paint_adjustment_preview", "Preview a destructive Painter layer adjustment or filter."),
+        ("paint.adjustment.apply", "paint_adjustment_apply", "Apply a Painter layer adjustment or filter with one-step Undo."),
+    ):
+        registry.register_adapter_action(
+            action_id, description, "paint", method,
+            params_schema=schema_object({"type": adjustment_type_schema, "settings": {"type": "object"}}, required=("type",)),
+            undo_label="Painter adjustment", dry_summary="Painter adjustment pixels would change",
+        )
+    for action_id, method, label in (
+        ("paint.adjustment.commit", "paint_adjustment_commit", "Commit Painter adjustment preview"),
+        ("paint.adjustment.cancel", "paint_adjustment_cancel", "Cancel Painter adjustment preview"),
+    ):
+        registry.register_adapter_action(
+            action_id, label, "paint", method,
+            params_schema=schema_object({}), undo_label=label,
+            dry_summary=label.lower(),
+        )
+    registry.register_adapter_action(
+        "paint.adjustment.layer.create",
+        "Create a non-destructive Painter adjustment layer.",
+        "paint", "paint_adjustment_layer_create",
+        params_schema=schema_object({
+            "type": adjustment_type_schema, "settings": {"type": "object"},
+            "name": {"type": "string"}, "use_selection": {"type": "boolean"},
+        }, required=("type",)),
+        undo_label="Create Painter adjustment layer",
+        dry_summary="a non-destructive Painter adjustment layer would be created",
+    )
+    registry.register_adapter_action(
+        "paint.adjustment.layer.update",
+        "Update a non-destructive Painter adjustment layer.",
+        "paint", "paint_adjustment_layer_update",
+        params_schema=schema_object({
+            "layer_id": {"type": "string"}, "settings": {"type": "object"},
+        }, required=("layer_id", "settings")),
+        undo_label="Update Painter adjustment layer",
+        dry_summary="a Painter adjustment layer would change",
+    )
+    for action_id, method, label in (
+        ("paint.palette.file.import", "paint_palette_file_import", "Import a named GPL or ASE Painter palette."),
+        ("paint.palette.file.export", "paint_palette_file_export", "Export named Painter swatch groups to GPL or ASE."),
+    ):
+        registry.register_adapter_action(
+            action_id, label, "paint", method,
+            params_schema=schema_object({"path": {"type": "string"}}, required=("path",)),
+            undo_label=label, dry_summary=label.lower(),
+        )
+    registry.register_adapter_action(
+        "paint.brush.library.view",
+        "Show and filter the Corel-style Painter brush library or advanced controls.",
+        "paint",
+        "paint_brush_library_view",
+        params_schema=schema_object(
+            {
+                "tab": {"type": "string", "enum": ["library", "controls"]},
+                "category": {"type": "string"},
+                "filter": {
+                    "type": "string",
+                    "enum": [
+                        "",
+                        "favorites",
+                        "masters",
+                        "stamps",
+                        "watercolor",
+                        "thick_paint",
+                    ],
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "favorites",
+                            "masters",
+                            "stamps",
+                            "watercolor",
+                            "thick_paint",
+                        ],
+                    },
+                    "uniqueItems": True,
+                },
+                "search": {"type": "string"},
+                "compact": {"type": "boolean"},
+            }
+        ),
+        undo_label="Set Painter brush library view",
+        dry_summary="Painter brush library view would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.favorite.set",
+        "Mark or unmark a Painter brush preset as a favorite.",
+        "paint",
+        "paint_brush_favorite_set",
+        params_schema=schema_object(
+            {
+                "preset": {"type": "string"},
+                "favorite": {"type": "boolean"},
+            },
+            required=("preset", "favorite"),
+        ),
+        undo_label="Set Painter brush favorite",
+        dry_summary="Painter brush favorite state would change",
+    )
+    point_schema = {
+        "type": "object",
+        "properties": {
+            "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "pressure": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "tilt": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "tilt_x": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+            "tilt_y": {"type": "number", "minimum": -1.0, "maximum": 1.0},
+            "rotation": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "tangential_pressure": {
+                "type": "number",
+                "minimum": -1.0,
+                "maximum": 1.0,
+            },
+            "load": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        },
+        "required": ["x", "y"],
+        "additionalProperties": False,
+    }
+    stroke_schema = {
+        "type": "object",
+        "properties": {
+            "points": {
+                "type": "array",
+                "items": point_schema,
+                "minItems": 2,
+                "maxItems": PAINT_ACTION_MAX_POINTS_PER_STROKE,
+            },
+            "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+            "opacity": {"type": "integer", "minimum": PAINT_ACTION_STROKE_OPACITY_MIN_PERCENT, "maximum": PAINT_ACTION_STROKE_OPACITY_MAX_PERCENT},
+            "width": {
+                "type": "number",
+                "minimum": PAINT_ACTION_STROKE_MIN_WIDTH_PX,
+                "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX,
+            },
+            "style": {
+                "type": "string",
+                "enum": list(PAINT_ACTION_BRUSH_STYLES),
+            },
+            "hardness": {"type": "integer", "minimum": BRUSH_HARDNESS_RANGE[0], "maximum": BRUSH_HARDNESS_RANGE[1]},
+            "spacing": {"type": "integer", "minimum": BRUSH_SPACING_RANGE[0], "maximum": BRUSH_SPACING_RANGE[1]},
+            "angle": {"type": "integer", "minimum": BRUSH_ANGLE_RANGE[0], "maximum": BRUSH_ANGLE_RANGE[1]},
+            "roundness": {"type": "integer", "minimum": BRUSH_ROUNDNESS_RANGE[0], "maximum": BRUSH_ROUNDNESS_RANGE[1]},
+            "closed": {"type": "boolean"},
+            "layer_id": {"type": "string"},
+            "engine_version": {"type": "integer", "minimum": PAINT_ACTION_STROKE_ENGINE_VERSION_MIN, "maximum": PAINT_ACTION_STROKE_ENGINE_VERSION_MAX},
+            "bristle_count": {"type": "integer", "minimum": PAINT_ACTION_STROKE_BRISTLE_COUNT_MIN, "maximum": PAINT_ACTION_STROKE_BRISTLE_COUNT_MAX},
+            "seed": {
+                "type": "integer",
+                "minimum": PAINT_ACTION_STROKE_SEED_MIN,
+                "maximum": PAINT_ACTION_STROKE_SEED_MAX,
+            },
+            "load_depletion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "path_mode": {
+                "type": "string",
+                "enum": ["smooth", "polyline"],
+            },
+        },
+        "required": ["points"],
+        "additionalProperties": False,
+    }
+    registry.register_adapter_action(
+        "paint.stroke.draw",
+        (
+            "Draw one or more normalized-coordinate brush strokes into Painter. "
+            "Use batches for AI/Claude painting; the entire batch is one undo step."
+        ),
+        "paint",
+        "paint_stroke_draw",
+        params_schema=schema_object(
+            {
+                "strokes": {
+                    "type": "array",
+                    "items": stroke_schema,
+                    "minItems": 1,
+                    "maxItems": PAINT_ACTION_MAX_STROKES_PER_REQUEST,
+                },
+                "undo_label": {"type": "string"},
+            },
+            required=("strokes",),
+        ),
+        undo_label="Draw AI Painter strokes",
+        dry_summary="AI-planned brush strokes would be drawn on the Painter canvas",
+    )
+    registry.register_adapter_action(
+        "paint.history.undo",
+        "Undo the latest Painter document operation.",
+        "paint",
+        "paint_history_undo",
+        undo_label="Undo Painter operation",
+        dry_summary="latest Painter document operation would be undone",
+    )
+    registry.register_adapter_action(
+        "paint.history.redo",
+        "Redo the latest undone Painter document operation.",
+        "paint",
+        "paint_history_redo",
+        undo_label="Redo Painter operation",
+        dry_summary="latest undone Painter document operation would be redone",
+    )
+    registry.register_adapter_action(
+        "paint.window.show_panel",
+        "Show the Brush, Layers, Channels, or Paths panel in the active Painter window.",
+        "paint",
+        "paint_window_show_panel",
+        params_schema=schema_object(
+            {"panel": {"type": "string", "enum": ["brush", "layers", "channels", "paths", "reference", "3d_blockout"]}},
+            required=("panel",),
+        ),
+        undo_label="Show Painter panel",
+        dry_summary="active Painter panel would change",
+    )
+    layer_optional_id_schema = {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}
+    layer_required_id_schema = {
+        "type": "string",
+        "minLength": PAINTER_LAYER_ID_MIN_CHARACTERS,
+        "pattern": r".*\S.*",
+    }
+    layer_optional_name_schema = {
+        "type": "string",
+        "maxLength": PAINTER_LAYER_NAME_MAX_CHARACTERS,
+    }
+    registry.register_adapter_action(
+        "paint.layer.add",
+        "Add a standard or stroke-native Material Paint layer to the active Painter document.",
+        "paint",
+        "paint_layer_add",
+        params_schema=schema_object(
+            {
+                "name": layer_optional_name_schema,
+                "layer_type": {"type": "string", "enum": list(PAINTER_LAYER_TYPES)},
+            }
+        ),
+        undo_label="Add Painter layer",
+        dry_summary="a Painter layer would be added",
+    )
+    registry.register_adapter_action(
+        "paint.layer.import_image",
+        "Import an image file into a regular raster Paint Layer.",
+        "paint",
+        "paint_layer_import_image",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string", "pattern": r".*\S.*"},
+                "name": layer_optional_name_schema,
+            },
+            required=("path",),
+        ),
+        undo_label="Import image as Painter layer",
+        dry_summary="an image would be imported as a raster Paint Layer",
+    )
+    registry.register_adapter_action(
+        "paint.layer.group.create",
+        "Create a Painter layer group and optionally parent layers into it.",
+        "paint",
+        "paint_layer_group_create",
+        params_schema=schema_object(
+            {
+                "name": layer_optional_name_schema,
+                "layer_ids": {
+                    "type": "array",
+                    "items": layer_required_id_schema,
+                    "uniqueItems": True,
+                },
+            }
+        ),
+        undo_label="Create Painter layer group",
+        dry_summary="a Painter layer group would be created",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_clipping",
+        "Enable or disable clipping to the previous sibling layer alpha.",
+        "paint",
+        "paint_layer_set_clipping",
+        params_schema=schema_object(
+            {"layer_id": layer_optional_id_schema, "clipping": {"type": "boolean"}},
+            required=("clipping",),
+        ),
+        undo_label="Set Painter clipping mask",
+        dry_summary="Painter clipping state would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.group.set_expanded",
+        "Expand or collapse a Painter layer group in the Layers panel.",
+        "paint",
+        "paint_layer_group_set_expanded",
+        params_schema=schema_object(
+            {"layer_id": layer_required_id_schema, "expanded": {"type": "boolean"}},
+            required=("layer_id", "expanded"),
+        ),
+        undo_label="Set Painter group disclosure",
+        dry_summary="Painter layer group disclosure would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_locks",
+        "Set independent pixel, transparency, position, or all-layer locks.",
+        "paint",
+        "paint_layer_set_locks",
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": layer_optional_id_schema,
+                    "pixels": {"type": "boolean"},
+                    "transparency": {"type": "boolean"},
+                    "position": {"type": "boolean"},
+                    "all_locked": {"type": "boolean"},
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("pixels", "transparency", "position", "all_locked")
+            ],
+        },
+        undo_label="Set Painter layer locks",
+        dry_summary="Painter layer lock channels would change",
+    )
+    for action_id, description, method, label in (
+        ("paint.layer.merge_down", "Merge a Painter layer into the sibling below.", "paint_layer_merge_down", "Merge Painter layer down"),
+        ("paint.layer.merge_visible", "Merge all visible Painter layers.", "paint_layer_merge_visible", "Merge visible Painter layers"),
+        ("paint.layer.flatten", "Flatten the Painter layer stack into one editable raster layer.", "paint_layer_flatten", "Flatten Painter layers"),
+    ):
+        registry.register_adapter_action(
+            action_id,
+            description,
+            "paint",
+            method,
+            params_schema=schema_object(
+                {"layer_id": layer_optional_id_schema}
+                if action_id == "paint.layer.merge_down"
+                else {}
+            ),
+            undo_label=label,
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.layer.set_type",
+        "Convert a Painter layer between standard color paint and stroke-native Material Paint.",
+        "paint",
+        "paint_layer_set_type",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "layer_type": {"type": "string", "enum": list(PAINTER_LAYER_TYPES)},
+            },
+            required=("layer_type",),
+        ),
+        undo_label="Set Painter layer type",
+        dry_summary="Painter layer type would change",
+    )
+    material_properties = {
+        key: {"type": "number", "minimum": 0.0, "maximum": 1.0}
+        for key in (
+            "load", "thickness", "wetness", "gloss", "roughness", "plow",
+            "resaturation",
+        )
+    }
+    material_properties["negative_depth"] = {"type": "boolean"}
+    registry.register_adapter_action(
+        "paint.material.settings.set",
+        "Set native Material Paint deposition and surface response for the active material layer.",
+        "paint",
+        "paint_material_settings_set",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string"}, **material_properties}
+        ),
+        undo_label="Set Painter material paint",
+        dry_summary="Material Paint deposition or surface controls would change",
+    )
+    registry.register_adapter_action(
+        "paint.material.preview.set",
+        "Set the canvas Material Paint relief preview and inspection light direction.",
+        "paint",
+        "paint_material_preview_set",
+        params_schema={
+            **schema_object(
+                {
+                    "enabled": {"type": "boolean"},
+                    "azimuth_deg": {
+                        "type": "number",
+                        "minimum": MATERIAL_PREVIEW_AZIMUTH_MIN_DEGREES,
+                        "maximum": MATERIAL_PREVIEW_AZIMUTH_MAX_DEGREES,
+                    },
+                    "elevation_deg": {
+                        "type": "number",
+                        "minimum": MATERIAL_PREVIEW_ELEVATION_MIN_DEGREES,
+                        "maximum": MATERIAL_PREVIEW_ELEVATION_MAX_DEGREES,
+                    },
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("enabled", "azimuth_deg", "elevation_deg")
+            ],
+        },
+        undo_label="Set Painter material preview",
+        dry_summary="Material Paint relief preview would change",
+    )
+    registry.register_adapter_action(
+        "paint.wet_canvas.settings.set",
+        (
+            "Enable and configure deterministic editable wet-layer color "
+            "exchange for a Painter material layer."
+        ),
+        "paint",
+        "paint_wet_canvas_settings_set",
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": layer_optional_id_schema,
+                    "enabled": {"type": "boolean"},
+                    "mixing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "diffusion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "pickup": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "drying_seconds": {
+                        "type": "number",
+                        "minimum": WET_CANVAS_DRYING_MIN_SECONDS,
+                        "maximum": WET_CANVAS_DRYING_MAX_SECONDS,
+                    },
+                },
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in ("enabled", "mixing", "diffusion", "pickup", "drying_seconds")
+            ],
+        },
+        undo_label="Set Painter Wet Canvas",
+        dry_summary="Wet Canvas settings would change",
+    )
+    registry.register_adapter_action(
+        "paint.wet_canvas.advance",
+        "Advance the saved Wet Canvas drying state by a deterministic duration.",
+        "paint",
+        "paint_wet_canvas_advance",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "seconds": {
+                    "type": "number",
+                    "exclusiveMinimum": 0.0,
+                    "maximum": WET_CANVAS_DRYING_MAX_SECONDS,
+                },
+            },
+            required=("seconds",),
+        ),
+        undo_label="Advance Painter Wet Canvas",
+        dry_summary="Wet Canvas drying time would advance",
+    )
+    registry.register_adapter_action(
+        "paint.wet_canvas.dry",
+        "Dry the selected Painter material layer without flattening its strokes.",
+        "paint",
+        "paint_wet_canvas_dry",
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
+        undo_label="Dry Painter Wet Canvas",
+        dry_summary="Wet Canvas would become dry",
+    )
+    registry.register_adapter_action(
+        "paint.layer.select",
+        "Select a Painter layer by id.",
+        "paint",
+        "paint_layer_select",
+        params_schema=schema_object({"layer_id": layer_required_id_schema}, required=("layer_id",)),
+        undo_label="Select Painter layer",
+        dry_summary="a Painter layer would be selected",
+    )
+    registry.register_adapter_action(
+        "paint.layer.rename",
+        "Rename a Painter layer.",
+        "paint",
+        "paint_layer_rename",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "name": {
+                    "type": "string",
+                    "minLength": PAINTER_LAYER_ID_MIN_CHARACTERS,
+                    "maxLength": PAINTER_LAYER_NAME_MAX_CHARACTERS,
+                    "pattern": r".*\S.*",
+                },
+            },
+            required=("name",),
+        ),
+        undo_label="Rename Painter layer",
+        dry_summary="a Painter layer would be renamed",
+    )
+    registry.register_adapter_action(
+        "paint.layer.duplicate",
+        "Duplicate the selected Painter layer or a layer by id.",
+        "paint",
+        "paint_layer_duplicate",
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
+        undo_label="Duplicate Painter layer",
+        dry_summary="a Painter layer would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.layer.delete",
+        "Delete the selected Painter layer or a layer by id.",
+        "paint",
+        "paint_layer_delete",
+        params_schema=schema_object({"layer_id": layer_optional_id_schema}),
+        undo_label="Delete Painter layer",
+        dry_summary="a Painter layer would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_visible",
+        "Set Painter layer visibility.",
+        "paint",
+        "paint_layer_set_visible",
+        params_schema=schema_object(
+            {"layer_id": layer_optional_id_schema, "visible": {"type": "boolean"}},
+            required=("visible",),
+        ),
+        undo_label="Set Painter layer visibility",
+        dry_summary="Painter layer visibility would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_locked",
+        "Set Painter layer lock state.",
+        "paint",
+        "paint_layer_set_locked",
+        params_schema=schema_object(
+            {"layer_id": layer_optional_id_schema, "locked": {"type": "boolean"}},
+            required=("locked",),
+        ),
+        undo_label="Set Painter layer lock",
+        dry_summary="Painter layer lock would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_opacity",
+        "Set Painter layer opacity.",
+        "paint",
+        "paint_layer_set_opacity",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "opacity": {
+                    "type": "integer",
+                    "minimum": PAINTER_LAYER_OPACITY_MIN_PERCENT,
+                    "maximum": PAINTER_LAYER_OPACITY_MAX_PERCENT,
+                },
+            },
+            required=("opacity",),
+        ),
+        undo_label="Set Painter layer opacity",
+        dry_summary="Painter layer opacity would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_blend_mode",
+        "Set Painter layer blend mode state.",
+        "paint",
+        "paint_layer_set_blend_mode",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "blend_mode": {"type": "string", "enum": list(BLEND_MODES)},
+            },
+            required=("blend_mode",),
+        ),
+        undo_label="Set Painter layer blend mode",
+        dry_summary="Painter layer blend mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_color",
+        "Set the Photoshop-style Painter layer color label.",
+        "paint",
+        "paint_layer_set_color",
+        params_schema=schema_object(
+            {
+                "layer_id": layer_optional_id_schema,
+                "color_label": {
+                    "type": "string",
+                    "enum": list(PAINTER_LAYER_COLOR_LABEL_IDS),
+                },
+            },
+            required=("color_label",),
+        ),
+        undo_label="Set Painter layer color label",
+        dry_summary="Painter layer color label would change",
+    )
+    registry.register_adapter_action(
+        "paint.channel.set_visible",
+        "Set component/transparency or saved-selection channel visibility in the active Painter document.",
+        "paint",
+        "paint_channel_set_visible",
+        params_schema=schema_object(
+            {
+                "channel": {
+                    "type": "string",
+                    "oneOf": [
+                        {"enum": list(PAINTER_CHANNEL_IDS)},
+                        {"pattern": r"^saved-selection-[1-9][0-9]*$"},
+                    ],
+                },
+                "visible": {"type": "boolean"},
+            },
+            required=("channel", "visible"),
+        ),
+        undo_label="Set Painter channel visibility",
+        dry_summary="Painter channel visibility would change",
+    )
+    registry.register_adapter_action(
+        "paint.channel.select",
+        "Select a component/transparency or saved-selection Painter channel target.",
+        "paint",
+        "paint_channel_select",
+        params_schema=schema_object(
+            {"channel": {"type": "string", "minLength": 1}},
+            required=("channel",),
+        ),
+        undo_label="Select Painter channel",
+        dry_summary="Painter channel target would change",
+    )
+    registry.register_adapter_action(
+        "paint.channel.copy_image",
+        "Copy the selected or specified Painter channel image to the system clipboard.",
+        "paint",
+        "paint_channel_copy_image",
+        params_schema=schema_object(
+            {"channel": {"type": "string"}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter channel image would be copied",
+    )
+    registry.register_adapter_action(
+        "paint.channel.paste_image",
+        "Paste a clipboard image into the selected or specified Painter channel.",
+        "paint",
+        "paint_channel_paste_image",
+        params_schema=schema_object(
+            {"channel": {"type": "string"}}
+        ),
+        undo_label="Paste Painter channel image",
+        dry_summary="clipboard image would be pasted into a Painter channel",
+    )
+    save_selection_channel_schema = schema_object(
+        {
+            "name": {"type": "string"},
+            "channel_id": {"type": "string"},
+            "operation": {
+                "type": "string",
+                "enum": ["new", "replace", "add", "subtract", "intersect"],
+            },
+        }
+    )
+    save_selection_channel_schema["oneOf"] = [
+        {
+            "properties": {
+                "name": {"type": "string", "pattern": r".*\S.*"},
+                "channel_id": {"type": "string", "maxLength": 0},
+                "operation": {"type": "string", "enum": ["new"]},
+            },
+            "required": ["name"],
+        },
+        {
+            "properties": {
+                "name": {"type": "string", "maxLength": 0},
+                "channel_id": {
+                    "type": "string",
+                    "pattern": r"^saved-selection-[1-9][0-9]*$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["replace", "add", "subtract", "intersect"],
+                },
+            },
+            "required": ["channel_id", "operation"],
+        },
+    ]
+    registry.register_adapter_action(
+        "paint.selection.save_channel",
+        "Save the exact active selection to a new or existing persistent Alpha8 channel.",
+        "paint",
+        "paint_selection_save_channel",
+        params_schema=save_selection_channel_schema,
+        undo_label="Save Painter selection channel",
+        dry_summary="active selection would be saved to a persistent channel",
+    )
+    registry.register_adapter_action(
+        "paint.selection.load_channel",
+        "Load a persistent Alpha8 channel into the active selection.",
+        "paint",
+        "paint_selection_load_channel",
+        params_schema=schema_object(
+            {
+                "channel_id": {"type": "string", "minLength": 1},
+                "operation": {
+                    "type": "string",
+                    "enum": ["new", "add", "subtract", "intersect"],
+                },
+                "invert": {"type": "boolean"},
+            },
+            required=("channel_id",),
+        ),
+        undo_label="Load Painter selection channel",
+        dry_summary="persistent channel would be loaded into the active selection",
+    )
+    runtime_document_id_schema = {
+        "type": "string",
+        "pattern": r"^painter-document-[0-9a-f]{32}$",
+    }
+    registry.register_adapter_action(
+        "paint.documents.inspect",
+        "List open Painter documents with runtime identity and exact pixel dimensions.",
+        "paint",
+        "paint_documents_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="open Painter documents would be inspected",
+    )
+    cross_document_save_schema = schema_object(
+        {
+            "destination_document_id": runtime_document_id_schema,
+            "name": {"type": "string"},
+            "channel_id": {"type": "string"},
+            "operation": {
+                "type": "string",
+                "enum": ["new", "replace", "add", "subtract", "intersect"],
+            },
+        },
+        required=("destination_document_id",),
+    )
+    cross_document_save_schema["oneOf"] = save_selection_channel_schema["oneOf"]
+    registry.register_adapter_action(
+        "paint.selection.save_channel_to_document",
+        "Save the active selection into another open same-size Painter document.",
+        "paint",
+        "paint_selection_save_channel_to_document",
+        params_schema=cross_document_save_schema,
+        undo_label="Save selection in destination Painter document",
+        dry_summary="selection would be saved in another open document",
+    )
+    registry.register_adapter_action(
+        "paint.selection.load_channel_from_document",
+        "Load a saved Alpha8 channel from another open same-size Painter document.",
+        "paint",
+        "paint_selection_load_channel_from_document",
+        params_schema=schema_object(
+            {
+                "source_document_id": runtime_document_id_schema,
+                "channel_id": {
+                    "type": "string",
+                    "pattern": r"^saved-selection-[1-9][0-9]*$",
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["new", "add", "subtract", "intersect"],
+                },
+                "invert": {"type": "boolean"},
+            },
+            required=("source_document_id", "channel_id"),
+        ),
+        undo_label="Load selection from source Painter document",
+        dry_summary="selection would be loaded from another open document",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channels.import_file",
+        "Import saved-selection alpha channels from a same-size PSD or TIFF file.",
+        "paint",
+        "paint_selection_channels_import_file",
+        params_schema=schema_object(
+            {
+                "path": {
+                    "type": "string",
+                    "minLength": 5,
+                    "pattern": (
+                        r"^.+\.(?:[Pp][Ss][Dd]|[Tt][Ii][Ff](?:[Ff])?)$"
+                    ),
+                },
+            },
+            required=("path",),
+        ),
+        undo_label="Import saved selection channels",
+        dry_summary="saved-selection channels would be imported from PSD or TIFF",
+    )
+    saved_selection_channel_id_schema = {
+        "type": "string",
+        "pattern": r"^saved-selection-[1-9][0-9]*$",
+    }
+    saved_selection_channel_name_schema = {
+        "type": "string",
+        "pattern": r".*\S.*",
+    }
+    registry.register_adapter_action(
+        "paint.selection.channel.rename",
+        "Rename a persistent Alpha8 saved-selection channel without changing its ID.",
+        "paint",
+        "paint_selection_channel_rename",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "name": saved_selection_channel_name_schema,
+            },
+            required=("channel_id", "name"),
+        ),
+        undo_label="Rename Painter selection channel",
+        dry_summary="persistent selection channel would be renamed",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.duplicate",
+        "Duplicate exact Alpha8 saved-selection bytes inside the current document.",
+        "paint",
+        "paint_selection_channel_duplicate",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "name": saved_selection_channel_name_schema,
+                "invert": {"type": "boolean"},
+            },
+            required=("channel_id", "name"),
+        ),
+        undo_label="Duplicate Painter selection channel",
+        dry_summary="persistent selection channel would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.options.set",
+        "Set saved alpha-channel selected/masked-area semantics and appearance-only overlay options.",
+        "paint",
+        "paint_selection_channel_options_set",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "display_mode": {
+                    "type": "string",
+                    "enum": ["masked_areas", "selected_areas"],
+                },
+                "overlay_color": {
+                    "type": "string",
+                    "pattern": r"^#[0-9A-Fa-f]{6}$",
+                },
+                "overlay_opacity_percent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                },
+            },
+            required=(
+                "channel_id",
+                "display_mode",
+                "overlay_color",
+                "overlay_opacity_percent",
+            ),
+        ),
+        undo_label="Set Painter selection channel options",
+        dry_summary="persistent selection channel options would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.reorder",
+        "Place one persistent saved-selection channel before or after another.",
+        "paint",
+        "paint_selection_channel_reorder",
+        params_schema=schema_object(
+            {
+                "channel_id": saved_selection_channel_id_schema,
+                "target_channel_id": saved_selection_channel_id_schema,
+                "placement": {"type": "string", "enum": ["before", "after"]},
+            },
+            required=("channel_id", "target_channel_id", "placement"),
+        ),
+        undo_label="Reorder Painter selection channel",
+        dry_summary="persistent selection channel order would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.channel.delete",
+        "Delete a persistent saved-selection channel without changing paint pixels.",
+        "paint",
+        "paint_selection_channel_delete",
+        params_schema=schema_object(
+            {"channel_id": saved_selection_channel_id_schema},
+            required=("channel_id",),
+        ),
+        undo_label="Delete Painter selection channel",
+        dry_summary="persistent selection channel would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.selection.select_all",
+        "Select the full Painter canvas.",
+        "paint",
+        "paint_selection_select_all",
+        params_schema=schema_object({}),
+        undo_label="Select all",
+        dry_summary="Painter canvas would be selected",
+    )
+    registry.register_adapter_action(
+        "paint.selection.deselect",
+        "Clear the active Painter selection.",
+        "paint",
+        "paint_selection_deselect",
+        params_schema=schema_object({}),
+        undo_label="Deselect",
+        dry_summary="Painter selection would be cleared",
+    )
+    registry.register_adapter_action(
+        "paint.selection.invert",
+        "Invert the active Painter selection.",
+        "paint",
+        "paint_selection_invert",
+        params_schema=schema_object({}),
+        undo_label="Invert Painter selection",
+        dry_summary="Painter selection would be inverted",
+    )
+    registry.register_adapter_action(
+        "paint.selection.to_path",
+        "Save the active Painter selection as a closed path.",
+        "paint",
+        "paint_selection_to_path",
+        params_schema=schema_object({}),
+        undo_label="Selection to path",
+        dry_summary="Painter selection would become a path",
+    )
+    registry.register_adapter_action(
+        "paint.selection.rectangle",
+        "Create a rectangular Painter selection from normalized 0..1 bounds.",
+        "paint",
+        "paint_selection_rectangle",
+        params_schema=schema_object(
+            {
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)},
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
+            },
+            required=("x1", "y1", "x2", "y2"),
+        ),
+        undo_label="Rectangular Painter selection",
+        dry_summary="Painter rectangular selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.ellipse",
+        "Create an elliptical Painter selection from normalized 0..1 bounds.",
+        "paint",
+        "paint_selection_ellipse",
+        params_schema=schema_object(
+            {
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)},
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
+            },
+            required=("x1", "y1", "x2", "y2"),
+        ),
+        undo_label="Elliptical Painter selection",
+        dry_summary="Painter elliptical selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.set_aspect",
+        "Set Painter marquee aspect mode to free, square, 16:9, or 4:3.",
+        "paint",
+        "paint_selection_set_aspect",
+        params_schema=schema_object(
+            {"aspect": {"type": "string", "enum": list(PAINTER_SELECTION_ASPECTS)}},
+            required=("aspect",),
+        ),
+        undo_label="Set Painter selection aspect",
+        dry_summary="Painter marquee aspect mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.lasso",
+        "Create a freehand or polygonal Painter selection from normalized points.",
+        "paint",
+        "paint_selection_lasso",
+        params_schema=schema_object(
+            {
+                "points": {
+                    "type": "array",
+                    "minItems": 3,
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                },
+                "mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)},
+                "polygonal": {"type": "boolean"},
+            },
+            required=("points",),
+        ),
+        undo_label="Painter lasso selection",
+        dry_summary="Painter lasso selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.modify",
+        "Feather, expand, contract, or border the active Painter selection mask.",
+        "paint",
+        "paint_selection_modify",
+        params_schema={
+            "oneOf": [
+                schema_object(
+                    {
+                        "operation": {"const": "feather"},
+                        "radius_px": {
+                            "type": "number",
+                            "exclusiveMinimum": 0.0,
+                            "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                        },
+                    },
+                    required=("operation",),
+                ),
+                schema_object(
+                    {
+                        "operation": {
+                            "type": "string",
+                            "enum": list(PAINTER_SELECTION_MODIFY_OPERATIONS[1:]),
+                        },
+                        "radius_px": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                        },
+                    },
+                    required=("operation",),
+                ),
+            ]
+        },
+        undo_label="Modify Painter selection",
+        dry_summary="Painter selection mask would be modified",
+    )
+    registry.register_adapter_action(
+        "paint.selection.set_mode",
+        "Set how the next Painter selection combines with the current selection.",
+        "paint",
+        "paint_selection_set_mode",
+        params_schema=schema_object(
+            {"mode": {"type": "string", "enum": list(PAINTER_SELECTION_MODES)}},
+            required=("mode",),
+        ),
+        undo_label="Set Painter selection mode",
+        dry_summary="Painter selection combination mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.select_by_color",
+        "Create a Painter selection from pixels similar to the sampled color point.",
+        "paint",
+        "paint_selection_select_by_color",
+        params_schema=schema_object(
+            {
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "tolerance": {"type": "integer", "minimum": PAINTER_COLOR_SELECTION_TOLERANCE_MIN, "maximum": PAINTER_COLOR_SELECTION_TOLERANCE_MAX},
+                "contiguous": {"type": "boolean"},
+                "phase": {"type": "string", "enum": list(PAINTER_COLOR_SELECTION_PHASES)},
+            },
+            required=("x", "y"),
+        ),
+        undo_label="Magic Select by color",
+        dry_summary="Painter would select similar color pixels",
+    )
+    registry.register_adapter_action(
+        "paint.crop.to_selection",
+        "Crop the Painter document to the active selection bounds.",
+        "paint",
+        "paint_crop_to_selection",
+        params_schema=schema_object({}),
+        undo_label="Crop Painter document",
+        dry_summary="Painter document would be cropped to selection",
+    )
+    for action_name, method_name, description in (
+        ("paint.crop.preview", "paint_crop_preview", "Preview cropping to the active Painter selection bounds."),
+        ("paint.crop.commit", "paint_crop_commit", "Commit the active Painter crop preview."),
+        ("paint.crop.cancel", "paint_crop_cancel", "Cancel the active Painter crop preview."),
+    ):
+        crop_schema = schema_object({})
+        if action_name == "paint.crop.preview":
+            straighten_schema = {"straighten_degrees": {"type": "number"}}
+            crop_coordinate_schema = {
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            }
+            crop_schema = {
+                "oneOf": [
+                    schema_object(straighten_schema),
+                    schema_object(
+                        {**crop_coordinate_schema, **straighten_schema},
+                        required=("x1", "y1", "x2", "y2"),
+                    ),
+                ]
+            }
+        registry.register_adapter_action(
+            action_name,
+            description,
+            "paint",
+            method_name,
+            params_schema=crop_schema,
+            undo_label="Painter crop",
+            dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.selection.transform",
+        "Preview, commit, or cancel a pixel selection move/free transform.",
+        "paint",
+        "paint_selection_transform",
+        params_schema=schema_object(
+            {
+                "translate_x": {"type": "number"}, "translate_y": {"type": "number"},
+                "scale_x": {"type": "number", "not": {"const": 0.0}},
+                "scale_y": {"type": "number", "not": {"const": 0.0}},
+                "rotation_degrees": {"type": "number"},
+                "skew_x_degrees": {
+                    "type": "number",
+                    "exclusiveMinimum": PAINTER_SELECTION_SKEW_MIN_DEGREES,
+                    "exclusiveMaximum": PAINTER_SELECTION_SKEW_MAX_DEGREES,
+                },
+                "skew_y_degrees": {
+                    "type": "number",
+                    "exclusiveMinimum": PAINTER_SELECTION_SKEW_MIN_DEGREES,
+                    "exclusiveMaximum": PAINTER_SELECTION_SKEW_MAX_DEGREES,
+                },
+                "pivot_x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "pivot_y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "flip_x": {"type": "boolean"}, "flip_y": {"type": "boolean"},
+                "phase": {"type": "string", "enum": list(PAINTER_SELECTION_TRANSFORM_PHASES)},
+                "target": {"type": "string", "enum": list(PAINTER_SELECTION_TRANSFORM_TARGETS)},
+            }
+        ),
+        undo_label="Free transform Painter selection",
+        dry_summary="Painter selection pixels would be transformed",
+    )
+    registry.register_adapter_action(
+        "paint.image.resize",
+        "Resize the Painter image pixels and document dimensions.",
+        "paint",
+        "paint_image_resize",
+        params_schema=schema_object(
+            {
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+                "height": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+            },
+            required=("width", "height"),
+        ),
+        undo_label="Resize Painter image",
+        dry_summary="Painter image pixels would be resized",
+    )
+    registry.register_adapter_action(
+        "paint.canvas.resize",
+        "Resize the Painter canvas without scaling layer geometry.",
+        "paint",
+        "paint_canvas_resize",
+        params_schema=schema_object(
+            {
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+                "height": {
+                    "type": "integer",
+                    "minimum": PAINTER_NEW_CANVAS_MIN_DIMENSION_PX,
+                    "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT,
+                },
+                "background": {"type": "string"},
+            },
+            required=("width", "height"),
+        ),
+        undo_label="Resize Painter canvas",
+        dry_summary="Painter canvas bounds would be resized",
+    )
+    registry.register_adapter_action(
+        "paint.canvas.flip",
+        "Flip the Painter canvas horizontally or vertically.",
+        "paint",
+        "paint_canvas_flip",
+        params_schema=schema_object(
+            {"axis": {"type": "string", "enum": ["horizontal", "vertical"]}},
+            required=("axis",),
+        ),
+        undo_label="Flip Painter canvas",
+        dry_summary="Painter canvas would be flipped",
+    )
+    registry.register_adapter_action(
+        "paint.fill.solid",
+        "Fill the active Painter selection, or full canvas if none is selected, with one color.",
+        "paint",
+        "paint_fill_solid",
+        params_schema=schema_object(
+            {"color": {"type": "string", "pattern": r".*\S.*"}},
+            required=("color",),
+        ),
+        undo_label="Painter solid fill",
+        dry_summary="Painter selection or canvas would be solid-filled",
+    )
+    registry.register_adapter_action(
+        "paint.fill.gradient",
+        "Fill the active Painter selection, or full canvas if none is selected, with a soft gradient.",
+        "paint",
+        "paint_fill_gradient",
+        params_schema=schema_object(
+            {
+                "color1": {"type": "string", "pattern": r".*\S.*"},
+                "color2": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("color1", "color2"),
+        ),
+        undo_label="Painter gradient fill",
+        dry_summary="Painter selection or canvas would be gradient-filled",
+    )
+    registry.register_adapter_action(
+        "paint.fill.pattern",
+        "Fill the active Painter selection, or full canvas if none is selected, with Qt's Dense4 pattern.",
+        "paint",
+        "paint_fill_pattern",
+        params_schema=schema_object(
+            {
+                "color1": {"type": "string", "pattern": r".*\S.*"},
+                "color2": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("color1", "color2"),
+        ),
+        undo_label="Painter pattern fill",
+        dry_summary="Painter selection or canvas would be pattern-filled",
+    )
+    registry.register_adapter_action(
+        "paint.mirror.set",
+        "Set Painter mirrored drawing along the canvas horizontal and/or vertical axes.",
+        "paint",
+        "paint_mirror_set",
+        params_schema={
+            **schema_object(
+                {
+                    "x": {"type": "boolean"},
+                    "y": {"type": "boolean"},
+                }
+            ),
+            "anyOf": [{"required": ["x"]}, {"required": ["y"]}],
+        },
+        undo_label="Set Painter mirror drawing",
+        dry_summary="Painter mirror drawing mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_from_selection",
+        "Create or replace the selected Painter layer mask from the active selection.",
+        "paint",
+        "paint_layer_mask_from_selection",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}}
+        ),
+        undo_label="Layer mask from selection",
+        dry_summary="Painter layer mask would be created from selection",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_from_path",
+        "Create or replace the selected Painter layer mask from the active path.",
+        "paint",
+        "paint_layer_mask_from_path",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "path_id": {"type": "string", "pattern": r".*\S.*"},
+            },
+            required=("path_id",),
+        ),
+        undo_label="Layer mask from path",
+        dry_summary="Painter layer mask would be created from path",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_create",
+        "Create or replace the selected Painter layer mask from selection, path, channel, alpha, or reveal-all.",
+        "paint",
+        "paint_layer_mask_create",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "mask_type": {
+                    "type": "string",
+                    "enum": ["selection", "path", "channel", "alpha", "layer_alpha", "white", "reveal_all"],
+                },
+            },
+            required=("mask_type",),
+        ),
+        undo_label="Create Painter layer mask",
+        dry_summary="Painter layer mask would be created",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_state.set",
+        "Enable, link, unlink, or delete a Painter layer mask.",
+        "paint",
+        "paint_layer_mask_state_set",
+        params_schema={
+            **schema_object(
+                {
+                    "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                    "enabled": {"type": "boolean"},
+                    "linked": {"type": "boolean"},
+                    "delete": {"type": "boolean"},
+                }
+            ),
+            "oneOf": [
+                {
+                    "anyOf": [{"required": ["enabled"]}, {"required": ["linked"]}],
+                    "not": {"required": ["delete"]},
+                },
+                {
+                    "required": ["delete"],
+                    "properties": {"delete": {"const": True}},
+                    "not": {"anyOf": [{"required": ["enabled"]}, {"required": ["linked"]}]},
+                },
+            ],
+        },
+        undo_label="Set Painter layer mask state",
+        dry_summary="Painter layer mask state would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.paint",
+        "Paint an 8-bit hide/reveal value into a Painter raster layer mask.",
+        "paint",
+        "paint_layer_mask_paint",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "radius_px": {"type": "number", "minimum": PAINTER_LAYER_MASK_RADIUS_MIN_PX},
+                "value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
+            },
+            required=("x", "y", "radius_px", "value"),
+        ),
+        undo_label="Paint Painter layer mask",
+        dry_summary="Painter raster layer mask would be painted",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.gradient",
+        "Replace a Painter layer mask with a continuous 8-bit linear gradient.",
+        "paint",
+        "paint_layer_mask_gradient",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+                "start": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "end": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}},
+                "start_value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
+                "end_value": {"type": "integer", "minimum": PAINTER_LAYER_MASK_ALPHA_MIN, "maximum": PAINTER_LAYER_MASK_ALPHA_MAX},
+            },
+            required=("start", "end"),
+        ),
+        undo_label="Painter layer mask gradient",
+        dry_summary="Painter raster layer mask gradient would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask.apply",
+        "Bake the selected Painter layer mask into its pixels and remove the mask.",
+        "paint",
+        "paint_layer_mask_apply",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}}
+        ),
+        undo_label="Apply Painter layer mask",
+        dry_summary="Painter layer mask would be applied",
+    )
+    path_optional_id_schema = {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}
+    path_point_pair_schema = {
+        "type": "array",
+        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "items": {
+            "type": "number",
+            "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM,
+            "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM,
+        },
+    }
+    path_handle_pair_schema = {
+        "type": "array",
+        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+        "items": {"type": "number"},
+    }
+    registry.register_adapter_action(
+        "paint.path.to_selection",
+        "Convert the active or specified Painter path to a marching-ants selection.",
+        "paint",
+        "paint_path_to_selection",
+        params_schema=schema_object({"path_id": path_optional_id_schema}),
+        undo_label="Path to selection",
+        dry_summary="Painter path would become a selection",
+    )
+    registry.register_adapter_action(
+        "paint.path.create",
+        "Create a saved Painter path from normalized 0..1 points.",
+        "paint",
+        "paint_path_create",
+        params_schema={
+            **schema_object(
+                {
+                    "points": {
+                        "type": "array",
+                        "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+                        "maxItems": PAINT_ACTION_MAX_POINTS_PER_STROKE,
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "array",
+                                    "minItems": PAINT_ACTION_PATH_MIN_POINTS,
+                                    "maxItems": PAINT_ACTION_PATH_MIN_POINTS,
+                                    "items": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                        "y": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                    },
+                                    "required": ["x", "y"],
+                                    "additionalProperties": False,
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "x_norm": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                        "y_norm": {"type": "number", "minimum": PAINT_ACTION_PATH_COORDINATE_MIN_NORM, "maximum": PAINT_ACTION_PATH_COORDINATE_MAX_NORM},
+                                    },
+                                    "required": ["x_norm", "y_norm"],
+                                    "additionalProperties": False,
+                                },
+                            ]
+                        },
+                    },
+                    "closed": {"type": "boolean"},
+                    "make_selection": {"type": "boolean"},
+                },
+                required=("points",),
+            ),
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"make_selection": {"const": True}},
+                        "required": ["make_selection"],
+                    },
+                    "then": {
+                        "properties": {
+                            "points": {"minItems": PAINT_ACTION_PATH_SELECTION_MIN_POINTS}
+                        }
+                    },
+                }
+            ],
+        },
+        undo_label="Create Painter path",
+        dry_summary="Painter path would be created",
+    )
+    registry.register_adapter_action(
+        "paint.path.delete",
+        "Delete the active or specified Painter work, selection, or saved path.",
+        "paint",
+        "paint_path_delete",
+        params_schema=schema_object({"path_id": path_optional_id_schema}),
+        undo_label="Delete Painter path",
+        dry_summary="Painter path would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.path.clear",
+        "Clear the active Painter work path preview.",
+        "paint",
+        "paint_path_clear",
+        params_schema=schema_object({}),
+        undo_label="Clear Painter work path",
+        dry_summary="Painter work path preview would be cleared",
+    )
+    registry.register_adapter_action(
+        "paint.path.anchor.edit",
+        "Add, delete, move, or convert a Painter path anchor and its Bezier handles.",
+        "paint", "paint_path_anchor_edit",
+        params_schema={
+            **schema_object(
+                {
+                    "path_id": path_optional_id_schema,
+                    "index": {"type": "integer", "minimum": PAINT_ACTION_PATH_INDEX_MIN},
+                    "operation": {"type": "string", "enum": ["add", "delete", "move", "corner", "smooth"]},
+                    "point": path_point_pair_schema,
+                    "in_handle": path_handle_pair_schema,
+                    "out_handle": path_handle_pair_schema,
+                },
+                required=("index", "operation"),
+            ),
+            "allOf": [
+                {
+                    "if": {"properties": {"operation": {"enum": ["add", "move"]}}},
+                    "then": {"required": ["point"]},
+                },
+                {
+                    "if": {"properties": {"operation": {"enum": ["add", "delete", "corner"]}}},
+                    "then": {
+                        "not": {
+                            "anyOf": [
+                                {"required": ["in_handle"]},
+                                {"required": ["out_handle"]},
+                            ]
+                        }
+                    },
+                },
+                {
+                    "if": {"properties": {"operation": {"const": "delete"}}},
+                    "then": {"not": {"required": ["point"]}},
+                },
+            ],
+        }, undo_label="Edit Painter path anchor", dry_summary="Painter path anchor would be edited",
+    )
+    for action_name, method_name, description, schema in (
+        ("paint.path.duplicate", "paint_path_duplicate", "Duplicate a saved Painter path.", schema_object({"path_id": path_optional_id_schema})),
+        ("paint.path.rename", "paint_path_rename", "Rename a saved Painter path.", schema_object({"path_id": path_optional_id_schema, "name": {"type": "string", "minLength": PAINT_ACTION_PATH_NAME_MIN_CHARACTERS, "pattern": r".*\S.*"}}, required=("name",))),
+        ("paint.path.reorder", "paint_path_reorder", "Move a saved Painter path to a new path-stack index.", schema_object({"path_id": path_optional_id_schema, "index": {"type": "integer", "minimum": PAINT_ACTION_PATH_INDEX_MIN}}, required=("index",))),
+        ("paint.path.fill", "paint_path_fill", "Fill a closed saved Painter path on the active raster layer.", schema_object({"path_id": path_optional_id_schema, "color": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}})),
+        ("paint.path.stroke", "paint_path_stroke", "Stroke a saved Painter path onto the active raster layer.", schema_object({"path_id": path_optional_id_schema, "color": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"}, "width_px": {"type": "number", "minimum": PAINT_ACTION_STROKE_MIN_WIDTH_PX, "maximum": PAINT_ACTION_MAX_BRUSH_WIDTH_PX}})),
+    ):
+        registry.register_adapter_action(
+            action_name, description, "paint", method_name,
+            params_schema=schema, undo_label=description, dry_summary=description,
+        )
+    registry.register_adapter_action(
+        "paint.path.commit",
+        "Commit the active Painter work path as an editable path stroke.",
+        "paint",
+        "paint_path_commit",
+        params_schema=schema_object({"closed": {"type": "boolean"}}),
+        undo_label="Commit Painter path",
+        dry_summary="Painter work path would be committed",
+    )
+    registry.register_adapter_action(
+        "paint.clipboard.copy",
+        "Copy the selected Painter layer/object to the TigerCapture paint clipboard.",
+        "paint",
+        "paint_clipboard_copy",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="selected Painter content would be copied",
+    )
+    registry.register_adapter_action(
+        "paint.clipboard.cut",
+        "Cut the selected Painter layer/object to the TigerCapture paint clipboard.",
+        "paint",
+        "paint_clipboard_cut",
+        params_schema=schema_object({}),
+        undo_label="Cut Painter content",
+        dry_summary="selected Painter content would be cut",
+    )
+    registry.register_adapter_action(
+        "paint.clipboard.paste",
+        "Paste TigerCapture paint clipboard content into the active Painter document.",
+        "paint",
+        "paint_clipboard_paste",
+        params_schema=schema_object({}),
+        undo_label="Paste Painter content",
+        dry_summary="Painter clipboard content would be pasted",
+    )
+    editor_object_locator_not_both = {
+        "not": {
+            "allOf": [
+                {
+                    "required": ["object_id"],
+                    "properties": {"object_id": {"pattern": r".*\S.*"}},
+                },
+                {
+                    "required": ["kind"],
+                    "properties": {"kind": {"pattern": r".*\S.*"}},
+                },
+            ]
+        }
+    }
+    registry.register_adapter_action(
+        "paint.editor_objects.list",
+        "List editor typography, AR/PBR, and actor objects importable into Paint.",
+        "paint",
+        "paint_editor_objects_list",
+        params_schema=schema_object(
+            {
+                "time_ms": {"type": "integer", "minimum": 0},
+                "include_inactive": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 0},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="paint importable editor objects would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.editor_object.render",
+        "Render one editor object to a Paint-import PNG without placing it.",
+        "paint",
+        "paint_editor_object_render",
+        params_schema={
+            **schema_object(
+                {
+                    "object_id": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "time_ms": {"type": "integer", "minimum": 0},
+                    "include_inactive": {"type": "boolean"},
+                    "output_dir": {"type": "string"},
+                    "force": {"type": "boolean"},
+                }
+            ),
+            **editor_object_locator_not_both,
+        },
+        mutating=False,
+        changed=False,
+        dry_summary="editor object poster would be rendered for Paint",
+    )
+    registry.register_adapter_action(
+        "paint.editor_object.import",
+        "Import one editor object into Paint as a movable sticker layer.",
+        "paint",
+        "paint_editor_object_import",
+        params_schema={
+            **schema_object(
+                {
+                "object_id": {"type": "string"},
+                "kind": {"type": "string"},
+                "time_ms": {"type": "integer", "minimum": 0},
+                "include_inactive": {"type": "boolean"},
+                "x_norm": {"type": "number", "minimum": 0.0, "maximum": PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM},
+                "y_norm": {"type": "number", "minimum": 0.0, "maximum": PAINT_ACTION_EDITOR_OBJECT_MAX_POSITION_NORM},
+                "width_norm": {"type": "number", "minimum": PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM, "maximum": 1.0},
+                "height_norm": {"type": "number", "minimum": PAINT_ACTION_EDITOR_OBJECT_MIN_SIZE_NORM, "maximum": 1.0},
+                "output_dir": {"type": "string"},
+                "force": {"type": "boolean"},
+                }
+            ),
+            **editor_object_locator_not_both,
+        },
+        undo_label="Import editor object into Paint",
+        dry_summary="editor object would be imported into Paint as a sticker layer",
+    )
+    reference_params = {
+        "reference_id": {"type": "string", "pattern": r"^(?:$|.*\S.*)$"},
+        "path": {"type": "string", "pattern": r".*\S.*"},
+        "name": {"type": "string", "maxLength": REFERENCE_NAME_MAX_CHARACTERS},
+        "x_norm": {"type": "number", "minimum": REFERENCE_POSITION_MIN_NORM, "maximum": REFERENCE_POSITION_MAX_NORM},
+        "y_norm": {"type": "number", "minimum": REFERENCE_POSITION_MIN_NORM, "maximum": REFERENCE_POSITION_MAX_NORM},
+        "width_norm": {"type": "number", "minimum": REFERENCE_SIZE_MIN_NORM, "maximum": REFERENCE_SIZE_MAX_NORM},
+        "height_norm": {"type": "number", "minimum": REFERENCE_SIZE_MIN_NORM, "maximum": REFERENCE_SIZE_MAX_NORM},
+        "opacity": {"type": "number", "minimum": REFERENCE_OPACITY_MIN, "maximum": REFERENCE_OPACITY_MAX},
+        "rotation_deg": {"type": "number", "minimum": REFERENCE_ROTATION_MIN_DEGREES, "maximum": REFERENCE_ROTATION_MAX_DEGREES},
+        "visible": {"type": "boolean"},
+        "locked": {"type": "boolean"},
+    }
+    reference_target_id_schema = {
+        "type": "string",
+        "minLength": REFERENCE_TARGET_ID_MIN_CHARACTERS,
+        "pattern": r".*\S.*",
+    }
+    reference_add_params = {
+        key: value for key, value in reference_params.items() if key != "reference_id"
+    }
+    reference_update_params = {
+        key: value for key, value in reference_params.items() if key != "path"
+    }
+    reference_update_params["reference_id"] = reference_target_id_schema
+    registry.register_adapter_action(
+        "paint.reference.state",
+        "Read the active Painter reference board without changing paint layers.",
+        "paint",
+        "paint_reference_state",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter reference board would be read",
+    )
+    registry.register_adapter_action(
+        "paint.reference.add",
+        "Add a non-destructive reference image to the Painter board.",
+        "paint",
+        "paint_reference_add",
+        params_schema=schema_object(reference_add_params, required=("path",)),
+        undo_label="Add Painter reference image",
+        dry_summary="Painter reference image would be added",
+    )
+    registry.register_adapter_action(
+        "paint.reference.update",
+        "Update position, size, opacity, visibility, or label for a Painter reference image.",
+        "paint",
+        "paint_reference_update",
+        params_schema={
+            **schema_object(reference_update_params, required=("reference_id",)),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "name", "x_norm", "y_norm", "width_norm", "height_norm",
+                    "opacity", "rotation_deg", "visible", "locked",
+                )
+            ],
+        },
+        undo_label="Update Painter reference image",
+        dry_summary="Painter reference image would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.reference.delete",
+        "Delete a Painter reference image from the reference board.",
+        "paint",
+        "paint_reference_delete",
+        params_schema=schema_object({"reference_id": reference_target_id_schema}, required=("reference_id",)),
+        undo_label="Delete Painter reference image",
+        dry_summary="Painter reference image would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.reference.duplicate",
+        "Duplicate a Painter reference image while keeping it non-destructive.",
+        "paint",
+        "paint_reference_duplicate",
+        params_schema=schema_object(
+            {
+                "reference_id": reference_target_id_schema,
+                "offset_x": {"type": "number"},
+                "offset_y": {"type": "number"},
+            },
+            required=("reference_id",),
+        ),
+        undo_label="Duplicate Painter reference image",
+        dry_summary="Painter reference image would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.reference.bake",
+        "Bake a selected Painter reference into an exportable sticker layer.",
+        "paint",
+        "paint_reference_bake",
+        params_schema=schema_object({"reference_id": reference_params["reference_id"]}),
+        undo_label="Bake Painter reference image",
+        dry_summary="Painter reference image would be baked into an exportable sticker layer",
+    )
+    registry.register_adapter_action(
+        "paint.reference.sample_color",
+        "Sample a color from a Painter reference image and optionally apply it as foreground color.",
+        "paint",
+        "paint_reference_sample_color",
+        params_schema=schema_object(
+            {
+                "reference_id": {"type": "string"},
+                "x_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "apply": {"type": "boolean"},
+            }
+        ),
+        undo_label="Sample Painter reference color",
+        dry_summary="Painter reference color would be sampled",
+    )
+    registry.register_adapter_action(
+        "paint.reference.extract_palette",
+        "Extract a compact color palette from a Painter reference image and optionally apply it to recent colors.",
+        "paint",
+        "paint_reference_extract_palette",
+        params_schema=schema_object(
+            {
+                "reference_id": {"type": "string"},
+                "max_colors": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": PAINT_ACTION_MAX_REFERENCE_COLORS,
+                },
+                "apply": {"type": "boolean"},
+            }
+        ),
+        undo_label="Extract Painter reference palette",
+        dry_summary="Painter reference palette would be extracted",
+    )
+    study_session_params = {
+        "reference_path": {"type": "string"},
+        "target_width": {"type": "integer", "minimum": 256, "maximum": 1600},
+        "region_count": {"type": "integer", "minimum": 3, "maximum": 24},
+        "seed": {"type": "integer"},
+        "focus_regions": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "bbox_norm": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                    "priority": {"type": "number", "minimum": 0.1, "maximum": 3.0},
+                },
+                "required": ["bbox_norm"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    registry.register_adapter_action(
+        "paint.study.analyze_reference",
+        "Analyze an approved reference for deterministic AI-guided Painter reconstruction.",
+        "paint",
+        "paint_study_analyze_reference",
+        params_schema=schema_object(study_session_params, required=("reference_path",)),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study reference would be analyzed",
+    )
+    registry.register_adapter_action(
+        "paint.study.segment_regions",
+        "Read deterministic color and edge regions for the active Painter study.",
+        "paint",
+        "paint_study_segment_regions",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study regions would be reported",
+    )
+    study_generate_params = {
+        "max_strokes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": PAINT_ACTION_MAX_STUDY_STROKES,
+        },
+        "layer_name": {"type": "string"},
+        "seed_offset": {"type": "integer"},
+    }
+    registry.register_adapter_action(
+        "paint.study.build_underpaint",
+        "Build broad editable underpainting strokes from the active Painter study.",
+        "paint",
+        "paint_study_build_underpaint",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Build AI study underpaint",
+        dry_summary="editable underpainting strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.trace_contours",
+        "Trace high-value reference contours as editable Painter strokes.",
+        "paint",
+        "paint_study_trace_contours",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Trace AI study contours",
+        dry_summary="editable contour strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.generate_strokes",
+        "Generate one editable Painter study stroke phase.",
+        "paint",
+        "paint_study_generate_strokes",
+        params_schema=schema_object(
+            {
+                **study_generate_params,
+                "phase": {
+                    "type": "string",
+                    "enum": ["underpaint", "forms", "detail", "contour", "accent"],
+                },
+            },
+            required=("phase",),
+        ),
+        undo_label="Generate AI study strokes",
+        dry_summary="editable study strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.compare_render",
+        "Compare the current real Painter render with the active approved reference.",
+        "paint",
+        "paint_study_compare_render",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study render would be compared with its reference",
+    )
+    registry.register_adapter_action(
+        "paint.study.refine_region",
+        "Add deterministic editable strokes to the highest-error study regions.",
+        "paint",
+        "paint_study_refine_region",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Refine AI study regions",
+        dry_summary="highest-error study regions would receive editable correction strokes",
+    )
+    registry.register_adapter_action(
+        "paint.study.quality_report",
+        "Report whether the active Painter study passes editability and fidelity gates.",
+        "paint",
+        "paint_study_quality_report",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study quality gates would be reported",
+    )
+    blockout_preview_size = {
+        "preview_width": {
+            "type": "integer",
+            "minimum": PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+            "maximum": PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+        },
+        "preview_height": {
+            "type": "integer",
+            "minimum": PAINT_ACTION_BLOCKOUT_PREVIEW_MIN_PX,
+            "maximum": PAINT_ACTION_BLOCKOUT_PREVIEW_MAX_PX,
+        },
+    }
+    blockout_primitive = {
+        "primitive_id": {"type": "string", "minLength": 1},
+        "kind": {
+            "type": "string",
+            "enum": ["box", "sphere", "cylinder", "cone", "plane", "arch"],
+        },
+        "name": {"type": "string"},
+        "x": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "y": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "z": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_POSITION_MIN, "maximum": BLOCKOUT_PRIMITIVE_POSITION_MAX},
+        "rx": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "ry": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "rz": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_ROTATION_MIN_DEGREES, "maximum": BLOCKOUT_PRIMITIVE_ROTATION_MAX_DEGREES},
+        "sx": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "sy": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "sz": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_SCALE_MIN, "maximum": BLOCKOUT_PRIMITIVE_SCALE_MAX},
+        "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "opacity": {"type": "number", "minimum": BLOCKOUT_PRIMITIVE_OPACITY_MIN, "maximum": BLOCKOUT_PRIMITIVE_OPACITY_MAX},
+        "wireframe": {"type": "boolean"},
+        "locked": {"type": "boolean"},
+        **blockout_preview_size,
+    }
+    registry.register_adapter_action(
+        "paint.3d_blockout.state",
+        "Read the active Painter 3D blockout scene and projected guide geometry.",
+        "paint",
+        "paint_3d_blockout_state",
+        params_schema=schema_object(
+            {
+                **blockout_preview_size,
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter 3D blockout scene would be read",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.add",
+        "Add a simple concept-art 3D blockout primitive to the active Painter scene.",
+        "paint",
+        "paint_3d_blockout_add",
+        params_schema=schema_object(blockout_primitive),
+        undo_label="Add Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be added",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.update",
+        "Update a Painter 3D blockout primitive transform, color, or guide state.",
+        "paint",
+        "paint_3d_blockout_update",
+        params_schema=schema_object(blockout_primitive, required=("primitive_id",)),
+        undo_label="Update Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.delete",
+        "Delete a Painter 3D blockout primitive from the active scene.",
+        "paint",
+        "paint_3d_blockout_delete",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string", "minLength": 1},
+                **blockout_preview_size,
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Delete Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.duplicate",
+        "Duplicate a Painter 3D blockout primitive for fast box-based scene construction.",
+        "paint",
+        "paint_3d_blockout_duplicate",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string", "minLength": 1},
+                "offset_x": {"type": "number"},
+                "offset_y": {"type": "number"},
+                "offset_z": {"type": "number"},
+                **blockout_preview_size,
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Duplicate Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.align_ground",
+        "Align a Painter 3D blockout primitive to the ground plane.",
+        "paint",
+        "paint_3d_blockout_align_ground",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string", "minLength": 1},
+                **blockout_preview_size,
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Align Painter 3D blockout primitive to ground",
+        dry_summary="Painter 3D blockout primitive would be aligned to ground",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.snap",
+        "Enable/disable blockout grid snapping or snap a selected primitive to the current grid.",
+        "paint",
+        "paint_3d_blockout_snap",
+        params_schema={
+            **schema_object(
+                {
+                    "enabled": {"type": "boolean"},
+                    "primitive_id": {"type": "string", "minLength": 1},
+                    **blockout_preview_size,
+                }
+            ),
+            "anyOf": [{"required": ["enabled"]}, {"required": ["primitive_id"]}],
+        },
+        undo_label="Set Painter 3D blockout snap",
+        dry_summary="Painter 3D blockout snap would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.camera",
+        "Adjust the Painter 3D blockout camera orbit, pan, zoom distance, or FOV.",
+        "paint",
+        "paint_3d_blockout_camera",
+        params_schema={
+            **schema_object(
+                {
+                "yaw_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_YAW_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_YAW_MAX_DEGREES,
+                },
+                "pitch_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_PITCH_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_PITCH_MAX_DEGREES,
+                },
+                "distance": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_MIN_DISTANCE,
+                    "maximum": BLOCKOUT_CAMERA_MAX_DISTANCE,
+                },
+                "target_x": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "target_y": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "target_z": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_TARGET_MIN,
+                    "maximum": BLOCKOUT_CAMERA_TARGET_MAX,
+                },
+                "fov_degrees": {
+                    "type": "number",
+                    "minimum": BLOCKOUT_CAMERA_FOV_MIN_DEGREES,
+                    "maximum": BLOCKOUT_CAMERA_FOV_MAX_DEGREES,
+                },
+                **blockout_preview_size,
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "yaw_degrees",
+                    "pitch_degrees",
+                    "distance",
+                    "target_x",
+                    "target_y",
+                    "target_z",
+                    "fov_degrees",
+                )
+            ],
+        },
+        undo_label="Adjust Painter 3D blockout camera",
+        dry_summary="Painter 3D blockout camera would be adjusted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.material_preview",
+        "Adjust the Painter blockout lit-white material, shadows, and directional light.",
+        "paint",
+        "paint_3d_blockout_material_preview",
+        params_schema={
+            **schema_object(
+                {
+                "material_lit": {"type": "boolean"},
+                "show_floor": {"type": "boolean"},
+                "show_shadows": {"type": "boolean"},
+                "show_fog": {"type": "boolean"},
+                "show_depth": {"type": "boolean"},
+                "light_yaw_degrees": {"type": "number", "minimum": BLOCKOUT_LIGHT_YAW_MIN_DEGREES, "maximum": BLOCKOUT_LIGHT_YAW_MAX_DEGREES},
+                "light_pitch_degrees": {"type": "number", "minimum": BLOCKOUT_LIGHT_PITCH_MIN_DEGREES, "maximum": BLOCKOUT_LIGHT_PITCH_MAX_DEGREES},
+                **blockout_preview_size,
+                }
+            ),
+            "anyOf": [
+                {"required": [field]}
+                for field in (
+                    "material_lit", "show_floor", "show_shadows", "show_fog",
+                    "show_depth", "light_yaw_degrees", "light_pitch_degrees",
+                )
+            ],
+        },
+        undo_label="Adjust Painter 3D blockout material preview",
+        dry_summary="Painter 3D blockout material preview would be adjusted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.camera_preset",
+        "Apply a Painter 3D blockout camera preset such as front, side, top, or perspective.",
+        "paint",
+        "paint_3d_blockout_camera_preset",
+        params_schema=schema_object(
+            {
+                "preset": {"type": "string", "enum": list(BLOCKOUT_CAMERA_PRESETS)},
+                **blockout_preview_size,
+            },
+            required=("preset",),
+        ),
+        undo_label="Apply Painter 3D blockout camera preset",
+        dry_summary="Painter 3D blockout camera preset would be applied",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.bake",
+        "Bake the current Painter 3D blockout wire guide into a new paint layer.",
+        "paint",
+        "paint_3d_blockout_bake",
+        params_schema=schema_object(
+            {
+                **blockout_preview_size,
+            }
+        ),
+        undo_label="Bake Painter 3D blockout",
+        dry_summary="Painter 3D blockout guide would be baked into a paint layer",
+    )
+    registry.register_adapter_action(
+        "paint.export_png",
+        "Export the current Paint overlays as a PNG from the editor window.",
+        "paint",
+        "paint_export_png",
+        params_schema=_paint_optional_export_size_schema(
+            {
+                "path": {"type": "string"},
+                "mode": {"type": "string", "enum": ["composited", "overlay", "transparent_overlay"]},
+                "time_ms": {"type": "integer", "minimum": 0},
+                "width": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+                "height": {"type": "integer", "minimum": 0, "maximum": PAINTER_CURRENT_CANVAS_DIMENSION_LIMIT},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="current Paint overlays would be exported as PNG",
+    )
+    pbr_settings = {
+        "type": "object",
+        "properties": {
+            "normal_strength": {"type": "number", "minimum": 0.0, "maximum": 12.0},
+            "normal_radius_px": {"type": "number", "minimum": 0.0, "maximum": 24.0},
+            "normal_format": {"type": "string", "enum": ["unreal_directx", "directx", "opengl"]},
+            "normal_filter": {"type": "string", "enum": ["sobel", "central_difference"]},
+            "height_invert": {"type": "boolean"},
+            "height_contrast": {"type": "number", "minimum": 0.1, "maximum": 4.0},
+            "height_blur_px": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+            "edge_aware_smoothing": {"type": "boolean"},
+            "edge_aware_sensitivity": {"type": "number", "minimum": 0.0, "maximum": 32.0},
+            "ao_strength": {"type": "number", "minimum": 0.0, "maximum": 3.0},
+            "ao_radius_px": {"type": "number", "minimum": 0.0, "maximum": 64.0},
+            "ao_algorithm": {"type": "string", "enum": ["heightfield_horizon", "legacy_blur"]},
+            "ao_samples": {"type": "integer", "minimum": 4, "maximum": 32},
+            "ao_steps": {"type": "integer", "minimum": 2, "maximum": 24},
+            "ao_height_scale": {"type": "number", "minimum": 0.1, "maximum": 64.0},
+            "ao_multiscale": {"type": "boolean"},
+            "cavity_strength": {"type": "number", "minimum": 0.0, "maximum": 2.0},
+            "cavity_radius_px": {"type": "number", "minimum": 0.2, "maximum": 32.0},
+            "curvature_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+            "roughness_bias": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "roughness_detail": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "metallic_value": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "preview_light_elevation": {"type": "number", "minimum": 3.0, "maximum": 89.0},
+        },
+    }
+    registry.register_adapter_action(
+        "paint.pbr.preview",
+        "Render a Painter document AR/PBR plane or texture-map preview from the current visible Painter document.",
+        "paint",
+        "paint_pbr_preview",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "preview_mode": {
+                    "type": "string",
+                    "enum": [
+                        "material",
+                        "base_color",
+                        "normal",
+                        "ao",
+                        "roughness",
+                        "metallic",
+                        "height",
+                        "cavity",
+                        "curvature",
+                        "unreal_orm",
+                        "arm",
+                        "gltf_mr",
+                    ],
+                },
+                "preview_shape": {"type": "string", "enum": ["plane", "sphere"]},
+                "width": {
+                    "type": "integer",
+                    "minimum": PAINT_ACTION_PBR_PREVIEW_MIN_PX,
+                    "maximum": PAINT_ACTION_PBR_PREVIEW_MAX_PX,
+                },
+                "settings": pbr_settings,
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR preview defaults to GPU-required mode.",
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR map preview would be rendered",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.export",
+        "Export separate and packed AR/PBR texture maps from the current visible Painter document.",
+        "paint",
+        "paint_pbr_export",
+        params_schema=schema_object(
+            {
+                "output_dir": {"type": "string"},
+                "settings": pbr_settings,
+                "maps": {"type": "array", "items": {"type": "string"}},
+                "packed_layouts": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["unreal_orm", "orm", "arm", "rma", "gltf_mr"]},
+                },
+                "packed": {"type": "boolean"},
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR export defaults to GPU-required mode.",
+                },
+            }
+        ),
+        mutating=True,
+        changed=True,
+        undo_label="Export Painter PBR maps",
+        dry_summary="Painter PBR maps would be exported",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.backend_status",
+        "Report Painter PBR Texture Lab CPU/GPU backend availability and selected backend.",
+        "paint",
+        "paint_pbr_backend_status",
+        params_schema=schema_object(
+            {
+                "backend": {"type": "string", "enum": ["auto", "cpu", "torch_cuda", "cupy", "opencv_cuda"]},
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR backend selection defaults to GPU-required mode.",
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR Texture Lab backend status would be reported",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.substrate_plan",
+        "Return Unreal Default Lit and Substrate wiring guidance for Painter PBR map exports.",
+        "paint",
+        "paint_pbr_substrate_plan",
+        params_schema=schema_object({"settings": pbr_settings}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR Substrate plan would be returned",
+    )
+    from app.actions.paint_ui_production_namespace import (
+        register_paint_ui_production_actions,
+    )
+
+    register_paint_ui_production_actions(registry)
+    from app.actions.paint_ui_advanced_namespace import (
+        register_paint_ui_advanced_actions,
+    )
+
+    register_paint_ui_advanced_actions(registry)
+    from app.actions.paint_ui_figma_plugin_namespace import (
+        register_paint_ui_figma_plugin_actions,
+    )
+
+    register_paint_ui_figma_plugin_actions(registry)
+
+
+__all__ = ["register_paint_actions"]

@@ -105,6 +105,24 @@ def test_ooxml_writer_exports_element_animation_timing(tmp_path):
     assert 'dur="650"' in slide_xml
 
 
+def test_ooxml_writer_exports_out_animation_when_no_entrance_exists(tmp_path):
+    deck = DeckSpec.sample()
+    title = deck.slides[0].elements[0]
+    title.animation.in_animation = "none"
+    title.animation.out_animation = "fade_out"
+    title.animation.start_ms = 900
+    title.animation.duration_ms = 350
+
+    out = write_pptx(deck, tmp_path / "animated-out.pptx")
+
+    with zipfile.ZipFile(out) as zf:
+        slide_xml = zf.read("ppt/slides/slide1.xml").decode("utf-8")
+    assert "<p:timing>" in slide_xml
+    assert '<p:animEffect transition="out" filter="fade">' in slide_xml
+    assert 'delay="900"' in slide_xml
+    assert 'dur="350"' in slide_xml
+
+
 def test_preview_contact_sheet_is_written(tmp_path):
     deck = DeckSpec.sample()
 

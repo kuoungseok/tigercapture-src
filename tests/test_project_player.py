@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import time
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -36,6 +37,17 @@ class _CountingDecoder(_FakeDecoder):
         return super().read_rgb()
 
 
+class _DelayedSeekDecoder(_FakeDecoder):
+    def __init__(self):
+        self.read_count = 0
+
+    def read_rgb(self):
+        self.read_count += 1
+        if self.read_count == 1:
+            return None
+        return np.full((2, 2, 3), 127, dtype=np.uint8)
+
+
 def test_single_source_refresh_syncs_duration_before_clip_view(monkeypatch, tmp_path):
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"placeholder")
@@ -65,6 +77,45 @@ def test_single_source_refresh_syncs_duration_before_clip_view(monkeypatch, tmp_
         assert player.duration() == 2500
         assert len(player._clips_view[1]) == 1
         assert player._active_clip_at(0) is not None
+    finally:
+        player.release()
+
+
+def test_project_player_renders_image_clip_without_video_decoder(monkeypatch, tmp_path):
+    from PIL import Image
+
+    from app.timeline_model import VideoClip
+    from app.video_track_legacy import VideoTrack
+
+    source = tmp_path / "poster.png"
+    Image.new("RGB", (32, 18), (210, 24, 48)).save(source)
+
+    def fake_open_decoder(*_args, **_kwargs):
+        raise AssertionError("image clips must not open video decoders")
+
+    monkeypatch.setattr("app.video_decoder.open_decoder", fake_open_decoder)
+    clip = VideoClip(
+        id=10,
+        source_path=source,
+        source_duration_ms=5000,
+        timeline_in_ms=0,
+        source_in_ms=0,
+        source_out_ms=5000,
+    )
+    clip.track_type = "image"
+    track = VideoTrack(id=1, source_path=None, clips=[clip], clips_explicit=True)
+    track.track_type = "image"
+    frames: list[np.ndarray] = []
+    player = ProjectPlayer()
+    player.gpu_frame_ready.connect(lambda rgb, _payload: frames.append(np.asarray(rgb).copy()))
+    try:
+        player.set_project_settings({"width": 64, "height": 36})
+        player.refresh_tracks([track])
+
+        assert player.duration() == 5000
+        assert frames
+        assert frames[-1].shape == (36, 64, 3)
+        assert tuple(frames[-1][18, 32]) == (210, 24, 48)
     finally:
         player.release()
 
@@ -201,6 +252,48 @@ def test_refresh_tracks_can_skip_immediate_preview_render(monkeypatch, tmp_path)
         player.release()
 
 
+def test_seek_retries_when_preview_decoder_is_not_ready(monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"placeholder")
+    decoder = _DelayedSeekDecoder()
+
+    def fake_open_decoder(path, hdr_info=None, preview_height=None):
+        return decoder
+
+    monkeypatch.setattr("app.video_decoder.open_decoder", fake_open_decoder)
+    track = SimpleNamespace(
+        id=1,
+        source_path=source,
+        duration_ms=0,
+        offset_ms=0,
+        cuts=[],
+        clips=[],
+        clips_explicit=False,
+        pip_enabled=False,
+    )
+    player = ProjectPlayer()
+    frames: list[np.ndarray] = []
+    player.gpu_frame_ready.connect(lambda rgb, _grade: frames.append(np.asarray(rgb).copy()))
+    try:
+        player.refresh_tracks([track], render_immediately=False)
+
+        player.set_position(100)
+
+        deadline = time.monotonic() + 1.0
+        while not frames and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+
+        assert decoder.read_count >= 2
+        assert frames
+        assert int(frames[-1][0, 0, 0]) == 127
+    finally:
+        player.release()
+
+
 def test_live2d_actor_tracks_prewarm_renderer(monkeypatch):
     import app.live2d.warmup as warmup
 
@@ -285,6 +378,59 @@ def test_play_until_previews_range_and_restores_playhead(monkeypatch, tmp_path):
         assert player.position() == 0
     finally:
         player.release()
+
+
+def test_project_player_uses_wall_clock_advance_for_late_preview_ticks(monkeypatch):
+    from app import project_player_core
+
+    ticks = iter([10.0, 10.08, 10.081])
+    monkeypatch.setattr(project_player_core.time, "monotonic", lambda: next(ticks))
+    player = ProjectPlayer()
+    try:
+        first = player._playback_advance_ms()
+        late = player._playback_advance_ms()
+        early = player._playback_advance_ms()
+    finally:
+        player.release()
+
+    assert first == 33
+    assert late == 80
+    assert early == 33
+
+
+def test_project_player_quality_mode_disables_frame_drop(monkeypatch):
+    from app import project_player_core
+
+    ticks = iter([10.0, 10.08])
+    monkeypatch.setattr(project_player_core.time, "monotonic", lambda: next(ticks))
+    player = ProjectPlayer()
+    try:
+        player.set_project_settings({"preview": {"quality_mode": "quality"}})
+
+        first = player._playback_advance_ms()
+        late = player._playback_advance_ms()
+        diag = player.preview_playback_diagnostics()
+    finally:
+        player.release()
+
+    assert first == 33
+    assert late == 33
+    assert diag["quality_mode"] == "quality"
+    assert diag["frame_drop_allowed"] is False
+    assert diag["preview_decode_height"] == 0
+
+
+def test_project_player_performance_mode_caps_preview_height_and_allows_drop():
+    player = ProjectPlayer()
+    try:
+        player.set_project_settings({"preview": {"quality_mode": "performance"}})
+        diag = player.preview_playback_diagnostics()
+    finally:
+        player.release()
+
+    assert diag["quality_mode"] == "performance"
+    assert diag["frame_drop_allowed"] is True
+    assert diag["preview_decode_height"] == 540
 
 
 def test_window_move_guard_relaxes_and_restores_preview_timer():
@@ -530,6 +676,22 @@ def test_project_player_can_skip_qimage_for_gpu_only_preview():
 
         assert len(gpu_frames) == 1
         assert frames == []
+    finally:
+        player.release()
+
+
+def test_project_player_blank_fallback_is_black_not_green():
+    player = ProjectPlayer()
+    gpu_frames = []
+    player.gpu_frame_ready.connect(lambda rgb, grade: gpu_frames.append((np.asarray(rgb).copy(), grade)))
+    try:
+        player._emit_blank()
+
+        assert len(gpu_frames) == 1
+        rgb, grade = gpu_frames[0]
+        assert grade is None
+        assert rgb.shape == (9, 16, 3)
+        assert int(rgb.max()) == 0
     finally:
         player.release()
 

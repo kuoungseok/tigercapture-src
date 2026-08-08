@@ -16,7 +16,8 @@ from app.update.manifest import (
     manifest_to_json,
 )
 from app.update.current import APP_VERSION, current_app_version, current_update_channel
-from app.update.workflow import prepare_update_from_manifest
+from app.update.runtime import default_manifest_source, default_updater_command
+from app.update.workflow import prepare_update_from_default_manifest, prepare_update_from_manifest
 
 __all__ = [
     "APP_VERSION",
@@ -27,8 +28,11 @@ __all__ = [
     "compare_versions",
     "current_app_version",
     "current_update_channel",
+    "default_manifest_source",
+    "default_updater_command",
     "evaluate_manifest",
     "manifest_from_json",
     "manifest_to_json",
+    "prepare_update_from_default_manifest",
     "prepare_update_from_manifest",
 ]

@@ -14,6 +14,7 @@ from typing import Any
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv", ".gif"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".jfif", ".webp", ".bmp"}
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,8 @@ def build_ai_action_command_plan(
         return music_plan
 
     if _requests_import_to_timeline(text, compact):
-        media = _first_media(snapshot, prefer_video=not _mentions_audio(text, compact))
+        prefer_kind = "audio" if _mentions_audio(text, compact) else ("image" if _mentions_image(text, compact) else "video")
+        media = _first_media(snapshot, prefer_kind=prefer_kind)
         if media is None:
             return AIActionCommandPlan(
                 raw_prompt,
@@ -1136,7 +1138,16 @@ def _mentions_audio(text: str, compact: str) -> bool:
     return _contains_any(text, ("오디오", "소리", "음악", "audio", "sound", "music")) or "음성" in compact
 
 
+def _mentions_image(text: str, compact: str) -> bool:
+    return _contains_any(text, ("image", "photo", "picture", "png", "jpg", "jpeg", "이미지", "사진", "그림"))
+
+
 def _requests_import_to_timeline(text: str, compact: str) -> bool:
+    if _mentions_image(text, compact):
+        has_timeline_target = _contains_any(text, ("timeline", "track", "타임라인", "트랙")) or "timeline" in compact
+        has_import_verb = _contains_any(text, ("import", "place", "add", "insert", "load", "drop", "배치", "추가", "올려", "넣어"))
+        if has_timeline_target and has_import_verb:
+            return True
     if not _contains_any(text, ("미디어", "media", "video", "영상", "동영상", "오디오", "audio")):
         return False
     if not (_contains_any(text, ("타임라인", "timeline", "트랙", "track")) or "미디어풀" in compact):
@@ -1220,6 +1231,8 @@ def _build_music_lab_action_plan(
         "auto_balance": True,
         "update_existing": True,
     }
+    render_params, render_warnings = _music_render_params_for_prompt(text, compact)
+    params.update(render_params)
     bpm = _music_bpm_from_prompt(text)
     if bpm is not None:
         params["bpm"] = bpm
@@ -1231,10 +1244,13 @@ def _build_music_lab_action_plan(
         ("\ud55c\ud2b8\ub799", "\ud558\ub098\uc758\ud2b8\ub799", "\ubbf9\uc2a4\ub9cc"),
     ):
         params["create_mix"] = True
+    if params.get("ai_provider"):
+        params["create_mix"] = True
     return AIActionCommandPlan(
         raw_prompt,
-        "Create a Music Lab arrangement, render draft/starter or configured production audio, place it on the timeline, and balance the mixer.",
+        "Create a Music Lab arrangement with the selected AI/sample render path, apply the default studio master and articulation/expression performance profile, place it on the timeline, and balance the mixer.",
         ({"action": "music.compose_to_timeline", "params": params},),
+        warnings=tuple(render_warnings),
         confidence=0.86,
     )
 
@@ -1271,6 +1287,8 @@ def _build_music_lab_edit_action_plan(
     section_name = _music_section_name_from_prompt(text, compact, snapshot)
     intensity = _music_intensity_from_prompt(text, compact)
     params: dict[str, Any] = {"composition_id": composition_id, "section_name": section_name}
+    render_params, render_warnings = _music_render_params_for_prompt(text, compact, composition=composition)
+    params.update(render_params)
     if intensity is not None:
         params["intensity"] = intensity
     genre, mood = _music_genre_mood_from_prompt(text, compact)
@@ -1280,16 +1298,109 @@ def _build_music_lab_edit_action_plan(
         {"action": "music.regenerate_section", "params": params},
         {
             "action": "music.render_to_timeline",
-            "params": {"composition_id": composition_id, "update_existing": True},
+            "params": {"composition_id": composition_id, "update_existing": True, **render_params},
         },
         {"action": "music.mixer.auto_balance", "params": {"composition_id": composition_id}},
     )
     return AIActionCommandPlan(
         raw_prompt,
-        "Regenerate a Music Lab section, update existing draft/starter or configured production audio, and rebalance the mixer.",
+        "Regenerate a Music Lab section with the selected AI/sample render path, apply the default studio master and articulation/expression performance profile, update existing audio, and rebalance the mixer.",
         steps,
+        warnings=tuple(render_warnings),
         confidence=0.82,
     )
+
+
+def _music_render_params_for_prompt(
+    text: str,
+    compact: str,
+    *,
+    composition: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
+    explicit = _explicit_music_render_params_from_prompt(text, compact)
+    if explicit[0]:
+        return explicit
+    inherited = _music_render_params_from_composition(composition)
+    if inherited:
+        return inherited, []
+    return {"backend": "sample_production", "sample_library_policy": "auto"}, []
+
+
+def _explicit_music_render_params_from_prompt(text: str, compact: str) -> tuple[dict[str, Any], list[str]]:
+    if _contains_any(text, ("stable audio", "stableaudio", "stability audio")) or _contains_any(
+        compact,
+        ("\uc2a4\ud14c\uc774\ube14\uc624\ub514\uc624", "\uc2a4\ud14c\uc774\ube14audio"),
+    ):
+        return (
+            {"backend": "production", "ai_provider": "stable_audio_3", "create_mix": True},
+            ["Stable Audio 3.0 is an external AI provider; prompts/audio requests may leave the local machine."],
+        )
+    if _contains_any(text, ("ace-step", "ace step", "acestep")) or _contains_any(
+        compact,
+        ("\uc5d0\uc774\uc2a4\uc2a4\ud15d", "acestep"),
+    ):
+        return {"backend": "production", "ai_provider": "acestep_api", "create_mix": True}, []
+    if _contains_any(text, ("lmms", "offline renderer", "offline production")):
+        return {"backend": "production", "ai_provider": "lmms", "create_mix": True}, []
+    if _contains_any(text, ("production renderer", "production render")):
+        return {"backend": "production", "create_mix": True}, []
+    if _contains_any(text, ("studio edm renderer", "studio edm", "draft synth")):
+        return {"backend": "studio_edm"}, []
+    if _contains_any(text, ("local synth", "local v5", "diagnostic synth", "internal synth", "built-in synth", "builtin synth", "no samples", "without samples")) or _contains_any(
+        compact,
+        ("\ub0b4\uc7a5\uc2e0\uc2a4", "\uc0d8\ud50c\uc5c6\uc774", "\uc0d8\ud50c\uc5c6\ub294"),
+    ):
+        return {"backend": "sample_production", "sample_library_policy": "procedural_only"}, []
+    if _contains_any(text, ("soundfont only", "sf2 only", "sf3 only")):
+        return {"backend": "sample_production", "sample_library_policy": "soundfont_only"}, []
+    if _contains_any(text, ("soundfont", "fluidsynth")):
+        return {"backend": "soundfont", "sample_library_policy": "soundfont_only"}, []
+    if _contains_any(text, ("sample kit first", "drum kit first", "sfz first", "decentsampler", "drumgizmo")) or _contains_any(
+        compact,
+        ("\uc0d8\ud50c\ud0b7", "\ub4dc\ub7fc\ud0b7", "\uc0d8\ud50c\uc6b0\uc120"),
+    ):
+        return {"backend": "sample_production", "sample_library_policy": "sample_kit_first"}, []
+    if _contains_any(text, ("sample production", "sample prod", "sample library", "sample libraries")) or "\uc0d8\ud50c" in compact:
+        return {"backend": "sample_production", "sample_library_policy": "auto"}, []
+    return {}, []
+
+
+def _music_render_params_from_composition(composition: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(composition, Mapping):
+        return {}
+    render_backend = composition.get("render_backend")
+    if not isinstance(render_backend, Mapping):
+        return {}
+    backend = str(render_backend.get("backend") or "").strip().lower()
+    params: dict[str, Any] = {}
+    if backend == "sample_production":
+        params["backend"] = "sample_production"
+        policy = str(render_backend.get("sample_library_policy") or "").strip()
+        params["sample_library_policy"] = policy or "auto"
+    elif backend == "fluidsynth_soundfont":
+        params["backend"] = "soundfont"
+    elif backend == "studio_edm":
+        params["backend"] = "studio_edm"
+    elif backend == "local_synth":
+        params["backend"] = "local_synth"
+    elif backend == "production_external":
+        params["backend"] = "production"
+        provider = str(
+            render_backend.get("provider")
+            or render_backend.get("requested_ai_provider")
+            or render_backend.get("ai_provider")
+            or ""
+        ).strip()
+        if provider:
+            params["ai_provider"] = provider
+            params["create_mix"] = True
+    soundfont_path = str(render_backend.get("requested_soundfont_path") or render_backend.get("soundfont_path") or "").strip()
+    if soundfont_path:
+        params["soundfont_path"] = soundfont_path
+    drum_kit_path = str(render_backend.get("requested_drum_kit_path") or render_backend.get("kit_path") or "").strip()
+    if drum_kit_path:
+        params["drum_kit_path"] = drum_kit_path
+    return params
 
 
 def _latest_music_composition_row(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -1505,7 +1616,7 @@ def _requests_music_generation(text: str, compact: str) -> bool:
             "generate music",
             "song",
         ),
-    ) or _contains_any(
+    ) or bool(re.search(r"\b(?:music|score|cue)\b", text)) or _contains_any(
         compact,
         (
             "\uc74c\uc545",
@@ -2597,9 +2708,18 @@ def _find_audio_clip(snapshot: Mapping[str, Any], *, track_id: int, clip_id: int
     return None
 
 
-def _first_media(snapshot: Mapping[str, Any], *, prefer_video: bool = True) -> dict[str, Any] | None:
+def _first_media(
+    snapshot: Mapping[str, Any],
+    *,
+    prefer_video: bool = True,
+    prefer_kind: str = "",
+) -> dict[str, Any] | None:
     rows = [row for row in list(snapshot.get("media_pool") or []) if isinstance(row, Mapping)]
-    order = ("video", "audio") if prefer_video else ("audio", "video")
+    preferred = str(prefer_kind or "").strip().lower()
+    if preferred in {"video", "audio", "image"}:
+        order = (preferred,) + tuple(kind for kind in ("video", "audio", "image") if kind != preferred)
+    else:
+        order = ("video", "audio", "image") if prefer_video else ("audio", "video", "image")
     for kind in order:
         for row in rows:
             media = _media_row(row)
@@ -2614,12 +2734,14 @@ def _media_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     suffix = Path(path).suffix.casefold()
     kind = str(row.get("kind") or row.get("type") or "").casefold()
-    if kind not in {"video", "audio"}:
+    if kind not in {"video", "audio", "image"}:
         if suffix in VIDEO_EXTS:
             kind = "video"
         elif suffix in AUDIO_EXTS:
             kind = "audio"
-    if kind not in {"video", "audio"}:
+        elif suffix in IMAGE_EXTS:
+            kind = "image"
+    if kind not in {"video", "audio", "image"}:
         return None
     duration = _int(row.get("duration_ms") or row.get("duration") or 0, 0)
     return {"path": path, "kind": kind, "name": str(row.get("name") or Path(path).name), "duration_ms": duration}

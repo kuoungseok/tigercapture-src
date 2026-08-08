@@ -91,6 +91,11 @@ feature-specific workspaces, and no fake composited editor scenes.
   `debugCapture/ui_renewal_standard_slider_round_1/workbench_mask_tab_action.png`,
   and
   `debugCapture/ui_renewal_standard_slider_round_1/editor_audio_mixer_action.png`.
+- 2026-07-25 shared slider feedback pass:
+  Painter brush, layer-opacity, zoom, and PBR numeric controls use
+  `StudioSlider`; dedicated HSV gradient controls stay specialized. Shared LED
+  feedback uses higher-saturation mint, blue, magenta, and gold colors while
+  retaining the existing soft pulse, fade, size, and luminance envelope.
 - 2026-07-02 workbench pass: `app/workbench_panel.py` now uses the shared UI
   font stack, lower-contrast tabs/cards/buttons, calmer VFX graph strip chrome,
   and ASCII `x` speed readouts instead of the multiplication symbol that looked

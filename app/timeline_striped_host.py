@@ -17,7 +17,8 @@ from app.timeline_lane_paint import (
 
 
 DEFAULT_TRACK_HEIGHT = 44
-DEFAULT_TRACK_V_PADDING = 2
+DEFAULT_TRACK_V_PADDING = 0
+DEFAULT_TRACK_LABEL_H = 0
 
 
 class StripedHost(QWidget):
@@ -38,7 +39,10 @@ class StripedHost(QWidget):
         self._draw_stripes(painter, self.rect(), self.BG, self.STRIPE)
         painter.save()
         margin = 170
-        lane_h = max(28, DEFAULT_TRACK_HEIGHT + DEFAULT_TRACK_V_PADDING)
+        lane_h = max(
+            28,
+            DEFAULT_TRACK_LABEL_H + DEFAULT_TRACK_HEIGHT + DEFAULT_TRACK_V_PADDING,
+        )
         painter.fillRect(QRect(0, 0, margin, self.height()), QColor(17, 17, 17, 142))
         painter.setPen(QPen(QColor(255, 255, 255, 10), 1))
         painter.drawLine(margin - 1, 0, margin - 1, self.height())

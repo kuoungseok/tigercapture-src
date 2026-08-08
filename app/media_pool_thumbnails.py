@@ -16,6 +16,7 @@ from app.media_pool_kinds import (
     THUMB_SIZE,
     LIST_THUMB_H,
     LIST_THUMB_W,
+    MOTION_PROJECT_EXTS,
     VIDEO_EXTS,
     VRM_EXTS,
     _DURATION_CACHE,
@@ -26,6 +27,7 @@ from app.media_pool_kinds import (
     _file_cache_key,
     _kind_for_path,
 )
+from app.image_media import image_pixmap
 
 
 def _probe_duration_ms(path: Path) -> int | None:
@@ -37,6 +39,16 @@ def _probe_duration_ms(path: Path) -> int | None:
     # Keep Media Pool ingest UI-only by default. Spawning ffmpeg/native
     # probes for every project media item made Windows flash small
     # console title bars during launcher -> editor startup.
+    if path.suffix.lower() in MOTION_PROJECT_EXTS:
+        try:
+            from app.motion_designer.project_io import load_motion_project
+
+            duration = max(1, int(load_motion_project(path).duration_ms))
+            _cache_put(_DURATION_CACHE, key, duration)
+            return duration
+        except Exception:
+            _cache_put(_DURATION_CACHE, key, None)
+            return None
     if path.suffix.lower() not in VIDEO_EXTS:
         _cache_put(_DURATION_CACHE, key, None)
         return None
@@ -175,6 +187,63 @@ def _make_video_list_thumbnail(
         return None
 
 
+def _make_image_thumbnail(path: Path, size: int = THUMB_SIZE) -> QPixmap | None:
+    return image_pixmap(path, size, size, fit="contain")
+
+
+def _make_image_list_thumbnail(
+    path: Path,
+    width: int = LIST_THUMB_W,
+    height: int = LIST_THUMB_H,
+) -> QPixmap | None:
+    return image_pixmap(path, width, height, fit="cover")
+
+
+def _make_motion_thumbnail(path: Path, size: int = THUMB_SIZE) -> QPixmap | None:
+    """Render a lightweight poster frame for an editable .tgmotion asset."""
+    key = (*_file_cache_key(path), int(size), 0x4D4F54)
+    cached = _cache_get(_VIDEO_THUMB_CACHE, key)
+    if cached is not None:
+        return cached
+    try:
+        from app.motion_designer.export_renderer import MotionExportRenderer
+        from app.motion_designer.project_io import load_motion_project
+
+        composition = load_motion_project(path)
+        sample_ms = max(0, min(composition.duration_ms - 1, composition.duration_ms // 3))
+        rgba = MotionExportRenderer(cache_capacity=1).render_rgba_array(
+            composition,
+            sample_ms,
+            width=max(96, int(size * 2)),
+            height=max(54, int(round(size * 1.125))),
+        )
+        rgba = np.ascontiguousarray(rgba)
+        height, width = rgba.shape[:2]
+        image = QImage(
+            rgba.data,
+            width,
+            height,
+            width * 4,
+            QImage.Format.Format_RGBA8888,
+        ).copy()
+        canvas = QPixmap(size, size)
+        canvas.fill(QColor("#111827"))
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        poster = QPixmap.fromImage(image).scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        painter.drawPixmap((size - poster.width()) // 2, (size - poster.height()) // 2, poster)
+        painter.end()
+        _cache_put(_VIDEO_THUMB_CACHE, key, canvas)
+        return canvas
+    except Exception:
+        return None
+
+
 def _make_video_thumbnail_at(path: Path, ratio: float, size: int = THUMB_SIZE) -> QPixmap | None:
     """Extract a frame near ``ratio`` of the source duration for hover scrub."""
     ratio = max(0.0, min(1.0, float(ratio or 0.0)))
@@ -260,15 +329,17 @@ def _draw_kind_badge(pm: QPixmap, kind: str, label: str | None = None) -> QPixma
     """Overlay a small ``V`` / ``A`` badge in the bottom-right corner
     of a thumbnail so users can tell media types apart at a glance.
     Single-accent grey badge — text alone differentiates."""
-    if kind not in ("V", "A", "S", "3", "R", "M"):
+    if kind not in ("V", "A", "I", "S", "3", "R", "M", "G"):
         return pm
     colors = {
         "V": "#E85D35",
         "A": "#5DCAA5",
+        "I": "#4FA3FF",
         "S": "#7A63FF",
         "3": "#5B8CFF",
         "R": "#B06BFF",
         "M": "#FF6FAE",
+        "G": "#27C2A0",
     }
     out = QPixmap(pm)
     p = QPainter(out)

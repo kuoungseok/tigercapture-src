@@ -105,6 +105,19 @@ def record_actor_load(
         merged = dict(entry.get("metadata") or {})
         merged.update(metadata)
         entry["metadata"] = merged
+    try:
+        from app.actor_loading_status import actor_loading_diagnostic_card
+
+        entry["diagnostic_card"] = actor_loading_diagnostic_card(
+            kind,
+            path,
+            status=status,
+            stage=stage or status,
+            message=message,
+            metadata=dict(entry.get("metadata") or {}),
+        )
+    except Exception:
+        pass
     payload["entries"][key] = entry
     _write_cache(payload, cache_path)
     try:

@@ -46,12 +46,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from app.i18n import tr
 from app.icons import app_icon, icon_size
+from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
 from app.mmd.project_tracks import MMD_MIME_TYPE
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.ux_feedback import apply_state_to_label, media_pool_empty_state
@@ -65,6 +67,7 @@ from app.media_pool_kinds import (
     FEATURED_THUMB_W,
     GRID_H,
     GRID_W,
+    IMAGE_EXTS,
     LIST_ROW_H,
     LIST_THUMB_H,
     LIST_THUMB_W,
@@ -72,6 +75,7 @@ from app.media_pool_kinds import (
     MMD_EXTS,
     MMD_MODEL_EXTS,
     MMD_MOTION_EXTS,
+    MOTION_PROJECT_EXTS,
     ROLE_MMD_BADGE,
     ROLE_PERFORMANCE_SOURCE,
     SPINE_EXTS,
@@ -108,7 +112,10 @@ from app.media_pool_thumbnails import (
     _draw_proxy_badge,
     _make_ar_pbr_thumbnail,
     _make_audio_thumbnail,
+    _make_image_list_thumbnail,
+    _make_image_thumbnail,
     _make_mmd_thumbnail,
+    _make_motion_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
     _make_video_thumbnail,
@@ -145,9 +152,15 @@ class _MediaPoolList(QListWidget):
         self._press_pos: QPoint | None = None
         self._press_item: QListWidgetItem | None = None
 
-    def mimeData(self, items: list[QListWidgetItem]) -> QMimeData:  # type: ignore[override]
+    def _mime_data_for_items(
+        self,
+        items: list[QListWidgetItem],
+        *,
+        include_file_urls: bool,
+    ) -> QMimeData:
         md = QMimeData()
         urls: list[QUrl] = []
+        internal_paths: list[str] = []
         performance_source = False
         vrm_avatar_paths: list[str] = []
         mmd_paths: list[str] = []
@@ -155,6 +168,7 @@ class _MediaPoolList(QListWidget):
             path = item.data(Qt.ItemDataRole.UserRole)
             kind = str(item.data(Qt.ItemDataRole.UserRole + 2) or "")
             if isinstance(path, str) and path:
+                internal_paths.append(path)
                 if kind == "R":
                     vrm_avatar_paths.append(path)
                     urls.append(QUrl.fromLocalFile(path))
@@ -165,8 +179,10 @@ class _MediaPoolList(QListWidget):
                     urls.append(QUrl.fromLocalFile(path))
             if bool(item.data(ROLE_PERFORMANCE_SOURCE)):
                 performance_source = True
-        if urls:
+        if urls and include_file_urls:
             md.setUrls(urls)
+        if internal_paths:
+            md.setData(MEDIA_POOL_ITEM_MIME_TYPE, "\n".join(internal_paths).encode("utf-8"))
         if vrm_avatar_paths:
             md.setData(VRM_AVATAR_MIME_TYPE, "\n".join(vrm_avatar_paths).encode("utf-8"))
         if mmd_paths:
@@ -174,6 +190,9 @@ class _MediaPoolList(QListWidget):
         if performance_source:
             md.setData(PERFORMANCE_SOURCE_MIME_TYPE, b"1")
         return md
+
+    def mimeData(self, items: list[QListWidgetItem]) -> QMimeData:  # type: ignore[override]
+        return self._mime_data_for_items(items, include_file_urls=True)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -257,18 +276,71 @@ class _MediaPoolList(QListWidget):
         path = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(path, str) or not path:
             return False
-        md = self.mimeData([item])
+        # Internal drags must not expose text/uri-list.  If the event leaks
+        # outside the editor, the launcher treats file URLs as an external
+        # video drop and opens a second editor window.
+        md = self._mime_data_for_items([item], include_file_urls=False)
         if not md.formats():
             return False
         drag = QDrag(self)
         drag.setMimeData(md)
-        pm = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE)
-        if pm.isNull() or pm.width() == 0 or pm.height() == 0:
-            pm = _placeholder_pixmap(THUMB_SIZE)
+        pm = self._drag_chip_pixmap(item, path)
         drag.setPixmap(pm)
-        drag.setHotSpot(QPoint(pm.width() // 2, pm.height() // 2))
+        drag.setHotSpot(QPoint(18, 18))
         drag.exec(Qt.DropAction.CopyAction)
         return True
+
+    def _drag_chip_pixmap(self, item: QListWidgetItem, path: str) -> QPixmap:
+        chip_w = 176
+        chip_h = 54
+        pm = QPixmap(chip_w, chip_h)
+        pm.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(124, 150, 185, 150), 1))
+        painter.setBrush(QColor(12, 18, 29, 222))
+        painter.drawRoundedRect(QRect(0, 0, chip_w - 1, chip_h - 1), 9, 9)
+
+        kind = str(item.data(Qt.ItemDataRole.UserRole + 2) or "M")
+        accent = {
+            "V": QColor(255, 112, 74),
+            "A": QColor(122, 211, 153),
+            "I": QColor(94, 162, 255),
+            "S": QColor(160, 181, 255),
+            "R": QColor(133, 214, 203),
+            "M": QColor(206, 174, 255),
+            "3": QColor(245, 190, 100),
+            "G": QColor(39, 194, 160),
+        }.get(kind, QColor(148, 163, 184))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(accent)
+        painter.drawRoundedRect(QRect(8, 9, 6, chip_h - 18), 3, 3)
+
+        thumb = item.icon().pixmap(44, 32)
+        if thumb.isNull() or thumb.width() == 0 or thumb.height() == 0:
+            thumb = _placeholder_pixmap(32).scaled(
+                QSize(44, 32),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        painter.setOpacity(0.82)
+        painter.drawPixmap(QRect(19, 11, 44, 32), thumb)
+        painter.setOpacity(1.0)
+
+        label = _compact_item_name(Path(path), max_chars=22, include_suffix=True)
+        painter.setPen(QColor(232, 238, 247))
+        painter.setFont(QFont(FONT_FAMILY, 8, QFont.Weight.DemiBold))
+        painter.drawText(QRect(72, 10, 95, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+        painter.setPen(QColor(150, 166, 190))
+        painter.setFont(QFont(FONT_FAMILY, 7))
+        kind_label = {
+            "V": "VIDEO", "A": "AUDIO", "I": "IMAGE", "S": "ACTOR",
+            "R": "VRM", "M": "MMD", "3": "3D", "G": "MOTION ACTOR",
+        }.get(kind, "MEDIA")
+        painter.drawText(QRect(72, 30, 95, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Add {kind_label}")
+        painter.end()
+        return pm
 
     def contextMenuEvent(self, event) -> None:
         item = self.itemAt(event.pos())
@@ -325,11 +397,13 @@ class MediaPool(QWidget):
     avatar_target_requested = Signal(str)
     vtuber_studio_requested = Signal(str)
     mmd_asset_requested = Signal(str)
+    character_asset_hub_requested = Signal(str)
     selection_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("MediaPool")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(
             f"QWidget#MediaPool {{ background:transparent; font-family:{FONT_FAMILY}; }}"
             "QWidget#MediaPool[dropState=\"active\"] { background:rgba(255,255,255,5); }"
@@ -590,7 +664,8 @@ class MediaPool(QWidget):
         self._list.empty_context_menu.connect(self._show_context_menu)
         self._list.item_context_menu.connect(self._show_item_context_menu)
         self._list.auto_polish_item_requested.connect(self._on_auto_polish_item_requested)
-        self._list.setMinimumHeight(220)
+        self._list.setMinimumHeight(280)
+        self._list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Drag OUT only — pool items go to tracks, but tracks don't
         # send anything back, and we don't allow rearranging inside
         # the pool either. Without ``DragOnly`` the default
@@ -1066,6 +1141,7 @@ class MediaPool(QWidget):
         act_load = menu.addAction(tr("media_pool.menu.load_files"))
         act_youtube = menu.addAction("Import YouTube URL as MP4")
         act_import_3d = menu.addAction("Import 3D / MMD Asset...")
+        act_character_hub = menu.addAction("Open Character Asset Hub...")
         chosen = menu.exec(global_pos)
         if chosen is act_load:
             self._open_file_dialog()
@@ -1073,6 +1149,8 @@ class MediaPool(QWidget):
             self._open_youtube_url_dialog()
         elif chosen is act_import_3d:
             self._open_3d_import_dialog()
+        elif chosen is act_character_hub:
+            self._open_character_asset_hub_dialog()
 
 
     def _open_file_dialog(self) -> None:
@@ -1093,6 +1171,16 @@ class MediaPool(QWidget):
         )
         self.import_3d_paths(paths)
 
+    def _open_character_asset_hub_dialog(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Open Character Asset Hub",
+            "",
+        )
+        if not folder:
+            return
+        self._set_status_message("Opening Character Asset Hub...", transient_ms=1200)
+        self.character_asset_hub_requested.emit(str(folder))
 
     def _on_youtube_import_progress(self, pct: int, label: str) -> None:
         if self._youtube_import_progress is not None:

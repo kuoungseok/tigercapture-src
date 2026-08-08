@@ -186,15 +186,26 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "ar_pbr.preview.depth_view.set",
         "ar_pbr.preview.surface.get",
         "ar_pbr.preview.surface.set",
+        "ar_pbr.preview.rt_status",
+        "ar_pbr.preview.rt_render",
         "ar_pbr.gizmo.state",
         "ar_pbr.gizmo.show",
         "ar_pbr.gizmo.hide",
+        "ar_pbr.texture_lab.open",
+        "ar_pbr.texture_lab.preview",
+        "ar_pbr.texture_lab.backend_status",
+        "ar_pbr.texture_lab.export",
+        "ar_pbr.texture_lab.substrate_plan",
     } <= action_ids
+    rt_render_schema = action_specs["ar_pbr.preview.rt_render"]["params_schema"]
+    assert rt_render_schema["required"] == ["output_path"]
+    assert rt_render_schema["properties"]["render_mode"]["enum"] == ["hybrid_rt", "path_traced"]
     settings_schema = action_specs["ar_pbr.preview.settings.set"]["params_schema"]["properties"]
     view_schema = action_specs["ar_pbr.preview.view.set"]["params_schema"]["properties"]
     depth_schema = action_specs["ar_pbr.preview.depth_view.set"]["params_schema"]["properties"]
     assert {"pan_x", "pan_y", "pan_z"} <= set(view_schema)
     assert {"mode", "refresh"} <= set(depth_schema)
+    assert {"matte", "distance", "plane"} <= set(depth_schema["mode"]["enum"])
     assert {
         "ambient_occlusion_mode",
         "ao_strength",
@@ -215,7 +226,11 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "clearcoat_ior",
         "surface",
         "clearcoat",
+        "parallax",
     } <= set(settings_schema)
+    assert {"off", "parallax", "pom"} <= set(
+        settings_schema["parallax"]["properties"]["mode"]["enum"]
+    )
     surface_schema = action_specs["ar_pbr.preview.surface.set"]["params_schema"]["properties"]
     assert {
         "ibl_exposure",
@@ -228,6 +243,24 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "clearcoat_roughness",
         "clearcoat_ior",
     } <= set(surface_schema)
+    texture_export_schema = action_specs["ar_pbr.texture_lab.export"]["params_schema"]["properties"]
+    texture_preview_schema = action_specs["ar_pbr.texture_lab.preview"]["params_schema"]["properties"]
+    backend_schema = action_specs["ar_pbr.texture_lab.backend_status"]["params_schema"]["properties"]
+    assert {"image_path", "output_dir", "settings", "maps", "packed_layouts", "backend", "allow_cpu"} <= set(
+        texture_export_schema
+    )
+    assert "allow_cpu" in backend_schema
+    assert "allow_cpu" in texture_preview_schema
+    assert {"auto", "cpu", "torch_cuda"} <= set(backend_schema["backend"]["enum"])
+    assert {"auto", "cpu", "torch_cuda"} <= set(texture_preview_schema["backend"]["enum"])
+    assert {"plane", "sphere"} <= set(texture_preview_schema["preview_shape"]["enum"])
+    assert {"material", "normal", "f0", "f90_mask", "unreal_orm", "gltf_mr"} <= set(
+        texture_preview_schema["preview_mode"]["enum"]
+    )
+    assert {"base_color", "f0", "f90_mask"} <= set(texture_export_schema["maps"]["items"]["enum"])
+    assert {"unreal_orm", "arm", "gltf_mr", "rma"} <= set(
+        texture_export_schema["packed_layouts"]["items"]["enum"]
+    )
 
 
 def test_ar_pbr_preview_diagnostics_action_reports_packet_and_vbo_state() -> None:
@@ -429,6 +462,14 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
             "clearcoat_strength": 0.52,
             "clearcoat_roughness": 0.08,
             "clearcoat_ior": 1.57,
+            "parallax": {
+                "mode": "pom",
+                "enabled": True,
+                "strength": 0.58,
+                "depth": 0.045,
+                "center": 0.5,
+                "steps": 32,
+            },
             "light_azimuth": None,
         },
     ).to_dict()
@@ -446,6 +487,7 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
         "denoise_strength",
         "diffuse_gi_strength",
         "hybrid_sample_count",
+        "parallax",
         "render_profile",
         "shadow_strength",
         "specular_gi_strength",
@@ -474,6 +516,8 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
     assert payload["after"]["clearcoat_strength"] == 0.52
     assert payload["after"]["clearcoat_roughness"] == 0.08
     assert payload["after"]["clearcoat_ior"] == 1.57
+    assert payload["after"]["parallax"]["mode"] == "pom"
+    assert payload["after"]["parallax"]["steps"] == 32
     assert preview.apply_count == 1
     assert preview.last_apply_emit is True
     assert preview.show_count == 1

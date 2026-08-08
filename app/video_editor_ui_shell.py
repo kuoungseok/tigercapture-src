@@ -1,16 +1,56 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtWidgets import QFrame, QScrollArea, QSplitter, QVBoxLayout, QWidget
 
 from app.video_editor_layout_specs import (
+    EDITOR_VERTICAL_SPLITTER_HANDLE_WIDTH,
+    EDITOR_RESIZABLE_PANE_MAX_HEIGHT,
     LEFT_DOCK_MIN_WIDTH,
-    MAIN_DOCK_MAX_HEIGHT,
+    MAIN_DOCK_SPLITTER_SETTINGS_KEY,
     MAIN_DOCK_MIN_HEIGHT,
+    editor_vertical_splitter_qss,
     main_dock_splitter_qss,
     left_dock_scroll_qss,
     right_dock_scroll_qss,
 )
+
+
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_main_dock_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(MAIN_DOCK_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_main_dock_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_main_dock_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            MAIN_DOCK_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
 
 
 def build_editor_shell(self):
@@ -22,14 +62,21 @@ def build_editor_shell(self):
     outer.setSpacing(8)
     self._editor_outer_layout = outer
 
+    self._editor_vertical_splitter = QSplitter(Qt.Orientation.Vertical, self)
+    self._editor_vertical_splitter.setObjectName("EditorVerticalSplitter")
+    self._editor_vertical_splitter.setChildrenCollapsible(False)
+    self._editor_vertical_splitter.setHandleWidth(EDITOR_VERTICAL_SPLITTER_HANDLE_WIDTH)
+    self._editor_vertical_splitter.setStyleSheet(editor_vertical_splitter_qss())
+    outer.addWidget(self._editor_vertical_splitter, stretch=1)
+
     self._main_dock_splitter = QSplitter(Qt.Orientation.Horizontal, self)
     self._main_dock_splitter.setObjectName("MainDockSplitter")
     self._main_dock_splitter.setChildrenCollapsible(False)
     self._main_dock_splitter.setHandleWidth(1)
     self._main_dock_splitter.setStyleSheet(main_dock_splitter_qss())
     self._main_dock_splitter.setMinimumHeight(MAIN_DOCK_MIN_HEIGHT)
-    self._main_dock_splitter.setMaximumHeight(MAIN_DOCK_MAX_HEIGHT)
-    outer.addWidget(self._main_dock_splitter, stretch=0)
+    self._main_dock_splitter.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
+    self._editor_vertical_splitter.addWidget(self._main_dock_splitter)
 
     # Left = media pool dock. DaVinci-style: imported clips live
     # here, drag them onto a track to add to the timeline.
@@ -62,9 +109,9 @@ def build_editor_shell(self):
     root.setSpacing(10)
     self._main_dock_splitter.addWidget(main_col)
 
-    # Workbench overflow stack. It is intentionally not a third splitter
-    # column: secondary panels sit below the Workbench and scroll there,
-    # so the Viewer/Workbench pair can keep the catalog-reference ratio.
+    # Unified Workbench stack. The main Workbench and its secondary
+    # sections live in this single scroll area so wheel scrolling moves
+    # the node/inspector area and the lower tools as one surface.
     self._right_dock_scroll = QScrollArea(main_col)
     self._right_dock_scroll.setObjectName("RightDockScroll")
     self._right_dock_scroll.setWidgetResizable(True)
@@ -73,7 +120,7 @@ def build_editor_shell(self):
     self._right_dock_scroll.setFrameShape(QFrame.Shape.NoFrame)
     self._right_dock_scroll.setMinimumWidth(0)
     self._right_dock_scroll.setMinimumHeight(48)
-    self._right_dock_scroll.setMaximumHeight(108)
+    self._right_dock_scroll.setMaximumHeight(16777215)
     self._right_dock_scroll.setStyleSheet(right_dock_scroll_qss())
     self._right_dock_host = QWidget(self._right_dock_scroll)
     self._right_dock_host.setObjectName("RightDockColumn")
@@ -89,8 +136,11 @@ def build_editor_shell(self):
     # Secondary panels no longer steal a right-side splitter column.
     self._main_dock_splitter.setStretchFactor(0, 1)
     self._main_dock_splitter.setStretchFactor(1, 7)
-    # Default sizes; user-dragged sizes are persisted via Qt's
-    # splitter state if we wire it later.
-    self._main_dock_splitter.setSizes([188, 1240])
+    if not _restore_main_dock_splitter_state(self._main_dock_splitter):
+        self._main_dock_splitter.setSizes([188, 1240])
+    self._main_dock_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_main_dock_splitter_state(self),
+    )
+    self._editor_vertical_splitter.setStretchFactor(0, 5)
     self._yield_startup_ui("shell_splitters")
     return main_col, root

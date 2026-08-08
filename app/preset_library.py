@@ -2836,6 +2836,31 @@ ACTOR_WORKFLOW_PRESETS: tuple[EditorPreset, ...] = (
 )
 
 
+def _character_one_click_workflow_presets() -> tuple[EditorPreset, ...]:
+    try:
+        from app.character_one_click_templates import character_one_click_templates
+    except Exception:
+        return ()
+    rows: list[EditorPreset] = []
+    for template in character_one_click_templates():
+        fallback = list(template.get("fallback_sequence") or [])
+        rows.append(
+            EditorPreset(
+                id=str(template.get("id") or ""),
+                kind="template",
+                name=str(template.get("name") or template.get("id") or "Character Template"),
+                description=str(template.get("description") or ""),
+                tags=tuple(str(tag) for tag in list(template.get("tags") or []) + ["template", "character-template"]),
+                payload={
+                    "character_template_id": str(template.get("id") or ""),
+                    "requires_character_asset": True,
+                    "sequence": fallback,
+                },
+            )
+        )
+    return tuple(row for row in rows if row.id)
+
+
 def _load_json_presets(path: Path) -> list[EditorPreset]:
     if not path.exists():
         return []
@@ -2883,6 +2908,7 @@ def _builtin_presets() -> list[EditorPreset]:
         + list(CREATOR_EFFECT_TRANSITION_EXPANSION_PRESETS)
         + list(CAPCUT_CREATOR_WORKFLOW_PRESETS)
         + list(ACTOR_WORKFLOW_PRESETS)
+        + list(_character_one_click_workflow_presets())
     )
 
 
@@ -3676,10 +3702,35 @@ def one_click_preset_plan(project_summary: dict[str, Any]) -> list[EditorPreset]
         ])
     if summary.get("live2d") or summary.get("spine") or summary.get("character"):
         ids.extend([
+            "template-character-intro-short",
+            "template-talking-live2d-short",
+            "template-gacha-character-showcase",
+            "template-anime-pv-intro",
             "template-live2d-reaction",
             "title-live2d-nameplate",
             "effect-character-focus",
             "effect-vtuber-overlay-pop",
+        ])
+    if summary.get("mmd") or summary.get("dance"):
+        ids.extend([
+            "template-mmd-dance-clip",
+            "template-anime-pv-intro",
+            "template-character-intro-short",
+        ])
+    if summary.get("gacha") or summary.get("showcase"):
+        ids.extend([
+            "template-gacha-character-showcase",
+            "template-character-intro-short",
+        ])
+    if summary.get("vtuber") or summary.get("announcement"):
+        ids.extend([
+            "template-vtuber-announcement",
+            "template-talking-live2d-short",
+        ])
+    if summary.get("subtitle_to_voice") or summary.get("tts_dialogue"):
+        ids.extend([
+            "template-subtitle-to-voice-dialogue-scene",
+            "template-talking-live2d-short",
         ])
     if summary.get("tutorial") or summary.get("howto") or summary.get("how_to") or summary.get("screen_recording"):
         ids.extend([

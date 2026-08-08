@@ -426,7 +426,16 @@ def build_video_clip_context_menu_model(
                 label_key="veditor.menu.blade_at_playhead",
                 icon="scissors",
             ),
-            _action("delete_selected_clips", "Delete", icon="trash"),
+            _separator("move"),
+            _action("move_clip_to_playhead", "Move clip to playhead"),
+            _action("move_clip_to_time", "Move clip to time..."),
+            _action("nudge_clip_left_frame", "Nudge left 1 frame"),
+            _action("nudge_clip_right_frame", "Nudge right 1 frame"),
+            _action("nudge_clip_left_5_frames", "Nudge left 5 frames"),
+            _action("nudge_clip_right_5_frames", "Nudge right 5 frames"),
+            _separator("delete"),
+            _action("delete_clip_leave_gap", "Delete clip (leave gap)", icon="trash"),
+            _action("ripple_delete_clip", "Ripple delete clip (close gap)"),
         ]
     )
     return rows
@@ -472,6 +481,22 @@ def dispatch_video_clip_context_menu_action(
         return _invoke(owner, "_extract_audio_from_video_selection", track, clip)
     if command == "blade_at_playhead":
         return _invoke(owner, "_blade_at_playhead", track_id=track_id)
+    if command == "move_clip_to_playhead":
+        return _invoke(owner, "_move_video_clip_to_playhead", track, clip)
+    if command == "move_clip_to_time":
+        return _invoke(owner, "_prompt_move_video_clip_to_time", track, clip)
+    if command == "nudge_clip_left_frame":
+        return _invoke(owner, "_nudge_video_clip_frames", track, clip, -1)
+    if command == "nudge_clip_right_frame":
+        return _invoke(owner, "_nudge_video_clip_frames", track, clip, 1)
+    if command == "nudge_clip_left_5_frames":
+        return _invoke(owner, "_nudge_video_clip_frames", track, clip, -5)
+    if command == "nudge_clip_right_5_frames":
+        return _invoke(owner, "_nudge_video_clip_frames", track, clip, 5)
+    if command == "delete_clip_leave_gap":
+        return _invoke(owner, "_delete_video_clip_leave_gap", track, clip)
+    if command == "ripple_delete_clip":
+        return _invoke(owner, "_ripple_delete_video_clip", track, clip)
     if command == "delete_selected_clips":
         return _invoke(owner, "_delete_selected_clips")
     return False
