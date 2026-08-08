@@ -2365,6 +2365,7 @@ class PainterUMGWidgetView(QDialog):
         self._material_graph_requested_visible = False
         self._material_dock_lifecycle_guard = 0
         self._material_dock_visibility_serial = 0
+        self._reference_unrendered = True
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -2395,11 +2396,31 @@ class PainterUMGWidgetView(QDialog):
         self.material_button.toggled.connect(
             self._set_material_graph_visible
         )
+        # Without this the UMG pane silently omits every layer Unreal cannot
+        # produce, so a Figma frame made mostly of blocked vectors looks like a
+        # broken import instead of an export limit. The reference rows are
+        # translucent and locked, and the summary keeps naming them, so they
+        # never read as widgets Unreal would receive.
+        self.reference_button = QPushButton(
+            painter_text("Show Blocked"),
+            self,
+        )
+        self.reference_button.setObjectName("PainterUMGViewReferenceButton")
+        self.reference_button.setCheckable(True)
+        self.reference_button.setChecked(True)
+        self.reference_button.setToolTip(
+            painter_text(
+                "Draw the layers UMG cannot produce as a locked, translucent "
+                "reference. They are never exported to Unreal."
+            )
+        )
+        self.reference_button.toggled.connect(self._set_reference_visible)
         close_button = QPushButton(painter_text("Close"), self)
         close_button.setObjectName("PainterUMGViewButton")
         close_button.clicked.connect(self.close)
         header.addWidget(title)
         header.addWidget(self.summary_label, 1)
+        header.addWidget(self.reference_button)
         header.addWidget(self.material_button)
         header.addWidget(refresh_button)
         header.addWidget(close_button)
@@ -2656,6 +2677,7 @@ class PainterUMGWidgetView(QDialog):
             selected_artboard_id,
             str(selection.get("object_id") or ""),
             tuple(str(value) for value in selection.get("object_ids", [])),
+            bool(self._reference_unrendered),
         )
         if not force and signature == self._source_signature:
             return
@@ -2667,6 +2689,7 @@ class PainterUMGWidgetView(QDialog):
         projection = project_painter_ui_umg_widgets(
             source,
             artboard_id=selected_artboard_id,
+            reference_unrendered=self._reference_unrendered,
         )
 
         same_artboard = bool(
@@ -2710,6 +2733,24 @@ class PainterUMGWidgetView(QDialog):
         else:
             QTimer.singleShot(0, self.fit_views)
 
+    def _set_reference_visible(self, value: bool) -> None:
+        """Redraw the UMG pane with or without the blocked-layer reference."""
+        requested = bool(value)
+        if requested == self._reference_unrendered:
+            return
+        self._reference_unrendered = requested
+        if not self._has_document:
+            return
+        self.set_document(
+            self._source_document,
+            artboard_id=self._artboard_id,
+            force=True,
+        )
+
+    def reference_visible(self) -> bool:
+        """Return whether blocked layers are drawn as a reference."""
+        return bool(self._reference_unrendered)
+
     def _update_report_labels(self) -> None:
         self._update_material_button()
         counts = dict(self._report.get("counts") or {})
@@ -2728,11 +2769,18 @@ class PainterUMGWidgetView(QDialog):
         component_instance_count = int(
             self._report.get("component_instance_count") or 0
         )
+        reference_ids = list(self._report.get("reference_object_ids") or [])
+        reference_label = (
+            f"{painter_text('Reference')} {len(reference_ids)}  |  "
+            if reference_ids
+            else ""
+        )
         self.summary_label.setText(
             f"Native {int(counts.get('Native', 0))}  |  "
             f"Material {int(counts.get('Material', 0))}  |  "
             f"Baked {int(counts.get('Baked', 0))}  |  "
             f"Blocked {int(counts.get('Blocked', 0))}  |  "
+            f"{reference_label}"
             f"Components {component_count}  |  "
             f"Instances {component_instance_count}  |  "
             f"{background_label}"
@@ -2742,6 +2790,15 @@ class PainterUMGWidgetView(QDialog):
                 "The artboard background is exported as a full-size, "
                 "non-interactive UMG Image. It is transparent only when the "
                 "source artboard background alpha is zero."
+            )
+            + (
+                "\n"
+                + painter_text(
+                    "Reference layers are drawn translucent so the frame stays "
+                    "recognizable. They are not exported to Unreal."
+                )
+                if reference_ids
+                else ""
             )
             + "\n"
             + (

@@ -1514,3 +1514,164 @@ def test_image_fill_failures_are_readable_and_block_reasons_stay_verbatim(
     blocked_widget = projection["widgets_by_id"]["blocked-mode"]
     assert blocked_widget["reasons"] == [reason]
     assert projection["unrendered"][0]["reasons"] == [reason]
+
+
+def _blocked_painter_document():
+    """Return a document with one Native and one Blocked leaf."""
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(400, 300, name="HUD")
+    document, kept = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Card",
+        x=10,
+        y=10,
+        width=100,
+        height=60,
+        style={"fill": "#3366FFFF"},
+    )
+    document, blocked = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Layered",
+        x=150,
+        y=40,
+        width=120,
+        height=80,
+        style={
+            "fills": [
+                {
+                    "type": "solid",
+                    "visible": True,
+                    "opacity": 1.0,
+                    "color": "#FF0000FF",
+                },
+                {
+                    "type": "solid",
+                    "visible": True,
+                    "opacity": 1.0,
+                    "color": "#00FF00FF",
+                },
+            ]
+        },
+    )
+    return document, kept, blocked
+
+
+def test_umg_projection_omits_unrendered_layers_without_the_reference_flag():
+    from app.painter_ui_umg_simulator import (
+        UMG_REFERENCE_ID_PREFIX,
+        project_painter_ui_umg_widgets,
+    )
+
+    document, _kept, blocked = _blocked_painter_document()
+    artboard_id = document["artboards"][0]["id"]
+
+    projection = project_painter_ui_umg_widgets(document, artboard_id=artboard_id)
+
+    assert projection["reference_object_ids"] == []
+    object_ids = {row["id"] for row in projection["document"]["objects"]}
+    assert blocked["id"] not in object_ids
+    assert not any(
+        str(row["id"]).startswith(UMG_REFERENCE_ID_PREFIX)
+        for row in projection["document"]["objects"]
+    )
+
+
+def test_umg_projection_reference_rows_restore_blocked_layers_as_marked_stand_ins():
+    from app.painter_ui_umg_simulator import (
+        UMG_REFERENCE_ID_PREFIX,
+        UMG_REFERENCE_ONLY_KEY,
+        UMG_REFERENCE_OPACITY,
+        project_painter_ui_umg_widgets,
+    )
+
+    document, _kept, blocked = _blocked_painter_document()
+    artboard_id = document["artboards"][0]["id"]
+
+    projection = project_painter_ui_umg_widgets(
+        document,
+        artboard_id=artboard_id,
+        reference_unrendered=True,
+    )
+
+    reference_id = f"{UMG_REFERENCE_ID_PREFIX}{blocked['id']}"
+    assert projection["reference_object_ids"] == [reference_id]
+    objects = {row["id"]: row for row in projection["document"]["objects"]}
+    row = objects[reference_id]
+    # The stand-in keeps the source geometry exactly: Painter coordinates are
+    # artboard-absolute, so flattening the parent chain cannot move it.
+    assert (row["x"], row["y"], row["width"], row["height"]) == (
+        blocked["x"],
+        blocked["y"],
+        blocked["width"],
+        blocked["height"],
+    )
+    assert row["parent_id"] == ""
+    assert row["locked"] is True
+    assert row["clip_content"] is False
+    assert row["opacity"] == UMG_REFERENCE_OPACITY
+    marker = row["content"][UMG_REFERENCE_ONLY_KEY]
+    assert marker["source_object_id"] == blocked["id"]
+    assert marker["disposition"] == "Blocked"
+    assert marker["reasons"] == [
+        "multiple_fills_require_umg_material_or_bake"
+    ]
+    # The UMG contract exports the artboard background as a full-size Image, so
+    # a reference row below it would be invisible.
+    other_z = [
+        int(other["z_index"])
+        for other in projection["document"]["objects"]
+        if other["id"] != reference_id
+    ]
+    assert int(row["z_index"]) > max(other_z)
+
+
+def test_umg_projection_reference_flag_never_changes_readiness_or_counts():
+    from app.painter_ui_umg_simulator import project_painter_ui_umg_widgets
+
+    document, _kept, _blocked = _blocked_painter_document()
+    artboard_id = document["artboards"][0]["id"]
+
+    plain = project_painter_ui_umg_widgets(document, artboard_id=artboard_id)
+    referenced = project_painter_ui_umg_widgets(
+        document,
+        artboard_id=artboard_id,
+        reference_unrendered=True,
+    )
+
+    for key in (
+        "counts",
+        "blockers",
+        "unrendered",
+        "widgets",
+        "widgets_by_id",
+        "ready",
+        "complete",
+        "preflight",
+    ):
+        assert referenced[key] == plain[key], key
+
+
+def test_umg_projection_reference_rows_skip_layers_without_a_painter_twin():
+    """Generated component-definition layers have no source row to stand in for."""
+    from app.painter_ui_umg_simulator import project_painter_ui_umg_widgets
+
+    document, _kept, blocked = _blocked_painter_document()
+    artboard_id = document["artboards"][0]["id"]
+
+    projection = project_painter_ui_umg_widgets(
+        document,
+        artboard_id=artboard_id,
+        reference_unrendered=True,
+    )
+
+    source_ids = {row["id"] for row in document["objects"]}
+    for entry in projection["unrendered"]:
+        expected = entry["object_id"] in source_ids
+        produced = any(
+            row.endswith(f"::{entry['object_id']}")
+            for row in projection["reference_object_ids"]
+        )
+        assert produced is expected

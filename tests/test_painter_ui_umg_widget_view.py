@@ -2442,3 +2442,53 @@ def test_umg_widget_view_renders_image_fill_and_explains_missing_files(
     view.close()
     view.deleteLater()
     app.processEvents()
+
+
+def test_umg_widget_view_draws_blocked_layers_as_a_labelled_reference() -> None:
+    app = _app()
+    from app.painter_i18n import painter_text
+    from app.painter_ui_umg_simulator import (
+        UMG_REFERENCE_ID_PREFIX,
+        UMG_REFERENCE_ONLY_KEY,
+    )
+    from app.painter_ui_umg_widget_view import PainterUMGWidgetView
+
+    document = _document()
+    blocked_id = next(
+        row["id"] for row in document["objects"] if row["name"] == "Gradient card"
+    )
+    view = PainterUMGWidgetView()
+    view.resize(980, 620)
+    view.set_document(document)
+    view.show()
+    app.processEvents()
+
+    # Default on: a frame whose art is mostly blocked would otherwise render
+    # almost empty and read as a broken import rather than an export limit.
+    assert view.reference_visible() is True
+    assert view.reference_button.isChecked() is True
+    reference_id = f"{UMG_REFERENCE_ID_PREFIX}{blocked_id}"
+    assert view.report()["reference_object_ids"] == [reference_id]
+    target = view.target_pane.preview._document
+    row = next(
+        item for item in target["objects"] if item["id"] == reference_id
+    )
+    assert row["locked"] is True
+    assert row["opacity"] < 1.0
+    assert (
+        row["content"][UMG_REFERENCE_ONLY_KEY]["source_object_id"] == blocked_id
+    )
+    assert f"{painter_text('Reference')} 1" in view.summary_label.text()
+
+    view.reference_button.setChecked(False)
+    app.processEvents()
+
+    assert view.reference_visible() is False
+    assert view.report()["reference_object_ids"] == []
+    assert all(
+        not str(item["id"]).startswith(UMG_REFERENCE_ID_PREFIX)
+        for item in view.target_pane.preview._document["objects"]
+    )
+    assert painter_text("Reference") not in view.summary_label.text()
+    # Readiness is a property of the export, never of the preview toggle.
+    assert view.report()["counts"]["Blocked"] == 1

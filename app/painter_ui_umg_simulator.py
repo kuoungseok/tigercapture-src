@@ -2793,12 +2793,89 @@ def project_tiger_umg_document(
     }
 
 
+UMG_REFERENCE_ONLY_KEY = "umg_reference_only"
+UMG_REFERENCE_ID_PREFIX = "umg-reference::"
+UMG_REFERENCE_OPACITY = 0.4
+
+
+def _unrendered_reference_objects(
+    source: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    artboard_id: str,
+    base_z_index: int,
+) -> list[dict[str, Any]]:
+    """Return flattened, clearly-marked stand-ins for unrendered layers.
+
+    The projection deliberately omits every layer UMG cannot produce, so a
+    Figma frame whose art is mostly blocked vectors renders almost empty and
+    reads as a broken import rather than as an export limit. These rows are a
+    reference underlay only: they carry a distinct id, they are locked, they
+    are translucent, and each one records the disposition and reasons that kept
+    the real widget out. They are never part of what Unreal would receive.
+
+    Painter geometry is artboard-absolute, so flattening to ``parent_id: ""``
+    keeps every position exact. Inherited parent opacity and clipping are lost
+    in the process, which is acceptable for a reference underlay and is why
+    these rows must not be mistaken for a render.
+    """
+
+    source_by_id = {
+        str(row.get("id") or ""): row
+        for row in source.get("objects", [])
+        if isinstance(row, Mapping)
+        and str(row.get("artboard_id") or "") == artboard_id
+    }
+    rows: list[dict[str, Any]] = []
+    unrendered = result.get("unrendered")
+    unrendered = unrendered if isinstance(unrendered, list) else []
+    for index, entry in enumerate(unrendered):
+        if not isinstance(entry, Mapping):
+            continue
+        origin = source_by_id.get(str(entry.get("object_id") or ""))
+        if origin is None:
+            # Generated component-definition layers have no Painter twin.
+            continue
+        row = copy.deepcopy(dict(origin))
+        row["id"] = f"{UMG_REFERENCE_ID_PREFIX}{row['id']}"
+        row["parent_id"] = ""
+        row["locked"] = True
+        row["clip_content"] = False
+        row["opacity"] = (
+            float(_number(row.get("opacity"), 1.0)) * UMG_REFERENCE_OPACITY
+        )
+        # Reference rows paint above the projection, not below it: the UMG
+        # contract exports the artboard background as a full-size Image, so
+        # anything underneath is completely hidden. Translucency, not depth, is
+        # what keeps the widgets UMG really emits readable through them.
+        row["z_index"] = base_z_index + 1 + index
+        content = row.get("content")
+        content = dict(content) if isinstance(content, Mapping) else {}
+        content[UMG_REFERENCE_ONLY_KEY] = {
+            "source_object_id": str(origin.get("id") or ""),
+            "name": str(entry.get("name") or origin.get("name") or ""),
+            "disposition": str(entry.get("disposition") or "Blocked"),
+            "reasons": [
+                str(reason) for reason in entry.get("reasons") or [] if str(reason)
+            ],
+        }
+        row["content"] = content
+        rows.append(row)
+    return rows
+
+
 def project_painter_ui_umg_widgets(
     value: Mapping[str, Any],
     *,
     artboard_id: str = "",
+    reference_unrendered: bool = False,
 ) -> dict[str, Any]:
-    """Build the non-mutating UMG widget projection for a Painter document."""
+    """Build the non-mutating UMG widget projection for a Painter document.
+
+    ``reference_unrendered`` adds locked, translucent stand-ins for the layers
+    UMG cannot produce. Counts, blockers, ``unrendered``, ``ready`` and
+    ``complete`` never change: the flag only affects what the preview draws.
+    """
     source = normalize_ui_document(value)
     selected_artboard_id = str(artboard_id or source["active_artboard_id"])
     selected_artboard = next(
@@ -2836,11 +2913,36 @@ def project_painter_ui_umg_widgets(
     result["ready"] = bool(preflight["ok"]) and not bool(
         result.get("resource_warnings")
     )
+    reference_rows = (
+        _unrendered_reference_objects(
+            source,
+            result,
+            artboard_id=selected_artboard_id,
+            base_z_index=max(
+                (
+                    int(_number(row.get("z_index"), 0.0))
+                    for row in result["document"].get("objects", [])
+                    if isinstance(row, Mapping)
+                ),
+                default=0,
+            ),
+        )
+        if reference_unrendered
+        else []
+    )
+    result["reference_object_ids"] = [str(row["id"]) for row in reference_rows]
+    if reference_rows:
+        document = result["document"]
+        document["objects"] = [*document.get("objects", []), *reference_rows]
+        result["document"] = normalize_ui_document(document)
     return result
 
 
 __all__ = [
     "PAINTER_UMG_SIMULATOR_SCHEMA",
+    "UMG_REFERENCE_ID_PREFIX",
+    "UMG_REFERENCE_ONLY_KEY",
+    "UMG_REFERENCE_OPACITY",
     "project_painter_ui_umg_widgets",
     "project_tiger_umg_document",
 ]
