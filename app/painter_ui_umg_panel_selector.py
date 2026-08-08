@@ -54,16 +54,21 @@ def _classification(
     requested = _normalized_panel_mode(layout.get("umg_panel_mode"))
     decision: Mapping[str, Any] = {}
     if object_id and isinstance(document, Mapping):
+        # Scoped to the selected container. Asking the whole-document contract
+        # and indexing one entry out of it classified every row in the file on
+        # every selection change, which on a large import was most of the cost
+        # of a click.
         from app.painter_ui_umg_auto_layout import (
-            painter_umg_auto_layout_contract,
+            painter_umg_panel_classification,
         )
 
-        contract = painter_umg_auto_layout_contract(document, normalize=normalize)
-        rows = contract.get("classification_by_id")
-        if isinstance(rows, Mapping):
-            candidate = rows.get(object_id)
-            if isinstance(candidate, Mapping):
-                decision = candidate
+        candidate = painter_umg_panel_classification(
+            document,
+            object_id,
+            normalize=normalize,
+        )
+        if isinstance(candidate, Mapping):
+            decision = candidate
 
     layout_mode = str(layout.get("mode") or "none")
     effective = str(
