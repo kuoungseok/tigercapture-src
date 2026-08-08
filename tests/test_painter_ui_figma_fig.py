@@ -969,3 +969,166 @@ def test_import_fig_file_reports_a_readable_error(tmp_path) -> None:
     target.write_bytes(b"not a fig file at all")
     with pytest.raises(PainterUIFigmaError, match="broken.fig"):
         import_fig_file(target)
+
+
+# -- instance expansion and mask flags -----------------------------------
+
+
+def _fig_rows(*rows: dict) -> dict:
+    from app.painter_ui_figma_fig_rest import _collect_nodes, _link_tree
+
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    return {"nodes": nodes, "warnings": warnings}
+
+
+def test_mask_nodes_use_the_rest_spelling(tmp_path) -> None:
+    """The importer reads ``isMask``; emitting ``mask`` hid every mask.
+
+    Figma fills mask shapes with a loud colour precisely because they never
+    render, so a missed mask paints a bright block over the artwork.
+    """
+
+    from app.painter_ui_figma_fig_rest import _convert_node, _collect_nodes, _link_tree
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(2),
+            "type": "RECTANGLE",
+            "name": "mask",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 10.0, "y": 10.0},
+            "mask": True,
+            "maskType": "ALPHA",
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    rest = _convert_node(nodes["0:2"], (1.0, 0.0, 0.0, 0.0, 1.0, 0.0), warnings, [])
+    assert rest["isMask"] is True
+    assert rest["maskType"] == "ALPHA"
+    assert "mask" not in rest
+
+
+def test_instances_are_expanded_from_their_component() -> None:
+    """A ``.fig`` instance stores a reference, not its children."""
+
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(10),
+            "type": "SYMBOL",
+            "name": "card",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 100.0, "y": 40.0},
+        },
+        {
+            "guid": _guid(11),
+            "type": "TEXT",
+            "name": "label",
+            "parentIndex": {"guid": _guid(10), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 80.0, "y": 20.0},
+            "textData": {"characters": "component default"},
+        },
+        {
+            "guid": _guid(20),
+            "type": "INSTANCE",
+            "name": "card instance",
+            "parentIndex": {"guid": _guid(1), "position": "\""},
+            "transform": _matrix(200.0, 0.0),
+            "size": {"x": 100.0, "y": 40.0},
+            "symbolData": {
+                "symbolID": _guid(10),
+                "symbolOverrides": [
+                    {
+                        "guidPath": {"guids": [_guid(11)]},
+                        "textData": {"characters": "overridden"},
+                    }
+                ],
+            },
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    report = _expand_instances(nodes, warnings)
+
+    assert report["instances"] == 1
+    assert report["unresolved"] == 0
+    instance = nodes["0:20"]
+    assert len(instance.children) == 1
+    child = instance.children[0]
+    # The clone is addressed the way REST addresses instance children.
+    assert child.node_id == "I0:20;0:11"
+    assert child.raw["textData"]["characters"] == "overridden"
+    # The component keeps its own copy untouched.
+    assert nodes["0:11"].raw["textData"]["characters"] == "component default"
+
+
+def test_expansion_refuses_a_component_that_contains_itself() -> None:
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(10),
+            "type": "SYMBOL",
+            "name": "loop",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 10.0, "y": 10.0},
+        },
+        {
+            "guid": _guid(11),
+            "type": "INSTANCE",
+            "name": "self",
+            "parentIndex": {"guid": _guid(10), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 10.0, "y": 10.0},
+            "symbolData": {"symbolID": _guid(10), "symbolOverrides": []},
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    _expand_instances(nodes, warnings)
+    assert any("recursive_component" in warning for warning in warnings)
+
+
+def test_an_instance_without_its_component_is_reported() -> None:
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(20),
+            "type": "INSTANCE",
+            "name": "orphan",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 10.0, "y": 10.0},
+            "symbolData": {"symbolID": _guid(99), "symbolOverrides": []},
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    report = _expand_instances(nodes, warnings)
+    assert report["unresolved"] == 1
+    assert nodes["0:20"].children == []
+    assert any("component_missing" in warning for warning in warnings)

@@ -15,8 +15,18 @@ from PySide6.QtGui import (
 
 
 def boolean_operand_ids(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Every object a boolean operation consumes, including nested ones.
+
+    ``operand_ids`` names the operation's direct children, but a boolean
+    consumes its whole subtree - a group operand contributes its contents, not
+    itself.  Stopping at the direct children left those descendants painting on
+    their own, which is how imported Figma booleans showed their operands'
+    placeholder colours on top of the resolved shape.
+    """
+
+    objects = list(rows)
     result: set[str] = set()
-    for row in rows:
+    for row in objects:
         boolean = (row.get("content") or {}).get("boolean")
         if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
             continue
@@ -25,6 +35,20 @@ def boolean_operand_ids(rows: Iterable[Mapping[str, Any]]) -> set[str]:
             for item in boolean.get("operand_ids", [])
             if str(item or "")
         )
+    if not result:
+        return result
+    children: dict[str, list[str]] = {}
+    for row in objects:
+        parent = str(row.get("parent_id") or "")
+        if parent:
+            children.setdefault(parent, []).append(str(row.get("id") or ""))
+    stack = list(result)
+    while stack:
+        current = stack.pop()
+        for child in children.get(current, ()):
+            if child and child not in result:
+                result.add(child)
+                stack.append(child)
     return result
 
 

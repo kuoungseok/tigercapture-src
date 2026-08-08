@@ -763,9 +763,20 @@ def _figma_missing_auto_layout_cross_box(
 
 def _map_kind(node: Mapping[str, Any]) -> str:
     node_type = str(node.get("type") or "").upper()
-    if node_type in {"FRAME", "SECTION", "COMPONENT", "COMPONENT_SET", "SLOT"}:
+    if node_type in {
+        "FRAME",
+        "SECTION",
+        "COMPONENT",
+        "COMPONENT_SET",
+        "SLOT",
+        # An instance is frame-like in Figma: it paints its own fills, clips,
+        # and carries auto layout.  Treating it as a group dropped the fill -
+        # invisible while instances imported empty, obvious once their children
+        # arrived and the button behind them had no background.
+        "INSTANCE",
+    }:
         return "frame"
-    if node_type in {"GROUP", "INSTANCE"}:
+    if node_type == "GROUP":
         return "group"
     if node_type == "ELLIPSE":
         return "ellipse"

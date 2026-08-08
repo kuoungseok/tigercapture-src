@@ -534,6 +534,180 @@ def _link_tree(nodes: Mapping[str, _FigNode]) -> list[_FigNode]:
     return roots
 
 
+_MAX_INSTANCE_DEPTH = 12
+_MAX_EXPANDED_INSTANCE_NODES = 400_000
+
+
+def _guid_path_key(value: Any) -> tuple[str, ...]:
+    """Identify one descendant of a component, as an override addresses it."""
+    guids = (value or {}).get("guids") if isinstance(value, Mapping) else None
+    if not isinstance(guids, Sequence) or isinstance(guids, (str, bytes)):
+        return ()
+    return tuple(fig_guid_to_id(item) for item in guids)
+
+
+def _symbol_overrides(symbol_data: Any) -> dict[tuple[str, ...], dict[str, Any]]:
+    rows = (symbol_data or {}).get("symbolOverrides") if isinstance(symbol_data, Mapping) else None
+    result: dict[tuple[str, ...], dict[str, Any]] = {}
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return result
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        key = _guid_path_key(row.get("guidPath"))
+        if not key:
+            continue
+        fields = {name: value for name, value in row.items() if name != "guidPath"}
+        # Later overrides for the same descendant supersede earlier ones.
+        result.setdefault(key, {}).update(fields)
+    return result
+
+
+def _derived_symbol_data(raw: Mapping[str, Any]) -> dict[tuple[str, ...], dict[str, Any]]:
+    rows = raw.get("derivedSymbolData")
+    result: dict[tuple[str, ...], dict[str, Any]] = {}
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        return result
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        key = _guid_path_key(row.get("guidPath"))
+        if not key:
+            continue
+        fields = {
+            name: value
+            for name, value in row.items()
+            if name != "guidPath" and value not in (None, [])
+        }
+        if fields:
+            result.setdefault(key, {}).update(fields)
+    return result
+
+
+def _expand_instances(
+    nodes: Mapping[str, "_FigNode"],
+    warnings: list[str],
+) -> dict[str, int]:
+    """Give every instance the children its component defines.
+
+    A ``.fig`` instance stores only a reference to its component plus the
+    overrides that make it differ; the REST API publishes the whole subtree.
+    Without this the importer sees an empty node and everything inside the
+    instance - text, icons, nested frames - disappears.
+    """
+
+    symbols = {
+        node.node_id: node
+        for node in nodes.values()
+        if str(node.raw.get("type") or "").upper() == "SYMBOL"
+    }
+    budget = [_MAX_EXPANDED_INSTANCE_NODES]
+    report = {"instances": 0, "nodes": 0, "unresolved": 0, "truncated": 0}
+
+    def clone(
+        source: "_FigNode",
+        instance_id: str,
+        path: tuple[str, ...],
+        overrides: Mapping[tuple[str, ...], Mapping[str, Any]],
+        derived: Mapping[tuple[str, ...], Mapping[str, Any]],
+        seen_symbols: frozenset[str],
+        depth: int,
+    ) -> "_FigNode | None":
+        if budget[0] <= 0:
+            report["truncated"] += 1
+            return None
+        budget[0] -= 1
+        step = path + (source.node_id,)
+        raw = dict(source.raw)
+        raw.update(derived.get(step) or {})
+        raw.update(overrides.get(step) or {})
+        # REST spells an instance child ``I<instance>;<component child>``.
+        node_id = "I" + ";".join((instance_id, *step))
+        copy_node = _FigNode(raw, node_id, instance_id, source.position)
+        report["nodes"] += 1
+        nested_type = str(raw.get("type") or "").upper()
+        if nested_type == "INSTANCE" and not source.children:
+            expand(copy_node, seen_symbols, depth + 1, path=step, outer=(overrides, derived))
+        else:
+            for child in source.children:
+                cloned = clone(
+                    child,
+                    instance_id,
+                    step,
+                    overrides,
+                    derived,
+                    seen_symbols,
+                    depth,
+                )
+                if cloned is not None:
+                    copy_node.children.append(cloned)
+            copy_node.children.sort(key=lambda item: (item.position, item.node_id))
+        return copy_node
+
+    def expand(
+        node: "_FigNode",
+        seen_symbols: frozenset[str],
+        depth: int,
+        *,
+        path: tuple[str, ...] = (),
+        outer: tuple[Mapping[Any, Any], Mapping[Any, Any]] | None = None,
+    ) -> None:
+        if depth > _MAX_INSTANCE_DEPTH:
+            warnings.append(f"fig_instance_nesting_too_deep:{node.node_id}")
+            return
+        data = node.raw.get("symbolData")
+        symbol_id = fig_guid_to_id((data or {}).get("symbolID") if isinstance(data, Mapping) else None)
+        symbol = symbols.get(symbol_id)
+        if symbol is None:
+            report["unresolved"] += 1
+            warnings.append(f"fig_instance_component_missing:{node.node_id}")
+            return
+        if symbol_id in seen_symbols:
+            # A component that contains itself would expand forever.
+            warnings.append(f"fig_instance_recursive_component:{symbol_id}")
+            return
+        overrides = dict(_symbol_overrides(data))
+        derived = dict(_derived_symbol_data(node.raw))
+        if outer is not None:
+            # A nested instance also inherits the outer instance's overrides
+            # that address through it, rebased onto this symbol.
+            outer_overrides, outer_derived = outer
+            for key, fields in outer_overrides.items():
+                if len(key) > len(path) and key[: len(path)] == path:
+                    overrides.setdefault(key[len(path):], {}).update(fields)
+            for key, fields in outer_derived.items():
+                if len(key) > len(path) and key[: len(path)] == path:
+                    derived.setdefault(key[len(path):], {}).update(fields)
+        children = []
+        for child in symbol.children:
+            cloned = clone(
+                child,
+                node.node_id,
+                (),
+                overrides,
+                derived,
+                seen_symbols | {symbol_id},
+                depth,
+            )
+            if cloned is not None:
+                children.append(cloned)
+        children.sort(key=lambda item: (item.position, item.node_id))
+        node.children = children
+        report["instances"] += 1
+
+    for node in list(nodes.values()):
+        if str(node.raw.get("type") or "").upper() != "INSTANCE":
+            continue
+        if node.children:
+            continue
+        expand(node, frozenset(), 0)
+    if report["truncated"]:
+        warnings.append(
+            f"fig_instance_expansion_truncated:{_MAX_EXPANDED_INSTANCE_NODES}"
+        )
+    return report
+
+
 def _node_type(raw: Mapping[str, Any], warnings: list[str]) -> str:
     internal = str(raw.get("type") or "").upper()
     if not internal:
@@ -600,7 +774,13 @@ def _convert_node(
         rest["clipsContent"] = bool(raw.get("clipsContent"))
 
     if raw.get("mask"):
-        rest["mask"] = True
+        # REST - and therefore the importer - spells these ``isMask`` and
+        # ``isMaskOutline``.  Emitting ``mask`` meant nothing read them, so
+        # every mask was imported as an ordinary shape: Figma fills mask
+        # rectangles with a loud colour precisely because they never render.
+        rest["isMask"] = True
+        if raw.get("maskIsOutline"):
+            rest["isMaskOutline"] = True
         mask_type = str(raw.get("maskType") or "").upper()
         if mask_type:
             rest["maskType"] = mask_type
@@ -691,6 +871,9 @@ def fig_archive_to_rest_payload(archive: FigArchive) -> tuple[dict[str, Any], di
     if not nodes:
         raise ValueError("The .fig document contains no node changes")
     roots = _link_tree(nodes)
+    # After linking: expansion copies a component's children, so the tree has
+    # to exist first.
+    instance_report = _expand_instances(nodes, warnings)
     raw_blobs = archive.message.get("blobs")
     blobs = raw_blobs if isinstance(raw_blobs, list) else []
     document = _document_root(roots, warnings, blobs)
@@ -719,6 +902,7 @@ def fig_archive_to_rest_payload(archive: FigArchive) -> tuple[dict[str, Any], di
         "node_count": len(nodes),
         "root_count": len(roots),
         "image_count": len(archive.images),
+        "instance_expansion": dict(instance_report),
         "unmapped_node_types": [entry.split(":", 1)[1] for entry in unmapped],
         "warnings": sorted(set(warnings)),
     }

@@ -714,7 +714,9 @@ def test_figma_remote_instance_fallback_detaches_expanded_descendants() -> None:
     descendants = [
         row for row in document["objects"] if row["parent_id"] == remote["id"]
     ]
-    assert remote["kind"] == "group"
+    # An instance is frame-like in Figma - it paints its own fills - so it
+    # imports as a frame even when its remote component cannot be resolved.
+    assert remote["kind"] == "frame"
     assert remote["component_id"] == ""
     assert remote["content"]["figma_component_id"] == "figma-component-99-42"
     assert remote["content"]["remote_component"]["status"] == "missing"
