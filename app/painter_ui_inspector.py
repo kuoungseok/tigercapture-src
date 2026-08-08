@@ -4846,15 +4846,18 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout
 
         report = diagnose_ui_layout(self._document, normalize=False)
+        # Index the rows once instead of re-scanning all of them per
+        # diagnostic; on a large import that inner scan was the single most
+        # expensive thing left on the click path.
+        artboard_of_object = {
+            item["id"]: item["artboard_id"]
+            for item in self._document["objects"]
+        }
         diagnostics = [
             row
             for row in report["diagnostics"]
             if row["owner_id"] == str(artboard["id"])
-            or any(
-                item["id"] == row["owner_id"]
-                and item["artboard_id"] == artboard["id"]
-                for item in self._document["objects"]
-            )
+            or artboard_of_object.get(row["owner_id"]) == artboard["id"]
         ]
         errors = sum(row["severity"] == "error" for row in diagnostics)
         warnings = sum(row["severity"] == "warning" for row in diagnostics)
