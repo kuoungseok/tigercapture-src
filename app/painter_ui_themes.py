@@ -370,6 +370,13 @@ def resolve_ui_theme_document(
         row["id"]: dict(row.get("variable_modes") or {})
         for row in document["artboards"]
     }
+    # The modes key depends only on the artboard, so derive it once per
+    # artboard rather than once per object. On a large import that is 123
+    # sorted joins instead of 8.9k.
+    artboard_modes_keys = {
+        artboard_id: _variable_modes_key(modes)
+        for artboard_id, modes in artboard_variable_modes.items()
+    }
     # Theme resolution is a pure function of a row plus its artboard's theme,
     # variable modes and the token table. Everything upstream now preserves the
     # object identity of rows an edit did not touch, so an unchanged row can
@@ -385,9 +392,9 @@ def resolve_ui_theme_document(
     current: dict[int, tuple[Any, str, str, dict[str, Any]]] = {}
     resolved_rows: list[dict[str, Any]] = []
     for row in document["objects"]:
-        theme = artboard_themes.get(row["artboard_id"], "light")
-        modes = artboard_variable_modes.get(row["artboard_id"], {})
-        modes_key = _variable_modes_key(modes)
+        artboard_id = row["artboard_id"]
+        theme = artboard_themes.get(artboard_id, "light")
+        modes_key = artboard_modes_keys.get(artboard_id, "")
         cached = previous.get(id(row))
         if (
             cached is not None
@@ -400,7 +407,7 @@ def resolve_ui_theme_document(
             resolved_row = resolve_ui_theme_object(
                 row,
                 theme=theme,
-                variable_modes=modes,
+                variable_modes=artboard_variable_modes.get(artboard_id, {}),
                 tokens=tokens,
             )
         # Holding the input row keeps its id from being recycled behind the key.

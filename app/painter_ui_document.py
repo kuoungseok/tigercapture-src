@@ -2054,6 +2054,7 @@ def update_ui_object(
     changes: Mapping[str, Any],
     *,
     normalize: bool = True,
+    validate: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply field changes to one object.
 
@@ -2061,6 +2062,13 @@ def update_ui_object(
     function writes to are copied - the object list, the selection mapping and
     the one replaced row - so a drag no longer clones every other row just to
     move a single one.
+
+    ``validate=False`` promises the caller validates the finished document
+    itself. Validation walks the whole document, so a caller applying several
+    changes in a row would otherwise pay for the entire document once per
+    object - which is what made moving a multi-object selection cost multiples
+    of moving one. Only skip it if you really do validate afterwards: this
+    function raises on invalid updates and callers rely on that.
     """
     if not normalize and isinstance(value, Mapping):
         document = dict(value)
@@ -2109,9 +2117,10 @@ def update_ui_object(
                     component_id,
                     normalize=False,
                 )
-        validation = validate_ui_document(document, normalize=False)
-        if not validation["ok"]:
-            raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
+        if validate:
+            validation = validate_ui_document(document, normalize=False)
+            if not validation["ok"]:
+                raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
         document["selection"]["object_id"] = object_id
         if object_id not in document["selection"]["object_ids"]:
             document["selection"]["object_ids"].append(object_id)
