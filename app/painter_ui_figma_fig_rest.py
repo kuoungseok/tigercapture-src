@@ -620,7 +620,13 @@ def _expand_instances(
         step = path + (source.node_id,)
         raw = dict(source.raw)
         raw.update(derived.get(step) or {})
-        raw.update(overrides.get(step) or {})
+        # A descendant that is itself an instance already stores the state
+        # Figma resolved for it, so the outer instance's override for that path
+        # is a stale delta - applying it repainted resolved nested instances
+        # with a colour Figma never renders.  Its own nested overrides still
+        # apply, one level down.
+        if str(source.raw.get("type") or "").upper() != "INSTANCE":
+            raw.update(overrides.get(step) or {})
         # REST spells an instance child ``I<instance>;<component child>``.
         node_id = "I" + ";".join((instance_id, *step))
         copy_node = _FigNode(raw, node_id, instance_id, source.position)

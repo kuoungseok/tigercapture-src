@@ -1132,3 +1132,97 @@ def test_an_instance_without_its_component_is_reported() -> None:
     assert report["unresolved"] == 1
     assert nodes["0:20"].children == []
     assert any("component_missing" in warning for warning in warnings)
+
+
+def test_a_nested_instance_keeps_its_own_resolved_state() -> None:
+    """An outer override must not repaint a nested instance.
+
+    A descendant that is itself an instance already carries the state Figma
+    resolved for it; the outer instance's override for that path is a stale
+    delta.  Applying it painted resolved nested instances a colour Figma never
+    renders, while text overrides on ordinary nodes still have to apply.
+    """
+
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _expand_instances,
+        _link_tree,
+    )
+
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        # The button component, and the button instance the card holds.
+        {
+            "guid": _guid(30),
+            "type": "SYMBOL",
+            "name": "button",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 80.0, "y": 24.0},
+            "fillPaints": [{"type": "SOLID", "color": {"r": 0, "g": 0, "b": 0, "a": 1}}],
+        },
+        {
+            "guid": _guid(10),
+            "type": "SYMBOL",
+            "name": "card",
+            "parentIndex": {"guid": _guid(1), "position": '"'},
+            "transform": _matrix(),
+            "size": {"x": 200.0, "y": 80.0},
+        },
+        {
+            "guid": _guid(11),
+            "type": "TEXT",
+            "name": "label",
+            "parentIndex": {"guid": _guid(10), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 100.0, "y": 20.0},
+            "textData": {"characters": "component default"},
+        },
+        {
+            "guid": _guid(12),
+            "type": "INSTANCE",
+            "name": "button",
+            "parentIndex": {"guid": _guid(10), "position": '"'},
+            "transform": _matrix(),
+            "size": {"x": 80.0, "y": 24.0},
+            # Already resolved to its own colour.
+            "fillPaints": [
+                {"type": "SOLID", "color": {"r": 0.125, "g": 0.125, "b": 0.125, "a": 1}}
+            ],
+            "symbolData": {"symbolID": _guid(30), "symbolOverrides": []},
+        },
+        {
+            "guid": _guid(20),
+            "type": "INSTANCE",
+            "name": "card instance",
+            "parentIndex": {"guid": _guid(1), "position": "#"},
+            "transform": _matrix(300.0, 0.0),
+            "size": {"x": 200.0, "y": 80.0},
+            "symbolData": {
+                "symbolID": _guid(10),
+                "symbolOverrides": [
+                    {
+                        "guidPath": {"guids": [_guid(11)]},
+                        "textData": {"characters": "overridden"},
+                    },
+                    {
+                        "guidPath": {"guids": [_guid(12)]},
+                        "fillPaints": [
+                            {"type": "SOLID", "color": {"r": 1, "g": 0, "b": 1, "a": 1}}
+                        ],
+                    },
+                ],
+            },
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    _expand_instances(nodes, warnings)
+
+    children = {child.raw["name"]: child for child in nodes["0:20"].children}
+    # An ordinary node still takes the override.
+    assert children["label"].raw["textData"]["characters"] == "overridden"
+    # The nested instance keeps what it already resolved to.
+    colour = children["button"].raw["fillPaints"][0]["color"]
+    assert colour["r"] == pytest.approx(0.125)
+    assert colour["g"] == pytest.approx(0.125)
