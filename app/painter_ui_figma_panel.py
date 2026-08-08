@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.painter_ui_document import ui_document_content_witness
 from app.painter_ui_figma import (
     import_fig_file,
     import_figma_file,
@@ -60,6 +61,9 @@ class PainterUIFigmaPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._document: dict[str, Any] = {}
+        self._summary_witness: tuple[Any, ...] | None = None
+        # The witness holds row ids, so the rows have to stay alive with it.
+        self._summary_pins: tuple[Any, ...] = ()
         self._worker: _FigmaImportThread | None = None
 
         root = QVBoxLayout(self)
@@ -185,6 +189,14 @@ class PainterUIFigmaPanel(QWidget):
         normalize: bool = True,
     ) -> None:
         self._document = dict(value or {})
+        # Both summaries below walk every row, and neither depends on the
+        # selection, so a click would otherwise rescan the whole document to
+        # rewrite two labels with the text they already have.
+        witness, pins = ui_document_content_witness(self._document)
+        if witness == self._summary_witness:
+            return
+        self._summary_witness = witness
+        self._summary_pins = pins
         report = inspect_figma_compatibility(
             self._document,
             normalize=normalize,
