@@ -4133,7 +4133,13 @@ class PainterUIInspector(QWidget):
             and str(row.get("kind") or "") == "frame"
         )
         if frame_selected:
-            self.frame_selection_panel.set_frame(row, self._document)
+            # ``self._document`` is canonical, as the panels below set_document
+            # already rely on.
+            self.frame_selection_panel.set_frame(
+                row,
+                self._document,
+                normalize=False,
+            )
         shape_selected = bool(
             count == 1
             and row is not None
