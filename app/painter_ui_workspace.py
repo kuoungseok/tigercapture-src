@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 from typing import Any, Mapping
 
@@ -25,7 +23,11 @@ from app.painter_ui_constraints import (
     resolve_ui_constraints,
     ui_pivot_point,
 )
-from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_document import (
+    canonical_payload_digest,
+    normalize_ui_document,
+    ui_document_content_witness,
+)
 from app.painter_ui_image_renderer import draw_ui_image
 from app.painter_i18n import painter_text
 from app.painter_ui_motion_bridge import resolved_ui_geometry
@@ -101,18 +103,6 @@ _ARTBOARD_SURFACE_PIXEL_BUDGET = 24_000_000
 _VIEW_GESTURE_SETTLE_MS = 90
 
 
-def _document_render_fingerprint(document: Mapping[str, Any]) -> str:
-    payload = dict(document)
-    payload.pop("selection", None)
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 class PainterUIDesignOverlay(QWidget):
     object_selected = Signal(str)
     object_selection_requested = Signal(str, str)
@@ -154,6 +144,11 @@ class PainterUIDesignOverlay(QWidget):
         self._document = normalize_ui_document(None)
         self._effective_document = self._document
         self._document_render_signature: tuple[Any, ...] | None = None
+        self._document_render_witness: tuple[Any, ...] | None = None
+        # The witness holds row ids, so the rows have to stay alive with it.
+        self._document_render_pins: tuple[Any, ...] = ()
+        self._document_render_digest: bytes | None = None
+        self._document_render_epoch = 0
         self._effective_objects_by_id: dict[str, dict[str, Any]] = {}
         self._artboards_by_id: dict[str, dict[str, Any]] = {}
         self._objects_by_artboard: dict[str, list[dict[str, Any]]] = {}
@@ -306,6 +301,17 @@ class PainterUIDesignOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
+    @staticmethod
+    def _render_content_digest(document: Mapping[str, Any]) -> bytes | None:
+        """Digest of everything the canvas renders, ignoring the selection."""
+        return canonical_payload_digest(
+            {
+                name: value
+                for name, value in document.items()
+                if name != "selection"
+            }
+        )
+
     def set_document(
         self,
         value: Mapping[str, Any] | None,
@@ -321,18 +327,17 @@ class PainterUIDesignOverlay(QWidget):
             if not normalize and isinstance(value, Mapping)
             else normalize_ui_document(value)
         )
-        signature = (
-            str(document.get("document_id") or ""),
-            int(document.get("revision") or 0),
-            str(document.get("active_page_id") or ""),
-            str(document.get("active_artboard_id") or ""),
-            len(document.get("objects") or []),
-            len(document.get("artboards") or []),
-            _document_render_fingerprint(document),
-        )
-        reuse_resolved = (
-            signature == self._document_render_signature
-            and bool(self._effective_objects_by_id)
+        # Two tiers, because digesting the whole page to answer this cost
+        # ~150 ms on a large import -- more than the rebuild it exists to skip,
+        # and it was paid even on the common path where it did skip it. Row
+        # identity settles the canvas's own refresh, which shares its rows; the
+        # digest still settles a caller that handed over a re-normalised
+        # document whose rows are new objects with unchanged content.
+        witness, pinned = ui_document_content_witness(document)
+        reuse_resolved = bool(self._effective_objects_by_id) and (
+            witness == self._document_render_witness
+            or self._render_content_digest(document)
+            == self._document_render_digest
         )
         self._document = document
         selected_ids = {
@@ -346,13 +351,30 @@ class PainterUIDesignOverlay(QWidget):
             for row in document.get("objects", [])
         ):
             self._layer_hover_object_id = ""
+        # Adopt the new rows either way: they are the ones this document holds
+        # now, so recognising them next time is what keeps the cheap tier cheap.
+        self._document_render_witness = witness
+        self._document_render_pins = pinned
         if reuse_resolved:
             self._effective_document["selection"] = copy.deepcopy(
                 document["selection"]
             )
         else:
             self._rebuild_effective_document()
-            self._document_render_signature = signature
+            self._document_render_digest = self._render_content_digest(document)
+            # The rendered-surface caches key off this, so it has to stay small
+            # enough to hash on every artboard paint -- hence an epoch counter
+            # rather than the witness itself, which holds one entry per row.
+            self._document_render_epoch += 1
+            self._document_render_signature = (
+                str(document.get("document_id") or ""),
+                int(document.get("revision") or 0),
+                str(document.get("active_page_id") or ""),
+                str(document.get("active_artboard_id") or ""),
+                len(document.get("objects") or []),
+                len(document.get("artboards") or []),
+                self._document_render_epoch,
+            )
         if self._edit_scope_id not in {
             row["id"] for row in self._document["objects"]
         }:

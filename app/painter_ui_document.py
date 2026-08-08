@@ -559,6 +559,61 @@ def canonical_payload_digest(value: Any) -> bytes | None:
     return _canonical_digest(value)
 
 
+_CONTENT_WITNESS_IGNORED = frozenset({"selection"})
+
+
+def ui_document_content_witness(
+    document: Mapping[str, Any],
+    *,
+    ignore: frozenset[str] = _CONTENT_WITNESS_IGNORED,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """Cheap proof that a document's content has not changed.
+
+    Compares scalars by value and rows by identity, so it is only sound where
+    rows are rebuilt rather than edited in place -- the invariant the whole
+    resolver chain upholds and the theme row cache already depends on. That
+    buys one pointer read per row against the ~150 ms
+    ``canonical_payload_digest`` costs on a large import, which is why every
+    "has this changed?" check on the click path uses this instead.
+
+    Deliberately not keyed on the document envelope: a selection change
+    rebuilds the envelope while sharing every container in it, so envelope
+    identity would report a change on exactly the interaction these checks
+    exist to skip.
+
+    Returns the witness and the containers behind it. An id only means
+    something while the object behind it is alive, so a caller that keeps a
+    witness must keep the returned containers alongside it.
+    """
+    witness: list[Any] = []
+    pinned: list[Any] = []
+    for name in sorted(document):
+        if name in ignore:
+            continue
+        value = document[name]
+        if value is None or isinstance(value, (str, bool, int, float)):
+            witness.append((name, value))
+            continue
+        pinned.append(value)
+        if isinstance(value, list):
+            witness.append(
+                (
+                    name,
+                    len(value),
+                    tuple(
+                        item
+                        if item is None
+                        or isinstance(item, (str, bool, int, float))
+                        else id(item)
+                        for item in value
+                    ),
+                )
+            )
+        else:
+            witness.append((name, id(value)))
+    return tuple(witness), tuple(pinned)
+
+
 def _remember_canonical_digest(digest: bytes | None) -> None:
     if digest is None:
         return
@@ -1570,6 +1625,31 @@ def _remove_dangling_records(
     }
 
 
+_SCOPED_PAGE_ROWS: dict[int, tuple[Any, dict[str, Any]]] = {}
+_SCOPED_PAGE_ROWS_LIMIT = 16
+
+
+def _page_row_scoped_out(page: dict[str, Any]) -> dict[str, Any]:
+    """Return ``page`` with no remembered artboard, reusing the last result.
+
+    Rebuilding this row on every canvas refresh cost nothing by itself, but it
+    handed the canvas a new object each time, and the canvas decides whether to
+    rebuild its resolved document by comparing row identity. One fresh page row
+    per refresh was enough to defeat that check on every click.
+    """
+    if not page["active_artboard_id"]:
+        return page
+    memo = _SCOPED_PAGE_ROWS.get(id(page))
+    if memo is not None and memo[0] is page:
+        return memo[1]
+    scoped = {**page, "active_artboard_id": ""}
+    # Holding the input row stops its id being recycled behind the memo.
+    _SCOPED_PAGE_ROWS[id(page)] = (page, scoped)
+    while len(_SCOPED_PAGE_ROWS) > _SCOPED_PAGE_ROWS_LIMIT:
+        _SCOPED_PAGE_ROWS.pop(next(iter(_SCOPED_PAGE_ROWS)))
+    return scoped
+
+
 def active_ui_page_document(
     value: Mapping[str, Any],
     *,
@@ -1611,7 +1691,7 @@ def active_ui_page_document(
     scoped["pages"] = [
         page
         if page["id"] == page_id
-        else {**page, "active_artboard_id": ""}
+        else _page_row_scoped_out(page)
         for page in document["pages"]
     ]
     return scoped
