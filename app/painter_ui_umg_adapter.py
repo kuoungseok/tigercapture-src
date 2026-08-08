@@ -1077,6 +1077,54 @@ def _flatten_component_override_changes(
     return flattened
 
 
+_DERIVABLE_INSTANCE_OVERRIDE_PATHS = ("content.text", "visible")
+
+
+def _derived_instance_overrides(
+    row: Mapping[str, Any],
+    definition_row: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return the authored values an expanded instance holds over its source.
+
+    Figma expands an instance into descendants that carry the authored values
+    instead of recording them as overrides, so a row can differ from its
+    definition while reporting no overrides at all. Replaying the definition
+    then silently changes the information: a button labelled "Start" arrives as
+    the default "Get started".
+
+    Only the paths UMG can actually replay at runtime are derived. Widening
+    this to style would not improve fidelity, because every derived path outside
+    that set becomes an unsupported-override blocker below; those differences
+    keep resolving to the definition exactly as they do today.
+    """
+
+    if definition_row is None:
+        return {}
+    derived: dict[str, Any] = {}
+    for path in _DERIVABLE_INSTANCE_OVERRIDE_PATHS:
+        if path == "visible":
+            authored = bool(row.get("visible", True))
+            source = bool(definition_row.get("visible", True))
+        else:
+            content = row.get("content")
+            source_content = definition_row.get("content")
+            authored = str(
+                (content if isinstance(content, Mapping) else {}).get("text")
+                or ""
+            )
+            source = str(
+                (
+                    source_content
+                    if isinstance(source_content, Mapping)
+                    else {}
+                ).get("text")
+                or ""
+            )
+        if authored != source:
+            derived[path] = authored
+    return derived
+
+
 def _instance_resolved_overrides(
     document: Mapping[str, Any],
     instance_root: Mapping[str, Any],
@@ -1112,6 +1160,11 @@ def _instance_resolved_overrides(
         overrides = normalize_ui_instance_overrides(
             row.get("instance_overrides")
         )
+        if source_id and not overrides:
+            overrides = _derived_instance_overrides(
+                row,
+                object_by_id.get(source_id),
+            )
         if (
             object_id == str(instance_root.get("id") or "")
             and source_id == str(component.get("root_object_id") or "")

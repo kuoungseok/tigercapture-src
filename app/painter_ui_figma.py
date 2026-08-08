@@ -219,6 +219,112 @@ def _detach_figma_component_property_bindings(
     warnings.append(f"converted:{row['id']}:{reason}")
 
 
+def _link_expanded_instance_descendants(
+    objects: list[dict[str, Any]],
+    objects_by_id: Mapping[str, dict[str, Any]],
+    warnings: list[str],
+) -> None:
+    """Record which definition node each expanded instance descendant clones.
+
+    Figma expands an instance into editable descendants that carry the authored
+    values, while the reusable definition keeps the defaults. Both subtrees are
+    present here, but only the instance *root* records the definition it came
+    from, so a consumer holding one descendant cannot tell an override from a
+    default and has to fall back to the definition.
+
+    Descendants are paired positionally in z-order, and only when the two
+    subtrees agree exactly on length and kind at every level. Anything else --
+    a swapped nested instance, grafted slot content, a variant with different
+    children -- leaves the descendants unlinked, which is the behaviour that
+    already existed. Nested instance roots are paired but not descended into:
+    each one is linked against its own definition by its own pass.
+    """
+
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for row in objects:
+        children_by_parent.setdefault(
+            str(row.get("parent_id") or ""),
+            [],
+        ).append(row)
+    for rows in children_by_parent.values():
+        rows.sort(
+            key=lambda item: (
+                int(item.get("z_index") or 0),
+                str(item.get("id") or ""),
+            )
+        )
+
+    def paired(
+        instance_id: str,
+        definition_id: str,
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]] | None:
+        instance_rows = children_by_parent.get(instance_id, [])
+        definition_rows = children_by_parent.get(definition_id, [])
+        if len(instance_rows) != len(definition_rows):
+            return None
+        pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for instance_row, definition_row in zip(instance_rows, definition_rows):
+            if str(instance_row.get("kind") or "") != str(
+                definition_row.get("kind") or ""
+            ):
+                return None
+            pairs.append((instance_row, definition_row))
+            if str(instance_row.get("component_role") or "") == "instance":
+                continue
+            nested = paired(
+                str(instance_row.get("id") or ""),
+                str(definition_row.get("id") or ""),
+            )
+            if nested is None:
+                return None
+            pairs.extend(nested)
+        return pairs
+
+    for row in objects:
+        if str(row.get("component_role") or "") != "instance":
+            continue
+        definition_id = str(row.get("component_source_object_id") or "")
+        if not definition_id or definition_id not in objects_by_id:
+            continue
+        pairs = paired(str(row.get("id") or ""), definition_id)
+        if pairs is None:
+            warnings.append(
+                f"unlinked:{row['id']}"
+                ":instance_subtree_shape_differs_from_definition"
+            )
+            continue
+        component_id = str(row.get("component_id") or "")
+        for instance_row, definition_row in pairs:
+            definition_object_id = str(definition_row.get("id") or "")
+            if not str(instance_row.get("component_source_object_id") or ""):
+                instance_row["component_source_object_id"] = (
+                    definition_object_id
+                )
+                continue
+            # A definition row of an enclosing component already points at
+            # itself, which is correct for that component. Its link to the
+            # nested component it also belongs to is the scope pair, and
+            # leaving it empty is what made a nested instance replay the
+            # nested default instead of the value authored one level up.
+            # The scope pair only means something when the row belongs to some
+            # other component as well; a scope equal to the row's own component
+            # is rejected as redundant by the document contract.
+            if (
+                component_id
+                and str(instance_row.get("component_id") or "") != component_id
+                and not str(instance_row.get("component_scope_id") or "")
+                and not str(
+                    instance_row.get("component_scope_source_object_id") or ""
+                )
+                and instance_row.get("component_source_object_id")
+                != definition_object_id
+            ):
+                instance_row["component_scope_id"] = component_id
+                instance_row["component_scope_source_object_id"] = (
+                    definition_object_id
+                )
+
+
 def _figma_variant_key(node: Mapping[str, Any]) -> str:
     properties = node.get("variantProperties")
     if isinstance(properties, Mapping) and properties:
@@ -3531,6 +3637,15 @@ def import_figma_payload(
                 row["component_id"] = ""
                 row["component_source_object_id"] = ""
                 _detach_figma_component_property_bindings(row, warnings)
+
+    # Expanded instance descendants inherit the component id but not the
+    # definition node they were cloned from, so nothing downstream can tell an
+    # authored override from a default. The UMG adapter then replays the
+    # definition and a button labelled "Start" exports as "Get started". Pair
+    # the two subtrees and record the link. Pairing is positional and fails
+    # closed: an instance whose content was swapped or grafted stays unlinked
+    # rather than mislabelled.
+    _link_expanded_instance_descendants(objects, objects_by_id, warnings)
 
     # REST /nodes responses include the resolved descendants of local
     # instances. Their componentPropertyReferences describe the source

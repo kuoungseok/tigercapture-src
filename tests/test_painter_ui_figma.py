@@ -4527,3 +4527,146 @@ def test_figma_import_reports_flattened_artboard_layout_and_reactions() -> None:
     assert any(
         "artboard_source_unsupported" in warning for warning in report["warnings"]
     )
+
+
+def _instance_override_payload() -> dict:
+    """A component whose instance authors a different label than the default."""
+    return {
+        "id": "20:1",
+        "type": "FRAME",
+        "name": "Screen",
+        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 400, "height": 300},
+        "children": [
+            {
+                "id": "20:2",
+                "type": "COMPONENT",
+                "name": "CTA",
+                "absoluteBoundingBox": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 200,
+                    "height": 60,
+                },
+                "children": [
+                    {
+                        "id": "20:3",
+                        "type": "TEXT",
+                        "name": "Label",
+                        "characters": "Get started",
+                        "absoluteBoundingBox": {
+                            "x": 10,
+                            "y": 10,
+                            "width": 180,
+                            "height": 40,
+                        },
+                    }
+                ],
+            },
+            {
+                "id": "20:10",
+                "type": "INSTANCE",
+                "name": "CTA",
+                "componentId": "20:2",
+                "absoluteBoundingBox": {
+                    "x": 0,
+                    "y": 120,
+                    "width": 200,
+                    "height": 60,
+                },
+                "children": [
+                    {
+                        "id": "I20:10;20:3",
+                        "type": "TEXT",
+                        "name": "Label",
+                        "characters": "Start",
+                        "absoluteBoundingBox": {
+                            "x": 10,
+                            "y": 130,
+                            "width": 180,
+                            "height": 40,
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def test_figma_expanded_instance_descendants_link_to_their_definition_node():
+    from app.painter_ui_figma import import_figma_payload
+
+    document, report = import_figma_payload(_instance_override_payload())
+    by_id = {row["id"]: row for row in document["objects"]}
+    descendant = next(
+        row
+        for row in document["objects"]
+        if str((row.get("content") or {}).get("figma_node_id") or "")
+        == "I20:10;20:3"
+    )
+    definition = next(
+        row
+        for row in document["objects"]
+        if str((row.get("content") or {}).get("figma_node_id") or "") == "20:3"
+    )
+
+    # Without this link nothing downstream can tell the authored "Start" from
+    # the component default, so the definition gets replayed instead.
+    assert descendant["component_source_object_id"] == definition["id"]
+    assert descendant["content"]["text"] == "Start"
+    assert definition["content"]["text"] == "Get started"
+    assert not [
+        warning
+        for warning in report["warnings"]
+        if "instance_subtree_shape_differs" in warning
+    ]
+    assert by_id[descendant["id"]] is descendant
+
+
+def test_umg_instance_override_is_derived_from_the_expanded_descendant():
+    import json
+
+    from app.painter_ui_figma import import_figma_payload
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, _ = import_figma_payload(_instance_override_payload())
+    definition = next(
+        row
+        for row in document["objects"]
+        if str((row.get("content") or {}).get("figma_node_id") or "") == "20:3"
+    )
+
+    umg = painter_ui_to_umg_document(document)
+    instance = next(
+        row
+        for row in umg["ComponentInstances"]
+        if str(row.get("ComponentId") or "")
+    )
+    overrides = json.loads(str(instance["ResolvedOverridesJson"]))
+
+    assert overrides == {definition["id"]: {"content.text": "Start"}}
+
+
+def test_umg_projection_shows_the_authored_instance_label_not_the_default():
+    from app.painter_ui_figma import import_figma_payload
+    from app.painter_ui_umg_simulator import project_painter_ui_umg_widgets
+
+    document, _ = import_figma_payload(_instance_override_payload())
+    artboard_id = document["artboards"][0]["id"]
+
+    projection = project_painter_ui_umg_widgets(
+        document,
+        artboard_id=artboard_id,
+    )
+
+    labels = sorted(
+        str((row.get("content") or {}).get("text") or "")
+        for row in projection["document"]["objects"]
+        if str((row.get("content") or {}).get("text") or "")
+    )
+    # The component definition also sits on this artboard, so one "Get started"
+    # is its own render. The instance must contribute "Start" -- before the
+    # override was derived it replayed the default and both read "Get started".
+    # A button whose label silently reverts is worse than a shape that renders
+    # imprecisely: it exports wrong information.
+    assert labels.count("Start") == 1
+    assert labels.count("Get started") == 1
