@@ -816,6 +816,13 @@ def _convert_node(
         if vector_warning:
             warnings.append(vector_warning)
 
+    if rest["type"] == "BOOLEAN_OPERATION":
+        # Without this every boolean imported as the default UNION, so a shape
+        # cut out of another one came through as the uncut original.
+        operation = str(raw.get("booleanOperation") or "").upper()
+        if operation:
+            rest["booleanOperation"] = operation
+
     if rest["type"] == "INSTANCE":
         symbol_data = raw.get("symbolData")
         component_id = ""

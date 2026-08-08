@@ -514,6 +514,12 @@ def draw_ui_vector_paths(
         if expanded_stroke_geometry
         else stroke_rows
     )
+    if not stroke_rows and stroke.alpha() > 0 and stroke_width > 0.0:
+        # A vector that ships only its fill geometry can still carry a stroke,
+        # and Figma strokes that same outline.  Emitting the geometry as fill
+        # only meant an open path with a transparent fill drew nothing at all -
+        # which is how imported hatch lines and ring outlines went missing.
+        centerline_stroke_rows = fill_rows
     # Figma REST strokeGeometry is normally an expanded outline, not a
     # centerline to stroke again. Filling its closed subpaths preserves
     # individual edge weights, inside/outside alignment, joins, caps, and

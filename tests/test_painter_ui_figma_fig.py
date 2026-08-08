@@ -1226,3 +1226,119 @@ def test_a_nested_instance_keeps_its_own_resolved_state() -> None:
     colour = children["button"].raw["fillPaints"][0]["color"]
     assert colour["r"] == pytest.approx(0.125)
     assert colour["g"] == pytest.approx(0.125)
+
+
+def test_boolean_operations_keep_their_kind(tmp_path) -> None:
+    """Every boolean imported as UNION, so cut-outs came through uncut."""
+
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _convert_node,
+        _link_tree,
+    )
+
+    identity = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    for internal, expected in (
+        ("SUBTRACT", "SUBTRACT"),
+        ("INTERSECT", "INTERSECT"),
+        ("UNION", "UNION"),
+        ("XOR", "XOR"),
+    ):
+        rows = [
+            {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+            {
+                "guid": _guid(2),
+                "type": "BOOLEAN_OPERATION",
+                "name": "shape",
+                "parentIndex": {"guid": _guid(1), "position": "!"},
+                "transform": _matrix(),
+                "size": {"x": 40.0, "y": 40.0},
+                "booleanOperation": internal,
+            },
+        ]
+        nodes, warnings = _collect_nodes(rows)
+        _link_tree(nodes)
+        rest = _convert_node(nodes["0:2"], identity, warnings, [])
+        assert rest["type"] == "BOOLEAN_OPERATION"
+        assert rest["booleanOperation"] == expected
+
+
+def test_a_subtract_boolean_reaches_the_document_as_subtract() -> None:
+    """The importer defaults to union, so the mapper has to say otherwise."""
+
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = {
+        "name": "Booleans",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "0:1",
+                    "type": "CANVAS",
+                    "name": "Page",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "FRAME",
+                            "name": "Frame",
+                            "absoluteBoundingBox": {
+                                "x": 0,
+                                "y": 0,
+                                "width": 200,
+                                "height": 200,
+                            },
+                            "children": [
+                                {
+                                    "id": "1:2",
+                                    "type": "BOOLEAN_OPERATION",
+                                    "name": "cut",
+                                    "booleanOperation": "SUBTRACT",
+                                    "absoluteBoundingBox": {
+                                        "x": 10,
+                                        "y": 10,
+                                        "width": 80,
+                                        "height": 80,
+                                    },
+                                    "children": [
+                                        {
+                                            "id": "1:3",
+                                            "type": "RECTANGLE",
+                                            "name": "base",
+                                            "absoluteBoundingBox": {
+                                                "x": 10,
+                                                "y": 10,
+                                                "width": 80,
+                                                "height": 80,
+                                            },
+                                        },
+                                        {
+                                            "id": "1:4",
+                                            "type": "ELLIPSE",
+                                            "name": "hole",
+                                            "absoluteBoundingBox": {
+                                                "x": 30,
+                                                "y": 30,
+                                                "width": 40,
+                                                "height": 40,
+                                            },
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    document, report = import_figma_payload(payload, source="BooleanSample")
+    assert report["ok"] is True
+    cut = next(
+        row for row in document["objects"] if row["name"] == "cut"
+    )
+    boolean = (cut.get("content") or {}).get("boolean") or {}
+    assert boolean.get("enabled") is True
+    assert boolean.get("operation") == "subtract"
+    assert len(boolean.get("operand_ids") or []) == 2

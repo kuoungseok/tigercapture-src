@@ -366,3 +366,47 @@ def test_layer_and_background_blur_render_real_pixel_blending() -> None:
     painter.end()
     assert 0 < surface.pixelColor(39, 20).red() < 255
     assert ui_blur_radius(style, "background_blur") == 6
+
+
+def test_a_vector_with_only_fill_geometry_still_strokes() -> None:
+    """Figma strokes the fill outline; emitting it as fill only lost the line.
+
+    An imported vector often ships just its fill geometry plus a stroke style.
+    Rendering that geometry with ``stroke="none"`` meant an open path with a
+    transparent fill drew nothing, which is how hatch lines and ring outlines
+    disappeared from imported documents.
+    """
+
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_vector_paths
+
+    image = QImage(64, 64, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    try:
+        drawn = draw_ui_vector_paths(
+            painter,
+            QRectF(0.0, 0.0, 64.0, 64.0),
+            {"vector_paths": ["M0 0L64 64"]},
+            {
+                "fill": "#00000000",
+                "stroke": "#FF0000FF",
+                "stroke_width": 4.0,
+            },
+        )
+    finally:
+        painter.end()
+    assert drawn is True
+    painted = sum(
+        1
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).alpha() > 0
+    )
+    assert painted > 0
+    # The diagonal has to land on the diagonal, not fill the box.
+    assert image.pixelColor(32, 32).red() > 200
+    assert image.pixelColor(4, 60).alpha() == 0
