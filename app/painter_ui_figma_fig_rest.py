@@ -351,6 +351,13 @@ def _text_style(node: Mapping[str, Any]) -> dict[str, Any]:
         "fontSize": font_size,
         "italic": "italic" in style_name.casefold(),
     }
+    auto_resize = str(node.get("textAutoResize") or "").upper()
+    if auto_resize:
+        # The importer turns WIDTH_AND_HEIGHT into the renderer's auto_width
+        # mode, which is what stops text being clipped to a box Figma only
+        # derived.  Leaving the field out clipped the last glyph of every
+        # hugging label, because our font measures a hair wider than Figma's.
+        style["textAutoResize"] = auto_resize
     horizontal = str(node.get("textAlignHorizontal") or "").upper()
     if horizontal:
         style["textAlignHorizontal"] = horizontal
@@ -369,8 +376,12 @@ def _text_style(node: Mapping[str, Any]) -> dict[str, Any]:
         units = str(line_height.get("units") or "RAW").upper()
         value = _number(line_height.get("value"))
         if units == "PIXELS":
-            style["lineHeightPx"] = value
-            style["lineHeightUnit"] = "PIXELS"
+            if value > 0.0:
+                style["lineHeightPx"] = value
+                style["lineHeightUnit"] = "PIXELS"
+            # Zero pixels is how ``.fig`` spells "auto": Figma derives the line
+            # box from the font.  Passing the zero through collapsed the text to
+            # nothing, so the field is left out and the renderer measures.
         elif units == "PERCENT":
             style["lineHeightPercent"] = value
             style["lineHeightPx"] = font_size * value / 100.0
@@ -632,6 +643,31 @@ def _library_guid_remap(
     return dict(zip(ordered, symbol_subtree))
 
 
+# What a remapped override may carry.  The pairing is recovered positionally,
+# so it is trusted for the content Figma clearly resolved through it - the text
+# and its metrics - and not for paint.  Those overrides pair a black paint with
+# ``styleIdForFill`` set to the null sentinel (all 189 in this file do), which
+# records "no shared style" rather than a colour: the component child keeps the
+# white it gets from its library style, which is what Figma draws.
+_REMAPPED_OVERRIDE_FIELDS: frozenset[str] = frozenset(
+    {
+        "textData",
+        "characters",
+        "fontName",
+        "fontSize",
+        "lineHeight",
+        "letterSpacing",
+        "textCase",
+        "textDecoration",
+        "textAlignHorizontal",
+        "textAlignVertical",
+        "size",
+        "visible",
+        "name",
+    }
+)
+
+
 # Fields that only make sense on a particular node type.  A positional remap is
 # sound but not certain, so an override that would land somewhere impossible is
 # dropped rather than applied.
@@ -693,13 +729,25 @@ def _expand_instances(
     def _remapped(
         table: Mapping[tuple[str, ...], Mapping[str, Any]],
         remap: Mapping[str, str],
+        *,
+        restrict: bool = False,
     ) -> dict[tuple[str, ...], dict[str, Any]]:
-        if not remap:
+        if not remap and not restrict:
             return {key: dict(value) for key, value in table.items()}
         result: dict[tuple[str, ...], dict[str, Any]] = {}
         for key, value in table.items():
             moved = tuple(remap.get(item, item) for item in key)
-            result.setdefault(moved, {}).update(value)
+            fields = (
+                {
+                    name: item
+                    for name, item in value.items()
+                    if name in _REMAPPED_OVERRIDE_FIELDS
+                }
+                if restrict
+                else dict(value)
+            )
+            if fields:
+                result.setdefault(moved, {}).update(fields)
         return result
 
     def clone(
@@ -777,7 +825,7 @@ def _expand_instances(
             return
         subtree = _symbol_subtree(symbol)
         remap = _library_guid_remap(node.raw, subtree, nodes)
-        overrides = _remapped(_symbol_overrides(data), remap)
+        overrides = _remapped(_symbol_overrides(data), remap, restrict=bool(remap))
         derived = _remapped(_derived_symbol_data(node.raw), remap)
         if remap:
             report["remapped"] += 1
@@ -846,6 +894,23 @@ def _convert_node(
     size = raw.get("size")
     width = _number(size.get("x")) if isinstance(size, Mapping) else 0.0
     height = _number(size.get("y")) if isinstance(size, Mapping) else 0.0
+    if (
+        height <= 0.0
+        and str(raw.get("type") or "").upper() == "TEXT"
+        and "HEIGHT" in str(raw.get("textAutoResize") or "").upper()
+    ):
+        # Text that hugs its height stores zero and lets Figma lay it out. REST
+        # publishes the laid-out height, so one is derived here from the line
+        # height or, failing that, the font size - otherwise the glyphs land in
+        # a box a pixel tall and never appear.
+        line_height = raw.get("lineHeight")
+        measured = (
+            _number(line_height.get("value"))
+            if isinstance(line_height, Mapping)
+            and str(line_height.get("units") or "").upper() == "PIXELS"
+            else 0.0
+        )
+        height = measured if measured > 0.0 else _number(raw.get("fontSize"), 12.0) * 1.25
 
     rest: dict[str, Any] = {
         "id": node.node_id,

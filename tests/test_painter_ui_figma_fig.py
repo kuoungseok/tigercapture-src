@@ -1468,3 +1468,130 @@ def test_text_overrides_never_land_on_a_non_text_node() -> None:
     kept = _guarded_override(fields, "RECTANGLE")
     assert "textData" not in kept
     assert set(kept) == {"fillPaints", "size"}
+
+
+def test_text_that_hugs_its_height_is_given_one() -> None:
+    """``.fig`` stores zero and lets Figma lay the text out.
+
+    Passing the zero straight through put the glyphs in a box a pixel tall, so
+    an arrow that Figma draws at 24px never appeared at all.
+    """
+
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _convert_node,
+        _link_tree,
+    )
+
+    identity = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(2),
+            "type": "TEXT",
+            "name": "arrow",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 23.0, "y": 0.0},
+            "fontSize": 24.0,
+            "lineHeight": {"value": 0.0, "units": "PIXELS"},
+            "textAutoResize": "WIDTH_AND_HEIGHT",
+            "textData": {"characters": "->"},
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    rest = _convert_node(nodes["0:2"], identity, warnings, [])
+
+    assert rest["absoluteBoundingBox"]["height"] == pytest.approx(30.0)
+    # A zero line height is ``.fig`` for "auto"; forwarding it collapsed the
+    # line box, so the field is left out and the renderer measures.
+    assert "lineHeightPx" not in rest["style"]
+    # The importer needs this to know the box is derived, not a clip.
+    assert rest["style"]["textAutoResize"] == "WIDTH_AND_HEIGHT"
+
+
+def test_a_real_line_height_is_kept_and_used_for_the_box() -> None:
+    from app.painter_ui_figma_fig_rest import (
+        _collect_nodes,
+        _convert_node,
+        _link_tree,
+    )
+
+    identity = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    rows = [
+        {"guid": _guid(1), "type": "CANVAS", "name": "Page"},
+        {
+            "guid": _guid(2),
+            "type": "TEXT",
+            "name": "label",
+            "parentIndex": {"guid": _guid(1), "position": "!"},
+            "transform": _matrix(),
+            "size": {"x": 45.0, "y": 0.0},
+            "fontSize": 18.0,
+            "lineHeight": {"value": 32.0, "units": "PIXELS"},
+            "textAutoResize": "HEIGHT",
+            "textData": {"characters": "Start"},
+        },
+    ]
+    nodes, warnings = _collect_nodes(rows)
+    _link_tree(nodes)
+    rest = _convert_node(nodes["0:2"], identity, warnings, [])
+    assert rest["style"]["lineHeightPx"] == pytest.approx(32.0)
+    assert rest["absoluteBoundingBox"]["height"] == pytest.approx(32.0)
+
+
+def test_hugging_text_reaches_the_document_unclipped() -> None:
+    """The renderer only skips its clip for auto_width text."""
+
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = {
+        "name": "Hug",
+        "document": {
+            "id": "0:0",
+            "type": "DOCUMENT",
+            "children": [
+                {
+                    "id": "0:1",
+                    "type": "CANVAS",
+                    "name": "Page",
+                    "children": [
+                        {
+                            "id": "1:1",
+                            "type": "FRAME",
+                            "name": "Frame",
+                            "absoluteBoundingBox": {
+                                "x": 0,
+                                "y": 0,
+                                "width": 200,
+                                "height": 100,
+                            },
+                            "children": [
+                                {
+                                    "id": "1:2",
+                                    "type": "TEXT",
+                                    "name": "label",
+                                    "characters": "Start",
+                                    "style": {
+                                        "fontSize": 18,
+                                        "textAutoResize": "WIDTH_AND_HEIGHT",
+                                    },
+                                    "absoluteBoundingBox": {
+                                        "x": 10,
+                                        "y": 10,
+                                        "width": 45,
+                                        "height": 32,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    document, report = import_figma_payload(payload, source="HugSample")
+    assert report["ok"] is True
+    label = next(row for row in document["objects"] if row["name"] == "label")
+    assert (label.get("content") or {}).get("text_resize") == "auto_width"
