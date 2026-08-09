@@ -998,3 +998,74 @@ def test_off_canvas_definition_stays_authoring_only_on_active_artboard() -> None
     assert exported["ComponentInstances"] == []
     assert root["id"] not in {row["Id"] for row in exported["Layers"]}
     assert validate_umg_component_contract(exported) == []
+
+
+def _hidden_layer_document() -> tuple[dict, str, str]:
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(320, 240, name="HUD")
+    document, shown = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Card",
+        x=10,
+        y=10,
+        width=120,
+        height=60,
+        style={"fill": "#3366FFFF"},
+    )
+    document, hidden = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Retired banner",
+        x=10,
+        y=100,
+        width=120,
+        height=60,
+        style={"fill": "#FF0000FF"},
+    )
+    hidden_row = next(
+        row for row in document["objects"] if row["id"] == hidden["id"]
+    )
+    hidden_row["visible"] = False
+    return document, shown["id"], hidden["id"]
+
+
+def test_hidden_painter_layers_export_as_hit_test_invisible() -> None:
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+    from app.unreal_umg_document import inspect_umg_document_records
+    from app.unreal_umg_layout import (
+        TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION,
+    )
+
+    document, shown_id, hidden_id = _hidden_layer_document()
+
+    umg = painter_ui_to_umg_document(document)
+    layers = {str(row["Id"]): row for row in umg["Layers"]}
+
+    # Zero opacity alone makes the widget invisible but not unclickable: Slate
+    # hit-tests against visibility, so it would still swallow input.
+    assert layers[hidden_id]["Opacity"] == 0.0
+    assert layers[hidden_id]["Visibility"] == "HitTestInvisible"
+    assert (
+        int(umg["SchemaVersion"])
+        >= TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
+    )
+    assert inspect_umg_document_records(umg, resources_required=False)[
+        "reasons"
+    ] == []
+
+
+def test_documents_that_hide_nothing_gain_no_visibility_field() -> None:
+    """A visible-only document must serialize exactly as it did before."""
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, shown_id, hidden_id = _hidden_layer_document()
+    document["objects"] = [
+        row for row in document["objects"] if row["id"] != hidden_id
+    ]
+
+    umg = painter_ui_to_umg_document(document)
+    layer = next(row for row in umg["Layers"] if str(row["Id"]) == shown_id)
+
+    assert layer.get("Visibility", "Visible") == "Visible"

@@ -2049,7 +2049,10 @@ def _painter_ui_to_umg_document_from_context(
     requires_static_texture_schema = False
     requires_button_style_schema = False
     requires_dynamic_rounded_card_schema = False
+    requires_widget_visibility_schema = False
     for row in export_rows:
+        if not bool(row.get("visible", True)):
+            requires_widget_visibility_schema = True
         style = dict(row.get("style") or {})
         content = dict(row.get("content") or {})
         painted_leaf_container = _is_painted_leaf_container(
@@ -2499,6 +2502,17 @@ def _painter_ui_to_umg_document_from_context(
                     if bool(row.get("visible", True))
                     else 0.0
                 ),
+                # A hidden Painter layer already exports at zero opacity, which
+                # makes it invisible but leaves it hit-testable: Slate tests
+                # against visibility, not opacity, so the widget still eats
+                # clicks meant for whatever sits behind it. Visible layers stay
+                # silent here and keep taking the schema-16 default, so a
+                # document that hides nothing gains no field it did not have.
+                **(
+                    {}
+                    if bool(row.get("visible", True))
+                    else {"Visibility": "HitTestInvisible"}
+                ),
                 "AssetId": asset_id,
                 "ImageFill": image_fill_record,
                 "Flipbook": flipbook_record,
@@ -2603,6 +2617,11 @@ def _painter_ui_to_umg_document_from_context(
         (
             TIGER_UMG_ROUNDED_CARD_DYNAMIC_SIZE_DOCUMENT_SCHEMA_VERSION
             if requires_dynamic_rounded_card_schema
+            else TIGER_UMG_SCHEMA_VERSION
+        ),
+        (
+            TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
+            if requires_widget_visibility_schema
             else TIGER_UMG_SCHEMA_VERSION
         ),
     )
