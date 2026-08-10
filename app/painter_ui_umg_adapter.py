@@ -3247,7 +3247,23 @@ def _materialize_static_bakes(
     resources = {
         str(row.get("Id") or ""): row for row in document["Resources"]
     }
-    for layer in document["Layers"]:
+    # Component definition layers are Baked exactly like screen layers, and a
+    # Figma document that keeps its art inside components has all of them
+    # there. Skipping them left the layer claiming an available bake with no
+    # asset, no ImageFill, and a status still reading "available", which the
+    # plugin rejects as an invalid Baked record and which blocks the whole
+    # document rather than just that layer.
+    bakeable_layers = [
+        *document["Layers"],
+        *(
+            component_layer
+            for component in document.get("Components", [])
+            if isinstance(component, Mapping)
+            for component_layer in component.get("Layers", [])
+            if isinstance(component_layer, dict)
+        ),
+    ]
+    for layer in bakeable_layers:
         if str(layer.get("Disposition") or "") != "Baked":
             continue
         bake_kind, plan = _bake_plan_from_layer(layer)

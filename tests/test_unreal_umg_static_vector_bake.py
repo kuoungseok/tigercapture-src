@@ -998,3 +998,109 @@ def test_generation_applies_lossless_texture_settings_only_to_materialized_baked
     )
     assert "Texture->UpdateResource();" in texture_branch
     assert "if (bMaterializedBaked || bFlipbook)" in texture_branch
+
+
+def _component_vector_document() -> tuple[dict, str]:
+    """Return a document whose only bakeable vector lives inside a component."""
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document, root = add_ui_object(
+        create_ui_document(320, 240),
+        kind="frame",
+        name="Badge",
+        x=20,
+        y=20,
+        width=60,
+        height=50,
+    )
+    document, vector = add_ui_object(
+        document,
+        kind="path",
+        name="Chevron",
+        parent_id=root["id"],
+        x=30,
+        y=30,
+        width=40,
+        height=30,
+        content={
+            "figma_type": "VECTOR",
+            "vector_fill_geometry": [
+                {
+                    "path": "M 0 30 L 20 0 L 40 30 Z",
+                    "winding_rule": "nonzero",
+                }
+            ],
+            "vector_paths": [{"path": "M 0 30 L 20 0 L 40 30 Z"}],
+        },
+        style={
+            "fill": "#336699FF",
+            "fills": [
+                {
+                    "type": "solid",
+                    "visible": True,
+                    "color": "#336699FF",
+                    "opacity": 0.5,
+                    "blend_mode": "normal",
+                }
+            ],
+            "stroke": "#00000000",
+            "stroke_width": 0.0,
+            "strokes": [],
+            "blend_mode": "normal",
+        },
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Badge",
+    )
+    document, _instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        x=140,
+        y=120,
+    )
+    return document, vector["id"]
+
+
+def test_static_vector_bakes_inside_components_are_materialized(
+    tmp_path: Path,
+) -> None:
+    """A component-owned Baked layer must arrive with its asset, not a plan."""
+    _app()
+    from app.painter_ui_umg_adapter import package_painter_umg
+
+    document, _vector_id = _component_vector_document()
+
+    package = package_painter_umg(document, tmp_path)
+
+    component_layers = [
+        layer
+        for component in package["document"]["Components"]
+        for layer in component["Layers"]
+        if str(layer.get("Disposition")) == "Baked"
+    ]
+    assert component_layers, "fixture no longer bakes anything inside a component"
+    resource_ids = {
+        str(row["Id"]) for row in package["document"]["Resources"]
+    }
+    for layer in component_layers:
+        payload = json.loads(str(layer["PayloadJson"]))
+        # Left as "available" the layer claims a bake it never produced, and the
+        # plugin rejects the whole document as an invalid Baked record.
+        assert payload["static_vector_bake"]["status"] == "materialized"
+        assert str(layer["AssetId"]) in resource_ids
+        assert layer["ImageFill"]
+        assert layer["ImageFill"]["AssetId"] == layer["AssetId"]
+    assert len(package["static_bakes"]) == len(component_layers)
+    baked_reasons = [
+        reason
+        for blocker in package["packaged_preflight"]["blockers"]
+        for reason in blocker.get("reasons", [])
+        if "baked" in reason
+    ]
+    assert baked_reasons == []
