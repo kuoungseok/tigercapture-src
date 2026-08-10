@@ -3978,6 +3978,13 @@ UTigerStudioUMGImportSubsystem::GenerateDocumentFile(
             Font.Size = PayloadFontSizeInSlatePoints(Payload, FontSize);
             Font.TypefaceFontName = ButtonTypefaceForWeight(
                 FMath::RoundToInt(FontWeight));
+            if (UFont* AuthoredFont = LoadLayerFont(Payload, ResourcePaths))
+            {
+                // Screen layers are built here rather than by the component
+                // path above, so the font has to be bound in both places.
+                Font.FontObject = AuthoredFont;
+                Font.TypefaceFontName = FName(TEXT("Regular"));
+            }
             Text->SetFont(Font);
             bool bAutoWrap = false;
             if (Payload)
