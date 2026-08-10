@@ -702,8 +702,14 @@ def test_unsupported_auto_layout_semantics_are_explicitly_blocked() -> None:
 
     assert layer["Disposition"] == "Blocked"
     assert "auto_layout_wrap_requires_umg_wrap_panel" in reasons
-    assert "auto_layout_main_alignment_unsupported:space_between" in reasons
     assert f"auto_layout_absolute_child_unsupported:{first['id']}" in reasons
+    # Main-axis alignment is no longer a blocker: the backend builds it from
+    # filler spacers, so the semantic is carried instead of refused.
+    assert not any(
+        reason.startswith("auto_layout_main_alignment_unsupported")
+        for reason in reasons
+    )
+    assert layer["MainAlignment"] == "SpaceBetween"
     preflight = preflight_painter_umg(document)
     assert preflight["ok"] is False
     assert any(row["object_id"] == frame["id"] for row in preflight["blockers"])
@@ -888,3 +894,123 @@ def test_component_slot_maps_to_native_static_umg_panel_contract() -> None:
         ],
     }
     assert preflight_painter_umg(document)["ok"] is True
+
+
+def test_main_axis_alignment_is_carried_instead_of_blocking_the_subtree() -> None:
+    """A centred Figma button must not take its own labels down with it."""
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import (
+        painter_ui_to_umg_document,
+        preflight_painter_umg,
+    )
+    from app.unreal_umg_layout import (
+        TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION,
+    )
+
+    document, frame = add_ui_object(
+        create_ui_document(400, 300),
+        kind="frame",
+        name="Button row",
+        x=20,
+        y=20,
+        width=240,
+        height=64,
+    )
+    document, frame = update_ui_object(
+        document,
+        frame["id"],
+        {
+            "layout": {
+                "mode": "horizontal",
+                "main_alignment": "center",
+                "gap": 8.0,
+            }
+        },
+    )
+    document, _label = add_ui_object(
+        document,
+        kind="text",
+        name="Label",
+        parent_id=frame["id"],
+        x=40,
+        y=36,
+        width=80,
+        height=32,
+        content={"text": "Start"},
+    )
+
+    exported = painter_ui_to_umg_document(document)
+    layer = next(row for row in exported["Layers"] if row["Id"] == frame["id"])
+
+    assert layer["MainAlignment"] == "Center"
+    assert not any(
+        str(reason).startswith("auto_layout_main_alignment_unsupported")
+        for reason in layer["BlockReasons"]
+    )
+    assert (
+        int(exported["SchemaVersion"])
+        >= TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION
+    )
+    report = preflight_painter_umg(document)
+    assert not any(
+        str(reason).startswith("auto_layout_main_alignment_unsupported")
+        for blocker in report["blockers"]
+        for reason in blocker["reasons"]
+    )
+
+
+def test_start_aligned_panels_keep_the_previous_schema_and_record() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+    )
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+    from app.unreal_umg_layout import (
+        TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION,
+    )
+
+    document, frame = add_ui_object(
+        create_ui_document(400, 300),
+        kind="frame",
+        name="Row",
+        x=20,
+        y=20,
+        width=240,
+        height=64,
+    )
+    document, frame = update_ui_object(
+        document,
+        frame["id"],
+        {
+            "layout": {
+                "mode": "horizontal",
+                "main_alignment": "start",
+                "gap": 8.0,
+            }
+        },
+    )
+    document, _label = add_ui_object(
+        document,
+        kind="text",
+        name="Label",
+        parent_id=frame["id"],
+        x=40,
+        y=36,
+        width=80,
+        height=32,
+        content={"text": "Start"},
+    )
+
+    exported = painter_ui_to_umg_document(document)
+    layer = next(row for row in exported["Layers"] if row["Id"] == frame["id"])
+
+    assert layer["MainAlignment"] == "Start"
+    assert (
+        int(exported["SchemaVersion"])
+        < TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION
+    )

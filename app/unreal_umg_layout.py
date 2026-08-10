@@ -14,8 +14,17 @@ from typing import Any, Mapping, Sequence
 TIGER_UMG_SCHEMA_VERSION = 13
 TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION = 16
 TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION = 17
+TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION = 20
 TIGER_UMG_PANEL_KINDS = frozenset(
     {"None", "Canvas", "Horizontal", "Vertical", "Grid", "Overlay"}
+)
+TIGER_UMG_MAIN_ALIGNMENTS = frozenset(
+    {
+        "Start",
+        "Center",
+        "End",
+        "SpaceBetween",
+    }
 )
 TIGER_UMG_WIDGET_VISIBILITIES = frozenset(
     {
@@ -356,8 +365,39 @@ def validate_umg_widget_visibility(
     return []
 
 
+def validate_umg_main_alignment(
+    value: object,
+    *,
+    document_schema_version: int | None = None,
+) -> list[str]:
+    """Validate the optional schema-20 linear-panel main-axis alignment.
+
+    UMG's box panels lay children out from the start and expose no main-axis
+    alignment, so anything other than ``Start`` is realized with filler spacers
+    by the backend. Absent means Start, which is what every earlier document
+    meant.
+    """
+
+    if value is None:
+        return []
+    if not isinstance(value, str):
+        return ["umg_main_alignment_record_invalid"]
+    if value not in TIGER_UMG_MAIN_ALIGNMENTS:
+        return ["umg_main_alignment_unsupported"]
+    if value != "Start" and document_schema_version is not None:
+        try:
+            schema_version = int(document_schema_version)
+        except (TypeError, ValueError):
+            schema_version = 0
+        if schema_version < TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION:
+            return ["umg_main_alignment_requires_schema_20"]
+    return []
+
+
 __all__ = [
     "TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION",
+    "TIGER_UMG_MAIN_ALIGNMENTS",
+    "TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION",
     "TIGER_UMG_PANEL_KINDS",
     "TIGER_UMG_SCHEMA_VERSION",
     "TIGER_UMG_WIDGET_VISIBILITIES",
@@ -365,6 +405,7 @@ __all__ = [
     "canvas_slot_record",
     "motion_layer_layout",
     "painter_layer_layout",
+    "validate_umg_main_alignment",
     "validate_umg_panel_record",
     "validate_umg_widget_visibility",
 ]

@@ -226,6 +226,231 @@ def _overlay_slots(
     return slots, sorted(set(reasons))
 
 
+_SINK_NAMES = (
+    "panel_kind_by_id",
+    "classification_by_id",
+    "spacing_strategy_by_id",
+    "spacer_size_rule_by_id",
+    "spacer_fill_coefficient_by_id",
+    "main_alignment_by_id",
+    "flow_slot_by_id",
+    "blockers_by_id",
+)
+
+
+_UMG_MAIN_ALIGNMENTS: Mapping[str, str] = {
+    "start": "Start",
+    "center": "Center",
+    "end": "End",
+    "space_between": "SpaceBetween",
+}
+
+
+def _empty_contract_sink() -> dict[str, dict[str, Any]]:
+    return {name: {} for name in _SINK_NAMES}
+
+
+def _classify_container(
+    row: Mapping[str, Any],
+    all_children: list[Mapping[str, Any]],
+    sink: dict[str, dict[str, Any]],
+) -> None:
+    """Apply the panel policy to one container, writing into ``sink``.
+
+    Split out of the whole-document contract so a caller that only needs one
+    container's decision -- the Inspector's UMG panel selector, on every
+    selection change -- can run the same policy over that row and its direct
+    children instead of over all 9k rows. There is exactly one implementation
+    of the policy; both entry points call this.
+    """
+    panel_kind_by_id = sink["panel_kind_by_id"]
+    classification_by_id = sink["classification_by_id"]
+    spacing_strategy_by_id = sink["spacing_strategy_by_id"]
+    spacer_size_rule_by_id = sink["spacer_size_rule_by_id"]
+    spacer_fill_coefficient_by_id = sink["spacer_fill_coefficient_by_id"]
+    main_alignment_by_id = sink["main_alignment_by_id"]
+    flow_slot_by_id = sink["flow_slot_by_id"]
+    blockers_by_id = sink["blockers_by_id"]
+    object_id = str(row["id"])
+    if str(row.get("kind") or "") not in {"frame", "group"}:
+        return
+    layout = normalize_ui_auto_layout(row.get("layout"))
+    mode = str(layout["mode"])
+    requested_panel_mode = str(layout["umg_panel_mode"])
+    spacing_strategy = str(layout["umg_spacing_strategy"]).title()
+    spacing_strategy_by_id[object_id] = spacing_strategy
+    spacer_size_rule_by_id[object_id] = str(
+        layout["umg_spacer_size_rule"]
+    ).title()
+    spacer_fill_coefficient_by_id[object_id] = float(
+        layout["umg_spacer_fill_coefficient"]
+    )
+    layout_panel_kind = {
+        "horizontal": "Horizontal",
+        "vertical": "Vertical",
+        "grid": "Grid",
+        "overlay": "Overlay",
+    }.get(mode)
+    if layout_panel_kind is not None:
+        panel_kind_by_id[object_id] = layout_panel_kind
+        classification_by_id[object_id] = {
+            "policy": "layout",
+            "requested": requested_panel_mode,
+            "effective": layout_panel_kind,
+            "reasons": [f"layout_mode_requires_{mode}_panel"],
+        }
+    else:
+        candidate_slots, candidate_reasons = _overlay_slots(
+            row,
+            all_children,
+        )
+        if requested_panel_mode == "canvas":
+            effective_panel_kind = "Canvas"
+            policy = "explicit"
+            classification_reasons = ["explicit_canvas_panel"]
+        elif requested_panel_mode == "overlay":
+            effective_panel_kind = "Overlay"
+            policy = "explicit"
+            classification_reasons = (
+                candidate_reasons or ["explicit_overlay_panel"]
+            )
+        elif candidate_reasons:
+            effective_panel_kind = "Canvas"
+            policy = "auto"
+            classification_reasons = candidate_reasons
+        else:
+            effective_panel_kind = "Overlay"
+            policy = "auto"
+            classification_reasons = [
+                "all_children_support_overlay_slots"
+            ]
+        panel_kind_by_id[object_id] = effective_panel_kind
+        classification_by_id[object_id] = {
+            "policy": policy,
+            "requested": requested_panel_mode,
+            "effective": effective_panel_kind,
+            "reasons": classification_reasons,
+        }
+        if effective_panel_kind == "Overlay":
+            flow_slot_by_id.update(candidate_slots)
+            if candidate_reasons:
+                blockers_by_id[object_id] = candidate_reasons
+    if mode not in {"horizontal", "vertical", "grid", "overlay"}:
+        if spacing_strategy != "Padding":
+            blockers_by_id.setdefault(object_id, []).append(
+                "umg_spacer_strategy_requires_linear_panel"
+            )
+            blockers_by_id[object_id] = sorted(
+                set(blockers_by_id[object_id])
+            )
+        return
+    reasons: list[str] = []
+    if mode == "overlay":
+        if spacing_strategy != "Padding":
+            reasons.append("umg_overlay_spacing_strategy_unsupported")
+        if bool(layout.get("reverse_z_index", False)):
+            reasons.append(
+                "overlay_reverse_z_index_requires_document_child_reorder"
+            )
+        overlay_slots, overlay_reasons = _overlay_slots(
+            row,
+            all_children,
+        )
+        flow_slot_by_id.update(overlay_slots)
+        reasons.extend(overlay_reasons)
+        if reasons:
+            blockers_by_id[object_id] = sorted(set(reasons))
+        return
+    if mode == "grid" and spacing_strategy == "Spacer":
+        reasons.append("umg_spacer_strategy_requires_linear_panel")
+    if (
+        mode in {"horizontal", "vertical"}
+        and spacing_strategy == "Spacer"
+        and float(layout["gap"]) < 0.0
+    ):
+        reasons.append("umg_spacer_size_must_be_nonnegative")
+    if bool(layout.get("reverse_z_index", False)):
+        # Horizontal/Vertical/Grid panels couple child order to both
+        # flow and paint order. Figma reverses paint stacking only, so a
+        # layered panel path is required before this can be native UMG.
+        reasons.append(
+            "auto_layout_reverse_z_index_requires_overlay_stack_support"
+        )
+    if bool(layout.get("include_strokes", False)):
+        # UMG panel slots do not include a widget's outside/center brush
+        # stroke in their desired size.  Keep this explicit until the
+        # shared backend can add deterministic stroke-footprint spacers.
+        reasons.append(
+            "auto_layout_strokes_included_requires_"
+            "deterministic_bake_or_slot_spacers"
+        )
+    if mode != "grid" and bool(layout["wrap"]):
+        reasons.append("auto_layout_wrap_requires_umg_wrap_panel")
+    if mode != "grid":
+        # UMG box panels lay children out from the start and expose no
+        # main-axis alignment, so the backend realizes anything else with
+        # filler spacers. Recording it here is what lets a centred Figma
+        # button survive instead of taking its whole subtree down with it.
+        main_alignment = str(layout["main_alignment"])
+        umg_alignment = _UMG_MAIN_ALIGNMENTS.get(main_alignment)
+        if umg_alignment is None:
+            reasons.append(
+                "auto_layout_main_alignment_unsupported:" + main_alignment
+            )
+        elif umg_alignment != "Start":
+            main_alignment_by_id[object_id] = umg_alignment
+    if mode != "grid" and str(layout["cross_alignment"]) == "baseline":
+        # Horizontal/Vertical Box slots expose edge, center, and fill
+        # alignment but no shared typographic baseline metric.  Keep the
+        # imported Figma semantic explicit until TigerStudioUMG has a
+        # deterministic baseline-aware panel or bake path.
+        reasons.append(
+            "auto_layout_cross_alignment_unsupported:baseline"
+        )
+    flow_children = [
+        child
+        for child in all_children
+        if normalize_ui_auto_layout(child.get("layout"))["positioning"]
+        != "absolute"
+    ]
+    absolute_children = [
+        str(child["id"])
+        for child in all_children
+        if normalize_ui_auto_layout(child.get("layout"))["positioning"]
+        == "absolute"
+        and normalize_ui_scroll(child.get("scroll"))["position"]
+        != "fixed"
+    ]
+    reasons.extend(
+        f"auto_layout_absolute_child_unsupported:{child_id}"
+        for child_id in absolute_children
+    )
+    if reasons:
+        blockers_by_id[object_id] = sorted(set(reasons))
+        return
+    if mode == "grid":
+        placements, row_count = grid_auto_layout_placements(
+            flow_children,
+            int(layout["grid_columns"]),
+        )
+        for child in flow_children:
+            child_id = str(child["id"])
+            flow_slot_by_id[child_id] = _grid_slot(
+                child,
+                layout,
+                placements[child_id],
+                row_count=row_count,
+            )
+    else:
+        for index, child in enumerate(flow_children):
+            flow_slot_by_id[str(child["id"])] = _flow_slot(
+                child,
+                layout,
+                index=index,
+                count=len(flow_children),
+            )
+
+
 def painter_umg_auto_layout_contract(
     value: Mapping[str, Any] | None,
     *,
@@ -249,185 +474,16 @@ def painter_umg_auto_layout_contract(
     for child_rows in children.values():
         child_rows.sort(key=lambda row: (int(row["z_index"]), str(row["id"])))
 
-    panel_kind_by_id: dict[str, str] = {}
-    classification_by_id: dict[str, dict[str, Any]] = {}
-    spacing_strategy_by_id: dict[str, str] = {}
-    spacer_size_rule_by_id: dict[str, str] = {}
-    spacer_fill_coefficient_by_id: dict[str, float] = {}
-    flow_slot_by_id: dict[str, dict[str, Any]] = {}
-    blockers_by_id: dict[str, list[str]] = {}
+    sink = _empty_contract_sink()
     for row in rows:
-        object_id = str(row["id"])
-        if str(row.get("kind") or "") not in {"frame", "group"}:
-            continue
-        layout = normalize_ui_auto_layout(row.get("layout"))
-        mode = str(layout["mode"])
-        requested_panel_mode = str(layout["umg_panel_mode"])
-        all_children = children.get(object_id, [])
-        spacing_strategy = str(layout["umg_spacing_strategy"]).title()
-        spacing_strategy_by_id[object_id] = spacing_strategy
-        spacer_size_rule_by_id[object_id] = str(
-            layout["umg_spacer_size_rule"]
-        ).title()
-        spacer_fill_coefficient_by_id[object_id] = float(
-            layout["umg_spacer_fill_coefficient"]
-        )
-        layout_panel_kind = {
-            "horizontal": "Horizontal",
-            "vertical": "Vertical",
-            "grid": "Grid",
-            "overlay": "Overlay",
-        }.get(mode)
-        if layout_panel_kind is not None:
-            panel_kind_by_id[object_id] = layout_panel_kind
-            classification_by_id[object_id] = {
-                "policy": "layout",
-                "requested": requested_panel_mode,
-                "effective": layout_panel_kind,
-                "reasons": [f"layout_mode_requires_{mode}_panel"],
-            }
-        else:
-            candidate_slots, candidate_reasons = _overlay_slots(
-                row,
-                all_children,
-            )
-            if requested_panel_mode == "canvas":
-                effective_panel_kind = "Canvas"
-                policy = "explicit"
-                classification_reasons = ["explicit_canvas_panel"]
-            elif requested_panel_mode == "overlay":
-                effective_panel_kind = "Overlay"
-                policy = "explicit"
-                classification_reasons = (
-                    candidate_reasons or ["explicit_overlay_panel"]
-                )
-            elif candidate_reasons:
-                effective_panel_kind = "Canvas"
-                policy = "auto"
-                classification_reasons = candidate_reasons
-            else:
-                effective_panel_kind = "Overlay"
-                policy = "auto"
-                classification_reasons = [
-                    "all_children_support_overlay_slots"
-                ]
-            panel_kind_by_id[object_id] = effective_panel_kind
-            classification_by_id[object_id] = {
-                "policy": policy,
-                "requested": requested_panel_mode,
-                "effective": effective_panel_kind,
-                "reasons": classification_reasons,
-            }
-            if effective_panel_kind == "Overlay":
-                flow_slot_by_id.update(candidate_slots)
-                if candidate_reasons:
-                    blockers_by_id[object_id] = candidate_reasons
-        if mode not in {"horizontal", "vertical", "grid", "overlay"}:
-            if spacing_strategy != "Padding":
-                blockers_by_id.setdefault(object_id, []).append(
-                    "umg_spacer_strategy_requires_linear_panel"
-                )
-                blockers_by_id[object_id] = sorted(
-                    set(blockers_by_id[object_id])
-                )
-            continue
-        reasons: list[str] = []
-        if mode == "overlay":
-            if spacing_strategy != "Padding":
-                reasons.append("umg_overlay_spacing_strategy_unsupported")
-            if bool(layout.get("reverse_z_index", False)):
-                reasons.append(
-                    "overlay_reverse_z_index_requires_document_child_reorder"
-                )
-            overlay_slots, overlay_reasons = _overlay_slots(
-                row,
-                all_children,
-            )
-            flow_slot_by_id.update(overlay_slots)
-            reasons.extend(overlay_reasons)
-            if reasons:
-                blockers_by_id[object_id] = sorted(set(reasons))
-            continue
-        if mode == "grid" and spacing_strategy == "Spacer":
-            reasons.append("umg_spacer_strategy_requires_linear_panel")
-        if (
-            mode in {"horizontal", "vertical"}
-            and spacing_strategy == "Spacer"
-            and float(layout["gap"]) < 0.0
-        ):
-            reasons.append("umg_spacer_size_must_be_nonnegative")
-        if bool(layout.get("reverse_z_index", False)):
-            # Horizontal/Vertical/Grid panels couple child order to both
-            # flow and paint order. Figma reverses paint stacking only, so a
-            # layered panel path is required before this can be native UMG.
-            reasons.append(
-                "auto_layout_reverse_z_index_requires_overlay_stack_support"
-            )
-        if bool(layout.get("include_strokes", False)):
-            # UMG panel slots do not include a widget's outside/center brush
-            # stroke in their desired size.  Keep this explicit until the
-            # shared backend can add deterministic stroke-footprint spacers.
-            reasons.append(
-                "auto_layout_strokes_included_requires_"
-                "deterministic_bake_or_slot_spacers"
-            )
-        if mode != "grid" and bool(layout["wrap"]):
-            reasons.append("auto_layout_wrap_requires_umg_wrap_panel")
-        if mode != "grid" and str(layout["main_alignment"]) != "start":
-            reasons.append(
-                "auto_layout_main_alignment_unsupported:"
-                + str(layout["main_alignment"])
-            )
-        if mode != "grid" and str(layout["cross_alignment"]) == "baseline":
-            # Horizontal/Vertical Box slots expose edge, center, and fill
-            # alignment but no shared typographic baseline metric.  Keep the
-            # imported Figma semantic explicit until TigerStudioUMG has a
-            # deterministic baseline-aware panel or bake path.
-            reasons.append(
-                "auto_layout_cross_alignment_unsupported:baseline"
-            )
-        flow_children = [
-            child
-            for child in all_children
-            if normalize_ui_auto_layout(child.get("layout"))["positioning"]
-            != "absolute"
-        ]
-        absolute_children = [
-            str(child["id"])
-            for child in all_children
-            if normalize_ui_auto_layout(child.get("layout"))["positioning"]
-            == "absolute"
-            and normalize_ui_scroll(child.get("scroll"))["position"]
-            != "fixed"
-        ]
-        reasons.extend(
-            f"auto_layout_absolute_child_unsupported:{child_id}"
-            for child_id in absolute_children
-        )
-        if reasons:
-            blockers_by_id[object_id] = sorted(set(reasons))
-            continue
-        if mode == "grid":
-            placements, row_count = grid_auto_layout_placements(
-                flow_children,
-                int(layout["grid_columns"]),
-            )
-            for child in flow_children:
-                child_id = str(child["id"])
-                flow_slot_by_id[child_id] = _grid_slot(
-                    child,
-                    layout,
-                    placements[child_id],
-                    row_count=row_count,
-                )
-        else:
-            for index, child in enumerate(flow_children):
-                flow_slot_by_id[str(child["id"])] = _flow_slot(
-                    child,
-                    layout,
-                    index=index,
-                    count=len(flow_children),
-                )
+        _classify_container(row, children.get(str(row["id"]), []), sink)
+    panel_kind_by_id = sink["panel_kind_by_id"]
+    classification_by_id = sink["classification_by_id"]
+    spacing_strategy_by_id = sink["spacing_strategy_by_id"]
+    spacer_size_rule_by_id = sink["spacer_size_rule_by_id"]
+    spacer_fill_coefficient_by_id = sink["spacer_fill_coefficient_by_id"]
+    flow_slot_by_id = sink["flow_slot_by_id"]
+    blockers_by_id = sink["blockers_by_id"]
     return {
         "schema": "tigerstudio.painter.umg.auto_layout.v1",
         "panel_kind_by_id": panel_kind_by_id,
@@ -435,6 +491,7 @@ def painter_umg_auto_layout_contract(
         "spacing_strategy_by_id": spacing_strategy_by_id,
         "spacer_size_rule_by_id": spacer_size_rule_by_id,
         "spacer_fill_coefficient_by_id": spacer_fill_coefficient_by_id,
+        "main_alignment_by_id": sink["main_alignment_by_id"],
         "flow_slot_by_id": flow_slot_by_id,
         "blockers_by_id": blockers_by_id,
         "converted_panel_ids": sorted(
@@ -447,4 +504,47 @@ def painter_umg_auto_layout_contract(
     }
 
 
-__all__ = ["painter_umg_auto_layout_contract"]
+def painter_umg_panel_classification(
+    value: Mapping[str, Any] | None,
+    object_id: str,
+    *,
+    normalize: bool = True,
+) -> dict[str, Any]:
+    """Return one container's panel decision, without classifying the rest.
+
+    The Inspector asks for a single selected frame's decision on every
+    selection change, and ``painter_umg_auto_layout_contract`` answered that
+    by classifying all 9k rows and throwing away all but one entry. The policy
+    only ever reads the row and its direct children, so this gathers those and
+    runs the same ``_classify_container`` over them.
+
+    Returns ``{}`` when the id is unknown or the row is not a container, which
+    is what indexing the full contract's ``classification_by_id`` gave too.
+    """
+    document = (
+        value
+        if not normalize and isinstance(value, Mapping)
+        else normalize_ui_document(value)
+    )
+    wanted = str(object_id or "")
+    if not wanted:
+        return {}
+    row = None
+    children: list[dict[str, Any]] = []
+    for candidate in document["objects"]:
+        if str(candidate["id"]) == wanted:
+            row = candidate
+        if str(candidate.get("parent_id") or "") == wanted:
+            children.append(candidate)
+    if row is None:
+        return {}
+    children.sort(key=lambda item: (int(item["z_index"]), str(item["id"])))
+    sink = _empty_contract_sink()
+    _classify_container(row, children, sink)
+    return sink["classification_by_id"].get(wanted, {})
+
+
+__all__ = [
+    "painter_umg_auto_layout_contract",
+    "painter_umg_panel_classification",
+]

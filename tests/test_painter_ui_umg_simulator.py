@@ -219,7 +219,7 @@ def test_painter_umg_projection_is_non_mutating_and_uses_adapter_preflight():
     # fit native UOverlaySlot constraints, so the adapter emits schema 17's
     # Overlay/spacing contract instead of silently retaining Canvas.
     assert projection["contract"]["schema_version"] == 17
-    assert projection["contract"]["supported_schema_version"] == 19
+    assert projection["contract"]["supported_schema_version"] == 20
     assert projection["contract"]["schema_version"] in (
         projection["contract"]["supported_schema_versions"]
     )

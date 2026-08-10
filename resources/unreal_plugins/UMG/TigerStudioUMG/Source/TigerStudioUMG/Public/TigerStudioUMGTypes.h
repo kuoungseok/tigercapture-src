@@ -577,6 +577,14 @@ struct TIGERSTUDIOUMG_API FTigerStudioUMGLayerRecord
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     double SpacerFillCoefficient = 1.0;
 
+    /**
+     * Schema 20 linear-panel main-axis alignment. UMG box panels always lay
+     * children out from the start, so anything else is realized with filler
+     * spacers at the ends. Absent means Start.
+     */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
+    FString MainAlignment = TEXT("Start");
+
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tiger Studio")
     FString ScrollOverflow = TEXT("None");
 

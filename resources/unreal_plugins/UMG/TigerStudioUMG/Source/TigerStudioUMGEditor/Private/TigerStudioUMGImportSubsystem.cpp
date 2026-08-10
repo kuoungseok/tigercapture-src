@@ -51,6 +51,7 @@ constexpr int32 LayerVisibilitySchemaVersion = 16;
 constexpr int32 OverlayPanelSchemaVersion = 17;
 constexpr int32 SpacingStrategySchemaVersion = 17;
 constexpr int32 ComponentSchemaVersion = 18;
+constexpr int32 MainAlignmentSchemaVersion = 20;
 constexpr int32 DynamicRoundedCardSizeSchemaVersion = 19;
 constexpr int32 StaticAppearanceBakeMaxDimension = 4096;
 constexpr int64 StaticAppearanceBakeMaxPixels = 16 * 1024 * 1024;
@@ -1823,6 +1824,29 @@ TArray<FString> ValidateRawPanelRecords(
         {
             Reasons.AddUnique(
                 LayerId + TEXT(":umg_spacer_size_rule_unsupported"));
+        }
+        FString MainAlignment = TEXT("Start");
+        if (Layer->HasField(TEXT("MainAlignment"))
+            && !Layer->TryGetStringField(
+                TEXT("MainAlignment"),
+                MainAlignment))
+        {
+            Reasons.AddUnique(
+                LayerId + TEXT(":umg_main_alignment_record_invalid"));
+        }
+        if (MainAlignment != TEXT("Start")
+            && MainAlignment != TEXT("Center")
+            && MainAlignment != TEXT("End")
+            && MainAlignment != TEXT("SpaceBetween"))
+        {
+            Reasons.AddUnique(
+                LayerId + TEXT(":umg_main_alignment_unsupported"));
+        }
+        if (SchemaVersion < MainAlignmentSchemaVersion
+            && MainAlignment != TEXT("Start"))
+        {
+            Reasons.AddUnique(
+                LayerId + TEXT(":umg_main_alignment_requires_schema_20"));
         }
         if (SchemaVersion < SpacingStrategySchemaVersion
             && SpacingStrategy != TEXT("Padding"))

@@ -29,6 +29,7 @@ from app.painter_ui_scroll import normalize_ui_scroll
 from app.unreal_umg_layout import (
     TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION,
     TIGER_UMG_SCHEMA_VERSION,
+    TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION,
     TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION,
     painter_layer_layout,
     validate_umg_panel_record,
@@ -2047,6 +2048,9 @@ def _painter_ui_to_umg_document_from_context(
     spacer_size_rule_by_id = dict(
         auto_layout_contract["spacer_size_rule_by_id"]
     )
+    main_alignment_by_id = dict(
+        auto_layout_contract["main_alignment_by_id"]
+    )
     spacer_fill_coefficient_by_id = dict(
         auto_layout_contract["spacer_fill_coefficient_by_id"]
     )
@@ -2085,6 +2089,7 @@ def _painter_ui_to_umg_document_from_context(
     requires_button_style_schema = False
     requires_dynamic_rounded_card_schema = False
     requires_widget_visibility_schema = False
+    requires_main_alignment_schema = False
     for row in export_rows:
         if not bool(row.get("visible", True)):
             requires_widget_visibility_schema = True
@@ -2124,6 +2129,13 @@ def _painter_ui_to_umg_document_from_context(
             if painted_leaf_container
             else authored_spacer_fill_coefficient
         )
+        effective_main_alignment = (
+            "Start"
+            if painted_leaf_container
+            else main_alignment_by_id.get(str(row["id"]), "Start")
+        )
+        if effective_main_alignment != "Start":
+            requires_main_alignment_schema = True
         button_style_conversion = painter_button_style_conversion(
             conversion_row,
             style,
@@ -2532,6 +2544,7 @@ def _painter_ui_to_umg_document_from_context(
                 "SpacingStrategy": effective_spacing_strategy,
                 "SpacerSizeRule": effective_spacer_size_rule,
                 "SpacerFillCoefficient": effective_spacer_fill_coefficient,
+                "MainAlignment": effective_main_alignment,
                 "ComponentSlot": dict(payload["component_slot"]),
                 "ScrollOverflow": normalize_ui_scroll(
                     row.get("scroll")
@@ -2667,6 +2680,11 @@ def _painter_ui_to_umg_document_from_context(
         (
             TIGER_UMG_WIDGET_VISIBILITY_DOCUMENT_SCHEMA_VERSION
             if requires_widget_visibility_schema
+            else TIGER_UMG_SCHEMA_VERSION
+        ),
+        (
+            TIGER_UMG_MAIN_ALIGNMENT_DOCUMENT_SCHEMA_VERSION
+            if requires_main_alignment_schema
             else TIGER_UMG_SCHEMA_VERSION
         ),
     )

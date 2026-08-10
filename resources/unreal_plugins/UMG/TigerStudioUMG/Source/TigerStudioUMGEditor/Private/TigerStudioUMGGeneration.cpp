@@ -665,6 +665,84 @@ UFont* LoadLayerFont(
     return Path ? Cast<UFont>(Path->TryLoad()) : nullptr;
 }
 
+// UHorizontalBox and UVerticalBox always lay children out from the start and
+// expose no main-axis alignment, so anything else has to be built from filler
+// spacers. Applying it after the children are in place keeps the child indices
+// the document authored.
+void ApplyPanelMainAlignment(
+    UPanelWidget* Panel,
+    const FString& MainAlignment,
+    const FString& LayerId)
+{
+    if (!Panel || MainAlignment.IsEmpty() || MainAlignment == TEXT("Start"))
+    {
+        return;
+    }
+    UHorizontalBox* Horizontal = Cast<UHorizontalBox>(Panel);
+    UVerticalBox* Vertical = Cast<UVerticalBox>(Panel);
+    if (!Horizontal && !Vertical)
+    {
+        return;
+    }
+    const int32 ChildCount = Panel->GetChildrenCount();
+    if (ChildCount <= 0)
+    {
+        return;
+    }
+    UWidgetTree* WidgetTree = Panel->GetTypedOuter<UWidgetTree>();
+    if (!WidgetTree)
+    {
+        return;
+    }
+
+    FSlateChildSize FillSize;
+    FillSize.SizeRule = ESlateSizeRule::Fill;
+    FillSize.Value = 1.0f;
+
+    int32 Serial = 0;
+    const auto InsertFiller = [&] (const int32 Index)
+    {
+        USpacer* Spacer = WidgetTree->ConstructWidget<USpacer>(
+            USpacer::StaticClass(),
+            FName(*FString::Printf(
+                TEXT("%s_TigerAlignFiller%d"),
+                *LayerId,
+                Serial++)));
+        if (!Spacer)
+        {
+            return;
+        }
+        Spacer->SetSize(FVector2D(0.0f, 0.0f));
+        UPanelSlot* Slot = Panel->InsertChildAt(Index, Spacer);
+        if (UHorizontalBoxSlot* HorizontalSlot = Cast<UHorizontalBoxSlot>(Slot))
+        {
+            HorizontalSlot->SetSize(FillSize);
+        }
+        else if (UVerticalBoxSlot* VerticalSlot = Cast<UVerticalBoxSlot>(Slot))
+        {
+            VerticalSlot->SetSize(FillSize);
+        }
+    };
+
+    if (MainAlignment == TEXT("SpaceBetween"))
+    {
+        // Walk backwards so each insertion cannot shift the gaps still to come.
+        for (int32 Index = ChildCount - 1; Index >= 1; --Index)
+        {
+            InsertFiller(Index);
+        }
+        return;
+    }
+    if (MainAlignment == TEXT("Center") || MainAlignment == TEXT("End"))
+    {
+        InsertFiller(0);
+    }
+    if (MainAlignment == TEXT("Center"))
+    {
+        InsertFiller(Panel->GetChildrenCount());
+    }
+}
+
 FLinearColor MaterialColor(const FString& Value)
 {
     FString Hex = Value;
@@ -3110,6 +3188,13 @@ bool GenerateComponentBlueprint(
             TEXT("component:") + Component.Id + TEXT("/") + Layer.Id,
             SlateVisibilityAuditName(Widget->GetVisibility()));
     }
+    for (const FTigerStudioUMGLayerRecord& Layer : Component.Layers)
+    {
+        ApplyPanelMainAlignment(
+            ParentPanels.FindRef(Layer.Id),
+            Layer.MainAlignment,
+            Layer.Id);
+    }
     if (!Result.Errors.IsEmpty())
     {
         return false;
@@ -4364,6 +4449,14 @@ UTigerStudioUMGImportSubsystem::GenerateDocumentFile(
                 SlateVisibilityAuditName(Widget->GetVisibility()));
             ++Result.GeneratedWidgetCount;
         }
+    }
+
+    for (const FTigerStudioUMGLayerRecord& Layer : Document.Layers)
+    {
+        ApplyPanelMainAlignment(
+            ParentPanels.FindRef(Layer.Id),
+            Layer.MainAlignment,
+            Layer.Id);
     }
 
     UE_LOG(
