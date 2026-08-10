@@ -718,6 +718,23 @@ void AddLegacyLayerDefaults(
             }
         }
     }
+    // The layer record is deserialized strictly, so a document written before
+    // schema 20 has to gain the field rather than be rejected for missing it.
+    for (const TSharedPtr<FJsonValue>& LayerValue : *Layers)
+    {
+        const TSharedPtr<FJsonObject>* LayerObject = nullptr;
+        if (!LayerValue.IsValid()
+            || !LayerValue->TryGetObject(LayerObject)
+            || !LayerObject)
+        {
+            continue;
+        }
+        const TSharedPtr<FJsonObject>& Layer = *LayerObject;
+        if (!Layer->HasField(TEXT("MainAlignment")))
+        {
+            Layer->SetStringField(TEXT("MainAlignment"), TEXT("Start"));
+        }
+    }
 }
 
 void AddLegacyComponentDocumentDefaults(
@@ -6510,7 +6527,7 @@ UTigerStudioUMGImportSubsystem::PreflightDocumentFile(const FString& DocumentPat
     DocumentObject->TryGetNumberField(
         TEXT("SchemaVersion"),
         SerializedSchemaVersion);
-    if (SerializedSchemaVersion < 4 || SerializedSchemaVersion > 19)
+    if (SerializedSchemaVersion < 4 || SerializedSchemaVersion > 20)
     {
         Result.Message = FString::Printf(
             TEXT("Unsupported Tiger UMG schema version: %d"),
@@ -6653,7 +6670,7 @@ UTigerStudioUMGImportSubsystem::PreflightDocumentFile(const FString& DocumentPat
     }
 
     if (Result.Document.SchemaVersion < 4
-        || Result.Document.SchemaVersion > 19)
+        || Result.Document.SchemaVersion > 20)
     {
         Result.Message = FString::Printf(
             TEXT("Unsupported Tiger UMG schema version: %d"),

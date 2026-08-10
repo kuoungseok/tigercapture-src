@@ -901,6 +901,102 @@ def _umg_disposition(
     return "Blocked", sorted(set(reasons))
 
 
+PAINTED_CONTAINER_BACKGROUND_SUFFIX = "::umg-background"
+PAINTED_CONTAINER_CONTENT_SUFFIX = "::umg-content"
+
+
+def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
+    """Move a painted container's own paint onto a synthetic leaf background.
+
+    UMG has no panel that paints a rounded, filled background behind its own
+    children, so ``advanced_appearance_requires_leaf_rectangle`` refused every
+    rounded card and every rounded button, taking the whole subtree with it --
+    a Figma button lost its own label that way.
+
+    A container that paints is rewritten into the shape UMG does have: an
+    overlay holding a leaf background rectangle and a content panel that keeps
+    the authored layout and children. The background is a leaf rectangle, so it
+    takes the existing RoundedCard material path unchanged.
+
+    Painter geometry is artboard-absolute, so both synthetic rows reuse the
+    container's rectangle exactly and no child moves.
+    """
+
+    rows = list(document.get("objects") or [])
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        children_by_parent.setdefault(str(row.get("parent_id") or ""), []).append(row)
+
+    split_targets = []
+    for row in rows:
+        object_id = str(row.get("id") or "")
+        kind = str(row.get("kind") or "").strip().casefold()
+        if kind not in {"frame", "group"}:
+            continue
+        if not children_by_parent.get(object_id):
+            continue
+        style = dict(row.get("style") or {})
+        if not _has_advanced_appearance(
+            style,
+            include_uniform_radius=kind in _VISIBLE_UNIFORM_RADIUS_KINDS,
+        ):
+            continue
+        if not _has_visible_surface_paint(style):
+            # Nothing to move: the appearance is strokes or effects, which a
+            # background rectangle would not reproduce faithfully.
+            continue
+        split_targets.append(row)
+
+    if not split_targets:
+        return document
+
+    for row in split_targets:
+        object_id = str(row["id"])
+        style = dict(row.get("style") or {})
+        geometry = {
+            key: row[key] for key in ("x", "y", "width", "height")
+        }
+        background = {
+            **geometry,
+            "id": f"{object_id}{PAINTED_CONTAINER_BACKGROUND_SUFFIX}",
+            "name": f"{row.get('name') or object_id} Background",
+            "kind": "rectangle",
+            "artboard_id": row["artboard_id"],
+            "parent_id": object_id,
+            "z_index": 0,
+            "style": style,
+        }
+        content = {
+            **geometry,
+            "id": f"{object_id}{PAINTED_CONTAINER_CONTENT_SUFFIX}",
+            "name": f"{row.get('name') or object_id} Content",
+            "kind": "frame",
+            "artboard_id": row["artboard_id"],
+            "parent_id": object_id,
+            "z_index": 1,
+            "layout": copy.deepcopy(row.get("layout") or {}),
+            "clip_content": bool(row.get("clip_content", False)),
+        }
+        for child in children_by_parent.get(object_id, []):
+            child["parent_id"] = content["id"]
+        # The container keeps its identity, geometry and constraints; it only
+        # stops painting and starts stacking.
+        row["style"] = {
+            **style,
+            "fill": "#00000000",
+            "fills": [],
+            "radius": 0.0,
+            "corner_radii": {},
+            "corner_smoothing": 0.0,
+        }
+        row["clip_content"] = False
+        row["layout"] = {"mode": "overlay"}
+        rows.extend((background, content))
+
+    document["objects"] = rows
+    return normalize_ui_document(document)
+
+
 def _prepare_painter_umg_conversion(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -917,6 +1013,7 @@ def _prepare_painter_umg_conversion(
     # their reusable meaning separately; resolving here is not a flattening
     # substitute, it is the static value used for exact preview/export.
     document = resolve_ui_component_document(document, normalize=False)
+    document = _split_painted_containers(dict(document))
     from app.painter_ui_umg_auto_layout import (
         painter_umg_auto_layout_contract,
     )
@@ -1429,6 +1526,7 @@ def _apply_schema18_layer_defaults(layer: dict[str, Any]) -> dict[str, Any]:
     result.setdefault("SpacingStrategy", "Padding")
     result.setdefault("SpacerSizeRule", "Auto")
     result.setdefault("SpacerFillCoefficient", 1.0)
+    result.setdefault("MainAlignment", "Start")
     return result
 
 
@@ -2698,6 +2796,10 @@ def _painter_ui_to_umg_document_from_context(
         for layer in layers:
             layer.setdefault("SpacingStrategy", "Padding")
             layer.setdefault("SpacerSizeRule", "Auto")
+            # The record is deserialized strictly, so provider-generated layers
+            # such as the artboard background need the field even when they are
+            # not panels.
+            layer.setdefault("MainAlignment", "Start")
             layer.setdefault("SpacerFillCoefficient", 1.0)
     else:
         for layer in layers:

@@ -240,7 +240,7 @@ def test_bundled_umg_plugin_has_shared_runtime_and_editor_modules() -> None:
     assert "FTigerStudioUMGImageNineSliceRecord NineSlice;" in types
     assert "FVector4 CornerRadii" in types
     assert "Result.Document.SchemaVersion < 4" in preflight
-    assert "Result.Document.SchemaVersion > 19" in preflight
+    assert "Result.Document.SchemaVersion > 20" in preflight
     assert "ValidateRawPanelRecords" in preflight
     assert preflight.index("bool TryGetFiniteNumber(") < preflight.index(
         "TArray<FString> ValidateRawPanelRecords("
