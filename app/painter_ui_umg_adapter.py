@@ -212,6 +212,41 @@ def _umg_kind(kind: str) -> str:
     }.get(kind, "Unsupported")
 
 
+def _register_font_resource(
+    family: str,
+    resources: dict[str, dict[str, Any]],
+) -> str:
+    """Add the font face backing ``family`` and return its asset id.
+
+    Returns "" when no bundled face matches, which leaves the layer naming the
+    family only and the backend falling back to its own default font, exactly
+    as it did before.
+    """
+
+    from app.font_fallback import design_font_file
+
+    source = design_font_file(family)
+    if not source:
+        return ""
+    path = Path(source)
+    asset_id = _resource_id(path, "font")
+    resources.setdefault(
+        asset_id,
+        {
+            "Id": asset_id,
+            "Kind": "font",
+            "SourcePath": str(path),
+            "DestinationName": f"TS_{asset_id}",
+            "ContentHash": _hash_file(path) if path.is_file() else "",
+            "SettingsJson": json.dumps(
+                {"Usage": "Font", "Family": str(family)},
+                separators=(",", ":"),
+            ),
+        },
+    )
+    return asset_id
+
+
 def _canonical_umg_color(
     value: object,
     *,
@@ -2297,6 +2332,11 @@ def _painter_ui_to_umg_document_from_context(
             image_fill_record = image_fill_conversion.bind_asset(asset_id)
         elif flipbook_conversion is not None and not flipbook_record:
             flipbook_record = flipbook_conversion.bind_asset("")
+        font_asset_id = (
+            _register_font_resource(str(style.get("font_family") or "Inter"), resources)
+            if _umg_kind(str(row["kind"])) == "Text"
+            else ""
+        )
         payload = {
             "source_kind": row["kind"],
             "umg_leaf_rectangle_classification": (
@@ -2354,6 +2394,11 @@ def _painter_ui_to_umg_document_from_context(
             "font_size_unit": PAINTER_UMG_FONT_SIZE_UNIT,
             "font_weight": int(style.get("font_weight", 400) or 400),
             "font_family": str(style.get("font_family") or "Inter"),
+            # The family name alone does not survive the trip: Unreal renders
+            # whatever its default font is, and Roboto is narrower than Inter,
+            # so an authored three-line paragraph arrives as two. Ship the face
+            # as a resource and name it here so the backend can bind it.
+            **({"font_asset_id": font_asset_id} if font_asset_id else {}),
             # Painter/Figma text is laid out inside its authored rectangle
             # unless the explicit auto-width mode asks the text box to grow.
             # Preserve that distinction for UTextBlock instead of relying on

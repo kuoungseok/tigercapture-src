@@ -1069,3 +1069,63 @@ def test_documents_that_hide_nothing_gain_no_visibility_field() -> None:
     layer = next(row for row in umg["Layers"] if str(row["Id"]) == shown_id)
 
     assert layer.get("Visibility", "Visible") == "Visible"
+
+
+def test_text_layers_ship_the_authored_font_face_as_a_resource() -> None:
+    """Naming the family is not enough; the face has to travel with it."""
+    import json
+    from pathlib import Path
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, _label = add_ui_object(
+        create_ui_document(320, 240, name="HUD"),
+        kind="text",
+        name="Body",
+        x=10,
+        y=10,
+        width=200,
+        height=90,
+        style={"font_family": "Inter", "font_size": 24.0},
+        content={"text": "Create layouts, frames, and components."},
+    )
+
+    umg = painter_ui_to_umg_document(document)
+    fonts = [row for row in umg["Resources"] if row["Kind"] == "font"]
+    assert len(fonts) == 1
+    assert Path(fonts[0]["SourcePath"]).name == "InterVariable.ttf"
+    assert Path(fonts[0]["SourcePath"]).is_file()
+
+    layer = next(row for row in umg["Layers"] if row["Kind"] == "Text")
+    payload = json.loads(str(layer["PayloadJson"]))
+    # Unreal renders its own default font when this is absent, and Roboto is
+    # narrower than Inter, so an authored three-line paragraph arrives as two.
+    assert payload["font_family"] == "Inter"
+    assert payload["font_asset_id"] == fonts[0]["Id"]
+
+
+def test_unknown_font_families_ship_no_face_and_no_binding() -> None:
+    import json
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
+
+    document, _label = add_ui_object(
+        create_ui_document(320, 240, name="HUD"),
+        kind="text",
+        name="Body",
+        x=10,
+        y=10,
+        width=200,
+        height=90,
+        style={"font_family": "Some Unbundled Face", "font_size": 24.0},
+        content={"text": "Hello"},
+    )
+
+    umg = painter_ui_to_umg_document(document)
+
+    assert [row for row in umg["Resources"] if row["Kind"] == "font"] == []
+    layer = next(row for row in umg["Layers"] if row["Kind"] == "Text")
+    payload = json.loads(str(layer["PayloadJson"]))
+    assert "font_asset_id" not in payload

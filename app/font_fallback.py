@@ -69,6 +69,29 @@ def _bundled_ui_font_paths() -> tuple[str, ...]:
     return tuple(paths)
 
 
+def design_font_file(family: str) -> str:
+    """Return the bundled font file backing ``family``, or "" when unknown.
+
+    Exporters that hand typography to another engine need the actual file, not
+    the family name: a UMG document that only names "Inter" is rendered in
+    whatever font that engine defaults to, which changes the metrics and
+    therefore the line breaks.
+    """
+
+    wanted = str(family or "").strip().casefold().replace(" ", "")
+    if not wanted:
+        return ""
+    for alias, names in DESIGN_FONT_ALIASES.items():
+        matches = {alias, *(name.casefold().replace(" ", "") for name in names)}
+        if wanted not in matches:
+            continue
+        for path in _bundled_ui_font_paths():
+            # Italic is a separate face; the upright file is the family default.
+            if "italic" not in Path(path).stem.casefold():
+                return path
+    return ""
+
+
 def _existing_system_font_paths() -> tuple[str, ...]:
     candidates: list[Path] = []
     windows_fonts = Path("C:/Windows/Fonts")

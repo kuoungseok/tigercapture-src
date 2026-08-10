@@ -2468,7 +2468,12 @@ def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> N
     assert layer["ImageFill"]["AssetId"] == layer["AssetId"]
     assert layer["ImageFill"]["Mode"] == "Fill"
     assert layer["ImageFill"]["Opacity"] == 0.65
-    assert umg["Resources"][0]["SourcePath"] == str(image_path)
+    # Resources are sorted by id and now include the text font face, so this
+    # has to name the resource it means rather than index the first one.
+    texture = next(
+        row for row in umg["Resources"] if row["Kind"] == "texture"
+    )
+    assert texture["SourcePath"] == str(image_path)
 
 
 def test_figma_rest_stretch_transform_renders_and_maps_to_umg_crop(

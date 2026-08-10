@@ -34,6 +34,8 @@
 #include "WidgetBlueprintFactory.h"
 #include "IAssetTools.h"
 #include "Dom/JsonObject.h"
+#include "Engine/Font.h"
+#include "Engine/FontFace.h"
 #include "Engine/Texture2D.h"
 #include "Factories/UIMaterialFactoryNew.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -592,6 +594,75 @@ bool SaveAssetPackage(UObject* Asset)
     Args.TopLevelFlags = RF_Public | RF_Standalone;
     Args.SaveFlags = SAVE_NoError;
     return UPackage::SavePackage(Package, Asset, *Filename, Args);
+}
+
+// A .ttf imports as UFontFace, which FSlateFontInfo cannot reference directly.
+// Wrapping it in a runtime-cached UFont with a single "Regular" typeface entry
+// is what lets a UTextBlock render the authored family. Without this the text
+// falls back to the engine default, whose metrics differ enough to change where
+// a paragraph wraps.
+UFont* CreateRuntimeFontForFace(UFontFace* FontFace, FString& OutError)
+{
+    if (!FontFace)
+    {
+        OutError = TEXT("font face was null");
+        return nullptr;
+    }
+    const FString FacePath = FontFace->GetOutermost()->GetName();
+    const FString FontPath = FacePath + TEXT("_Font");
+    if (UFont* Existing = LoadObject<UFont>(nullptr, *(FontPath + TEXT(".") + FPackageName::GetShortName(FontPath))))
+    {
+        return Existing;
+    }
+    UPackage* Package = CreatePackage(*FontPath);
+    if (!Package)
+    {
+        OutError = TEXT("could not create font package: ") + FontPath;
+        return nullptr;
+    }
+    UFont* Font = NewObject<UFont>(
+        Package,
+        *FPackageName::GetShortName(FontPath),
+        RF_Public | RF_Standalone);
+    if (!Font)
+    {
+        OutError = TEXT("could not create font object: ") + FontPath;
+        return nullptr;
+    }
+    Font->FontCacheType = EFontCacheType::Runtime;
+    Font->CompositeFont.DefaultTypeface.Fonts.Empty();
+    FTypefaceEntry Entry(FName(TEXT("Regular")));
+    // FTypefaceEntry has no font-face constructor; FFontData is what accepts
+    // an imported UFontFace asset.
+    Entry.Font = FFontData(FontFace);
+    Font->CompositeFont.DefaultTypeface.Fonts.Add(MoveTemp(Entry));
+    Font->PostEditChange();
+    Font->MarkPackageDirty();
+    FAssetRegistryModule::AssetCreated(Font);
+    if (!SaveAssetPackage(Font))
+    {
+        OutError = TEXT("generated font could not be saved: ") + FontPath;
+        return nullptr;
+    }
+    return Font;
+}
+
+UFont* LoadLayerFont(
+    const TSharedPtr<FJsonObject>& Payload,
+    const TMap<FString, FSoftObjectPath>& ResourcePaths)
+{
+    if (!Payload)
+    {
+        return nullptr;
+    }
+    FString AssetId;
+    if (!Payload->TryGetStringField(TEXT("font_asset_id"), AssetId)
+        || AssetId.IsEmpty())
+    {
+        return nullptr;
+    }
+    const FSoftObjectPath* Path = ResourcePaths.Find(AssetId);
+    return Path ? Cast<UFont>(Path->TryLoad()) : nullptr;
 }
 
 FLinearColor MaterialColor(const FString& Value)
@@ -2551,6 +2622,14 @@ UWidget* ConstructComponentLeaf(
         Font.Size = PayloadFontSizeInSlatePoints(Payload, FontSize);
         Font.TypefaceFontName = ButtonTypefaceForWeight(
             FMath::RoundToInt(FontWeight));
+        if (UFont* AuthoredFont = LoadLayerFont(Payload, ResourcePaths))
+        {
+            // The authored family decides the metrics, and the metrics decide
+            // the line breaks. Keeping the engine default here is what turned
+            // an authored three-line paragraph into two.
+            Font.FontObject = AuthoredFont;
+            Font.TypefaceFontName = FName(TEXT("Regular"));
+        }
         Text->SetFont(Font);
         bool bAutoWrap = false;
         if (Payload)
@@ -3269,6 +3348,27 @@ UTigerStudioUMGImportSubsystem::GenerateDocumentFile(
                             TEXT("Imported texture settings could not be saved: %s"),
                             *ObjectPath));
                     }
+                }
+            }
+            else if (UFontFace* FontFace = Cast<UFontFace>(ImportedObject))
+            {
+                FString FontError;
+                UFont* Font = CreateRuntimeFontForFace(FontFace, FontError);
+                if (Font)
+                {
+                    // Layers name the resource id, so the map has to point at
+                    // the object a UTextBlock can actually use.
+                    ResourcePaths.Add(
+                        ImportResourceIds[Index],
+                        FSoftObjectPath(Font));
+                    Result.ImportedAssetPaths.Add(Font->GetPathName());
+                }
+                else
+                {
+                    Result.Errors.Add(FString::Printf(
+                        TEXT("Font resource could not be prepared: %s (%s)"),
+                        *ImportResourceIds[Index],
+                        *FontError));
                 }
             }
             else if (ImageFillResourceIds.Contains(ImportResourceIds[Index]))
