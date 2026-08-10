@@ -23,6 +23,9 @@ Always start with:
 
 Focused entry points:
 
+- Session economy, handoff triggers, and the handoff document format:
+  `## Session Economy and Handoff Discipline` in this file.
+- Figma to UMG to Unreal generation: `docs/FIGMA_UMG_UNREAL_HANDOFF.md`.
 - Claude/Codex handoff mailbox wakeups:
   `docs/AGENT_MAILBOX_WAKEUP.md`. If `.agent_mailbox/CODEX_WAKE_PENDING.md`
   exists, read it before assuming there is no cross-agent message.
@@ -481,6 +484,57 @@ Review/catalog/PPT evidence must use real TigerCapture UI screenshots and real
 rendered proof outputs. Generated monitor frames, mockups, and debug captures
 can be used only when clearly labeled as design/reference or regenerated proof,
 not as fake editor evidence.
+
+## Session Economy and Handoff Discipline
+
+These rules exist because a long session degrades in a specific way: context
+fills, earlier findings get compacted into summaries, and the agent starts
+re-deriving facts it already proved. Work produced in that state looks
+confident and is not trustworthy.
+
+### Spend context like it is scarce
+
+- Read with `offset`/`limit` or grep for the symbol. Do not read a large file
+  end to end to find one function.
+- Filter logs before quoting them. Grep for the verdict line, the error, or the
+  specific counter. Never paste a build or test log wholesale.
+- Prefer one measurement that settles a question over three that circle it.
+
+### Stop and hand off when any of these appear
+
+- A compaction warning fires, or the conversation has already been summarized.
+- The same file is opened again to re-confirm something already established.
+- A fact that was measured earlier now has to be re-verified because only a
+  summary of it survives.
+
+When one of these appears, do not push the current task further. Write the
+handoff, state plainly what is proven and what is not, and let a fresh session
+continue. Finishing badly costs more than stopping cleanly.
+
+### Never continue from a guess
+
+Compacted memory is a summary, not evidence. If continuing requires assuming
+what an earlier measurement showed, re-measure it or hand off. Do not reason
+forward from a remembered conclusion. This is the same discipline as
+`## Evidence Discipline` above, applied to the agent's own prior findings
+rather than to screenshots.
+
+### Handoff document format
+
+Use `docs/FIGMA_UMG_UNREAL_HANDOFF.md` as the template. A handoff has:
+
+1. **Symptom** — the exact failing message or observed behaviour, verbatim.
+2. **Measurement** — the numbers that localize it, not a narrative.
+3. **Code locations** — the files and functions to start from.
+4. **Proven vs unproven** — separated explicitly. Never let a hypothesis sit in
+   the same list as a verified fact.
+5. **Rules that cost time** — the traps discovered this session: build commands
+   that fail intermittently, arguments that get rewritten, APIs that are not
+   reachable, processes that must be closed first.
+6. **Do not touch** — areas deliberately left alone, and why.
+
+Also hand the user a message they can paste into the next session as-is. The
+next agent should not have to reconstruct the request.
 
 ## Painter UI Web Delivery Boundary
 

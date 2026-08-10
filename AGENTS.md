@@ -10,6 +10,11 @@ VTuber Studio, VSeeFace, Program Output, or missing context, read
 That file is the durable index for active handoff docs, current assumptions, and
 known traps from recent sessions.
 
+It also carries `## Session Economy and Handoff Discipline`: how to spend
+context, when to stop and hand off instead of pushing a task further, and the
+required shape of a handoff document. Read it before continuing long work from a
+summarized session.
+
 ## Git Remote Boundary
 
 This repository uses separate remotes for private source and public
