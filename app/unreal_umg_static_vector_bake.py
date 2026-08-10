@@ -446,6 +446,15 @@ def plan_static_vector_bake(
     if reasons:
         return {"status": "unsafe", "available": False, "reasons": reasons}
 
+    # Figma/Painter geometry resolution can leave sub-ULP float32 noise on an
+    # otherwise-integer size (e.g. 11.999999046325684 instead of 12.0), which
+    # the check above already treats as integer. Snap it here so the hashed
+    # source and the plugin's fixed-precision canonical float formatting
+    # agree; leaving the noisy value in only the two of them disagree and the
+    # plugin reports baked_static_vector_source_hash_mismatch.
+    width = float(round(width))
+    height = float(round(height))
+
     # Painter preview/export selects the visible paint record before the
     # legacy style.fill shortcut.  Preserve that exact color and paint opacity
     # so a package bake cannot silently become more opaque than the Figma node.

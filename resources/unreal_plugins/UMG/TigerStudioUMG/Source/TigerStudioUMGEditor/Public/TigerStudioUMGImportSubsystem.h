@@ -142,6 +142,10 @@ struct FTigerStudioUMGRenderResult
     /** Runtime widget path -> padded visual Canvas-slot diagnostics. */
     UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
     TMap<FString, FString> RoundedCardVisualSlotAudit;
+
+    /** Runtime widget path -> cached paint geometry after DrawWidget. */
+    UPROPERTY(BlueprintReadOnly, Category = "Tiger Studio")
+    TMap<FString, FString> WidgetGeometryAudit;
 };
 
 UCLASS()

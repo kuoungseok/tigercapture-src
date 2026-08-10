@@ -24,8 +24,14 @@ from app.painter_ui_components import (
     normalize_ui_instance_overrides,
     resolve_ui_component_document,
 )
+from app.painter_ui_auto_layout import resolve_ui_auto_layout
 from app.painter_ui_motion_bridge import resolved_ui_geometry
 from app.painter_ui_scroll import normalize_ui_scroll
+from app.font_fallback import (
+    load_application_ui_fonts,
+    registered_design_font_family,
+)
+from app.painter_ui_text_layout import text_content_geometry
 from app.unreal_umg_layout import (
     TIGER_UMG_OVERLAY_DOCUMENT_SCHEMA_VERSION,
     TIGER_UMG_SCHEMA_VERSION,
@@ -974,6 +980,11 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
             "artboard_id": row["artboard_id"],
             "parent_id": object_id,
             "z_index": 1,
+            # A pure layout wrapper: the background rectangle painted below
+            # already reproduces the container's appearance. Without an
+            # explicit transparent fill here, missing style/fill defaults to
+            # opaque white and hides everything stacked on top of it.
+            "style": {"fill": "#00000000", "fills": []},
             "layout": copy.deepcopy(row.get("layout") or {}),
             "clip_content": bool(row.get("clip_content", False)),
         }
@@ -1434,6 +1445,68 @@ def _add_layer_block_reasons(
     return result
 
 
+def _remap_component_record_layer_ids(
+    record: Mapping[str, Any],
+    id_map: Mapping[str, str],
+) -> dict[str, Any]:
+    """Rename every layer id a private component clone owns.
+
+    ``validate_umg_component_contract`` requires each layer id to be owned
+    by exactly one Components[] entry. A per-instance clone built from the
+    same source layers as the shared template would otherwise collide with
+    it, so every id the clone's own subtree owns is renamed before it is
+    added alongside the template. Ids outside ``id_map`` (nested instances'
+    own component ids, grafted slot content living on the screen, shared
+    resource ids) are references to things the clone does not own and are
+    left untouched.
+    """
+    result = copy.deepcopy(dict(record))
+    root_layer_id = str(result.get("RootLayerId") or "")
+    result["RootLayerId"] = id_map.get(root_layer_id, root_layer_id)
+    remapped_layers: list[Any] = []
+    for layer in result.get("Layers", []):
+        if not isinstance(layer, Mapping):
+            remapped_layers.append(layer)
+            continue
+        layer = dict(layer)
+        layer_id = str(layer.get("Id") or "")
+        parent_id = str(layer.get("ParentId") or "")
+        layer["Id"] = id_map.get(layer_id, layer_id)
+        layer["ParentId"] = id_map.get(parent_id, parent_id)
+        payload_json = layer.get("PayloadJson")
+        if isinstance(payload_json, str) and payload_json:
+            try:
+                payload = json.loads(payload_json)
+            except (TypeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                instance_payload = payload.get("component_instance")
+                if isinstance(instance_payload, Mapping):
+                    nested_id = str(instance_payload.get("id") or "")
+                    if nested_id in id_map:
+                        instance_payload = dict(instance_payload)
+                        instance_payload["id"] = id_map[nested_id]
+                        payload["component_instance"] = instance_payload
+                        layer["PayloadJson"] = json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+        remapped_layers.append(layer)
+    result["Layers"] = remapped_layers
+    remapped_slots: list[Any] = []
+    for slot in result.get("Slots", []):
+        if not isinstance(slot, Mapping):
+            remapped_slots.append(slot)
+            continue
+        slot = dict(slot)
+        slot_layer_id = str(slot.get("LayerId") or "")
+        slot["LayerId"] = id_map.get(slot_layer_id, slot_layer_id)
+        remapped_slots.append(slot)
+    result["Slots"] = remapped_slots
+    return result
+
+
 def _attach_component_instance_payload(
     layer: dict[str, Any],
     *,
@@ -1683,41 +1756,31 @@ def _apply_painter_component_contract(
             )
         return flat_by_artboard[artboard_id]
 
-    definition_subtrees: dict[str, list[str]] = {}
-    component_records: list[dict[str, Any]] = []
-    for component in components:
+    def _build_component_record(
+        component: Mapping[str, Any],
+        root: Mapping[str, Any],
+        root_id: str,
+        *,
+        record_id: str | None = None,
+        flat_source_document: Mapping[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], list[str]]:
+        """Build one Components[] record for ``component``.
+
+        ``record_id``/``flat_source_document`` let a caller bake a private,
+        geometry-corrected clone of a shared component definition (used by
+        ``_instance_auto_height_correction`` below) without touching the
+        template every other instance of the same component keeps using.
+        """
         component_id = str(component.get("id") or "")
-        root_id = str(component.get("root_object_id") or "")
-        root = object_by_id.get(root_id)
-        if root is None:
-            # The provider-neutral validator will report the missing root
-            # through the empty component layer list.
-            definition_subtrees[component_id] = []
-            component_records.append(
-                {
-                    "Id": component_id,
-                    "Name": str(component.get("name") or component_id),
-                    "RootLayerId": root_id,
-                    "BaseComponentId": str(
-                        component.get("base_component_id") or ""
-                    ),
-                    "VariantValuesJson": json.dumps(
-                        component_variant_properties(component),
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    ),
-                    "DependencyComponentIds": [],
-                    "Layers": [],
-                    "Properties": [],
-                    "Slots": [],
-                }
-            )
-            continue
+        output_id = str(record_id) if record_id else component_id
         subtree = _component_subtree_ids(root_id, children)
-        definition_subtrees[component_id] = subtree
         subtree_set = set(subtree)
         artboard_id = str(root.get("artboard_id") or selected_artboard_id)
-        source_document = flat_for_artboard(artboard_id)
+        source_document = (
+            flat_source_document
+            if flat_source_document is not None
+            else flat_for_artboard(artboard_id)
+        )
         source_layers = {
             str(layer.get("Id") or ""): copy.deepcopy(dict(layer))
             for layer in source_document.get("Layers", [])
@@ -1824,6 +1887,45 @@ def _apply_painter_component_contract(
                 layer = _add_layer_block_reasons(
                     layer, marker["blockers"]
                 )
+                # A nested instance's persisted Size is Figma's hug result
+                # for whatever placeholder text the master had; it does not
+                # get recomputed for this instance's own text override. Once
+                # overridden, the instance's outer SizeBox (built from this
+                # Size) must be at least as large as the definition's own
+                # natural content, or trailing children like an icon after
+                # a label get squeezed to zero width.
+                if any(
+                    "content.text" in changes
+                    for changes in marker["resolved_overrides"].values()
+                ):
+                    nested_component = component_by_id.get(
+                        marker["component_id"]
+                    )
+                    nested_root_geometry = (
+                        context["geometry"].get(
+                            str(
+                                nested_component.get("root_object_id")
+                                or ""
+                            )
+                        )
+                        if nested_component is not None
+                        else None
+                    )
+                    if nested_root_geometry:
+                        size = dict(layer.get("Size") or {})
+                        size["X"] = max(
+                            float(size.get("X") or 0.0),
+                            float(
+                                nested_root_geometry.get("width") or 0.0
+                            ),
+                        )
+                        size["Y"] = max(
+                            float(size.get("Y") or 0.0),
+                            float(
+                                nested_root_geometry.get("height") or 0.0
+                            ),
+                        )
+                        layer["Size"] = size
             if object_id == root_id:
                 layer = _localize_component_root_layer(
                     layer,
@@ -1839,9 +1941,9 @@ def _apply_painter_component_contract(
             for name, definition in definitions.items()
             if str(definition.get("type") or "") == "slot"
         ]
-        component_records.append(
+        return (
             {
-                "Id": component_id,
+                "Id": output_id,
                 "Name": str(component.get("name") or component_id),
                 "RootLayerId": root_id,
                 "BaseComponentId": str(
@@ -1863,8 +1965,195 @@ def _apply_painter_component_contract(
                     subtree_ids=subtree_set,
                 ),
                 "Slots": slots,
-            }
+            },
+            subtree,
         )
+
+    def _instance_auto_height_correction(
+        component: Mapping[str, Any],
+        component_id: str,
+        instance_id: str,
+        resolved_overrides: Mapping[str, Mapping[str, Any]],
+        instance_root: Mapping[str, Any],
+    ) -> tuple[str, Mapping[str, Mapping[str, Any]]]:
+        """Bake a private, geometry-corrected component clone for one instance.
+
+        Figma persists the correct hug height on the on-screen instance's own
+        root, but the shared component definition's child geometry (used as
+        the template for every instance) is frozen at import time from the
+        master's own placeholder text. Replaying that frozen height for an
+        instance whose override text renders to a different height leaves
+        later flow siblings (e.g. a trailing button) positioned against the
+        wrong stack total -- the description looks truncated and the button
+        can end up clipped outside the instance's real allocated size.
+
+        Only instances whose resolved override text actually needs a
+        different auto-height box get a private clone; every other instance
+        (including other placements of the same component with no such
+        override) keeps sharing the original template untouched.
+
+        Returns ``("", resolved_overrides)`` unchanged when no correction is
+        needed. Otherwise returns the new component id plus
+        ``resolved_overrides`` rekeyed to the clone's own renamed layer ids,
+        since the clone cannot reuse the shared template's layer ids (the
+        component contract requires each layer id to be owned by exactly one
+        Components[] entry) and the override map is keyed by layer id.
+        """
+        root_id = str(component.get("root_object_id") or "")
+        root = object_by_id.get(root_id)
+        subtree = definition_subtrees.get(component_id)
+        if root is None or not subtree:
+            return "", resolved_overrides
+        subtree_set = set(subtree)
+        # Figma expands an instance's descendants with the actually-authored
+        # style (font size, line height, etc.) baked in -- the definition-side
+        # row keyed by source_id only has the master's placeholder style.
+        # Re-measuring with the master's style understates or overstates the
+        # override text's real height, so the corrected total never matches
+        # the instance's own Figma-persisted size and the trailing button
+        # ends up positioned outside it.
+        expanded_by_source: dict[str, Mapping[str, Any]] = {}
+        for expanded_id in _component_subtree_ids(instance_id, children):
+            expanded_row = object_by_id.get(expanded_id)
+            if expanded_row is None:
+                continue
+            expanded_source_id = _component_source_id(
+                expanded_row, component_id
+            )
+            if expanded_source_id:
+                expanded_by_source[expanded_source_id] = expanded_row
+        corrections: dict[str, float] = {}
+        for source_id, changes in resolved_overrides.items():
+            if source_id not in subtree_set or "content.text" not in changes:
+                continue
+            source_row = expanded_by_source.get(source_id) or object_by_id.get(
+                source_id
+            )
+            if source_row is None:
+                continue
+            content = dict(source_row.get("content") or {})
+            if str(content.get("text_resize") or "") != "auto_height":
+                continue
+            seed = dict(context["geometry"].get(source_id) or {})
+            if not seed:
+                continue
+            style = dict(source_row.get("style") or {})
+            # QFont silently substitutes an unregistered "Inter" for a wider
+            # system font, wrapping short single-line labels onto a second
+            # line and overstating the required height. Painter's own preview
+            # avoids this by loading the bundled face first; the headless
+            # export path skipped that step.
+            load_application_ui_fonts()
+            style["font_family"] = registered_design_font_family(
+                str(style.get("font_family") or "Inter")
+            )
+            _, new_height = text_content_geometry(
+                str(changes.get("content.text") or ""),
+                style,
+                mode="auto_height",
+                width=float(seed.get("width") or 0.0),
+                height=float(seed.get("height") or 0.0),
+            )
+            if abs(new_height - float(seed.get("height") or 0.0)) > 0.5:
+                corrections[source_id] = new_height
+        if not corrections:
+            return "", resolved_overrides
+
+        # A scoped Auto Layout re-resolve, seeded from the same absolute
+        # geometry the rest of this document already trusts, with only the
+        # override-driven text heights patched. Forcing the subtree root's
+        # own parent_id empty makes it the resolver's traversal root, so the
+        # whole subtree gets the correct top-down measure/place pass instead
+        # of the resolver's unordered orphan fallback.
+        sub_objects: list[dict[str, Any]] = []
+        for object_id in subtree:
+            row = object_by_id.get(object_id)
+            if row is None:
+                continue
+            row = dict(row)
+            if object_id == root_id:
+                row["parent_id"] = ""
+            sub_objects.append(row)
+        sub_geometry = {
+            object_id: dict(context["geometry"][object_id])
+            for object_id in subtree
+            if object_id in context["geometry"]
+        }
+        for object_id, new_height in corrections.items():
+            sub_geometry[object_id]["height"] = new_height
+        resolved_rects = resolve_ui_auto_layout(
+            {"objects": sub_objects}, sub_geometry
+        )
+
+        patched_geometry = dict(context["geometry"])
+        patched_geometry.update(resolved_rects)
+        patched_context = dict(context)
+        patched_context["geometry"] = patched_geometry
+        artboard_id = str(root.get("artboard_id") or selected_artboard_id)
+        alt_flat_document = _painter_ui_to_umg_document_from_context(
+            patched_context,
+            artboard_id=artboard_id,
+            include_component_contract=False,
+        )
+        local_component_id = (
+            f"{component_id}::instance-height::{instance_id}"
+        )
+        record, _subtree = _build_component_record(
+            component,
+            root,
+            root_id,
+            record_id=local_component_id,
+            flat_source_document=alt_flat_document,
+        )
+        # Every layer id this clone's own subtree owns must be renamed: the
+        # validator requires each layer id to belong to exactly one
+        # Components[] entry, and this clone was built from the same source
+        # layers as the shared template it stands in for.
+        id_map = {
+            object_id: f"{object_id}::instance-height::{instance_id}"
+            for object_id in subtree
+        }
+        record = _remap_component_record_layer_ids(record, id_map)
+        component_records.append(record)
+        remapped_overrides = {
+            id_map.get(source_id, source_id): changes
+            for source_id, changes in resolved_overrides.items()
+        }
+        return local_component_id, remapped_overrides
+
+    definition_subtrees: dict[str, list[str]] = {}
+    component_records: list[dict[str, Any]] = []
+    for component in components:
+        component_id = str(component.get("id") or "")
+        root_id = str(component.get("root_object_id") or "")
+        root = object_by_id.get(root_id)
+        if root is None:
+            # The provider-neutral validator will report the missing root
+            # through the empty component layer list.
+            definition_subtrees[component_id] = []
+            component_records.append(
+                {
+                    "Id": component_id,
+                    "Name": str(component.get("name") or component_id),
+                    "RootLayerId": root_id,
+                    "BaseComponentId": str(
+                        component.get("base_component_id") or ""
+                    ),
+                    "VariantValuesJson": json.dumps(
+                        component_variant_properties(component),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    "DependencyComponentIds": [],
+                    "Layers": [],
+                    "Properties": [],
+                    "Slots": [],
+                }
+            )
+            continue
+        record, subtree = _build_component_record(component, root, root_id)
+        definition_subtrees[component_id] = subtree
+        component_records.append(record)
 
     selected_rows = list(
         context["objects_by_artboard"].get(selected_artboard_id, [])
@@ -1991,6 +2280,17 @@ def _apply_painter_component_contract(
             children=children,
             object_by_id=object_by_id,
         )
+        local_component_id, resolved_overrides = (
+            _instance_auto_height_correction(
+                component,
+                component_id,
+                instance_id,
+                resolved_overrides,
+                instance_root,
+            )
+        )
+        if local_component_id:
+            component_id = local_component_id
         property_values = _component_property_values(
             instance_root, component
         )

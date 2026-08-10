@@ -3042,15 +3042,22 @@ bool GenerateComponentBlueprint(
         return Child;
     };
 
+    // A single pass over Component.Layers in authored document order. Groups,
+    // nested instances, and leaves used to be attached to their parent panel
+    // in two separate passes (structural layers first, then leaves), which
+    // silently reordered every panel's children to "structural, then leaf"
+    // instead of the authored order -- a leaf meant to paint on top of a
+    // later-authored Group (or a leaf meant to sit after a Group in a
+    // VerticalBox) instead landed underneath/before it. Layer order is a
+    // parent-before-children pre-order traversal (see
+    // _component_subtree_ids in painter_ui_umg_adapter.py), so by the time a
+    // child is visited here its parent panel has already been registered in
+    // ParentPanels.
     for (const FTigerStudioUMGLayerRecord& Layer : Component.Layers)
     {
         FTigerComponentInstanceData InstanceData;
         const bool bNestedInstance =
             ParseComponentInstancePayload(Layer, InstanceData);
-        if (!bNestedInstance && Layer.Kind != ETigerStudioUMGLayerKind::Group)
-        {
-            continue;
-        }
         UPanelWidget* Parent = SlotRootParents.FindRef(Layer.Id);
         if (!Parent)
         {
@@ -3060,6 +3067,40 @@ bool GenerateComponentBlueprint(
         if (bNestedInstance)
         {
             ConstructNestedInstance(Layer, Parent, InstanceData);
+            continue;
+        }
+        if (Layer.Kind != ETigerStudioUMGLayerKind::Group)
+        {
+            UWidget* Widget = ConstructComponentLeaf(
+                OutBlueprint,
+                Layer,
+                ResourcePaths,
+                AssetTools,
+                GeneratedRoot,
+                Result);
+            if (!Widget)
+            {
+                Result.Errors.Add(Component.Id + TEXT(":component_layer_generation_failed:")
+                    + Layer.Id);
+                continue;
+            }
+            ConfigureWidget(
+                Widget,
+                Layer,
+                Parent,
+                Document.SchemaVersion,
+                LayerOrders.FindRef(Layer.Id),
+                TEXT("Padding"),
+                TEXT("Auto"),
+                1.0,
+                ComponentWidgetClasses);
+            ComponentWidgetClasses.Add(
+                Layer.Id,
+                Widget->GetClass()->GetName());
+            ApplyTypedLayerVisibility(Widget, Layer, Document.SchemaVersion);
+            Result.GeneratedWidgetVisibilityAudit.Add(
+                TEXT("component:") + Component.Id + TEXT("/") + Layer.Id,
+                SlateVisibilityAuditName(Widget->GetVisibility()));
             continue;
         }
         const FTigerStudioUMGComponentSlotRecord* Slot =
@@ -3142,51 +3183,6 @@ bool GenerateComponentBlueprint(
                 Layer.Id + TEXT("#panel"),
                 ContentPanel->GetClass()->GetName());
         }
-    }
-    for (const FTigerStudioUMGLayerRecord& Layer : Component.Layers)
-    {
-        FTigerComponentInstanceData InstanceData;
-        if (ParseComponentInstancePayload(Layer, InstanceData)
-            || Layer.Kind == ETigerStudioUMGLayerKind::Group)
-        {
-            continue;
-        }
-        UPanelWidget* Parent = SlotRootParents.FindRef(Layer.Id);
-        if (!Parent)
-        {
-            Parent = ParentPanels.FindRef(Layer.ParentId);
-        }
-        Parent = Parent ? Parent : GeneratedPanel;
-        UWidget* Widget = ConstructComponentLeaf(
-            OutBlueprint,
-            Layer,
-            ResourcePaths,
-            AssetTools,
-            GeneratedRoot,
-            Result);
-        if (!Widget)
-        {
-            Result.Errors.Add(Component.Id + TEXT(":component_layer_generation_failed:")
-                + Layer.Id);
-            continue;
-        }
-        ConfigureWidget(
-            Widget,
-            Layer,
-            Parent,
-            Document.SchemaVersion,
-            LayerOrders.FindRef(Layer.Id),
-            TEXT("Padding"),
-            TEXT("Auto"),
-            1.0,
-            ComponentWidgetClasses);
-        ComponentWidgetClasses.Add(
-            Layer.Id,
-            Widget->GetClass()->GetName());
-        ApplyTypedLayerVisibility(Widget, Layer, Document.SchemaVersion);
-        Result.GeneratedWidgetVisibilityAudit.Add(
-            TEXT("component:") + Component.Id + TEXT("/") + Layer.Id,
-            SlateVisibilityAuditName(Widget->GetVisibility()));
     }
     for (const FTigerStudioUMGLayerRecord& Layer : Component.Layers)
     {

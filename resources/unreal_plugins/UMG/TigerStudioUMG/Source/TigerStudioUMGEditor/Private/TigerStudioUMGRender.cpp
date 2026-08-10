@@ -352,6 +352,51 @@ void CollectWidgetRuntimeAudit(
         });
 }
 
+void CollectWidgetGeometryAudit(
+    UUserWidget* Owner,
+    const FString& Prefix,
+    TMap<FString, FString>& GeometryAudit,
+    TSet<const UUserWidget*>& VisitedOwners)
+{
+    if (!Owner || !Owner->WidgetTree || VisitedOwners.Contains(Owner))
+    {
+        return;
+    }
+    VisitedOwners.Add(Owner);
+    Owner->WidgetTree->ForEachWidget(
+        [&Prefix, &GeometryAudit, &VisitedOwners](UWidget* Child)
+        {
+            if (!Child)
+            {
+                return;
+            }
+            const FString Name = Child->GetFName().ToString();
+            const FString Path = Prefix.IsEmpty()
+                ? Name
+                : Prefix + TEXT("/") + Name;
+            const FGeometry& Geometry = Child->GetCachedGeometry();
+            const FVector2D AbsPos =
+                Geometry.GetAbsolutePosition();
+            const FVector2D LocalSize = Geometry.GetLocalSize();
+            GeometryAudit.Add(
+                Path,
+                FString::Printf(
+                    TEXT("abspos=%.2f,%.2f;localsize=%.2fx%.2f"),
+                    AbsPos.X,
+                    AbsPos.Y,
+                    LocalSize.X,
+                    LocalSize.Y));
+            if (UUserWidget* Nested = Cast<UUserWidget>(Child))
+            {
+                CollectWidgetGeometryAudit(
+                    Nested,
+                    Path,
+                    GeometryAudit,
+                    VisitedOwners);
+            }
+        });
+}
+
 void CollectRoundedCardRuntimeAudit(
     UUserWidget* Owner,
     const FString& Prefix,
@@ -536,6 +581,13 @@ UTigerStudioUMGImportSubsystem::RenderWidgetBlueprintToPng(
     // this draw's AllottedGeometry before its visual child paints; a warm-up
     // pass would hide a first-frame regression in that same-frame contract.
     Renderer.DrawWidget(RenderTarget, SlateWidget, PixelSize, 0.0f, false);
+
+    TSet<const UUserWidget*> VisitedGeometryOwners;
+    CollectWidgetGeometryAudit(
+        Widget,
+        TEXT(""),
+        Result.WidgetGeometryAudit,
+        VisitedGeometryOwners);
 
     TSet<const UUserWidget*> VisitedRoundedCardOwners;
     CollectRoundedCardRuntimeAudit(
