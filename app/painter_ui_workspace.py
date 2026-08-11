@@ -1193,8 +1193,23 @@ class PainterUIDesignOverlay(QWidget):
         )
 
     def _scene_bounds(self) -> QRectF:
+        artboards = self._document["artboards"]
+        active_page_id = str(self._document.get("active_page_id") or "")
+        # Pages don't share a coordinate space, so unioning every page's
+        # artboards fits (and centers) on the whole file's combined extent
+        # instead of the active page -- wrong scale, wrong frame in view.
+        if active_page_id and any(
+            str(row.get("page_id") or "") for row in artboards
+        ):
+            scoped = [
+                row
+                for row in artboards
+                if str(row.get("page_id") or "") == active_page_id
+            ]
+            if scoped:
+                artboards = scoped
         bounds = QRectF()
-        for artboard in self._document["artboards"]:
+        for artboard in artboards:
             rect = QRectF(
                 float(artboard["x"]),
                 float(artboard["y"]),
