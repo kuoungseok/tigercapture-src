@@ -1002,6 +1002,13 @@ def _figma_resolved_child_baseline_offsets(
 
 _FIGMA_LAYOUT_GEOMETRY_EPSILON = 0.5
 _FIGMA_AFFINE_EPSILON = 0.0001
+# A rotation dragged/edited by hand in Figma can serialize with a==d and
+# b==-c off by ~1e-3 even though it is a pure rotation - the tight epsilon
+# above rejected those as sheared and fell back to the (larger) unrotated
+# bounding box with no rotation applied, which is what visibly shifted a
+# rotated Boolean operand (a hexagon rotated ~30 degrees) off to one side
+# instead of leaving it, at worst, a fraction of a percent off-shape.
+_FIGMA_AFFINE_ORTHOGONALITY_EPSILON = 0.01
 _FIGMA_AUTO_LAYOUT_RECOVERY_FIELDS = (
     "layoutMode",
     "layoutWrap",
@@ -1296,7 +1303,7 @@ def _figma_affine_snapshot_geometry(
         or scale_x <= _FIGMA_AFFINE_EPSILON
         or scale_y <= _FIGMA_AFFINE_EPSILON
         or determinant <= _FIGMA_AFFINE_EPSILON
-        or orthogonality > _FIGMA_AFFINE_EPSILON
+        or orthogonality > _FIGMA_AFFINE_ORTHOGONALITY_EPSILON
     ):
         metadata.update(
             {
