@@ -17,7 +17,7 @@ import math
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.painter_ui_figma_fig import FigArchive
-from app.painter_ui_figma_fig_vector import fig_vector_geometry
+from app.painter_ui_figma_fig_vector import fig_command_geometry, fig_vector_geometry
 
 __all__ = [
     "FIG_REST_SCHEMA",
@@ -987,6 +987,17 @@ def _convert_node(
             rest["fillGeometry"] = geometry
         if vector_warning:
             warnings.append(vector_warning)
+    elif "fillGeometry" in raw:
+        # Parametric shapes (regular polygons, stars, ...) carry no editable
+        # vectorData network - Figma bakes their outline straight into
+        # fillGeometry's commandsBlob instead. Skipping this left every
+        # polygon/star operand of a Boolean group resolving to an empty
+        # path, so subtract/union results rendered as nothing.
+        geometry, command_warning = fig_command_geometry(raw, blobs)
+        if geometry:
+            rest["fillGeometry"] = geometry
+        if command_warning:
+            warnings.append(command_warning)
 
     if rest["type"] == "BOOLEAN_OPERATION":
         # Without this every boolean imported as the default UNION, so a shape

@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import copy
+import re
 from collections import defaultdict, deque
 from math import hypot
 from typing import Any, Mapping
 
 from app.painter_ui_json_copy import json_deepcopy
+
+# Matches the "M1 2L3 4C5 6 7 8 9 10Z" dialect emitted by fig_vector_geometry
+# and fig_command_geometry: a command letter directly followed by
+# space-separated numbers, no commas.
+_LOCAL_SVG_TOKEN_RE = re.compile(r"[MLCQZ]|-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
 VECTOR_NODE_KINDS = {"corner", "smooth", "symmetric"}
@@ -260,6 +266,54 @@ def vector_network_to_qpath(value: Any, rect) -> Any:
             remaining.discard(segment["id"])
         if network["closed"] and current_id == start_id:
             path.closeSubpath()
+    return path
+
+
+def local_svg_path_to_qpath(d: Any, rect, geometry_scale: float = 1.0) -> Any:
+    """Build a QPainterPath from the "M1 2L3 4Z" dialect used by imported
+    Figma geometry (``vector_fill_geometry`` / ``vector_paths``).
+
+    Unlike ``vector_network_to_qpath``, coordinates here are absolute local
+    pixels (the object's own 0..width/0..height box), not 0..1 fractions of
+    ``rect`` - so each point is an offset from ``rect``'s top-left, scaled by
+    ``geometry_scale`` rather than by ``rect``'s size.
+    """
+
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QPainterPath
+
+    path = QPainterPath()
+    tokens = _LOCAL_SVG_TOKEN_RE.findall(str(d or ""))
+    left, top = float(rect.left()), float(rect.top())
+
+    def point(index: int) -> QPointF:
+        return QPointF(
+            left + float(tokens[index]) * geometry_scale,
+            top + float(tokens[index + 1]) * geometry_scale,
+        )
+
+    i = 0
+    count = len(tokens)
+    while i < count:
+        command = tokens[i]
+        i += 1
+        if command == "Z":
+            path.closeSubpath()
+            continue
+        if command == "M" and i + 1 < count:
+            path.moveTo(point(i))
+            i += 2
+        elif command == "L" and i + 1 < count:
+            path.lineTo(point(i))
+            i += 2
+        elif command == "Q" and i + 3 < count:
+            path.quadTo(point(i), point(i + 2))
+            i += 4
+        elif command == "C" and i + 5 < count:
+            path.cubicTo(point(i), point(i + 2), point(i + 4))
+            i += 6
+        else:
+            break
     return path
 
 

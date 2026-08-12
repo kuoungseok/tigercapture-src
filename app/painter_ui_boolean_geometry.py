@@ -155,12 +155,39 @@ def ui_object_shape_path(
             path.addText(QPointF(x, baseline), font, line)
             baseline += line_height
     elif kind == "path":
-        from app.painter_ui_vector_network import vector_network_to_qpath
+        vector_network = content.get("vector_network")
+        if isinstance(vector_network, Mapping):
+            from app.painter_ui_vector_network import vector_network_to_qpath
 
-        path = vector_network_to_qpath(
-            content.get("vector_network"),
-            rect,
-        )
+            path = vector_network_to_qpath(vector_network, rect)
+        else:
+            # Imported Figma vectors with no editable network (plain
+            # REST-style fillGeometry, e.g. a polygon/star baked from a
+            # commandsBlob) still need a real path here - this is what a
+            # Boolean operation subtracts/unions, not just paints. Falling
+            # through to an empty path silently dropped the whole operand,
+            # which is why a Boolean group with such an operand (like the
+            # Auto Layout playground's hatch-triangle cutouts) rendered
+            # as nothing.
+            from app.painter_ui_vector_network import local_svg_path_to_qpath
+
+            fill_rows = [
+                row
+                for row in content.get("vector_fill_geometry") or []
+                if isinstance(row, Mapping) and str(row.get("path") or "")
+            ] or [
+                {"path": row}
+                for row in content.get("vector_paths") or []
+                if str(row or "")
+            ]
+            path = QPainterPath()
+            for row in fill_rows:
+                piece = local_svg_path_to_qpath(
+                    row.get("path"),
+                    rect,
+                    geometry_scale=geometry_scale,
+                )
+                path = path.united(piece) if not path.isEmpty() else piece
     elif kind in {"polygon", "star", "arc"}:
         from app.painter_ui_parametric_shapes import parametric_shape_path
 
@@ -334,6 +361,12 @@ def resolve_ui_boolean_path(
     if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
         return None
     by_id = {str(row["id"]): row for row in rows}
+    children_by_parent: dict[str, list[Mapping[str, Any]]] = {}
+    for row in by_id.values():
+        parent_id = str(row.get("parent_id") or "")
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(row)
+
     def shape(
         operand: Mapping[str, Any],
         visiting: set[str],
@@ -347,6 +380,26 @@ def resolve_ui_boolean_path(
         ):
             nested = resolve(operand, visiting)
             return nested if nested is not None else QPainterPath()
+        children = children_by_parent.get(operand_id)
+        if children and str(operand.get("kind") or "") in {"frame", "group"}:
+            # A plain (non-Boolean) group operand contributes its children's
+            # combined shape, not its own bounding box - an operand like a
+            # rotated rectangle wrapped in an organizational group otherwise
+            # resolved to the group's axis-aligned box instead of the
+            # rotated rectangle actually inside it.
+            if operand_id in visiting:
+                return QPainterPath()
+            next_visiting = set(visiting)
+            next_visiting.add(operand_id)
+            combined = QPainterPath()
+            for child in children:
+                if not bool(child.get("visible", True)):
+                    continue
+                piece = shape(child, next_visiting)
+                combined = (
+                    combined.united(piece) if not combined.isEmpty() else piece
+                )
+            return combined
         scale = (
             float(geometry_scale_for_object(operand))
             if geometry_scale_for_object is not None

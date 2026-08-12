@@ -29,6 +29,8 @@ __all__ = [
     "VectorNetworkError",
     "parse_vector_network",
     "vector_network_fill_paths",
+    "fig_vector_geometry",
+    "fig_command_geometry",
 ]
 
 
@@ -302,3 +304,91 @@ def fig_vector_geometry(
         return vector_network_fill_paths(network, scale_x=scale_x, scale_y=scale_y), ""
     except (VectorNetworkError, struct.error) as exc:
         return [], f"fig_vector_network_unparsed:{exc}"
+
+
+# Verb bytes seen in ``commandsBlob`` payloads, each followed by that many
+# little-endian float32 coordinate pairs (0 for close, which carries none).
+_COMMAND_POINT_COUNTS = {0: 0, 1: 1, 2: 1, 3: 2, 4: 3}
+_COMMAND_LETTERS = {1: "M", 2: "L", 3: "Q", 4: "C"}
+_COMMAND_POINT = struct.Struct("<ff")
+
+
+def _decode_command_blob(data: bytes) -> str:
+    """Decode a ``fillGeometry``/``strokeGeometry`` ``commandsBlob`` payload.
+
+    Parametric shapes (regular polygons, stars, ...) have no ``vectorData``
+    network - Figma bakes their outline straight into a flat verb-and-point
+    stream instead: one byte verb, then that many float32 ``x, y`` pairs
+    (0 for the close verb). Reverse engineered from a hexagon's 64-byte blob:
+    a move, six lines back to the start point, and a trailing close byte.
+    """
+
+    index = 0
+    length = len(data)
+    chunks: list[str] = []
+    while index < length:
+        verb = data[index]
+        index += 1
+        if verb == 0:
+            chunks.append("Z")
+            continue
+        count = _COMMAND_POINT_COUNTS.get(verb)
+        if count is None:
+            raise VectorNetworkError(f"Unknown path command verb {verb}")
+        needed = count * _COMMAND_POINT.size
+        if index + needed > length:
+            raise VectorNetworkError("Path command blob is truncated")
+        points: list[str] = []
+        for _ in range(count):
+            x, y = _COMMAND_POINT.unpack_from(data, index)
+            index += _COMMAND_POINT.size
+            points.append(_point(x, y))
+        chunks.append(_COMMAND_LETTERS[verb] + " ".join(points))
+    return "".join(chunks)
+
+
+def fig_command_geometry(
+    node: Mapping[str, Any],
+    blobs: Sequence[Any],
+    *,
+    field: str = "fillGeometry",
+) -> tuple[list[dict[str, str]], str]:
+    """Resolve one node's baked ``fillGeometry`` ``commandsBlob`` entries.
+
+    Returns the rows plus a warning string (empty when nothing went wrong).
+    """
+
+    entries = node.get(field)
+    if not isinstance(entries, list) or not entries:
+        return [], ""
+    rows: list[dict[str, str]] = []
+    warning = ""
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        index = entry.get("commandsBlob")
+        if not isinstance(index, int) or isinstance(index, bool):
+            continue
+        if index < 0 or index >= len(blobs):
+            warning = f"fig_command_blob_missing:{index}"
+            continue
+        blob_entry = blobs[index]
+        raw = blob_entry.get("bytes") if isinstance(blob_entry, Mapping) else blob_entry
+        if not isinstance(raw, (bytes, bytearray)):
+            warning = f"fig_command_blob_unreadable:{index}"
+            continue
+        try:
+            path = _decode_command_blob(bytes(raw))
+        except (VectorNetworkError, struct.error) as exc:
+            warning = f"fig_command_path_unparsed:{exc}"
+            continue
+        if path:
+            rows.append(
+                {
+                    "path": path,
+                    "windingRule": str(
+                        entry.get("windingRule") or "NONZERO"
+                    ).upper(),
+                }
+            )
+    return rows, warning
