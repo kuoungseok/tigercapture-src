@@ -312,6 +312,42 @@ def _line_segment_from_path(path: str) -> tuple[float, float, float, float] | No
     return x1, y1, x2, y2
 
 
+def _close_implicit_polyline_path(path: str) -> str | None:
+    """Append an explicit ``Z`` to an M/L polyline that already returns to
+    its own start point without one.
+
+    Figma exports simple chevron/arrow icons as ``M x0 y0 L ... L x0 y0``:
+    geometrically closed, but missing the literal ``Z`` the bake contract
+    requires so this renderer and the Unreal plugin agree on the exact
+    same closed path. Synthesizing that Z is safer than loosening the
+    strict subpath grammar both renderers rely on.
+    """
+    tokens = _svg_path_tokens(path)
+    if not tokens or len(tokens) < 6 or tokens[-1].upper() == "Z":
+        return None
+    commands = [token for token in tokens if len(token) == 1 and token.isalpha()]
+    if not commands or commands[0] != "M" or any(command != "L" for command in commands[1:]):
+        return None
+    try:
+        start_x, start_y = float(tokens[1]), float(tokens[2])
+        end_x, end_y = float(tokens[-2]), float(tokens[-1])
+    except (TypeError, ValueError):
+        return None
+    if abs(start_x - end_x) > 0.001 or abs(start_y - end_y) > 0.001:
+        return None
+    return f"{path.strip()} Z"
+
+
+def _close_implicit_polyline_geometry(
+    rows: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    closed = []
+    for row in rows:
+        closed_path = _close_implicit_polyline_path(row["path"])
+        closed.append({**row, "path": closed_path} if closed_path else row)
+    return closed
+
+
 def _stroke_line_to_fill_row(
     row: Mapping[str, Any],
     resolved_size: Mapping[str, Any],
@@ -473,12 +509,13 @@ def plan_static_vector_bake(
     content = content if isinstance(content, Mapping) else {}
     figma_type = str(content.get("figma_type") or "").upper()
     raw_fill_geometry = content.get("vector_fill_geometry")
-    fill_geometry = _geometry_rows(content.get("vector_fill_geometry"))
+    original_fill_geometry = _geometry_rows(content.get("vector_fill_geometry"))
     is_candidate = figma_type in _FIGMA_VECTOR_TYPES and bool(
         content.get("vector_fill_geometry")
     )
     if not is_candidate:
         return {"status": "not_applicable", "available": False, "reasons": []}
+    fill_geometry = _close_implicit_polyline_geometry(original_fill_geometry)
 
     reasons: list[str] = []
     if has_children:
@@ -547,7 +584,7 @@ def plan_static_vector_bake(
     vector_paths = _path_values(raw_vector_paths)
     if raw_vector_paths and (
         not vector_paths
-        or vector_paths != [item["path"] for item in fill_geometry]
+        or vector_paths != [item["path"] for item in original_fill_geometry]
     ):
         reasons.append("figma_vector_static_bake_geometry_sources_disagree")
     if content.get("vector_stroke_geometry"):
