@@ -313,6 +313,7 @@ def test_painted_leaf_container_uses_existing_rectangle_material_path(
 
 def test_painted_container_with_child_keeps_group_semantics() -> None:
     from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
     document, frame = add_ui_object(
         create_ui_document(320, 180),
@@ -325,13 +326,19 @@ def test_painted_container_with_child_keeps_group_semantics() -> None:
         parent_id=frame["id"],
         content={"text": "Child"},
     )
-    layer = _painter_layer(document, frame["id"])
-    payload = json.loads(layer["PayloadJson"])
+    layers = painter_ui_to_umg_document(document)["Layers"]
+    layer = next(row for row in layers if row["Id"] == frame["id"])
+    background = next(
+        row for row in layers if row["Id"] == f"{frame['id']}::umg-background"
+    )
 
+    # The container's own gradient paint moves onto a synthetic leaf
+    # background (see _split_painted_containers), so the group itself keeps
+    # structural semantics instead of being blocked by its own appearance.
     assert layer["Kind"] == "Group"
-    assert layer["Disposition"] == "Blocked"
-    assert "gradient_material_requires_leaf_rectangle" in layer["BlockReasons"]
-    assert payload["umg_leaf_rectangle_classification"] == {}
+    assert layer["Disposition"] == "Native"
+    assert layer["BlockReasons"] == []
+    assert background["Disposition"] == "Material"
 
 
 def test_saas_dashboard_leaf_frames_export_as_native_or_material_images() -> None:

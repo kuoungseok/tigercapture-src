@@ -800,11 +800,20 @@ def validate_umg_static_vector_source_plan(
     width = _finite_number(logical.get("width"))
     height = _finite_number(logical.get("height"))
     layer_size = _mapping(layer.get("Size"))
+    layer_width = _finite_number(layer_size.get("X"))
+    layer_height = _finite_number(layer_size.get("Y"))
     if (
         width is None
         or height is None
-        or _finite_number(layer_size.get("X")) != width
-        or _finite_number(layer_size.get("Y")) != height
+        or layer_width is None
+        or layer_height is None
+        # plan_static_vector_bake snaps a genuinely fractional authored size
+        # (e.g. an auto-layout 1/3 split) to the nearest integer with the
+        # same round() so its hashed source and the plugin's fixed-precision
+        # formatting agree; the layer's own authored Size is never re-snapped,
+        # so this must compare against that same rounding, not exact equality.
+        or round(layer_width) != width
+        or round(layer_height) != height
     ):
         reasons.append("baked_source_plan_layer_size_mismatch")
     expected_pixel = {

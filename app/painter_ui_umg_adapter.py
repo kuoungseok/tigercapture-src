@@ -483,6 +483,38 @@ def _leaf_rectangle_conversion_row(
     return {**row, "kind": "rectangle"}
 
 
+def _is_circular_ellipse_leaf(row: Mapping[str, Any]) -> bool:
+    """Return whether ``row`` is a stroked/gradient/effect circle.
+
+    RoundedCard has no ellipse primitive, so a non-circular ellipse still has
+    no leaf-rectangle path. A circle (width == height) is exactly a
+    full-radius RoundedCard, so only that subset is eligible here.
+    """
+
+    if str(row.get("kind") or "").strip().casefold() != "ellipse":
+        return False
+    width = float(row.get("width", 0.0) or 0.0)
+    height = float(row.get("height", 0.0) or 0.0)
+    if width <= 0.0001 or height <= 0.0001:
+        return False
+    if abs(width - height) > 0.01:
+        return False
+    return _has_advanced_appearance(dict(row.get("style") or {}))
+
+
+def _circle_rectangle_conversion_row(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    radius = float(row.get("width", 0.0) or 0.0) / 2.0
+    style = dict(row.get("style") or {})
+    style["radius"] = radius
+    style["corner_radii"] = {
+        "top_left": radius,
+        "top_right": radius,
+        "bottom_right": radius,
+        "bottom_left": radius,
+    }
+    return {**row, "kind": "rectangle", "style": style}
+
+
 def _row_size(row: Mapping[str, Any], override: object = None) -> dict[str, float]:
     source = override if isinstance(override, Mapping) else row
     return {
@@ -870,6 +902,7 @@ def _umg_disposition(
         appearance_style["corner_smoothing"] = 0.0
     if (
         source_kind != "rectangle"
+        and not is_vector_geometry_object
         and not (button_style is not None and not button_style.block_reasons)
         and _has_advanced_appearance(
         appearance_style,
@@ -962,6 +995,12 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
         geometry = {
             key: row[key] for key in ("x", "y", "width", "height")
         }
+        # Both synthetic rows must keep the container's own z_index. The UMG
+        # simulator resolves each layer's effective parent in a single
+        # document-order pass, so a child processed before its parent gets
+        # silently re-parented to the artboard root; z_index 0/1 collided
+        # with every earlier sibling in the document and reordered Content
+        # ahead of its own parent, dropping the label/decoration to (0, 0).
         background = {
             **geometry,
             "id": f"{object_id}{PAINTED_CONTAINER_BACKGROUND_SUFFIX}",
@@ -969,7 +1008,7 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
             "kind": "rectangle",
             "artboard_id": row["artboard_id"],
             "parent_id": object_id,
-            "z_index": 0,
+            "z_index": row["z_index"],
             "style": style,
         }
         content = {
@@ -979,7 +1018,7 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
             "kind": "frame",
             "artboard_id": row["artboard_id"],
             "parent_id": object_id,
-            "z_index": 1,
+            "z_index": row["z_index"],
             # A pure layout wrapper: the background rectangle painted below
             # already reproduces the container's appearance. Without an
             # explicit transparent fill here, missing style/fill defaults to
@@ -991,9 +1030,14 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
         for child in children_by_parent.get(object_id, []):
             child["parent_id"] = content["id"]
         # The container keeps its identity, geometry and constraints; it only
-        # stops painting and starts stacking.
+        # stops painting and starts stacking. The background row above just
+        # took the full original style (fill *and* strokes/effects/radius),
+        # so nothing paint-related may survive here -- spreading the old
+        # ``style`` left strokes/effects duplicated onto this now-overlay
+        # frame, which still isn't a leaf rectangle and so re-tripped
+        # advanced_appearance_requires_leaf_rectangle on the very container
+        # this split exists to route around.
         row["style"] = {
-            **style,
             "fill": "#00000000",
             "fills": [],
             "radius": 0.0,
@@ -2497,9 +2541,13 @@ def _painter_ui_to_umg_document_from_context(
             row,
             parent_ids_with_children,
         )
-        conversion_row = _leaf_rectangle_conversion_row(
-            row,
-            painted_leaf_container=painted_leaf_container,
+        conversion_row = (
+            _circle_rectangle_conversion_row(row)
+            if _is_circular_ellipse_leaf(row)
+            else _leaf_rectangle_conversion_row(
+                row,
+                painted_leaf_container=painted_leaf_container,
+            )
         )
         authored_panel_kind = panel_kind_by_id.get(str(row["id"]), "None")
         authored_spacing_strategy = spacing_strategy_by_id.get(
