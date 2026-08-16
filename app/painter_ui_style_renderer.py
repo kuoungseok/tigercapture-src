@@ -361,6 +361,8 @@ def draw_ui_vector_paths(
     rect: QRectF,
     content: object,
     style: Mapping[str, Any],
+    *,
+    scale: float = 1.0,
 ) -> bool:
     """Render Figma SVG path geometry without substituting a bounding box."""
     if not isinstance(content, Mapping):
@@ -379,7 +381,14 @@ def draw_ui_vector_paths(
             return False
         fill = ui_color(style.get("fill"), "#506884")
         stroke = ui_color(style.get("stroke"), "#00000000")
-        stroke_width = max(0.0, float(style.get("stroke_width") or 0.0))
+        # ``path`` is already in screen space (``rect`` carries the current
+        # view scale), but this stroke width is the raw authored value - every
+        # other stroke in this file's caller multiplies by the view scale, so
+        # skipping it here only matched at 100% zoom and looked too thin/thick
+        # everywhere else.
+        stroke_width = max(0.0, float(style.get("stroke_width") or 0.0)) * max(
+            0.0, float(scale)
+        )
         painter.save()
         if fill.alpha() > 0:
             painter.fillPath(path, ui_fill_brush(style))

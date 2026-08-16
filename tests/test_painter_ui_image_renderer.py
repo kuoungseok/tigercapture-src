@@ -122,7 +122,7 @@ def test_figma_affine_image_transform_samples_normalized_source_uv(
             "image_fit": "stretch",
             # Figma REST transforms target-normalized positions into source
             # UVs, so this selects source U=0.5..1.0.
-            "figma_image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
+            "image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
         },
     )
     painter.end()
@@ -139,7 +139,7 @@ def test_figma_affine_image_transform_samples_normalized_source_uv(
         {
             "source_path": str(source_path),
             "image_fit": "stretch",
-            "figma_image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
+            "image_transform": [[0.5, 0.0, 0.5], [0.0, 1.0, 0.0]],
         },
     )
     painter.end()
@@ -155,7 +155,7 @@ def test_figma_affine_image_transform_samples_normalized_source_uv(
         {
             "source_path": str(source_path),
             "image_fit": "stretch",
-            "figma_image_transform": [[0.5, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            "image_transform": [[0.5, 0.0, 0.0], [0.0, 1.0, 0.0]],
         },
     )
     painter.end()

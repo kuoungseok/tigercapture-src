@@ -30,6 +30,37 @@ def _normalized_panel_mode(value: Any) -> str:
     return mode if mode in _PANEL_MODES else "auto"
 
 
+_CHILD_COUNT_MEMO: dict[tuple[Any, ...], tuple[Any, dict[str, int]]] = {}
+_CHILD_COUNT_MEMO_LIMIT = 4
+
+
+def _child_counts_by_parent(document: Mapping[str, Any]) -> Mapping[str, int]:
+    """Parent id -> child count, cached on document content.
+
+    Selection change re-runs classification for whatever got selected, and
+    used to re-scan every object in the file to count one row's children.
+    Content doesn't change on a selection click, so the index built here
+    survives across the whole run of clicks that follow one edit.
+    """
+    from app.painter_ui_document import ui_document_content_witness
+
+    witness, pinned = ui_document_content_witness(document)
+    cached = _CHILD_COUNT_MEMO.get(witness)
+    if cached is not None:
+        return cached[1]
+    counts: dict[str, int] = {}
+    for item in document.get("objects", []):
+        if not isinstance(item, Mapping):
+            continue
+        parent_id = str(item.get("parent_id") or "")
+        if parent_id:
+            counts[parent_id] = counts.get(parent_id, 0) + 1
+    _CHILD_COUNT_MEMO[witness] = (pinned, counts)
+    while len(_CHILD_COUNT_MEMO) > _CHILD_COUNT_MEMO_LIMIT:
+        _CHILD_COUNT_MEMO.pop(next(iter(_CHILD_COUNT_MEMO)))
+    return counts
+
+
 def _classification(
     document: Mapping[str, Any] | None,
     row: Mapping[str, Any] | None,
@@ -40,30 +71,30 @@ def _classification(
 
     source = row if isinstance(row, Mapping) else {}
     object_id = str(source.get("id") or "")
-    child_count = sum(
-        1
-        for item in (
-            document.get("objects", [])
-            if isinstance(document, Mapping)
-            else []
-        )
-        if isinstance(item, Mapping)
-        and str(item.get("parent_id") or "") == object_id
+    child_count = (
+        _child_counts_by_parent(document).get(object_id, 0)
+        if isinstance(document, Mapping)
+        else 0
     )
     layout = normalize_ui_auto_layout(source.get("layout"))
     requested = _normalized_panel_mode(layout.get("umg_panel_mode"))
     decision: Mapping[str, Any] = {}
     if object_id and isinstance(document, Mapping):
+        # Scoped to the selected container. Asking the whole-document contract
+        # and indexing one entry out of it classified every row in the file on
+        # every selection change, which on a large import was most of the cost
+        # of a click.
         from app.painter_ui_umg_auto_layout import (
-            painter_umg_auto_layout_contract,
+            painter_umg_panel_classification,
         )
 
-        contract = painter_umg_auto_layout_contract(document, normalize=normalize)
-        rows = contract.get("classification_by_id")
-        if isinstance(rows, Mapping):
-            candidate = rows.get(object_id)
-            if isinstance(candidate, Mapping):
-                decision = candidate
+        candidate = painter_umg_panel_classification(
+            document,
+            object_id,
+            normalize=normalize,
+        )
+        if isinstance(candidate, Mapping):
+            decision = candidate
 
     layout_mode = str(layout.get("mode") or "none")
     effective = str(

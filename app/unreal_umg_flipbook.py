@@ -273,10 +273,10 @@ def painter_flipbook_conversion(
             source.get("image_crop"),
             content.get("crop"),
             content.get("image_crop"),
-            content.get("figma_image_transform"),
+            content.get("image_transform"),
             paint.get("crop"),
             paint.get("image_crop"),
-            paint.get("figma_image_transform"),
+            paint.get("image_transform"),
         )
     ):
         reasons.append("flipbook_atlas_crop_unsupported")

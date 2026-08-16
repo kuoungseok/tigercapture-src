@@ -56,7 +56,7 @@ def normalize_ui_image_content(
         source.get("image_rotation", source.get("rotation")),
         0.0,
     )
-    transform = source.get("figma_image_transform")
+    transform = source.get("image_transform")
     normalized_transform: list[list[float]] = []
     if (
         isinstance(transform, (list, tuple))
@@ -72,7 +72,7 @@ def normalize_ui_image_content(
         ]
         if all(math.isfinite(value) for axis in candidate for value in axis):
             normalized_transform = candidate
-    source["figma_image_transform"] = normalized_transform
+    source["image_transform"] = normalized_transform
     source["focal_x"] = max(
         0.0,
         min(1.0, _number(source.get("focal_x"), 0.5)),
@@ -503,7 +503,7 @@ def draw_ui_image(
             QColor(tint.red(), tint.green(), tint.blue(), 255),
         )
         tint_painter.end()
-    figma_transform = settings["figma_image_transform"]
+    figma_transform = settings["image_transform"]
     if not figma_transform:
         draw_image, logical_width, logical_height = _rotated_image_and_size(
             draw_image,

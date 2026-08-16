@@ -17,6 +17,8 @@ from typing import Any, Mapping
 
 from app.painter_ui_document import create_ui_document, normalize_ui_document
 from app.painter_ui_umg_adapter import (
+    PAINTED_CONTAINER_BACKGROUND_SUFFIX,
+    PAINTED_CONTAINER_CONTENT_SUFFIX,
     TIGER_UMG_SCHEMA_VERSION,
     painter_ui_to_umg_document,
     preflight_painter_umg,
@@ -1469,6 +1471,47 @@ def _image_corner_style(binding: Mapping[str, Any]) -> dict[str, Any]:
     return {"radius": uniform, "corner_radii": radii}
 
 
+def _static_vector_bake_preview_style_and_content(
+    vector_bake: Mapping[str, Any],
+) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
+    """Draw a not-yet-materialized static vector bake from its own plan.
+
+    Materialization (writing the real PNG) only happens at export time, so
+    the interactive preview never sees a ``rendered`` Baked layer and always
+    fell back to the translucent unrendered-reference stand-in instead - even
+    for plans already proven safe. The plan carries the exact fill geometry
+    Unreal will receive, so draw that directly through the existing vector
+    path renderer rather than waiting on a materialization step this preview
+    never performs.
+    """
+
+    if str(vector_bake.get("status") or "") != "available":
+        return None
+    source = vector_bake.get("source")
+    source = source if isinstance(source, Mapping) else {}
+    geometry = source.get("geometry")
+    geometry = geometry if isinstance(geometry, list) else []
+    if not geometry:
+        return None
+    fill_rgba = source.get("fill_rgba")
+    fill_rgba = (
+        fill_rgba if isinstance(fill_rgba, list) and len(fill_rgba) == 4 else [0, 0, 0, 255]
+    )
+    fill_hex = "#{:02X}{:02X}{:02X}{:02X}".format(
+        *(max(0, min(255, int(channel))) for channel in fill_rgba)
+    )
+    return (
+        "path",
+        {
+            "fill": fill_hex,
+            "stroke": "#00000000",
+            "stroke_width": 0.0,
+            "radius": 0.0,
+        },
+        {"vector_fill_geometry": copy.deepcopy(geometry)},
+    )
+
+
 def _projection_style_and_content(
     *,
     kind: str,
@@ -1477,9 +1520,14 @@ def _projection_style_and_content(
     image_binding: Mapping[str, Any] | None,
     material: Mapping[str, Any] | None = None,
     button_style: Mapping[str, Any] | None = None,
+    vector_bake: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     if material:
         return "rectangle", umg_material_preview_style(material), {}
+    if isinstance(vector_bake, Mapping):
+        preview = _static_vector_bake_preview_style_and_content(vector_bake)
+        if preview is not None:
+            return preview
     fill = str(payload.get("fill") or "#FFFFFFFF")
     image = image_binding if isinstance(image_binding, Mapping) else {}
     has_image = bool(image.get("present"))
@@ -1521,8 +1569,28 @@ def _projection_style_and_content(
                 "stroke": "#00000000",
                 "text_color": fill,
                 "font_size": float(font_size),
+                # The payload already carries these from the source Painter
+                # style (see painter_ui_to_umg_document); dropping them here
+                # forced every UMG preview glyph onto a fallback system font
+                # at default weight, which reads differently enough at large
+                # sizes to look like corrupted letterforms.
+                "font_family": str(payload.get("font_family") or "Inter"),
+                "font_weight": int(_number(payload.get("font_weight"), 400.0)),
             },
-            {"text": str(payload.get("text") or name)},
+            {
+                "text": str(payload.get("text") or name),
+                # ``auto_wrap`` (see painter_ui_to_umg_document) is the only
+                # surviving signal that the source was Figma's auto-width
+                # text-resize mode. Dropping it here left every preview label
+                # in word-wrap mode with the object's authored rect clipped
+                # to a single line's height, so wrapped words (including the
+                # tail of short button labels) were silently clipped away.
+                "text_resize": (
+                    "auto_width"
+                    if not bool(payload.get("auto_wrap", True))
+                    else "fixed"
+                ),
+            },
         )
     if kind == "Button":
         if not button_style:
@@ -1762,10 +1830,20 @@ def project_tiger_umg_document(
             layer.get("Visibility"),
             document_schema_version=schema_version,
         )
+        vector_bake_plan = (
+            _payload(layer.get("PayloadJson")).get("static_vector_bake")
+            if disposition == "Baked"
+            else None
+        )
+        vector_bake_previewable = (
+            isinstance(vector_bake_plan, Mapping)
+            and str(vector_bake_plan.get("status") or "") == "available"
+        )
         if disposition == "Native" or (
             disposition == "Material" and not material_reasons
         ) or (
-            disposition == "Baked" and not baked_reasons
+            disposition == "Baked"
+            and (not baked_reasons or vector_bake_previewable)
         ):
             if (
                 layer["_sim_panel_reasons"]
@@ -1851,8 +1929,41 @@ def project_tiger_umg_document(
     paint_order: list[str] = []
     seen: set[str] = set()
 
+    def _reorder_painted_container_siblings(
+        child_ids: list[str],
+    ) -> list[str]:
+        # _split_painted_containers grafts a leaf Background rectangle and a
+        # Group Content wrapper onto the same parent. The two-pass Group-
+        # then-leaf registration above always appends the Group (Content)
+        # before the leaf (Background), so Background silently paints last
+        # -- on top of -- the real children it was meant to sit behind.
+        # Move each Background immediately ahead of its own Content sibling;
+        # every other child keeps its existing relative order.
+        content_ids = {
+            child_id[: -len(PAINTED_CONTAINER_CONTENT_SUFFIX)]
+            for child_id in child_ids
+            if child_id.endswith(PAINTED_CONTAINER_CONTENT_SUFFIX)
+        }
+        if not content_ids:
+            return child_ids
+        reordered = list(child_ids)
+        for child_id in child_ids:
+            if not child_id.endswith(PAINTED_CONTAINER_BACKGROUND_SUFFIX):
+                continue
+            prefix = child_id[: -len(PAINTED_CONTAINER_BACKGROUND_SUFFIX)]
+            if prefix not in content_ids:
+                continue
+            content_id = prefix + PAINTED_CONTAINER_CONTENT_SUFFIX
+            if reordered.index(child_id) < reordered.index(content_id):
+                continue
+            reordered.remove(child_id)
+            reordered.insert(reordered.index(content_id), child_id)
+        return reordered
+
     def append_subtree(parent_id: str) -> None:
-        child_ids = list(children.get(parent_id, []))
+        child_ids = _reorder_painted_container_siblings(
+            list(children.get(parent_id, []))
+        )
         # Only CanvasPanel slots consume LayerOrders as ZOrder. Overlay and
         # flow panels retain the generator's two-pass insertion order.
         if child_ids and all(
@@ -2016,10 +2127,21 @@ def project_tiger_umg_document(
         if image_binding.get("present"):
             resource_id = str(image_binding.get("resource_id") or resource_id)
             resource = resource_by_id.get(resource_id)
+        vector_bake_plan = (
+            payload.get("static_vector_bake")
+            if isinstance(payload, Mapping)
+            else None
+        )
+        vector_bake_previewable = (
+            disposition == "Baked"
+            and isinstance(vector_bake_plan, Mapping)
+            and str(vector_bake_plan.get("status") or "") == "available"
+        )
         rendered = disposition == "Native" or (
             disposition == "Material" and not material_reasons
         ) or (
-            disposition == "Baked" and not baked_reasons
+            disposition == "Baked"
+            and (not baked_reasons or vector_bake_previewable)
         )
         rendered = (
             rendered
@@ -2385,6 +2507,9 @@ def project_tiger_umg_document(
                 dict(layer.get("ButtonStyle") or {})
                 if isinstance(layer.get("ButtonStyle"), Mapping)
                 else None
+            ),
+            vector_bake=(
+                vector_bake_plan if vector_bake_previewable else None
             ),
         )
         if component_instance:

@@ -23,6 +23,9 @@ def test_auto_layout_normalizes_aliases_and_preserves_positioning() -> None:
             "position": "absolute",
         }
     )
+    # umg_* fields only have meaning for the Unreal/UMG export path, so the
+    # core layout normalizer no longer guarantees them -- they are resolved
+    # on demand by resolve_umg_layout_fields (see the test below).
     assert layout == {
         "mode": "horizontal",
         "padding": {"left": 12.0, "top": 8.0, "right": 12.0, "bottom": 8.0},
@@ -34,16 +37,37 @@ def test_auto_layout_normalizes_aliases_and_preserves_positioning() -> None:
         "wrap": False,
         "width_sizing": "fixed",
         "height_sizing": "fixed",
-        "umg_panel_mode": "auto",
-        "umg_spacing_strategy": "padding",
-        "umg_spacer_size_rule": "auto",
-        "umg_spacer_fill_coefficient": 1.0,
         "grid_columns": 2,
         "grid_column_span": 1,
         "grid_row_span": 1,
         "cell_horizontal_alignment": "stretch",
         "cell_vertical_alignment": "stretch",
     }
+
+
+def test_resolve_umg_layout_fields_defaults_when_absent_from_core_layout() -> None:
+    from app.painter_ui_auto_layout import normalize_ui_auto_layout
+    from app.painter_ui_umg_auto_layout import resolve_umg_layout_fields
+
+    layout = normalize_ui_auto_layout({"direction": "row"})
+    assert resolve_umg_layout_fields(layout) == {
+        "umg_panel_mode": "auto",
+        "umg_spacing_strategy": "padding",
+        "umg_spacer_size_rule": "auto",
+        "umg_spacer_fill_coefficient": 1.0,
+    }
+
+
+def test_resolve_umg_layout_fields_preserves_legacy_document_values() -> None:
+    from app.painter_ui_umg_auto_layout import resolve_umg_layout_fields
+
+    legacy_layout = {
+        "umg_panel_mode": "canvas",
+        "umg_spacing_strategy": "spacer",
+        "umg_spacer_size_rule": "fill",
+        "umg_spacer_fill_coefficient": 2.5,
+    }
+    assert resolve_umg_layout_fields(legacy_layout) == legacy_layout
 
 
 def test_horizontal_auto_layout_applies_padding_gap_and_alignment() -> None:

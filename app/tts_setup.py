@@ -30,6 +30,8 @@ TTS_AUTO_START_SETTINGS_KEY = "tts/style_bert_vits2/auto_start"
 TTS_KOKORO_ROOT_SETTINGS_KEY = "tts/kokoro/root"
 TTS_GPT_SOVITS_ROOT_SETTINGS_KEY = "tts/gpt_sovits/root"
 TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY = "tts/gpt_sovits/endpoint"
+TTS_VOICEBOX_ROOT_SETTINGS_KEY = "tts/voicebox/root"
+TTS_VOICEBOX_ENDPOINT_SETTINGS_KEY = "tts/voicebox/endpoint"
 TTS_DEFAULT_ENDPOINT = "http://127.0.0.1:5000"
 TTS_DEFAULT_LOCAL_ROOT = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
 TTS_REPO_SIDECAR_ROOT = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "style-bert-vits2"
@@ -329,6 +331,13 @@ def _normalize_provider_id(provider_id: str | None = None) -> str:
             return GPT_SOVITS_PROVIDER_ID
     except Exception:
         pass
+    try:
+        from app.tts_voicebox import VOICEBOX_PROVIDER_ID
+
+        if raw in {VOICEBOX_PROVIDER_ID, "voicebox", "jamiepine_voicebox"}:
+            return VOICEBOX_PROVIDER_ID
+    except Exception:
+        pass
     if raw in {TTS_PROVIDER_ID, "style_bert", "style-bert", "style_bert_vits2"}:
         return TTS_PROVIDER_ID
     return raw
@@ -368,6 +377,33 @@ def save_gpt_sovits_provider_config(
         ok = _settings_set_value(TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY, str(endpoint).strip()) and ok
     elif not _saved_gpt_sovits_endpoint():
         ok = _settings_set_value(TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY, GPT_SOVITS_DEFAULT_ENDPOINT) and ok
+    return bool(ok)
+
+
+def _saved_voicebox_root() -> str:
+    return _path_text(_settings_value(TTS_VOICEBOX_ROOT_SETTINGS_KEY, ""))
+
+
+def _saved_voicebox_endpoint() -> str:
+    from app.tts_voicebox import VOICEBOX_DEFAULT_ENDPOINT
+
+    return _path_text(_settings_value(TTS_VOICEBOX_ENDPOINT_SETTINGS_KEY, VOICEBOX_DEFAULT_ENDPOINT)) or VOICEBOX_DEFAULT_ENDPOINT
+
+
+def save_voicebox_provider_config(
+    root: str | Path = "",
+    *,
+    endpoint: str = "",
+) -> bool:
+    from app.tts_voicebox import VOICEBOX_DEFAULT_ENDPOINT, VOICEBOX_PROVIDER_ID
+
+    ok = save_tts_selected_provider(VOICEBOX_PROVIDER_ID)
+    if root not in ("", None):
+        ok = _settings_set_value(TTS_VOICEBOX_ROOT_SETTINGS_KEY, str(Path(root))) and ok
+    if endpoint:
+        ok = _settings_set_value(TTS_VOICEBOX_ENDPOINT_SETTINGS_KEY, str(endpoint).strip()) and ok
+    elif not _saved_voicebox_endpoint():
+        ok = _settings_set_value(TTS_VOICEBOX_ENDPOINT_SETTINGS_KEY, VOICEBOX_DEFAULT_ENDPOINT) and ok
     return bool(ok)
 
 
@@ -585,6 +621,36 @@ def tts_provider_status(
                 "supports": [],
                 "license": {},
             }
+    try:
+        from app.tts_voicebox import VOICEBOX_PROVIDER_ID, voicebox_provider_status
+
+        if selected == VOICEBOX_PROVIDER_ID:
+            return voicebox_provider_status(
+                env,
+                root=_saved_voicebox_root() or None,
+                endpoint=_saved_voicebox_endpoint(),
+            )
+    except Exception:
+        if selected != TTS_PROVIDER_ID:
+            return {
+                "schema": TTS_SCHEMA_VERSION,
+                "provider_id": selected,
+                "label": selected or "Unknown TTS",
+                "kind": "tts",
+                "configured": False,
+                "installed": False,
+                "available": False,
+                "setup_needed": True,
+                "setup_state": "provider_error",
+                "requires_network": False,
+                "local_first": True,
+                "endpoint": "",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "reason": "Selected TTS provider could not be loaded.",
+                "server_command": [],
+                "supports": [],
+                "license": {},
+            }
     if selected in _catalog_provider_ids():
         return _catalog_provider_status(selected)
     return _style_bert_provider_status(env)
@@ -611,6 +677,13 @@ def tts_install_plan(install_root: str | Path | None = None, *, provider_id: str
 
         if selected == GPT_SOVITS_PROVIDER_ID:
             return gpt_sovits_install_plan(install_root)
+    except Exception:
+        pass
+    try:
+        from app.tts_voicebox import VOICEBOX_PROVIDER_ID, voicebox_install_plan
+
+        if selected == VOICEBOX_PROVIDER_ID:
+            return voicebox_install_plan(install_root)
     except Exception:
         pass
     if selected in _catalog_provider_ids():
@@ -684,6 +757,13 @@ def tts_install_execution_gate(install_root: str | Path | None = None, *, provid
 
         if selected == GPT_SOVITS_PROVIDER_ID:
             return gpt_sovits_install_execution_gate(install_root)
+    except Exception:
+        pass
+    try:
+        from app.tts_voicebox import VOICEBOX_PROVIDER_ID, voicebox_install_execution_gate
+
+        if selected == VOICEBOX_PROVIDER_ID:
+            return voicebox_install_execution_gate(install_root)
     except Exception:
         pass
     if selected in _catalog_provider_ids():
@@ -820,6 +900,29 @@ def connect_installed_tts_provider(
             "error": f"Could not connect GPT-SoVITS sidecar: {exc}",
             "missing": ["gpt-sovits provider"],
         }
+    try:
+        from app.tts_voicebox import VOICEBOX_PROVIDER_ID, connect_installed_voicebox
+
+        if selected == VOICEBOX_PROVIDER_ID:
+            result = connect_installed_voicebox(root_path)
+            if result.get("ok"):
+                voicebox_endpoint = endpoint
+                if not voicebox_endpoint or voicebox_endpoint == TTS_DEFAULT_ENDPOINT:
+                    voicebox_endpoint = _saved_voicebox_endpoint()
+                result = {
+                    **result,
+                    "endpoint": voicebox_endpoint,
+                    "saved": save_voicebox_provider_config(root_path, endpoint=voicebox_endpoint),
+                }
+            return result
+    except Exception as exc:
+        return {
+            "schema": TTS_SCHEMA_VERSION,
+            "ok": False,
+            "connected": False,
+            "error": f"Could not connect Voicebox sidecar: {exc}",
+            "missing": ["voicebox provider"],
+        }
     result = connect_installed_tts(root_path, endpoint=endpoint, auto_start=auto_start)
     if result.get("ok"):
         result = {**result, "saved": save_tts_selected_provider(TTS_PROVIDER_ID)}
@@ -864,6 +967,29 @@ def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str,
                 "installed": False,
                 "setup_state": "provider_error",
                 "reason": f"GPT-SoVITS provider could not be loaded: {exc}",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "requires_server": True,
+            }
+        )
+    try:
+        from app.tts_voicebox import voicebox_provider_status
+
+        rows.append(
+            voicebox_provider_status(
+                env,
+                root=_saved_voicebox_root() or None,
+                endpoint=_saved_voicebox_endpoint(),
+            )
+        )
+    except Exception as exc:
+        rows.append(
+            {
+                "provider_id": "voicebox_sidecar",
+                "label": "Voicebox",
+                "available": False,
+                "installed": False,
+                "setup_state": "provider_error",
+                "reason": f"Voicebox provider could not be loaded: {exc}",
                 "root": {"model_names": [], "missing": ["provider import failed"]},
                 "requires_server": True,
             }
@@ -1029,6 +1155,7 @@ __all__ = [
     "connect_installed_tts_provider",
     "save_gpt_sovits_provider_config",
     "save_kokoro_provider_config",
+    "save_voicebox_provider_config",
     "save_tts_provider_config",
     "save_tts_selected_provider",
     "saved_tts_provider_config",

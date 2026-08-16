@@ -862,7 +862,10 @@ def test_m1b8_workspace_caches_boolean_geometry_until_render_state_changes(
     overlay.set_document(document)
     row = overlay._effective_objects_by_id[group["id"]]
 
-    assert overlay._boolean_path(row) is overlay._boolean_path(row)
+    # The resolved geometry is cached in artboard-local space and mapped to
+    # screen space on every call (so it always reflects the current pan/
+    # zoom), so repeated calls return equal but no longer identical paths.
+    assert overlay._boolean_path(row) == overlay._boolean_path(row)
     assert calls == 1
 
     overlay.set_motion_preview({first["id"]: {"x": 12.0}})

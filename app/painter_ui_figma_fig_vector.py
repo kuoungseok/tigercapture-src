@@ -199,6 +199,22 @@ def _loop_path(
     return "".join(commands)
 
 
+def _flip_vertical(network: VectorNetwork, height: float) -> VectorNetwork:
+    """Mirror a vector network's y-axis about ``height``.
+
+    Vertex positions flip about the midline (``y' = height - y``); tangent
+    offsets are deltas, not positions, so they only need their y-component
+    negated.
+    """
+
+    vertices = [(x, height - y) for x, y in network.vertices]
+    segments = [
+        (start, start_tx, -start_ty, end, end_tx, -end_ty)
+        for start, start_tx, start_ty, end, end_tx, end_ty in network.segments
+    ]
+    return VectorNetwork(vertices, segments, network.regions)
+
+
 def _open_chains(network: VectorNetwork) -> list[list[int]]:
     """Group segments into connected runs for networks without regions."""
 
@@ -291,6 +307,7 @@ def fig_vector_geometry(
     # Vertices are authored against normalizedSize; the node may be scaled.
     normalized = vector_data.get("normalizedSize")
     scale_x = scale_y = 1.0
+    base_height = 0.0
     if isinstance(normalized, Mapping):
         base_width = float(normalized.get("x") or 0.0)
         base_height = float(normalized.get("y") or 0.0)
@@ -301,6 +318,14 @@ def fig_vector_geometry(
 
     try:
         network = parse_vector_network(raw)
+        if base_height > 0.0:
+            # The editable vector network is authored bottom-up (y grows
+            # upward from normalizedSize's base), while every other geometry
+            # source this importer reads - fillGeometry, absoluteBoundingBox,
+            # commandsBlob - is top-down. Left unflipped, a plain drawn line
+            # or curve comes out mirrored vertically (confirmed against a
+            # real Figma render: a "\" diagonal decoded and redrew as "/").
+            network = _flip_vertical(network, base_height)
         return vector_network_fill_paths(network, scale_x=scale_x, scale_y=scale_y), ""
     except (VectorNetworkError, struct.error) as exc:
         return [], f"fig_vector_network_unparsed:{exc}"

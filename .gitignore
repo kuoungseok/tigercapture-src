@@ -81,6 +81,7 @@ external/tools/lmms/
 external/tools/fluidsynth/
 external/tools/tts/kokoro/
 external/tools/tts/gpt-sovits/
+external/tools/tts/voicebox/
 external/tools/motion_references/
 external/tools/remotion_tsx_runtime/
 external/tools/ar_pbr_dxr/

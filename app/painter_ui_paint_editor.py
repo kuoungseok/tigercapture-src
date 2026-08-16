@@ -153,10 +153,23 @@ class PainterUIPaintStackEditor(QFrame):
         return copy.deepcopy(self._paints)
 
     def _clear_rows(self) -> None:
+        # Each row's buttons connect to a lambda that closes over ``self``, and
+        # ``self`` owns the row through this layout -- a reference cycle that
+        # only Python's cyclic GC can break. ``deleteLater`` alone leaves that
+        # cycle standing until GC gets around to it, which on a document with
+        # frequent selection changes showed up as periodic multi-hundred-ms
+        # stalls. Disconnecting here breaks the cycle immediately instead of
+        # waiting on GC.
         while self.rows_layout.count():
             item = self.rows_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                for button in widget.findChildren(QToolButton):
+                    try:
+                        button.clicked.disconnect()
+                    except (RuntimeError, TypeError):
+                        pass
+                widget.deleteLater()
 
     def _rebuild(self) -> None:
         self._clear_rows()

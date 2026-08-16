@@ -926,7 +926,9 @@ def _vector_message(blob: bytes = _SQUARE, *, blob_index: int = 0) -> dict:
 def test_vector_geometry_reaches_the_rest_payload(tmp_path) -> None:
     payload = _rest_payload(tmp_path, _vector_message())
     glyph = _find(payload["document"], "Glyph")
-    assert glyph["fillGeometry"] == [{"path": "M0 0L10 0L10 10L0 10L0 0Z", "windingRule": "NONZERO"}]
+    # The editable network is authored bottom-up; the importer flips it to
+    # match the top-down convention every other geometry source here uses.
+    assert glyph["fillGeometry"] == [{"path": "M0 10L10 10L10 0L0 0L0 10Z", "windingRule": "NONZERO"}]
 
 
 def test_missing_vector_blob_is_reported(tmp_path) -> None:

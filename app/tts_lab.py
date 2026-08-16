@@ -754,6 +754,9 @@ class TtsLabPage(QWidget):
         elif provider_id == "gpt_sovits_sidecar":
             start_dir = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "gpt-sovits"
             title = "Connect GPT-SoVITS"
+        elif provider_id == "voicebox_sidecar":
+            start_dir = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "voicebox"
+            title = "Connect Voicebox"
         else:
             start_dir = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
             title = "Connect Style-Bert-VITS2"

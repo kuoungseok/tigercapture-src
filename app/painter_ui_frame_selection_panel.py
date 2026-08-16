@@ -196,7 +196,15 @@ class PainterUIFrameSelectionPanel(QFrame):
         self,
         row: Mapping[str, Any],
         document: Mapping[str, Any] | None = None,
+        *,
+        normalize: bool = True,
     ) -> None:
+        """Show ``row``'s frame properties.
+
+        ``normalize=False`` promises ``document`` is canonical. The UMG panel
+        classifier walks the whole document, so without this a selection
+        change re-derived every row just to fill in this panel.
+        """
         self._row = dict(row)
         self._syncing = True
         try:
@@ -221,6 +229,7 @@ class PainterUIFrameSelectionPanel(QFrame):
                 document,
                 row,
                 editable=not bool(row.get("locked", False)),
+                normalize=normalize,
             )
         finally:
             self._syncing = False

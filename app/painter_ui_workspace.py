@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 from typing import Any, Mapping
 
@@ -25,7 +23,11 @@ from app.painter_ui_constraints import (
     resolve_ui_constraints,
     ui_pivot_point,
 )
-from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_document import (
+    canonical_payload_digest,
+    normalize_ui_document,
+    ui_document_content_witness,
+)
 from app.painter_ui_image_renderer import draw_ui_image
 from app.painter_i18n import painter_text
 from app.painter_ui_motion_bridge import resolved_ui_geometry
@@ -94,23 +96,16 @@ _ARTBOARD_SURFACE_GRID = 128
 _ARTBOARD_SURFACE_MARGIN = 64.0
 _ARTBOARD_SURFACE_PIXEL_CAP = 16_000_000
 _ARTBOARD_SURFACE_PIXEL_BUDGET = 24_000_000
+# A pixel-mask composite is a one-off buffer for whichever mask paints next,
+# not a surface kept around like the artboard cache above - it can afford a
+# much larger ceiling before falling back to the viewport window. Sized well
+# past what a deeply nested mask needs when the view is zoomed in close.
+_PIXEL_MASK_COMPOSITE_PIXEL_CAP = 64_000_000
 # How long the view has to hold still before the canvas stops reusing stretched
 # surfaces and rasterises the boards exactly again.  Short enough to feel like
 # the picture sharpens as the gesture ends, long enough that a wheel burst or a
 # drag never pays a rebuild between two input events.
 _VIEW_GESTURE_SETTLE_MS = 90
-
-
-def _document_render_fingerprint(document: Mapping[str, Any]) -> str:
-    payload = dict(document)
-    payload.pop("selection", None)
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 class PainterUIDesignOverlay(QWidget):
@@ -154,6 +149,11 @@ class PainterUIDesignOverlay(QWidget):
         self._document = normalize_ui_document(None)
         self._effective_document = self._document
         self._document_render_signature: tuple[Any, ...] | None = None
+        self._document_render_witness: tuple[Any, ...] | None = None
+        # The witness holds row ids, so the rows have to stay alive with it.
+        self._document_render_pins: tuple[Any, ...] = ()
+        self._document_render_digest: bytes | None = None
+        self._document_render_epoch = 0
         self._effective_objects_by_id: dict[str, dict[str, Any]] = {}
         self._artboards_by_id: dict[str, dict[str, Any]] = {}
         self._objects_by_artboard: dict[str, list[dict[str, Any]]] = {}
@@ -167,6 +167,7 @@ class PainterUIDesignOverlay(QWidget):
         self._last_paint_metrics: dict[str, Any] = {}
         self._overview_artboard_cache: dict[tuple[Any, ...], QImage] = {}
         self._exact_artboard_cache: dict[tuple[Any, ...], QImage] = {}
+        self._surface_keys_this_frame: set[tuple[Any, ...]] = set()
         self._overview_rows_by_artboard: dict[
             str,
             list[dict[str, Any]],
@@ -306,6 +307,17 @@ class PainterUIDesignOverlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
+    @staticmethod
+    def _render_content_digest(document: Mapping[str, Any]) -> bytes | None:
+        """Digest of everything the canvas renders, ignoring the selection."""
+        return canonical_payload_digest(
+            {
+                name: value
+                for name, value in document.items()
+                if name != "selection"
+            }
+        )
+
     def set_document(
         self,
         value: Mapping[str, Any] | None,
@@ -321,18 +333,17 @@ class PainterUIDesignOverlay(QWidget):
             if not normalize and isinstance(value, Mapping)
             else normalize_ui_document(value)
         )
-        signature = (
-            str(document.get("document_id") or ""),
-            int(document.get("revision") or 0),
-            str(document.get("active_page_id") or ""),
-            str(document.get("active_artboard_id") or ""),
-            len(document.get("objects") or []),
-            len(document.get("artboards") or []),
-            _document_render_fingerprint(document),
-        )
-        reuse_resolved = (
-            signature == self._document_render_signature
-            and bool(self._effective_objects_by_id)
+        # Two tiers, because digesting the whole page to answer this cost
+        # ~150 ms on a large import -- more than the rebuild it exists to skip,
+        # and it was paid even on the common path where it did skip it. Row
+        # identity settles the canvas's own refresh, which shares its rows; the
+        # digest still settles a caller that handed over a re-normalised
+        # document whose rows are new objects with unchanged content.
+        witness, pinned = ui_document_content_witness(document)
+        reuse_resolved = bool(self._effective_objects_by_id) and (
+            witness == self._document_render_witness
+            or self._render_content_digest(document)
+            == self._document_render_digest
         )
         self._document = document
         selected_ids = {
@@ -346,13 +357,30 @@ class PainterUIDesignOverlay(QWidget):
             for row in document.get("objects", [])
         ):
             self._layer_hover_object_id = ""
+        # Adopt the new rows either way: they are the ones this document holds
+        # now, so recognising them next time is what keeps the cheap tier cheap.
+        self._document_render_witness = witness
+        self._document_render_pins = pinned
         if reuse_resolved:
             self._effective_document["selection"] = copy.deepcopy(
                 document["selection"]
             )
         else:
             self._rebuild_effective_document()
-            self._document_render_signature = signature
+            self._document_render_digest = self._render_content_digest(document)
+            # The rendered-surface caches key off this, so it has to stay small
+            # enough to hash on every artboard paint -- hence an epoch counter
+            # rather than the witness itself, which holds one entry per row.
+            self._document_render_epoch += 1
+            self._document_render_signature = (
+                str(document.get("document_id") or ""),
+                int(document.get("revision") or 0),
+                str(document.get("active_page_id") or ""),
+                str(document.get("active_artboard_id") or ""),
+                len(document.get("objects") or []),
+                len(document.get("artboards") or []),
+                self._document_render_epoch,
+            )
         if self._edit_scope_id not in {
             row["id"] for row in self._document["objects"]
         }:
@@ -1613,9 +1641,8 @@ class PainterUIDesignOverlay(QWidget):
             if item["id"] == row["artboard_id"]
         )
 
-    def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
-        artboard = self._row_artboard(row)
-        viewport, scale = self._artboard_viewport(artboard)
+    def _object_local_rect(self, row: Mapping[str, Any]) -> QRectF:
+        """Artboard-local rect: resolved geometry/motion preview, no viewport."""
         geometry = self._resolved_geometry.get(str(row["id"]), row)
         x = float(geometry["x"])
         y = float(geometry["y"])
@@ -1642,11 +1669,17 @@ class PainterUIDesignOverlay(QWidget):
             )
             x = center_x - width * 0.5
             y = center_y - height * 0.5
+        return QRectF(x, y, width, height)
+
+    def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
+        artboard = self._row_artboard(row)
+        viewport, scale = self._artboard_viewport(artboard)
+        local = self._object_local_rect(row)
         return QRectF(
-            viewport.x() + x * scale,
-            viewport.y() + y * scale,
-            width * scale,
-            height * scale,
+            viewport.x() + local.x() * scale,
+            viewport.y() + local.y() * scale,
+            local.width() * scale,
+            local.height() * scale,
         )
 
     def _review_comments(self) -> list[dict[str, Any]]:
@@ -3941,20 +3974,30 @@ class PainterUIDesignOverlay(QWidget):
     def _boolean_path(self, row: Mapping[str, Any]) -> QPainterPath | None:
         from app.painter_ui_boolean_geometry import resolve_ui_boolean_path
 
+        # The union/subtract/intersect math runs on each operand's artboard-
+        # local rect, not the live, pan-and-zoom-scaled screen rect. Qt's own
+        # path clipper is sensitive to huge or awkwardly-scaled coordinates,
+        # so resolving in screen space made a rotated Boolean group's topology
+        # shift - sometimes losing or gaining vertices - as the view scrolled
+        # or zoomed to an unlucky percentage. Local space is stable across
+        # pan/zoom, so the cache below now only needs invalidating when the
+        # document itself changes, not on every repaint.
         object_id = str(row.get("id") or "")
         if object_id in self._boolean_path_cache:
-            return self._boolean_path_cache[object_id]
-        path = resolve_ui_boolean_path(
-            self._effective_document["objects"],
-            row,
-            self._object_rect,
-            geometry_scale_for_object=lambda operand: (
-                self._object_rect(operand).width()
-                / max(0.001, float(operand["width"]))
-            ),
-        )
-        self._boolean_path_cache[object_id] = path
-        return path
+            local_path = self._boolean_path_cache[object_id]
+        else:
+            local_path = resolve_ui_boolean_path(
+                self._effective_document["objects"],
+                row,
+                self._object_local_rect,
+            )
+            self._boolean_path_cache[object_id] = local_path
+        if local_path is None or local_path.isEmpty():
+            return local_path
+        artboard = self._row_artboard(row)
+        viewport, scale = self._artboard_viewport(artboard)
+        to_screen = QTransform(scale, 0.0, 0.0, scale, viewport.x(), viewport.y())
+        return to_screen.map(local_path)
 
     @staticmethod
     def _composition_mode(blend_mode: object):
@@ -4089,9 +4132,9 @@ class PainterUIDesignOverlay(QWidget):
             # representation, so resolving the editable Boolean can be empty.
             # Paint the pinned host geometry in that case instead of hiding
             # both the operands and the visible Boolean result.
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         elif use_figma_stroke_geometry:
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         elif kind == "ellipse":
             painter.drawEllipse(rect)
         elif kind == "line":
@@ -4162,7 +4205,7 @@ class PainterUIDesignOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(image_shape)
         elif kind == "path":
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         else:
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
@@ -4499,9 +4542,22 @@ class PainterUIDesignOverlay(QWidget):
         render_bounds = target_bounds
         if not bool(mask.get("inverted", False)):
             render_bounds = target_bounds.intersected(source_bounds)
-        crop = render_bounds.toAlignedRect().intersected(surface.rect())
+        # ``surface`` is only the artboard's current on-screen raster window,
+        # not the mask's own extent - bounding the crop to it truncated masks
+        # whose true target/source subtree is bigger than what happens to be
+        # in view (a band of a hatch pattern zoomed in far enough that its
+        # own diagonal-line group towers over the window lost everything
+        # below the window edge). The composited layers below are independent
+        # buffers Qt clips to ``surface`` automatically when drawn back, so
+        # the crop only needs its own sane pixel-area cap, not the window's.
+        crop = render_bounds.toAlignedRect()
         if crop.isEmpty():
             return QImage(), QPointF()
+        crop_area = crop.width() * crop.height()
+        if crop_area > _PIXEL_MASK_COMPOSITE_PIXEL_CAP:
+            crop = crop.intersected(surface.rect())
+            if crop.isEmpty():
+                return QImage(), QPointF()
 
         layer = QImage(
             crop.width(),
@@ -4619,7 +4675,16 @@ class PainterUIDesignOverlay(QWidget):
         rows: list[dict[str, Any]],
         visible_artboard_ids: set[str],
     ) -> tuple[list[dict[str, Any]], int]:
-        """Cull rows before any vector, effect, clip or text work is done."""
+        """Cull rows before any vector, effect, clip or text work is done.
+
+        Mask participants always stay regardless of their own on-screen rect:
+        the pixel-mask compositor derives its bounds from the rows it is
+        handed, so dropping an off-screen member (a hatch line's individual
+        box reaching past the visible band, an outer mask's other targets
+        sitting off-canvas) shrank the composite and left the rest of that
+        same mask's content - including pieces that were themselves fully
+        visible - unpainted.
+        """
 
         canvas = QRectF(self.rect()).adjusted(-8.0, -8.0, 8.0, 8.0)
         left_edge = canvas.left()
@@ -4634,6 +4699,13 @@ class PainterUIDesignOverlay(QWidget):
         for row in rows:
             if str(row.get("artboard_id") or "") not in visible_artboard_ids:
                 culled += 1
+                continue
+            object_id = str(row.get("id") or "")
+            if (
+                object_id in self._pixel_mask_group_by_target
+                or object_id in self._mask_source_object_ids
+            ):
+                visible.append(row)
                 continue
             box = self._row_cull_box(row)
             if box is not None:
@@ -4861,25 +4933,31 @@ class PainterUIDesignOverlay(QWidget):
 
         ``meta`` records which board, scale and box the surface holds so a later
         frame can stretch it into place instead of rebuilding it.  Eviction is
-        oldest-first, so a frame only ever discards surfaces from earlier frames
-        unless that single frame needs more than the whole budget - which takes
-        several 4K-sized boards at once.
+        oldest-first, but never a surface this same paint pass already stored -
+        a page with many boards visible at once renders them one at a time
+        within one frame, so without this guard the very first board painted
+        looked "oldest" and got evicted by the others before the frame even
+        finished, leaving it blank until something else forced a cache miss.
         """
         pixels = image.width() * image.height()
         if pixels > _ARTBOARD_SURFACE_PIXEL_CAP:
             return
         cache[key] = image
         self._artboard_surface_meta[key] = meta
+        self._surface_keys_this_frame.add(key)
         total = sum(
             entry.width() * entry.height() for entry in cache.values()
         )
-        while total > _ARTBOARD_SURFACE_PIXEL_BUDGET and len(cache) > 1:
-            oldest = next(iter(cache))
-            if oldest == key:
+        if total <= _ARTBOARD_SURFACE_PIXEL_BUDGET:
+            return
+        for candidate in list(cache.keys()):
+            if total <= _ARTBOARD_SURFACE_PIXEL_BUDGET or len(cache) <= 1:
                 break
-            total -= cache[oldest].width() * cache[oldest].height()
-            cache.pop(oldest, None)
-            self._artboard_surface_meta.pop(oldest, None)
+            if candidate in self._surface_keys_this_frame:
+                continue
+            total -= cache[candidate].width() * cache[candidate].height()
+            cache.pop(candidate, None)
+            self._artboard_surface_meta.pop(candidate, None)
 
     @staticmethod
     def _draw_artboard_surface(
@@ -5072,6 +5150,7 @@ class PainterUIDesignOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         self._approximate_artboard_count = 0
         self._deferred_artboard_count = 0
+        self._surface_keys_this_frame = set()
         empty_page = bool(self._empty_page_mode and not self._document["objects"])
         canvas_color = QColor("#F5F5F5" if empty_page else "#3F4145")
         surface = QImage(

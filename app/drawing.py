@@ -9225,6 +9225,8 @@ class PaintDialog(QDialog):
             self._prompt_import_image_as_paint_layer,
         )
         self._add_painter_menu_action(file_menu, "Import Layered PSD...", self._prompt_import_layered_psd)
+        self._add_painter_menu_action(file_menu, "Import Figma File...", self._prompt_import_figma_file)
+        self._add_painter_menu_action(file_menu, "Export Figma Plugin Bundle...", self._prompt_export_figma_bundle)
         self._add_painter_menu_action(file_menu, "Save", self._prompt_save_painter_document, "Ctrl+S")
         self._add_painter_menu_action(
             file_menu,
@@ -18584,6 +18586,46 @@ class PaintDialog(QDialog):
         self._painter_ui_production_status(
             f"Figma plugin bundle: {report['manifest_path']}"
         )
+
+    def _reveal_painter_ui_figma_panel(self):
+        # The Figma exchange controls only exist on the UI Design canvas's
+        # Publish > Figma tab, and the outer tab bar is icon-only -- reachable
+        # from File menu shortcuts is the only way most people ever find it.
+        self._set_canvas_workspace_mode("ui_design")
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        production_panel = getattr(inspector, "production_panel", None)
+        figma_panel = getattr(production_panel, "figma_panel", None)
+        if inspector is None or production_panel is None or figma_panel is None:
+            return None
+        inspector_tabs = getattr(inspector, "tabs", None)
+        if inspector_tabs is not None:
+            inspector_tabs.setCurrentWidget(production_panel)
+        production_panel.tabs.setCurrentWidget(figma_panel)
+        return figma_panel
+
+    def _prompt_import_figma_file(self) -> None:
+        figma_panel = self._reveal_painter_ui_figma_panel()
+        if figma_panel is None:
+            return
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Figma File",
+            "",
+            "Figma files (*.json *.fig *.jam);;Figma REST JSON (*.json);;"
+            "Figma design (*.fig);;FigJam board (*.jam);;All files (*)",
+        )
+        if not path:
+            return
+        kind = "fig" if Path(path).suffix.casefold() in {".fig", ".jam"} else "json"
+        figma_panel._start_import(path, kind=kind)
+
+    def _prompt_export_figma_bundle(self) -> None:
+        figma_panel = self._reveal_painter_ui_figma_panel()
+        if figma_panel is None:
+            return
+        figma_panel._choose_export_directory()
 
     def _set_painter_umg_widget_view_enabled(self, enabled: bool) -> bool:
         from app.painter_ui_umg_widget_view import (

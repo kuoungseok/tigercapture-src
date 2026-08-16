@@ -796,8 +796,10 @@ def test_painter_ui_layer_drop_reparents_and_action_moves_to_root() -> None:
     assert next(
         row for row in document["objects"] if row["id"] == object_ids[2]
     )["parent_id"] == group_id
+    from app.painter_ui_inspector import _LAYER_DEPTH_ROLE
+
     assert any(
-        "  " in dialog._paint_ui_inspector.layer_list.item(index).text()
+        int(dialog._paint_ui_inspector.layer_list.item(index).data(_LAYER_DEPTH_ROLE) or 0) > 0
         for index in range(dialog._paint_ui_inspector.layer_list.count())
     )
     dialog._undo()

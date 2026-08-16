@@ -172,18 +172,18 @@ def ui_object_shape_path(
             from app.painter_ui_vector_network import local_svg_path_to_qpath
 
             fill_rows = [
-                row
-                for row in content.get("vector_fill_geometry") or []
-                if isinstance(row, Mapping) and str(row.get("path") or "")
+                fill_row
+                for fill_row in content.get("vector_fill_geometry") or []
+                if isinstance(fill_row, Mapping) and str(fill_row.get("path") or "")
             ] or [
-                {"path": row}
-                for row in content.get("vector_paths") or []
-                if str(row or "")
+                {"path": fill_row}
+                for fill_row in content.get("vector_paths") or []
+                if str(fill_row or "")
             ]
             path = QPainterPath()
-            for row in fill_rows:
+            for fill_row in fill_rows:
                 piece = local_svg_path_to_qpath(
-                    row.get("path"),
+                    fill_row.get("path"),
                     rect,
                     geometry_scale=geometry_scale,
                 )
@@ -211,7 +211,10 @@ def ui_object_shape_path(
         )
         transform = QTransform()
         transform.translate(pivot.x(), pivot.y())
-        transform.rotate(rotation)
+        # row["rotation"] is stored in Figma's raw convention; every other
+        # paint-time rotation in the workspace negates it for Qt, so this
+        # must too or a Boolean operand spins the opposite way.
+        transform.rotate(-rotation)
         transform.translate(-pivot.x(), -pivot.y())
         path = transform.map(path)
     return path

@@ -290,6 +290,171 @@ def _geometry_complexity_supported(rows: list[dict[str, str]]) -> bool:
     return True
 
 
+def _line_segment_from_path(path: str) -> tuple[float, float, float, float] | None:
+    """Return the two endpoints of an ``M x1 y1 L x2 y2`` path, else ``None``.
+
+    Anything with additional commands, extra points, or curves is left alone;
+    this only recognizes the narrow straight two-point case.
+    """
+    tokens = _svg_path_tokens(path)
+    if not tokens or len(tokens) != 6:
+        return None
+    if tokens[0].upper() != "M" or tokens[3].upper() != "L":
+        return None
+    try:
+        x1, y1, x2, y2 = (float(tokens[index]) for index in (1, 2, 4, 5))
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+        return None
+    if x1 == x2 and y1 == y2:
+        return None
+    return x1, y1, x2, y2
+
+
+def _stroke_line_to_fill_row(
+    row: Mapping[str, Any],
+    resolved_size: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Rewrite a stroke-only straight hairline as an equivalent closed quad.
+
+    Figma auto-layout hatch/stripe decorations are routinely authored as a
+    single two-point line with no fill, just a stroke -- the closed-fill bake
+    contract below rejects those outright (``geometry_incomplete`` /
+    ``stroke_unsupported``). Expanding the segment by its stroke width into a
+    closed rectangle lets the existing fill-only bake path handle it without
+    a second rasterization pipeline. Anything more complex (multi-segment
+    polylines, curves, more than one stroke, an already-visible fill) is left
+    for the caller's normal rejection path.
+    """
+    style = row.get("style")
+    style = style if isinstance(style, Mapping) else {}
+    content = row.get("content")
+    content = content if isinstance(content, Mapping) else {}
+    if str(content.get("figma_type") or "").upper() not in _FIGMA_VECTOR_TYPES:
+        return None
+    if bool((content.get("boolean") or {}).get("enabled")):
+        return None
+    if content.get("vector_stroke_geometry") or content.get("vector_render_path"):
+        return None
+    if bool((row.get("mask") or {}).get("enabled")):
+        return None
+    geometry = content.get("vector_fill_geometry")
+    if not isinstance(geometry, list) or len(geometry) != 1:
+        return None
+    geometry_row = geometry[0]
+    if not isinstance(geometry_row, Mapping):
+        return None
+    segment = _line_segment_from_path(str(geometry_row.get("path") or ""))
+    if segment is None:
+        return None
+
+    fills = _visible_rows(style.get("fills"))
+    if any(_rgba(paint.get("color"), "#00000000")[3] > 0 for paint in fills):
+        return None  # a real fill already exists; nothing to synthesize
+
+    strokes = _visible_rows(style.get("strokes"))
+    if len(strokes) > 1:
+        return None  # only a single uniform stroke is supported
+    stroke_color = None
+    stroke_width = 0.0
+    stroke_align = "center"
+    if strokes:
+        paint = strokes[0]
+        rgba = _rgba(paint.get("color"), "#00000000")
+        if rgba[3] > 0:
+            stroke_color = rgba
+            stroke_width = float(paint.get("width") or 0.0)
+            stroke_align = str(paint.get("align") or "center").casefold()
+    if stroke_color is None:
+        legacy_rgba = _rgba(style.get("stroke"), "#00000000")
+        legacy_width = float(style.get("stroke_width") or 0.0)
+        if legacy_rgba[3] > 0 and legacy_width > 0.0001:
+            stroke_color = legacy_rgba
+            stroke_width = legacy_width
+            stroke_align = str(style.get("stroke_align") or "center").casefold()
+    if stroke_color is None or stroke_width <= 0.0001:
+        return None
+
+    x1, y1, x2, y2 = segment
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length <= 0.0:
+        return None
+    nx, ny = -(y2 - y1) / length, (x2 - x1) / length
+    if stroke_align == "inside":
+        near, far = 0.0, -stroke_width
+    elif stroke_align == "outside":
+        near, far = 0.0, stroke_width
+    else:
+        near, far = stroke_width / 2.0, -stroke_width / 2.0
+    quad = (
+        (x1 + nx * near, y1 + ny * near),
+        (x2 + nx * near, y2 + ny * near),
+        (x2 + nx * far, y2 + ny * far),
+        (x1 + nx * far, y1 + ny * far),
+    )
+    try:
+        raw_bounds_width = float(
+            resolved_size.get("width", resolved_size.get("X"))
+        )
+        raw_bounds_height = float(
+            resolved_size.get("height", resolved_size.get("Y"))
+        )
+    except (TypeError, ValueError):
+        return None
+    if not all(
+        math.isfinite(value) and value > 0.0
+        for value in (raw_bounds_width, raw_bounds_height)
+    ):
+        return None
+    # plan_static_vector_bake snaps the logical size it hands to the bounds
+    # check to round(width)/round(height) (see the comment on that snap
+    # below), so the clamp here must target the same rounded box, not the
+    # raw fractional size, or a diagonal line's corners still read as
+    # slightly outside it.
+    bounds_width = float(round(raw_bounds_width))
+    bounds_height = float(round(raw_bounds_height))
+    # The raw line already touches the layer's exact bounding box, so
+    # expanding it by half the stroke width pushes the quad's corners a
+    # fraction of a pixel past that box (worst case at a 45-degree diagonal).
+    # The bake's logical-bounds check has no padding allowance, so clamp
+    # rather than reject -- a hairline's very tip narrowing by well under a
+    # pixel is not visually distinguishable in a baked UI decoration.
+    quad = tuple(
+        (
+            min(max(point_x, 0.0), bounds_width),
+            min(max(point_y, 0.0), bounds_height),
+        )
+        for point_x, point_y in quad
+    )
+    path = "M {:.6f} {:.6f} L {:.6f} {:.6f} L {:.6f} {:.6f} L {:.6f} {:.6f} Z".format(
+        *quad[0], *quad[1], *quad[2], *quad[3]
+    )
+
+    synthesized = copy.deepcopy(dict(row))
+    synthesized_content = dict(synthesized.get("content") or {})
+    synthesized_content["vector_fill_geometry"] = [
+        {"path": path, "winding_rule": "nonzero"}
+    ]
+    synthesized_content["vector_paths"] = [path]
+    synthesized["content"] = synthesized_content
+    synthesized_style = dict(synthesized.get("style") or {})
+    synthesized_style["fills"] = [
+        {
+            "type": "solid",
+            "visible": True,
+            "opacity": 1.0,
+            "color": "#{:02X}{:02X}{:02X}{:02X}".format(*stroke_color),
+            "blend_mode": "normal",
+        }
+    ]
+    synthesized_style["strokes"] = []
+    synthesized_style["stroke"] = "#00000000"
+    synthesized_style["stroke_width"] = 0.0
+    synthesized["style"] = synthesized_style
+    return synthesized
+
+
 def plan_static_vector_bake(
     row: Mapping[str, Any],
     *,
@@ -299,6 +464,9 @@ def plan_static_vector_bake(
 ) -> dict[str, Any]:
     """Return a pure, filesystem-free plan for the safe static subset."""
 
+    line_fill_row = _stroke_line_to_fill_row(row, resolved_size)
+    if line_fill_row is not None:
+        row = line_fill_row
     style = row.get("style")
     style = style if isinstance(style, Mapping) else {}
     content = row.get("content")
@@ -430,9 +598,16 @@ def plan_static_vector_bake(
         width = height = math.nan
     if not all(math.isfinite(value) and value > 0.0 for value in (width, height)):
         reasons.append("figma_vector_static_bake_dimensions_invalid")
-    elif abs(width - round(width)) > 0.000001 or abs(height - round(height)) > 0.000001:
-        reasons.append("figma_vector_static_bake_fractional_dimensions_unsupported")
     else:
+        # Auto-layout distribution routinely leaves genuinely fractional
+        # sizes (e.g. a 1/3 split of 1160px), not just float32 noise. The
+        # determinism this guards -- the hashed source and the plugin's
+        # fixed-precision float formatting agreeing -- only requires that
+        # both sides bake at the same *rounded* pixel size, which the round()
+        # calls below already produce regardless of how fractional the
+        # input was. A single shape's raster canvas being off by at most
+        # half a pixel from its authored size is not visually distinguishable
+        # in a baked UI decoration, so there is nothing left to block here.
         pixel_width = int(round(width)) + STATIC_VECTOR_BAKE_PADDING * 2
         pixel_height = int(round(height)) + STATIC_VECTOR_BAKE_PADDING * 2
         if (

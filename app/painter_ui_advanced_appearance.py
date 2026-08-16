@@ -88,9 +88,9 @@ def normalize_ui_paint(value: object, *, stroke: bool = False) -> dict[str, Any]
         result["original_height"] = max(0.0, _number(row.get("original_height"), 0.0))
         if isinstance(row.get("crop"), (Mapping, list, tuple)):
             result["crop"] = json_deepcopy(row["crop"])
-        if isinstance(row.get("figma_image_transform"), list):
-            result["figma_image_transform"] = json_deepcopy(
-                row["figma_image_transform"]
+        if isinstance(row.get("image_transform"), list):
+            result["image_transform"] = json_deepcopy(
+                row["image_transform"]
             )
         if paint_type == "image":
             adjustments = row.get("adjustments") if isinstance(row.get("adjustments"), Mapping) else {}

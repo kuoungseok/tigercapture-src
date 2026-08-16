@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -40,6 +42,7 @@ from app.painter_ui_constraints import (
 )
 from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_umg_auto_layout import resolve_umg_layout_fields
 from app.icons import app_icon, icon_size
 from app.painter_i18n import painter_text
 from app.painter_ui_sizing_control import PainterUISizingControl
@@ -47,14 +50,60 @@ from app.painter_ui_umg_panel_selector import PainterUIUMGPanelSelector
 from app.color_picker_widget import ColorPaletteStrip, color_edit_with_picker
 
 
+_LAYER_INDENT_PX = 14
+_LAYER_CHEVRON_SIZE = 10
+_LAYER_ROW_ICON_SIZE = 12
+_LAYER_DEPTH_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+_LAYER_HAS_CHILDREN_ROLE = int(Qt.ItemDataRole.UserRole) + 3
+_LAYER_COLLAPSED_ROLE = int(Qt.ItemDataRole.UserRole) + 4
+
+
+class _PainterUILayerItemDelegate(QStyledItemDelegate):
+    """Figma-style depth indent plus a disclosure chevron for parent rows.
+
+    ``PainterUILayerList`` stays a flat ``QListWidget`` (drag/reorder and the
+    hierarchy-drop preview are already built against that API); this delegate
+    only shifts where the default icon/text paint so the chevron has room to
+    its left, at ``depth * _LAYER_INDENT_PX``.
+    """
+
+    @staticmethod
+    def chevron_rect(row_rect: QRect, depth: int) -> QRect:
+        x = row_rect.left() + depth * _LAYER_INDENT_PX
+        y = row_rect.top() + (row_rect.height() - _LAYER_CHEVRON_SIZE) // 2
+        return QRect(x, y, _LAYER_CHEVRON_SIZE, _LAYER_CHEVRON_SIZE)
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        depth = int(index.data(_LAYER_DEPTH_ROLE) or 0)
+        has_children = bool(index.data(_LAYER_HAS_CHILDREN_ROLE))
+        indent = depth * _LAYER_INDENT_PX + _LAYER_CHEVRON_SIZE + 4
+        shifted = QStyleOptionViewItem(option)
+        self.initStyleOption(shifted, index)
+        shifted.rect = option.rect.adjusted(indent, 0, 0, 0)
+        super().paint(painter, shifted, index)
+        if has_children:
+            collapsed = bool(index.data(_LAYER_COLLAPSED_ROLE))
+            chevron = app_icon(
+                "chevron-right" if collapsed else "chevron-down",
+                size=_LAYER_CHEVRON_SIZE,
+                color="#8A93A6",
+            )
+            chevron.paint(
+                painter,
+                self.chevron_rect(option.rect, depth),
+            )
+
+
 class PainterUILayerList(QListWidget):
     hierarchy_drop_requested = Signal(object, str, str)
     hovered_object_changed = Signal(str)
+    collapse_toggle_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._hierarchy_drop_preview: tuple[str, str, QRect] | None = None
         self._hovered_object_id = ""
+        self.setItemDelegate(_PainterUILayerItemDelegate(self))
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.itemEntered.connect(
@@ -62,6 +111,21 @@ class PainterUILayerList(QListWidget):
                 str(item.data(Qt.ItemDataRole.UserRole) or "")
             )
         )
+
+    def mousePressEvent(self, event) -> None:
+        item = self.itemAt(event.position().toPoint())
+        if item is not None and bool(item.data(_LAYER_HAS_CHILDREN_ROLE)):
+            depth = int(item.data(_LAYER_DEPTH_ROLE) or 0)
+            chevron_rect = _PainterUILayerItemDelegate.chevron_rect(
+                self.visualItemRect(item), depth
+            )
+            if chevron_rect.contains(event.position().toPoint()):
+                self.collapse_toggle_requested.emit(
+                    str(item.data(Qt.ItemDataRole.UserRole) or "")
+                )
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     def _set_hovered_object(self, object_id: str) -> None:
         target = str(object_id or "")
@@ -759,6 +823,7 @@ class PainterUIInspector(QWidget):
         root.addWidget(artboard_layout_frame)
 
         tabs = QTabWidget()
+        self.tabs = tabs
         tabs.setObjectName("PainterUIInspectorTabs")
         tabs.setDocumentMode(True)
         tabs.setIconSize(QSize(15, 15))
@@ -832,6 +897,10 @@ class PainterUIInspector(QWidget):
         )
         self.layer_list.hierarchy_drop_requested.connect(
             self.hierarchy_drop_requested
+        )
+        self._layer_collapsed_ids: set[str] = set()
+        self.layer_list.collapse_toggle_requested.connect(
+            self._toggle_layer_collapse
         )
         layers_layout.addWidget(self.layer_list, 1)
         actions = QHBoxLayout()
@@ -3146,7 +3215,8 @@ class PainterUIInspector(QWidget):
         def append_children(parent_id: str) -> None:
             for row in children_by_parent.get(parent_id, []):
                 rows.append(row)
-                append_children(row["id"])
+                if str(row["id"]) not in self._layer_collapsed_ids:
+                    append_children(row["id"])
 
         append_children("")
         row_by_id = {row["id"]: row for row in rows}
@@ -3163,10 +3233,8 @@ class PainterUIInspector(QWidget):
                     break
                 depth += 1
                 parent_id = parent["parent_id"]
-            # QListWidget is retained for drag/reorder compatibility; use a
-            # Figma-sized visual indent so children read as hierarchy instead
-            # of appearing aligned with their parent.
-            prefix = "    " * depth
+            has_children = bool(children_by_parent.get(row["id"]))
+            collapsed = str(row["id"]) in self._layer_collapsed_ids
             state = "" if row["visible"] else "hidden"
             mask_state = (
                 "mask"
@@ -3185,9 +3253,12 @@ class PainterUIInspector(QWidget):
                 "progress": "progress",
             }.get(str(row["kind"]), "rectangle")
             item = QListWidgetItem(
-                app_icon(icon_name, size=12, color="#AAB7C6"),
-                f"{prefix}{row['name']}",
+                app_icon(icon_name, size=_LAYER_ROW_ICON_SIZE, color="#AAB7C6"),
+                str(row["name"]),
             )
+            item.setData(_LAYER_DEPTH_ROLE, depth)
+            item.setData(_LAYER_HAS_CHILDREN_ROLE, has_children)
+            item.setData(_LAYER_COLLAPSED_ROLE, collapsed)
             detail = " | ".join(
                 value
                 for value in (
@@ -3213,6 +3284,16 @@ class PainterUIInspector(QWidget):
             )
             item.setData(Qt.ItemDataRole.UserRole, section["id"])
             self.section_list.addItem(item)
+
+    def _toggle_layer_collapse(self, object_id: str) -> None:
+        target = str(object_id or "")
+        if not target:
+            return
+        if target in self._layer_collapsed_ids:
+            self._layer_collapsed_ids.discard(target)
+        else:
+            self._layer_collapsed_ids.add(target)
+        self._sync_layer_hierarchy_lists()
 
     def set_hierarchy_document(
         self,
@@ -3385,7 +3466,11 @@ class PainterUIInspector(QWidget):
         if row is not None and row.get("component_role") == "instance":
             from app.painter_ui_components import resolve_ui_component_document
 
-            component_document = resolve_ui_component_document(self._document)
+            component_document = resolve_ui_component_document(
+                self._document,
+                normalize=False,
+                scope_object_id=str(row["id"]),
+            )
             row = next(
                 (
                     item
@@ -3655,6 +3740,7 @@ class PainterUIInspector(QWidget):
             override_report = inspect_ui_component_instance_overrides(
                 self._document,
                 instance_root_id=str(instance_root["id"]),
+                normalize=False,
             )
             for override in override_report["overrides"]:
                 object_name = str(override["object_name"])
@@ -3882,6 +3968,7 @@ class PainterUIInspector(QWidget):
             spin.setValue(float(image_content["nine_slice"][edge]))
         self._sync_image_control_states()
         layout = normalize_ui_auto_layout(row.get("layout"))
+        umg_layout_fields = resolve_umg_layout_fields(layout)
         mode_index = self.auto_layout_mode_combo.findData(layout["mode"])
         self.auto_layout_mode_combo.setCurrentIndex(max(0, mode_index))
         self.auto_layout_umg_panel_control.set_context(
@@ -3929,9 +4016,9 @@ class PainterUIInspector(QWidget):
         )
         spacing_option = (
             "padding"
-            if layout["umg_spacing_strategy"] == "padding"
+            if umg_layout_fields["umg_spacing_strategy"] == "padding"
             else "spacer_fill"
-            if layout["umg_spacer_size_rule"] == "fill"
+            if umg_layout_fields["umg_spacer_size_rule"] == "fill"
             else "spacer_auto"
         )
         spacing_index = self.auto_layout_umg_spacing_combo.findData(
@@ -3941,7 +4028,7 @@ class PainterUIInspector(QWidget):
             max(0, spacing_index)
         )
         self.auto_layout_umg_spacer_fill_spin.setValue(
-            float(layout["umg_spacer_fill_coefficient"])
+            float(umg_layout_fields["umg_spacer_fill_coefficient"])
         )
         self.auto_layout_wrap_check.setChecked(bool(layout["wrap"]))
         self._sync_auto_layout_control_states()
@@ -4133,7 +4220,13 @@ class PainterUIInspector(QWidget):
             and str(row.get("kind") or "") == "frame"
         )
         if frame_selected:
-            self.frame_selection_panel.set_frame(row, self._document)
+            # ``self._document`` is canonical, as the panels below set_document
+            # already rely on.
+            self.frame_selection_panel.set_frame(
+                row,
+                self._document,
+                normalize=False,
+            )
         shape_selected = bool(
             count == 1
             and row is not None
@@ -4840,15 +4933,18 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout
 
         report = diagnose_ui_layout(self._document, normalize=False)
+        # Index the rows once instead of re-scanning all of them per
+        # diagnostic; on a large import that inner scan was the single most
+        # expensive thing left on the click path.
+        artboard_of_object = {
+            item["id"]: item["artboard_id"]
+            for item in self._document["objects"]
+        }
         diagnostics = [
             row
             for row in report["diagnostics"]
             if row["owner_id"] == str(artboard["id"])
-            or any(
-                item["id"] == row["owner_id"]
-                and item["artboard_id"] == artboard["id"]
-                for item in self._document["objects"]
-            )
+            or artboard_of_object.get(row["owner_id"]) == artboard["id"]
         ]
         errors = sum(row["severity"] == "error" for row in diagnostics)
         warnings = sum(row["severity"] == "warning" for row in diagnostics)

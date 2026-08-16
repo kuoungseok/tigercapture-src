@@ -559,6 +559,80 @@ def canonical_payload_digest(value: Any) -> bytes | None:
     return _canonical_digest(value)
 
 
+_CONTENT_WITNESS_IGNORED = frozenset({"selection"})
+
+# Keyed on (id(envelope), ignore) rather than content, because computing the
+# witness is itself the O(n) cost this exists to skip -- a single click
+# resolves theme/validation/panel state through several callers that each
+# hold the same envelope, and previously recomputed this from scratch every
+# time. The envelope reference rides along so a recycled id() on a dead
+# document can't produce a false hit.
+_CONTENT_WITNESS_MEMO: dict[
+    tuple[int, frozenset[str]], tuple[Any, tuple[Any, ...], tuple[Any, ...]]
+] = {}
+_CONTENT_WITNESS_MEMO_LIMIT = 8
+
+
+def ui_document_content_witness(
+    document: Mapping[str, Any],
+    *,
+    ignore: frozenset[str] = _CONTENT_WITNESS_IGNORED,
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """Cheap proof that a document's content has not changed.
+
+    Compares scalars by value and rows by identity, so it is only sound where
+    rows are rebuilt rather than edited in place -- the invariant the whole
+    resolver chain upholds and the theme row cache already depends on. That
+    buys one pointer read per row against the ~150 ms
+    ``canonical_payload_digest`` costs on a large import, which is why every
+    "has this changed?" check on the click path uses this instead.
+
+    Deliberately not keyed on the document envelope: a selection change
+    rebuilds the envelope while sharing every container in it, so envelope
+    identity would report a change on exactly the interaction these checks
+    exist to skip.
+
+    Returns the witness and the containers behind it. An id only means
+    something while the object behind it is alive, so a caller that keeps a
+    witness must keep the returned containers alongside it.
+    """
+    cache_key = (id(document), ignore)
+    cached = _CONTENT_WITNESS_MEMO.get(cache_key)
+    if cached is not None and cached[0] is document:
+        return cached[1], cached[2]
+    witness: list[Any] = []
+    pinned: list[Any] = []
+    for name in sorted(document):
+        if name in ignore:
+            continue
+        value = document[name]
+        if value is None or isinstance(value, (str, bool, int, float)):
+            witness.append((name, value))
+            continue
+        pinned.append(value)
+        if isinstance(value, list):
+            witness.append(
+                (
+                    name,
+                    len(value),
+                    tuple(
+                        item
+                        if item is None
+                        or isinstance(item, (str, bool, int, float))
+                        else id(item)
+                        for item in value
+                    ),
+                )
+            )
+        else:
+            witness.append((name, id(value)))
+    result = (tuple(witness), tuple(pinned))
+    _CONTENT_WITNESS_MEMO[cache_key] = (document, result[0], result[1])
+    while len(_CONTENT_WITNESS_MEMO) > _CONTENT_WITNESS_MEMO_LIMIT:
+        _CONTENT_WITNESS_MEMO.pop(next(iter(_CONTENT_WITNESS_MEMO)))
+    return result
+
+
 def _remember_canonical_digest(digest: bytes | None) -> None:
     if digest is None:
         return
@@ -813,6 +887,10 @@ def _append_cycle_errors(
             current = by_id.get(referenced)
 
 
+_VALIDATION_MEMO: dict[tuple[Any, ...], tuple[Any, dict[str, Any]]] = {}
+_VALIDATION_MEMO_LIMIT = 4
+
+
 def validate_ui_document(
     value: Mapping[str, Any],
     *,
@@ -824,8 +902,17 @@ def validate_ui_document(
     can pass ``normalize=False``.  That matters on large imported files: the
     defensive re-derivation costs as much as the edit that triggered it, which
     made a single object change re-normalize every row twice.
+
+    Every action reports this via ``inspect_ui_document``, so an action that
+    only touches selection re-ran this full-document scan for a result that
+    could not have changed. Cached on the content witness, which selection
+    changes leave untouched.
     """
     document = normalize_ui_document(value) if normalize else value
+    witness, pinned = ui_document_content_witness(document)
+    cached = _VALIDATION_MEMO.get(witness)
+    if cached is not None:
+        return dict(cached[1])
     errors: list[str] = []
     warnings: list[str] = []
     page_ids = [row["id"] for row in document["pages"]]
@@ -1383,7 +1470,7 @@ def validate_ui_document(
     layout_diagnostics = diagnose_ui_layout(document, normalize=normalize)
     errors.extend(layout_diagnostics["errors"])
     warnings.extend(layout_diagnostics["warnings"])
-    return {
+    result = {
         "schema": "tigerstudio.painter.ui.validation.v2",
         "ok": not errors,
         "errors": sorted(set(errors)),
@@ -1401,6 +1488,10 @@ def validate_ui_document(
         "layout_grid_style_count": len(layout_grid_style_ids),
         "revision": document["revision"],
     }
+    _VALIDATION_MEMO[witness] = (pinned, result)
+    while len(_VALIDATION_MEMO) > _VALIDATION_MEMO_LIMIT:
+        _VALIDATION_MEMO.pop(next(iter(_VALIDATION_MEMO)))
+    return dict(result)
 
 
 def inspect_ui_document(
@@ -1570,6 +1661,31 @@ def _remove_dangling_records(
     }
 
 
+_SCOPED_PAGE_ROWS: dict[int, tuple[Any, dict[str, Any]]] = {}
+_SCOPED_PAGE_ROWS_LIMIT = 16
+
+
+def _page_row_scoped_out(page: dict[str, Any]) -> dict[str, Any]:
+    """Return ``page`` with no remembered artboard, reusing the last result.
+
+    Rebuilding this row on every canvas refresh cost nothing by itself, but it
+    handed the canvas a new object each time, and the canvas decides whether to
+    rebuild its resolved document by comparing row identity. One fresh page row
+    per refresh was enough to defeat that check on every click.
+    """
+    if not page["active_artboard_id"]:
+        return page
+    memo = _SCOPED_PAGE_ROWS.get(id(page))
+    if memo is not None and memo[0] is page:
+        return memo[1]
+    scoped = {**page, "active_artboard_id": ""}
+    # Holding the input row stops its id being recycled behind the memo.
+    _SCOPED_PAGE_ROWS[id(page)] = (page, scoped)
+    while len(_SCOPED_PAGE_ROWS) > _SCOPED_PAGE_ROWS_LIMIT:
+        _SCOPED_PAGE_ROWS.pop(next(iter(_SCOPED_PAGE_ROWS)))
+    return scoped
+
+
 def active_ui_page_document(
     value: Mapping[str, Any],
     *,
@@ -1611,7 +1727,7 @@ def active_ui_page_document(
     scoped["pages"] = [
         page
         if page["id"] == page_id
-        else {**page, "active_artboard_id": ""}
+        else _page_row_scoped_out(page)
         for page in document["pages"]
     ]
     return scoped
@@ -2054,6 +2170,7 @@ def update_ui_object(
     changes: Mapping[str, Any],
     *,
     normalize: bool = True,
+    validate: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply field changes to one object.
 
@@ -2061,6 +2178,13 @@ def update_ui_object(
     function writes to are copied - the object list, the selection mapping and
     the one replaced row - so a drag no longer clones every other row just to
     move a single one.
+
+    ``validate=False`` promises the caller validates the finished document
+    itself. Validation walks the whole document, so a caller applying several
+    changes in a row would otherwise pay for the entire document once per
+    object - which is what made moving a multi-object selection cost multiples
+    of moving one. Only skip it if you really do validate afterwards: this
+    function raises on invalid updates and callers rely on that.
     """
     if not normalize and isinstance(value, Mapping):
         document = dict(value)
@@ -2109,9 +2233,10 @@ def update_ui_object(
                     component_id,
                     normalize=False,
                 )
-        validation = validate_ui_document(document, normalize=False)
-        if not validation["ok"]:
-            raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
+        if validate:
+            validation = validate_ui_document(document, normalize=False)
+            if not validation["ok"]:
+                raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
         document["selection"]["object_id"] = object_id
         if object_id not in document["selection"]["object_ids"]:
             document["selection"]["object_ids"].append(object_id)

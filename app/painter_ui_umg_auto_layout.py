@@ -1,6 +1,7 @@
 """Convert Painter Auto Layout semantics to explicit Tiger UMG panel slots."""
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 from app.painter_ui_auto_layout import (
@@ -10,6 +11,50 @@ from app.painter_ui_auto_layout import (
 from app.painter_ui_constraints import normalize_ui_constraints
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_scroll import normalize_ui_scroll
+
+_UMG_PANEL_MODES = {"auto", "overlay", "canvas"}
+_UMG_SPACING_STRATEGIES = {"padding", "spacer"}
+_UMG_SPACER_SIZE_RULES = {"auto", "fill"}
+
+
+def resolve_umg_layout_fields(layout: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve one container's UMG panel-mapping fields, defaulted for export.
+
+    These fields only have meaning for the Unreal/UMG export path and the
+    Inspector's UMG panel controls, so they are resolved here instead of being
+    guaranteed by the generic ``normalize_ui_auto_layout`` core layout
+    normalizer -- objects authored or imported without ever touching the UMG
+    panel controls simply fall back to the defaults below.
+    """
+    panel_mode = str(layout.get("umg_panel_mode") or "auto").strip().casefold()
+    spacing_strategy = str(
+        layout.get("umg_spacing_strategy") or "padding"
+    ).strip().casefold()
+    spacer_size_rule = str(
+        layout.get("umg_spacer_size_rule") or "auto"
+    ).strip().casefold()
+    try:
+        spacer_fill_coefficient = float(layout.get("umg_spacer_fill_coefficient"))
+    except (TypeError, ValueError):
+        spacer_fill_coefficient = 1.0
+    if not math.isfinite(spacer_fill_coefficient):
+        spacer_fill_coefficient = 1.0
+    return {
+        "umg_panel_mode": (
+            panel_mode if panel_mode in _UMG_PANEL_MODES else "auto"
+        ),
+        "umg_spacing_strategy": (
+            spacing_strategy
+            if spacing_strategy in _UMG_SPACING_STRATEGIES
+            else "padding"
+        ),
+        "umg_spacer_size_rule": (
+            spacer_size_rule
+            if spacer_size_rule in _UMG_SPACER_SIZE_RULES
+            else "auto"
+        ),
+        "umg_spacer_fill_coefficient": max(0.0001, spacer_fill_coefficient),
+    }
 
 
 def _flow_slot(
@@ -276,15 +321,14 @@ def _classify_container(
         return
     layout = normalize_ui_auto_layout(row.get("layout"))
     mode = str(layout["mode"])
-    requested_panel_mode = str(layout["umg_panel_mode"])
-    spacing_strategy = str(layout["umg_spacing_strategy"]).title()
+    umg_fields = resolve_umg_layout_fields(layout)
+    requested_panel_mode = umg_fields["umg_panel_mode"]
+    spacing_strategy = umg_fields["umg_spacing_strategy"].title()
     spacing_strategy_by_id[object_id] = spacing_strategy
-    spacer_size_rule_by_id[object_id] = str(
-        layout["umg_spacer_size_rule"]
-    ).title()
-    spacer_fill_coefficient_by_id[object_id] = float(
-        layout["umg_spacer_fill_coefficient"]
-    )
+    spacer_size_rule_by_id[object_id] = umg_fields["umg_spacer_size_rule"].title()
+    spacer_fill_coefficient_by_id[object_id] = umg_fields[
+        "umg_spacer_fill_coefficient"
+    ]
     layout_panel_kind = {
         "horizontal": "Horizontal",
         "vertical": "Vertical",

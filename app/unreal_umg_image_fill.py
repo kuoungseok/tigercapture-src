@@ -299,7 +299,7 @@ def _normalized_conversion(
         source.get("image_crop", source.get("crop"))
     )
     transform_crop, transform_reasons = _figma_transform_crop_record(
-        source.get("figma_image_transform")
+        source.get("image_transform")
     )
     if transform_crop is not None:
         if crop["Enabled"] and crop != transform_crop:

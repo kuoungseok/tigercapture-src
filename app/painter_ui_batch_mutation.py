@@ -12,7 +12,12 @@ def apply_ui_object_batch(
         capture_ui_constraints,
         constraint_parent_geometry,
     )
-    from app.painter_ui_document import normalize_ui_document, update_ui_object
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        update_ui_object,
+        validate_ui_document,
+    )
 
     updated = normalize_ui_document(document)
     changed_ids: list[str] = []
@@ -40,8 +45,26 @@ def apply_ui_object_batch(
             )
         if all(row.get(key) == value for key, value in changes.items()):
             continue
-        updated, _row = update_ui_object(updated, object_id, changes)
+        # Validation walks the whole document, so validating per object made a
+        # multi-object move cost a multiple of a single one. Apply every change
+        # first, then validate the finished document once below.
+        # ``updated`` is canonical: normalized once above, and every
+        # update_ui_object hands back a revised canonical document. Letting it
+        # re-normalize would walk the whole document again per object.
+        updated, _row = update_ui_object(
+            updated,
+            object_id,
+            changes,
+            normalize=False,
+            validate=False,
+        )
         changed_ids.append(object_id)
+    if changed_ids:
+        validation = validate_ui_document(updated, normalize=False)
+        if not validation["ok"]:
+            raise PainterUIDocumentError(
+                "Invalid UI object batch: " + ", ".join(validation["errors"])
+            )
     return updated, changed_ids
 
 

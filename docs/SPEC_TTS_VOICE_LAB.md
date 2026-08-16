@@ -1,6 +1,6 @@
 # TTS Voice Lab
 
-Last updated: 2026-07-14
+Last updated: 2026-08-15
 
 TigerCapture is moving toward a subculture media creator studio, so TTS is a
 core product direction rather than a throwaway utility. The first provider is a
@@ -8,7 +8,9 @@ local Style-Bert-VITS2 sidecar, kept outside the editor process because it is
 large, GPU/PyTorch-heavy, and AGPL-3.0 licensed. Voice Lab also supports Kokoro
 as an optional local fallback provider installed under `external/tools`, plus
 GPT-SoVITS as an optional reference-voice sidecar for few-shot/voice-cloning
-workflows.
+workflows, and Voicebox (`jamiepine/voicebox`, MIT) as an optional multi-engine
+sidecar (Qwen3-TTS, LuxTTS, Chatterbox, HumeAI TADA, Kokoro, and more) that
+exposes its own voice-profile system over a local FastAPI server.
 
 ## Product Role
 
@@ -33,6 +35,12 @@ Voice Lab should eventually cover:
   optional external sidecar, exposes reference-voice preset JSON files, builds
   the `api_v2.py` start command, and posts to `/tts` without importing the
   heavy torch stack into the editor process.
+- `app/tts_voicebox.py`: Voicebox provider boundary. It detects the optional
+  external sidecar checkout (`backend/main.py`, `requirements.txt`), builds the
+  `python -m backend.main` start command, lists voice profiles from the
+  running server's `/profiles` endpoint, and posts to `/generate/stream` for
+  synchronous WAV synthesis without importing any Voicebox backend code into
+  the editor process.
 - `app/tts_subtitle_workflow.py`: subtitle row collection, model selection,
   deterministic generated-WAV paths, and batch synthesis planning.
 - `app/tts_model_training.py`: model-maker boundary for local Style-Bert-VITS2
@@ -93,6 +101,25 @@ or model caches. A usable voice must be declared as
 `ref_audio_path`, `prompt_text`, `prompt_lang`, and `text_lang`. The server
 contract is `api_v2.py` on `http://127.0.0.1:9880`, using the `/tts` endpoint.
 
+Voicebox installs under:
+
+```text
+external\tools\tts\voicebox
+```
+
+`tools/install_voicebox.py` clones the official `jamiepine/voicebox`
+repository (MIT-licensed) and, with `--install-deps`, creates
+`external\tools\tts\voicebox\.venv` and installs `requirements.txt`
+(Python 3.12+). It does not bundle voice profiles, samples, or model caches;
+Voicebox's own engines (Qwen3-TTS, LuxTTS, Chatterbox, HumeAI TADA, Kokoro,
+etc.) download their weights from Hugging Face on first use. The server
+contract is `python -m backend.main` on `http://127.0.0.1:8000`. Unlike
+GPT-SoVITS's local JSON presets, voices are "voice profiles" managed inside
+Voicebox's own SQLite database; a profile must be created through
+`http://127.0.0.1:8000/docs` (`POST /profiles`) before synthesis, and
+synthesis calls the synchronous `/generate/stream` endpoint rather than
+polling the async `/generate` + SSE status flow.
+
 ## UI/UX Contract
 
 The user should see a friendly setup path instead of raw Python dependency
@@ -100,7 +127,7 @@ instructions:
 
 - `Install`: show a safe install plan, estimated size, and AGPL sidecar notice.
 - `Voice Library`: choose the active local TTS provider. Current providers are
-  `Style-Bert-VITS2`, `Kokoro`, and `GPT-SoVITS`. The list must always show all
+  `Style-Bert-VITS2`, `Kokoro`, `GPT-SoVITS`, and `Voicebox`. The list must always show all
   known voice libraries, sort currently usable libraries first, and render
   unavailable libraries in muted gray rather than hiding them. Catalog-only
   planned entries are visible too, including Piper, Coqui XTTS, F5-TTS,
@@ -119,7 +146,9 @@ instructions:
   into `external/tools/tts/kokoro`; Style-Bert-VITS2 remains an optional sidecar
   and must not be copied into the closed source tree. GPT-SoVITS installs into
   `external/tools/tts/gpt-sovits`; it is not synthesis-ready until at least one
-  reference voice preset points to an existing local audio file.
+  reference voice preset points to an existing local audio file. Voicebox
+  installs into `external/tools/tts/voicebox`; it is not synthesis-ready until
+  at least one voice profile is created through its own `/docs` Swagger UI.
 - `Connect`: select an existing provider folder.
 - `Start server`: start the connected local `server_fastapi.py` from the UI.
   Hide/disable this for providers such as Kokoro that do not need a server.
@@ -148,7 +177,9 @@ instructions:
   valid, Voice Lab starts `server_fastapi.py`, shows a clear waiting message,
   waits for `/status` or `/models/info`, then continues generation. For Kokoro,
   it skips server startup and runs the external venv subprocess. For GPT-SoVITS,
-  it requires a selected reference preset and calls the local `/tts` API.
+  it requires a selected reference preset and calls the local `/tts` API. For
+  Voicebox, it requires a selected voice profile id and calls the local
+  `/generate/stream` API for synchronous WAV synthesis.
 - Bilingual dialogue rows: display captions and spoken TTS text may differ.
   Store the rendered caption in `subtitle_text` / `display_text` and the text
   sent to the voice model in `tts_text` / `spoken_text`. Project subtitles keep

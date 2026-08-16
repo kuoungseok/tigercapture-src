@@ -13,9 +13,6 @@ _MAIN_ALIGNMENTS = {"start", "center", "end", "space_between"}
 _CROSS_ALIGNMENTS = {"start", "center", "end", "stretch", "baseline"}
 _POSITIONING = {"auto", "absolute"}
 _SIZING_MODES = {"fixed", "hug", "fill"}
-_UMG_PANEL_MODES = {"auto", "overlay", "canvas"}
-_UMG_SPACING_STRATEGIES = {"padding", "spacer"}
-_UMG_SPACER_SIZE_RULES = {"auto", "fill"}
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -155,15 +152,6 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
         or source.get("vertical_sizing")
         or "fixed"
     ).strip().casefold()
-    umg_panel_mode = str(
-        source.get("umg_panel_mode") or "auto"
-    ).strip().casefold()
-    umg_spacing_strategy = str(
-        source.get("umg_spacing_strategy") or "padding"
-    ).strip().casefold()
-    umg_spacer_size_rule = str(
-        source.get("umg_spacer_size_rule") or "auto"
-    ).strip().casefold()
     source.update(
         {
             "mode": mode if mode in _MODES else "none",
@@ -198,25 +186,6 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
             ),
             "height_sizing": (
                 height_sizing if height_sizing in _SIZING_MODES else "fixed"
-            ),
-            "umg_panel_mode": (
-                umg_panel_mode
-                if umg_panel_mode in _UMG_PANEL_MODES
-                else "auto"
-            ),
-            "umg_spacing_strategy": (
-                umg_spacing_strategy
-                if umg_spacing_strategy in _UMG_SPACING_STRATEGIES
-                else "padding"
-            ),
-            "umg_spacer_size_rule": (
-                umg_spacer_size_rule
-                if umg_spacer_size_rule in _UMG_SPACER_SIZE_RULES
-                else "auto"
-            ),
-            "umg_spacer_fill_coefficient": max(
-                0.0001,
-                _number(source.get("umg_spacer_fill_coefficient"), 1.0),
             ),
             "grid_columns": max(1, int(_number(source.get("grid_columns"), 2))),
             "grid_column_span": max(
@@ -285,10 +254,6 @@ _CANONICAL_LAYOUT_KEYS = frozenset(
         "wrap",
         "width_sizing",
         "height_sizing",
-        "umg_panel_mode",
-        "umg_spacing_strategy",
-        "umg_spacer_size_rule",
-        "umg_spacer_fill_coefficient",
         "grid_columns",
         "grid_column_span",
         "grid_row_span",

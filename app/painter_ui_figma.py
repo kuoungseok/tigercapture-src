@@ -701,7 +701,7 @@ def _map_paints(
                 # rectangle in all cases (it may rotate/skew). Preserve it for
                 # inspection; CROP remains explicitly blocked until a safe
                 # rectangular crop can be supplied.
-                row["figma_image_transform"] = copy.deepcopy(image_transform)
+                row["image_transform"] = copy.deepcopy(image_transform)
         else:
             continue
         if stroke:
@@ -2540,7 +2540,7 @@ def _map_content(
                 transform_valid = False
             if not transform_valid:
                 image_render_blockers.append(
-                    "figma_image_transform_invalid_or_singular"
+                    "image_transform_invalid_or_singular"
                 )
         result.update(
             {
@@ -2558,8 +2558,8 @@ def _map_content(
                     mapped_image.get("blend_mode") or "normal"
                 ),
                 "image_status": "ready" if local_path else "missing",
-                "figma_image_transform": image_transform,
-                "figma_image_transform_semantics": (
+                "image_transform": image_transform,
+                "image_transform_semantics": (
                     "target_normalized_to_source_normalized"
                     if image_transform
                     else "none"
@@ -5658,8 +5658,8 @@ function imagePaint(row,imageHash) {{
   if(!['FILL','FIT','CROP','TILE'].includes(mode)) mode='FILL';
   const result={{type:'IMAGE',scaleMode:mode,imageHash}};
   if(mode==='CROP') {{
-    const transform=validImageTransform(content.figma_image_transform)
-      ? content.figma_image_transform : imageCropTransform(content);
+    const transform=validImageTransform(content.image_transform)
+      ? content.image_transform : imageCropTransform(content);
     result.imageTransform=transform||[[1,0,0],[0,1,0]];
   }}
   const rotation=Number(content.image_rotation??content.rotation??0);

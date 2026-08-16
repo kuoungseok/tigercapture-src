@@ -2119,11 +2119,15 @@ def inspect_ui_component_instance_overrides(
     value: Mapping[str, Any],
     *,
     instance_root_id: str,
+    normalize: bool = True,
 ) -> dict[str, Any]:
     """Return the explicit local differences for one component instance."""
     from app.painter_ui_document import PainterUIDocumentError, normalize_ui_document
 
-    document = normalize_ui_document(value)
+    # This is read-only and only ever looks at one instance's subtree, but it
+    # used to re-normalize the whole document regardless -- on a large
+    # imported file that made selecting any component instance cost seconds.
+    document = normalize_ui_document(value) if normalize else value
     objects = {row["id"]: row for row in document["objects"]}
     root = objects.get(str(instance_root_id))
     if root is None or root["component_role"] != "instance":
@@ -2359,6 +2363,7 @@ def resolve_ui_component_document(
     value: Mapping[str, Any],
     *,
     normalize: bool = True,
+    scope_object_id: str = "",
 ) -> dict[str, Any]:
     from app.painter_ui_document import normalize_ui_document
 
@@ -2383,6 +2388,24 @@ def resolve_ui_component_document(
             continue
         if row["component_source_object_id"] == component["root_object_id"]:
             instance_roots.append(row)
+    if scope_object_id:
+        # A single selected row only ever needs its own enclosing instance
+        # resolved. Walking every instance subtree in the document to answer
+        # a one-row question made selecting any instance cost seconds on a
+        # large imported file.
+        root_ids = {str(root["id"]) for root in instance_roots}
+        current = objects.get(str(scope_object_id))
+        enclosing_id = ""
+        while current is not None:
+            if str(current.get("id") or "") in root_ids:
+                enclosing_id = str(current["id"])
+                break
+            current = objects.get(str(current.get("parent_id") or ""))
+        instance_roots = (
+            [root for root in instance_roots if str(root["id"]) == enclosing_id]
+            if enclosing_id
+            else []
+        )
     for root in instance_roots:
         component = components[root["component_id"]]
         properties = component_property_defaults(component)

@@ -2529,15 +2529,15 @@ def test_figma_rest_stretch_transform_renders_and_maps_to_umg_crop(
     row = next(item for item in document["objects"] if item["name"] == "REST stretch crop")
     assert row["content"]["image_fit"] == "stretch"
     assert row["content"]["image_opacity"] == 0.75
-    assert row["content"]["figma_image_transform"] == [
+    assert row["content"]["image_transform"] == [
         [0.5, 0.0, 0.5],
         [0.0, 1.0, 0.0],
     ]
-    assert row["content"]["figma_image_transform_semantics"] == (
+    assert row["content"]["image_transform_semantics"] == (
         "target_normalized_to_source_normalized"
     )
     assert not any(
-        "figma_image_transform" in warning for warning in report["warnings"]
+        "image_transform_invalid_or_singular" in warning for warning in report["warnings"]
     )
 
     rendered = render_ui_artboard(document, document["active_artboard_id"])
@@ -2588,7 +2588,7 @@ def test_figma_image_paint_preserves_tile_filters_and_crop_transform() -> None:
     assert paint["adjustments"]["contrast"] == 25
     assert paint["adjustments"]["saturation"] == -50
     assert paint["adjustments"]["shadows"] == 12.5
-    assert paint["figma_image_transform"] == [
+    assert paint["image_transform"] == [
         [1, 0, 0.1],
         [0, 1, 0.2],
     ]

@@ -69,6 +69,12 @@ Format: grouped by area, newest work at the top of each section.
   user's `zoe` model when available, exposes a Model Maker bridge for local
   voice models, and has QA Dashboard preflight coverage that can auto-start the
   sidecar for project evaluation sessions.
+- **Voicebox TTS provider** — Added Voicebox (jamiepine/voicebox) as an optional
+  local TTS sidecar provider — supports multiple engines (Qwen3-TTS, LuxTTS,
+  Chatterbox, HumeAI TADA, Kokoro) through its own voice-profile system. New
+  module `app/tts_voicebox.py`, install script `tools/install_voicebox.py`,
+  wired into `app/tts_setup.py`, `app/tts_lab.py`, and
+  `app/tts_subtitle_workflow.py`.
 
 ### UX
 

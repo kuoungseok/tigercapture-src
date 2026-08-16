@@ -326,7 +326,7 @@ def test_figma_axis_aligned_image_transform_reuses_native_crop_contract(
         content={
             "source_path": str(texture),
             "image_fit": "stretch",
-            "figma_image_transform": [
+            "image_transform": [
                 [0.6, 0.0, 0.2],
                 [0.0, 0.5, 0.25],
             ],
@@ -357,7 +357,7 @@ def test_figma_skewed_image_transform_and_shadows_filter_are_explicitly_blocked(
         content={
             "source_path": str(texture),
             "image_fit": "stretch",
-            "figma_image_transform": [
+            "image_transform": [
                 [1.0, 0.2, 0.0],
                 [0.0, 1.0, 0.0],
             ],

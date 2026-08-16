@@ -107,6 +107,22 @@ Start here when changing a feature:
   occlusion, scene/plane anchoring, or explicit depth-map viewing is active.
   Use `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Actions
   `ar_pbr.preview.depth_view.get/set`; do not add parallel private toggles.
+  Native DXR render modes live in `app/ar_pbr/native_rt.py` with the helper
+  sources under `native/ar_pbr_dxr_helper/`, built by
+  `tools/build_ar_pbr_dxr_helper.py` and checked by `tools/qa_ar_pbr_dxr.py`.
+- Editable material graph shared by UMG material surfaces and the PBR Texture
+  Lab: `app/material_graph/registry.py`, `app/material_graph/document.py`,
+  `app/material_graph/view.py`, `app/material_graph/hlsl_to_glsl.py`,
+  `app/material_graph/compile_glsl.py`, `app/material_graph/preview.py`,
+  `tests/test_material_graph_document.py`, `tests/test_material_graph_hlsl.py`.
+  This is a separate graph from the video workbench node graph; do not extend
+  the DaVinci-style fixed-port graph for Unreal-facing surfaces.
+- Local Figma `.fig` archive import (no REST API, no token):
+  `app/painter_ui_figma_fig.py`, `app/painter_ui_figma_kiwi.py`,
+  `app/painter_ui_figma_fig_rest.py`, `app/painter_ui_figma_fig_vector.py`,
+  `tests/test_painter_ui_figma_fig.py`. `.fig` content is translated onto the
+  REST node shape so `import_figma_payload` runs unchanged; do not add a second
+  document model.
 - General video processing: `app/video_filters.py`, `app/chroma_key.py`,
   `app/background_removal.py`, `app/video_stabilizer.py`,
   `app/video_decoder.py`.
@@ -159,7 +175,8 @@ Start here when changing a feature:
   `docs/SPEC_TTS_VOICE_LAB.md`, `app/tts_setup.py`, `app/tts_synthesis.py`,
   `app/tts_subtitle_workflow.py`, `app/tts_model_training.py`,
   `app/tts_lab.py`, `app/tts_kokoro.py`, `app/tts_gpt_sovits.py`,
-  `app/actions/tts_namespace.py`, and `app/actions/editor_adapter_tts.py`.
+  `app/tts_voicebox.py`, `app/actions/tts_namespace.py`, and
+  `app/actions/editor_adapter_tts.py`.
   Local Style-Bert-VITS2 experiments currently live outside the repo at
   `D:\TTS\sbv2\Style-Bert-VITS2`. This folder is not a runtime dependency for
   the current editor build, but it is a product-direction asset for the planned
@@ -195,6 +212,15 @@ Start here when changing a feature:
   synthesis-ready only when a `voice_presets/*.json` entry points to an existing
   local `ref_audio_path`; subtitle/TTS generation then posts to the local
   `api_v2.py` `/tts` endpoint, defaulting to `http://127.0.0.1:9880`.
+  Voicebox is also exposed as an optional local multi-engine sidecar under
+  `external/tools/tts/voicebox`; `tools/install_voicebox.py` clones the
+  official `jamiepine/voicebox` repository and manages engine setup, while user
+  voice profiles, model caches, and configuration stay outside Git. Voicebox
+  supports multiple synthesis engines (Qwen3-TTS, LuxTTS, Chatterbox, HumeAI
+  TADA, Kokoro) through a unified voice-profile system; the editor can select
+  engines and voices through Voice Lab without reimplementing provider
+  boundaries for each backend. Subtitle/TTS generation posts to the local
+  Voicebox `/synthesize` endpoint, defaulting to `http://127.0.0.1:5000`.
   Voice Lab's provider selector is a visible Voice Library catalog rather than
   a hidden setup choice: all known libraries stay listed, currently usable
   libraries sort first, unavailable libraries are muted gray, and selecting an
@@ -11148,3 +11174,228 @@ AI Script Edit MVP integration:
   https://learn.microsoft.com/en-us/windows/win32/procthread/process-working-set,
   https://learn.microsoft.com/en-us/windows/win32/memory/working-set, and
   https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex.
+
+## Editable material graph for Unreal-facing surfaces (implemented, 2026-08-07)
+
+- The video workbench node graph speaks DaVinci: fixed RGB/KEY ports, thumbnail
+  bodies, no pin names. Unreal-facing material surfaces need named, typed pins,
+  and the PBR Texture Lab had no graph at all. `app/material_graph/*` is one
+  editable graph both surfaces use; the workbench graph is unchanged.
+- `registry.py` declares pin types with promotion rules, category title colors,
+  and a node vocabulary split by surface, so a PBR palette never offers
+  `UIOutput`. Entry points are `node_definition`, `node_types_for_surface`,
+  `pin_color`, `category_title_color`, `pins_are_compatible`,
+  `default_param_values`, and `registry_report`.
+- `document.py` holds the authored graph. Every mutation (`add_node`,
+  `remove_nodes`, `move_node`, `set_node_param`, `connect`, `disconnect`,
+  `set_selection`) returns a new document so the undo stack can keep the old
+  one. `normalize_graph` drops unknown node types, duplicate ids, mistyped
+  links, and cycles; a refused mutation raises `MaterialGraphError` carrying the
+  reason. `evaluation_order` and `graph_report` are the read-only views.
+- `view.py::MaterialGraphView` is the editor: category-tinted title bars, pins
+  colored by value type, wires inheriting the source pin color, drag-to-connect,
+  a searchable palette, and marquee select.
+- `hlsl_to_glsl.py` exists because the two languages disagree. Custom nodes are
+  authored in HLSL because Unreal consumes HLSL, and previewed in GLSL 120
+  because the app renders GLSL. Constructs whose meaning differs between the two
+  — `mul()`, resource declarations, bit reinterpretation — are refused by
+  `HLSLTranslationError` with the offending line and an alternative, rather than
+  translated into something that quietly disagrees with Unreal.
+  `translation_support_report()` states what is and is not covered.
+- `compile_glsl.py::compile_graph_glsl` emits a fragment shader in dependency
+  order; unconnected inputs fall back to their declared pin defaults, and
+  failures raise `GraphCompileError`. `preview.py::render_graph_preview`
+  compiles and renders offscreen and reports every failure instead of going
+  blank; `preview_backend_status()` reports backend availability.
+- Claim boundary: node representation follows conventions an Unreal node editor
+  uses publicly. No Unreal Engine source was consulted, which `registry_report()`
+  and `translation_support_report()` both record. The generated GLSL is not yet
+  verified against a driver, so treat preview output as unproven until a
+  driver-backed QA pass exists.
+
+## Local Figma `.fig` archive import (implemented, 2026-08-07)
+
+- Painter UI could previously import Figma content only through the REST API or
+  a saved REST JSON snapshot, so a `.fig` saved locally from Figma was
+  unreadable and working offline or without a token meant no import at all.
+  `app/painter_ui_figma_fig.py` now reads the local file directly.
+- `.fig` is a ZIP (or bare) container holding a fig-kiwi payload: an 8-byte
+  prelude, a version, then length-prefixed chunks carrying the Kiwi schema and
+  the document message. Because the payload embeds its own schema,
+  `app/painter_ui_figma_kiwi.py` is a generic Kiwi decoder — no code generation
+  and no new dependency. Older files use raw deflate; newer ones switch the
+  message chunk to zstd. The reader accepts either, using `compression.zstd`
+  (PEP 784) on Python 3.14 and falling back to `zstandard`/`pyzstd` on earlier
+  interpreters.
+- `app/painter_ui_figma_fig_rest.py` translates the decoded node array onto the
+  REST node shape rather than into a second document model, so the existing
+  `import_figma_payload` pipeline — with all its component, Auto Layout, and
+  preflight handling — runs unchanged. That means rebuilding the tree from
+  `parentIndex`, composing parent-relative affine transforms into
+  `absoluteBoundingBox`, and renaming internal fields onto their REST
+  equivalents.
+- Vector shapes need extra work: REST publishes flattened `fillGeometry` path
+  strings, while `.fig` keeps an editable vector network in a separate blob.
+  `app/painter_ui_figma_fig_vector.py` decodes vertex/segment/region data into
+  SVG paths. Without it every `VECTOR` node imports blocked.
+- Coverage is in `tests/test_painter_ui_figma_fig.py`.
+
+## `.fig` import visual fidelity (implemented, 2026-08-08)
+
+- Measured against the live Figma app on "Figma auto layout playground
+  (Community)", frame `Auto Layout` of page `Auto Layout UI3`, by sampling both
+  windows pixel for pixel. Color conversion was never the problem: raw floats
+  land exactly on `n/255` (`0.9529411792755127 * 255 = 243.0000`) and the
+  section renders `#F3FFE3` in both, as do `#C7F8FB` and `#B9B1EA`. What
+  differed was which nodes painted at all.
+- **Masks were ignored.** The `.fig` mapper emitted `mask` while the importer
+  reads `isMask`, so all 19 masks in that file imported as ordinary shapes.
+  Figma fills mask rectangles with a loud color precisely because they never
+  render, and those filled 21.5 percent of the frame.
+- **Instances were empty.** A `.fig` stores an instance as a component
+  reference plus overrides, not as a subtree, so all 645 arrived with no
+  children and everything inside them vanished. `_expand_instances` clones the
+  component and applies the overrides its `guidPath` addresses, with guards for
+  self-containing components, nesting depth, and total node count.
+- **Instances did not paint their fill.** An instance is frame-like in Figma,
+  but `app/painter_ui_figma.py::_map_kind` treated it as a group, which paints
+  nothing. Invisible while instances imported empty; obvious once the button
+  behind the label arrived.
+- **Boolean operands showed through.**
+  `app/painter_ui_boolean_geometry.py::boolean_operand_ids` stopped at the
+  operation's direct children, but a boolean consumes its whole subtree, so a
+  group operand's own children kept painting their placeholder colors over the
+  resolved shape. Note the same name also exists as
+  `app/motion_designer/boolean_layers.py::linked_boolean_operand_ids` for Motion
+  Designer; they are unrelated.
+- **Outer overrides must not repaint a nested instance.** Expanding instances
+  applied every override to the descendant its `guidPath` names. For a
+  descendant that is itself an instance that is wrong: the node already stores
+  the state Figma resolved for it, and the outer override is a stale delta.
+  Measured on the same frame, symbol child `2411:13259` renders `fillPaints`
+  `#202020` in Figma while the outer override claimed `#D4FF5B`, a color absent
+  from every pixel of Figma's canvas. Overrides on ordinary nodes still apply
+  and must: the same instance's text overrides are what make the heading read
+  "Auto Layout" instead of the component's "Playground file overview".
+
+## Painter UI Design large-document performance (partially implemented, 2026-08-08)
+
+- Opening a large imported Figma file made Painter UI Design unusable. On an
+  8903-object document, selecting a single object took about 8.9s and each
+  successive edit was slower than the last. Drawing was never the cause:
+  measured on that document `paintEvent` is 3ms, a hover 1ms, a zoom 0.5ms. The
+  cost was read-only code defensively re-normalizing and deep-copying the whole
+  document. The `normalize=False` convention for avoiding that already existed
+  in several panels; newer paths had not followed it, so one click renormalized
+  8903 rows several times over.
+- **Share unchanged rows.** Selection is view state, not structure, yet changing
+  it cloned every row; it now rebuilds only the selection mapping. The same
+  treatment applies to `inspect_ui_document`, `active_ui_page_document`, the
+  stress preview, the workspace and inspector document setters, and the
+  delivery/component/UMG report helpers. Click drops from 8.9s to 0.74s and
+  repeated edits no longer degrade.
+- **Preserve row identity through the resolver chain.**
+  `resolve_ui_component_document` deep-copied the whole document even with
+  `normalize=False`, although it only rewrites rows inside an instance subtree
+  and already copies those individually. Sharing the untouched rows takes that
+  pass from 2.36s to 72ms and preserves the object identity of 8802 of 8903
+  rows, which is what lets later passes recognise unchanged work. Responsive
+  resolution passes rows through untouched when they have no override for their
+  artboard's context; theme resolution memoises per row, keyed on input-row
+  identity plus artboard theme and variable modes, and drops the memo when the
+  token table changes. `update_ui_object` copies only the containers it writes
+  to and skips the closing re-normalization when it replaced a single
+  already-normalized row. Object move drops from 9.7s to 2.6s.
+- **Resolve the theme once per edit.** An edit resolved the theme four times
+  because the canvas scoped the document to its active page before resolving,
+  and a page-scoped document gets its own resolver cache key. The full document
+  is now resolved first and the result scoped; page scoping shares its rows and
+  only rebuilds the envelope, with selection and revision restored onto that
+  private envelope. The canvas skips resolving entirely when handed an
+  already-resolved document. Computing the cache key cost about as much as a hit
+  saves, so it is memoised per document, witnessed by the identity and length of
+  every collection the digest covers. `ui_auto_layout_view()` was added for
+  read-only callers.
+- **Still slow, deliberately scoped out.** Editing remains about 11s because
+  structural changes legitimately invalidate the resolution caches. Making that
+  incremental means splitting the component, responsive, and theme resolvers per
+  artboard. Dragging is still too slow at 2.6s per move; the remaining cost is
+  layout diagnostics and the workspace effective-document rebuild, each
+  resolving a different document shape so they cannot share a cache entry.
+- Measurement warning: timing a repeated no-op edit reads the cache and looks
+  tens of times faster than the real path. Use the committed profiling scripts
+  rather than improvising a benchmark.
+
+## GIF export compression (implemented, 2026-08-08)
+
+- The encoder delegated all size reduction to gifsicle, but gifsicle was never
+  bundled and `TigerCapture.spec` never collected it, so `find_gifsicle()`
+  returned `None` in every shipped build and the `-O3` and `--lossy` passes
+  never ran. The editor's `Lossy` control was wired to that dead stage, so it
+  changed the size estimate and nothing else: `aggressive` and `off` produced
+  byte-identical files.
+- `app/exporter.py` now performs inter-frame delta encoding, which needs no
+  external binary. Pixels unchanged since the frame the viewer actually saw are
+  written as the transparent index and left in place via `disposal=1`, so only
+  the moving region costs bytes. Reference tracking is against the last emitted
+  state rather than the previous source frame, which bounds drift to the
+  tolerance in total instead of per frame.
+- `Lossy` in `app/gif_editor_window.py` now maps onto that tolerance instead of
+  a gifsicle palette budget. This is the equivalent trade for screen
+  recordings: sensor noise otherwise marks every pixel as changed, and absorbing
+  it is what makes the delta pass pay off.
+- Noisy content at zero tolerance is the one case where delta loses — it pays
+  for a shared palette and gets no transparency back. A sampled pre-check on
+  adjacent frame pairs falls back to whole-frame encoding there, so output is
+  never larger than before. Encoding errors fall back the same way.
+- Coverage is in `tests/test_gif_export_compression.py`.
+
+## Painter live stroke incremental rendering (implemented, 2026-08-07)
+
+- `app/painter_brush_dynamics.py::DynamicDabStream` keyed its signature on
+  `id(stroke)`, but the live preview hands in a fresh stroke snapshot on every
+  input sample, so the stream reset constantly and every sample re-rendered the
+  whole stroke. The signature now excludes stroke identity and the stream resets
+  on a point-count shrink instead, tracked by `_points_seen`. What must not
+  change is the brush; the point list may only grow.
+- The live path in `app/drawing.py` renders only newly appended dabs rather than
+  the full dab list.
+- Coverage is in `tests/test_painter_live_stroke_incremental.py` and the updated
+  `tests/test_painter_brush_dynamics.py`; `tmp/measure_paint_stroke_latency.py`
+  and `tmp/verify_live_dynamic_increment.py` are the measurement scripts.
+
+## PBR Texture Lab source-less open and out-of-process torch probe (implemented, 2026-08-07)
+
+- The lab takes its source from a clipboard paste, but the `3D PBR Texture`
+  launcher in `app/workbench_panel.py::_open_pbr_texture_program` still made the
+  user pick a file before the window would open. `ArPbrTextureMapLabWindow`,
+  `app/ar_pbr/texture_lab_entry.py::open_texture_lab_window`, and the workbench
+  launcher now all accept no image. With no source the window title is
+  `AR/PBR Texture Lab` with no file suffix, and the subtitle and status line
+  read `Paste a source image with Ctrl+V or the Paste Image button.` Export
+  refuses with the same message instead of dereferencing a missing path.
+- Importing torch inside the Studio host aborts the process — not an exception,
+  a hard `Fatal Python error: Aborted` inside `torch/distributed/__init__.py` —
+  once other native extensions such as live2d and the OpenGL viewer are loaded.
+  Asking whether CUDA was available therefore took the whole app down as the lab
+  window built its backend status label.
+- `app/ar_pbr/texture_map_lab.py::_torch_cuda_probe` now runs the probe in a
+  child process with a timeout, reusing the `verify_program`/`verify_args` of
+  `texture_lab_gpu_install_plan()`, and caches the answer for the lifetime of
+  the process because it cannot change while the app is running.
+  `texture_map_backend_status()` consumes that probe and no longer imports torch
+  in the host.
+- Known remaining risk: `_generate_texture_maps_torch_cuda` still does an
+  in-process `import torch`, so the same abort can occur once a source image is
+  present and map generation runs. Isolating generation is not done yet.
+
+## Explicit language selection is not overwritten (implemented, 2026-08-07)
+
+- `app/i18n.py::set_language` set the active language but left the module marked
+  uninitialised, so the next `tr()` ran `initialize()` and replaced the
+  requested language with the saved or detected one. Any caller that chose a
+  language before anything had translated a string — a test, a tool that starts
+  in English, a settings dialog applied early — was silently ignored.
+- An explicit choice now counts as initialised, so nothing later resets it.
+  `initialize()` itself is unchanged and still wins when called on purpose.
+- Coverage is in `tests/test_i18n_language_selection.py`.

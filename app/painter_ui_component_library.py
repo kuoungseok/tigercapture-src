@@ -28,17 +28,19 @@ def inspect_ui_component_library(
     # defensive copy, which dominates click latency on large files.
     document = normalize_ui_document(value) if normalize else value
     components = {row["id"]: row for row in document["components"]}
-    instance_counts = {
-        component_id: sum(
-            1
-            for row in document["objects"]
-            if row["component_role"] == "instance"
-            and row["component_id"] == component_id
-            and row["component_source_object_id"]
-            == components[component_id]["root_object_id"]
-        )
-        for component_id in components
-    }
+    # One pass over the objects rather than one per component: this used to
+    # re-walk all 9k rows for each of a large file's ~130 components, which
+    # cost more than the rest of the inspection put together.
+    instance_counts = {component_id: 0 for component_id in components}
+    for row in document["objects"]:
+        if row["component_role"] != "instance":
+            continue
+        component = components.get(row["component_id"])
+        if (
+            component is not None
+            and row["component_source_object_id"] == component["root_object_id"]
+        ):
+            instance_counts[row["component_id"]] += 1
     families: list[dict[str, Any]] = []
     for component in document["components"]:
         if component["base_component_id"]:

@@ -306,6 +306,7 @@ def synthesize_subtitle_rows(
 ) -> list[dict[str, Any]]:
     from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID, synthesize_gpt_sovits_voice
     from app.tts_kokoro import KOKORO_PROVIDER_ID, synthesize_kokoro_voice
+    from app.tts_voicebox import VOICEBOX_PROVIDER_ID, synthesize_voicebox_voice
     from app.tts_setup import tts_provider_status
     from app.tts_synthesis import synthesize_style_bert_voice
 
@@ -351,6 +352,15 @@ def synthesize_subtitle_rows(
                 root=str(root.get("root") or "") if isinstance(root, Mapping) else "",
                 preset_id=model_name,
                 language=language or str(synthesis_params.get("language") or ""),
+                timeout_s=timeout_s,
+            )
+        elif selected_provider == VOICEBOX_PROVIDER_ID:
+            result = synthesize_voicebox_voice(
+                text=str(row.get("tts_text") or row.get("text") or ""),
+                output_path=output_path,
+                endpoint=endpoint,
+                profile_id=model_name,
+                language=language or str(synthesis_params.get("language") or "en"),
                 timeout_s=timeout_s,
             )
         else:
