@@ -600,7 +600,13 @@ def _convert_node(
         rest["clipsContent"] = bool(raw.get("clipsContent"))
 
     if raw.get("mask"):
-        rest["mask"] = True
+        # REST - and therefore the importer - spells these ``isMask`` and
+        # ``isMaskOutline``. Emitting ``mask`` meant nothing read them, so
+        # every mask was imported as an ordinary shape: Figma fills mask
+        # rectangles with a loud colour precisely because they never render.
+        rest["isMask"] = True
+        if raw.get("maskIsOutline"):
+            rest["isMaskOutline"] = True
         mask_type = str(raw.get("maskType") or "").upper()
         if mask_type:
             rest["maskType"] = mask_type

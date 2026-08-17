@@ -38,6 +38,16 @@ STATIC_VECTOR_BAKE_MAX_PATH_BYTES = 1024 * 1024
 STATIC_VECTOR_BAKE_MAX_PATH_TOKENS = 100_000
 STATIC_VECTOR_BAKE_PROBE_DIMENSION = 256
 STATIC_VECTOR_BAKE_BOUNDS_EPSILON = 0.0001
+# The logical size gets snapped to the nearest integer for hash determinism
+# (see its round() calls), which can leave the actual geometry extending up
+# to half a pixel past that rounded box - not a real error, just where the
+# snap landed. Half a pixel is not visually distinguishable in a baked UI
+# decoration, so the *outside-bounds* check tolerates it. This is
+# deliberately a separate, looser constant from
+# STATIC_VECTOR_BAKE_BOUNDS_EPSILON: that one also gates degenerate-subpath
+# detection, where a genuinely thin but real subpath must not be misread as
+# zero-area.
+STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK = 0.5001
 STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_geometry_v3"
 STATIC_VECTOR_BAKE_COLOR_CONTRACT = {
     "color_space": "sRGB",
@@ -430,9 +440,16 @@ def plan_static_vector_bake(
         width = height = math.nan
     if not all(math.isfinite(value) and value > 0.0 for value in (width, height)):
         reasons.append("figma_vector_static_bake_dimensions_invalid")
-    elif abs(width - round(width)) > 0.000001 or abs(height - round(height)) > 0.000001:
-        reasons.append("figma_vector_static_bake_fractional_dimensions_unsupported")
     else:
+        # Auto-layout distribution routinely leaves genuinely fractional
+        # sizes (e.g. a 1/3 split of 1160px), not just float32 noise. The
+        # determinism this guards -- the hashed source and the plugin's
+        # fixed-precision float formatting agreeing -- only requires that
+        # both sides bake at the same *rounded* pixel size, which the
+        # round() calls below already produce regardless of how fractional
+        # the input was. A single shape's raster canvas being off by at most
+        # half a pixel from its authored size is not visually distinguishable
+        # in a baked UI decoration, so there is nothing left to block here.
         pixel_width = int(round(width)) + STATIC_VECTOR_BAKE_PADDING * 2
         pixel_height = int(round(height)) + STATIC_VECTOR_BAKE_PADDING * 2
         if (
@@ -445,6 +462,15 @@ def plan_static_vector_bake(
     reasons = sorted(set(reasons))
     if reasons:
         return {"status": "unsafe", "available": False, "reasons": reasons}
+
+    # Figma/Painter geometry resolution can leave sub-ULP float32 noise on an
+    # otherwise-integer size (e.g. 11.999999046325684 instead of 12.0), which
+    # the check above already treats as integer. Snap it here so the hashed
+    # source and the plugin's fixed-precision canonical float formatting
+    # agree; leaving the noisy value in only the two of them disagree and the
+    # plugin reports baked_static_vector_source_hash_mismatch.
+    width = float(round(width))
+    height = float(round(height))
 
     # Painter preview/export selects the visible paint record before the
     # legacy style.fill shortcut.  Preserve that exact color and paint opacity
@@ -679,12 +705,12 @@ def _derive_subpath_contract(
         ):
             return {}, "figma_vector_static_bake_subpath_degenerate"
         if (
-            bounds.left() < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
-            or bounds.top() < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            bounds.left() < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
+            or bounds.top() < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
             or bounds.right()
-            > logical_width + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            > logical_width + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
             or bounds.bottom()
-            > logical_height + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            > logical_height + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
         ):
             return {}, "figma_vector_static_bake_subpath_outside_logical_bounds"
         isolated_source = dict(source)
@@ -710,7 +736,7 @@ def _derive_subpath_contract(
     return {
         "count": len(items),
         "max_count": STATIC_VECTOR_BAKE_MAX_SUBPATHS,
-        "logical_bounds_epsilon": STATIC_VECTOR_BAKE_BOUNDS_EPSILON,
+        "logical_bounds_epsilon": STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK,
         "items": items,
     }, ""
 
@@ -1009,6 +1035,7 @@ def expand_umg_layer_for_static_bake(
 __all__ = [
     "STATIC_VECTOR_BAKE_BOUNDS_EPSILON",
     "STATIC_VECTOR_BAKE_COLOR_CONTRACT",
+    "STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK",
     "STATIC_VECTOR_BAKE_MAX_DIMENSION",
     "STATIC_VECTOR_BAKE_MAX_PIXELS",
     "STATIC_VECTOR_BAKE_MAX_SUBPATHS",

@@ -25,6 +25,7 @@ from app.unreal_umg_image_fill import (
 from app.unreal_umg_static_vector_bake import (
     STATIC_VECTOR_BAKE_BOUNDS_EPSILON,
     STATIC_VECTOR_BAKE_COLOR_CONTRACT,
+    STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK,
     STATIC_VECTOR_BAKE_MAX_SUBPATHS,
     STATIC_VECTOR_BAKE_PADDING,
     STATIC_VECTOR_BAKE_RENDERER,
@@ -662,7 +663,7 @@ def _validate_static_vector_source(
         and subpath_count == round(subpath_count)
         and 1 <= subpath_count <= STATIC_VECTOR_BAKE_MAX_SUBPATHS
         and subpath_max == STATIC_VECTOR_BAKE_MAX_SUBPATHS
-        and subpath_epsilon == STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+        and subpath_epsilon == STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
         and isinstance(subpath_items, list)
         and len(subpath_items) == int(subpath_count)
     )
@@ -699,12 +700,12 @@ def _validate_static_vector_source(
                 or bounds_height <= STATIC_VECTOR_BAKE_BOUNDS_EPSILON
                 or width is None
                 or height is None
-                or x < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
-                or y < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+                or x < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
+                or y < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
                 or x + bounds_width
-                > width + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+                > width + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
                 or y + bounds_height
-                > height + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+                > height + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
             ):
                 subpaths_valid = False
                 break
