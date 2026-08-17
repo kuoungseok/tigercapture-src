@@ -1781,6 +1781,60 @@ def project_tiger_umg_document(
     effective_parent: dict[str, str] = {}
     children: dict[str, list[str]] = {"": []}
     generated_by_id: dict[str, dict[str, Any]] = {}
+    raw_by_id: dict[str, dict[str, Any]] = {
+        str(layer.get("Id") or ""): layer for layer in raw_layers
+    }
+
+    def _apply_reachable_parent(layer: Mapping[str, Any]) -> str:
+        """Fall back to root - never to some other unrelated panel - when the
+        requested parent never became a panel (most commonly a transformed
+        auto-layout frame blocked on
+        ``figma_transformed_auto_layout_requires_affine_layout``).
+
+        Landing on the nearest ancestor that *did* become a panel is not
+        safe: that ancestor (e.g. the screen's outer ``visuals`` Overlay) can
+        use a completely different slot kind, so the child would be
+        re-laid-out by alignment flags instead of its own position. Root
+        (``""``) always resolves to a plain ``CanvasPanelSlot`` (see
+        ``generated_slot_context`` below), so folding every skipped
+        ancestor's own local offset into the child and landing on root keeps
+        the original absolute placement instead of discarding it (the old
+        behaviour) or reinterpreting it under the wrong panel kind.
+        """
+        requested_parent = str(layer.get("ParentId") or "")
+        if requested_parent in parent_panels:
+            return requested_parent
+        offset_x = 0.0
+        offset_y = 0.0
+        current_id = requested_parent
+        visited: set[str] = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            ancestor = raw_by_id.get(current_id)
+            if ancestor is None:
+                break
+            ancestor_position = _vector(
+                ancestor.get("Position"), default_x=0.0, default_y=0.0
+            )
+            ancestor_size = _vector(
+                ancestor.get("Size"), default_x=100.0, default_y=100.0
+            )
+            ancestor_anchor = _vector(
+                ancestor.get("Anchor"), default_x=0.5, default_y=0.5
+            )
+            offset_x += ancestor_position[0] - ancestor_size[0] * ancestor_anchor[0]
+            offset_y += ancestor_position[1] - ancestor_size[1] * ancestor_anchor[1]
+            current_id = str(ancestor.get("ParentId") or "")
+        if offset_x or offset_y:
+            position = _vector(
+                layer.get("Position"), default_x=0.0, default_y=0.0
+            )
+            layer["Position"] = {
+                "X": position[0] + offset_x,
+                "Y": position[1] + offset_y,
+            }
+        return ""
+
     for layer in generated_layers:
         layer_id = str(layer.get("Id") or "")
         generated_by_id[layer_id] = layer
@@ -1791,8 +1845,7 @@ def project_tiger_umg_document(
             )
         ):
             continue
-        requested_parent = str(layer.get("ParentId") or "")
-        parent_id = requested_parent if requested_parent in parent_panels else ""
+        parent_id = _apply_reachable_parent(layer)
         effective_parent[layer_id] = parent_id
         children.setdefault(parent_id, []).append(layer_id)
         children.setdefault(layer_id, [])
@@ -1802,8 +1855,7 @@ def project_tiger_umg_document(
         layer_id = str(layer.get("Id") or "")
         if str(layer.get("Kind") or "Unsupported") == "Group":
             continue
-        requested_parent = str(layer.get("ParentId") or "")
-        parent_id = requested_parent if requested_parent in parent_panels else ""
+        parent_id = _apply_reachable_parent(layer)
         effective_parent[layer_id] = parent_id
         children.setdefault(parent_id, []).append(layer_id)
 
