@@ -19,7 +19,9 @@ Always start with:
 
 1. `AGENTS.md`
 2. this file
-3. the focused handoff/spec listed below for the active area
+3. `docs/WORK_LOG.md` — dated session diary of recent findings/decisions, newest
+   entry first. Read it before assuming something is unknown or undecided.
+4. the focused handoff/spec listed below for the active area
 
 Focused entry points:
 
