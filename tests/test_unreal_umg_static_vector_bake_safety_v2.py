@@ -155,8 +155,8 @@ def test_v2_v3_png_and_manifest_pin_exact_srgb_straight_alpha_contract(
 
     plan = _plan("M 0 0 L 40 0 L 40 30 L 0 30 Z")
     assert plan["available"] is True
-    assert STATIC_VECTOR_BAKE_SCHEMA == "tigerstudio.umg.static_vector_bake.v2"
-    assert STATIC_VECTOR_BAKE_RENDERER == "qt_svg_fill_geometry_v3"
+    assert STATIC_VECTOR_BAKE_SCHEMA == "tigerstudio.umg.static_vector_bake.v3"
+    assert STATIC_VECTOR_BAKE_RENDERER == "qt_svg_fill_stroke_geometry_v4"
     assert STATIC_VECTOR_BAKE_COLOR_CONTRACT == {
         "color_space": "sRGB",
         "alpha_mode": "straight",

@@ -590,6 +590,8 @@ def _validate_static_vector_source(
         "schema",
         "geometry",
         "fill_rgba",
+        "stroke_rgba",
+        "stroke_width",
         "color_contract",
         "logical_size",
         "padding",
@@ -623,17 +625,48 @@ def _validate_static_vector_source(
     ):
         reasons.append("baked_static_vector_geometry_invalid")
     rgba = source.get("fill_rgba")
-    if (
-        not isinstance(rgba, list)
-        or len(rgba) != 4
-        or any(
+    fill_channels_valid = (
+        isinstance(rgba, list)
+        and len(rgba) == 4
+        and not any(
             isinstance(channel, bool)
             or not isinstance(channel, int)
             or channel < 0
             or channel > 255
             for channel in rgba
         )
-        or (isinstance(rgba, list) and len(rgba) == 4 and rgba[3] <= 0)
+    )
+    if not fill_channels_valid:
+        reasons.append("baked_static_vector_fill_invalid")
+    stroke_rgba = source.get("stroke_rgba")
+    stroke_channels_valid = (
+        isinstance(stroke_rgba, list)
+        and len(stroke_rgba) == 4
+        and not any(
+            isinstance(channel, bool)
+            or not isinstance(channel, int)
+            or channel < 0
+            or channel > 255
+            for channel in stroke_rgba
+        )
+    )
+    if not stroke_channels_valid:
+        reasons.append("baked_static_vector_stroke_invalid")
+    stroke_width = source.get("stroke_width")
+    stroke_width_number = _finite_number(stroke_width)
+    if (
+        isinstance(stroke_width, bool)
+        or stroke_width_number is None
+        or stroke_width_number < 0.0
+        or not stroke_channels_valid
+        or (stroke_width_number > 0.0) != (int(stroke_rgba[3]) > 0)
+    ):
+        reasons.append("baked_static_vector_stroke_invalid")
+    # A stroke-only decoration has no fill; only reject when neither paints.
+    if (
+        fill_channels_valid
+        and rgba[3] <= 0
+        and (not stroke_channels_valid or int(stroke_rgba[3]) <= 0)
     ):
         reasons.append("baked_static_vector_fill_invalid")
     logical = _mapping(source.get("logical_size"))

@@ -1186,7 +1186,7 @@ def _materialization_evidence(package: dict[str, Any]) -> dict[str, Any]:
                 for row in materialized_plans
             )
             and all(row["status"] == "materialized" for row in payload_rows)
-            and all(row["renderer_id"] == "qt_svg_fill_geometry_v3" for row in payload_rows)
+            and all(row["renderer_id"] == "qt_svg_fill_stroke_geometry_v4" for row in payload_rows)
             and all(
                 row["kind"] == "texture"
                 and row["source_path"].startswith("assets/")

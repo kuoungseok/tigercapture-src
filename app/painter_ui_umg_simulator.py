@@ -1500,12 +1500,21 @@ def _static_vector_bake_preview_style_and_content(
     fill_hex = "#{:02X}{:02X}{:02X}{:02X}".format(
         *(max(0, min(255, int(channel))) for channel in fill_rgba)
     )
+    stroke_rgba = source.get("stroke_rgba")
+    stroke_rgba = (
+        stroke_rgba
+        if isinstance(stroke_rgba, list) and len(stroke_rgba) == 4
+        else [0, 0, 0, 0]
+    )
+    stroke_hex = "#{:02X}{:02X}{:02X}{:02X}".format(
+        *(max(0, min(255, int(channel))) for channel in stroke_rgba)
+    )
     return (
         "path",
         {
             "fill": fill_hex,
-            "stroke": "#00000000",
-            "stroke_width": 0.0,
+            "stroke": stroke_hex,
+            "stroke_width": float(source.get("stroke_width") or 0.0),
             "radius": 0.0,
         },
         {"vector_fill_geometry": copy.deepcopy(geometry)},

@@ -385,8 +385,13 @@ def test_unsafe_vector_cases_remain_explicitly_blocked(
     document = _vector_document()
     row = document["objects"][0]
     if mutation == "stroke":
+        # A single center-aligned solid stroke that fits inside the bake's
+        # padding is now composited into the bake (see stroke_rgba/
+        # stroke_width). Use two strokes here so this case still exercises
+        # the genuinely-unsupported path.
         row["style"]["strokes"] = [
-            {"type": "solid", "visible": True, "color": "#FFFFFFFF", "width": 2}
+            {"type": "solid", "visible": True, "color": "#FFFFFFFF", "width": 2},
+            {"type": "solid", "visible": True, "color": "#000000FF", "width": 1},
         ]
     elif mutation == "effect":
         row["style"]["effects"] = [
@@ -592,7 +597,7 @@ def test_manifest_keeps_renderer_source_pixel_hash_and_baked_provenance(
     )
 
     assert len(manifest["pixel_rgba_sha256"]) == 64
-    assert manifest["source"]["renderer"]["id"] == "qt_svg_fill_geometry_v3"
+    assert manifest["source"]["renderer"]["id"] == "qt_svg_fill_stroke_geometry_v4"
     assert manifest["source"]["geometry"][0]["path"].endswith("Z")
     assert manifest["origin_disposition"] == "Baked"
     assert manifest["satisfied_gate"] == (
@@ -954,8 +959,8 @@ def test_unreal_qa_requires_schema_16_background_and_two_materialized_baked_laye
         "materialized",
     ]
     assert [row["renderer_id"] for row in evidence["payloads"]] == [
-        "qt_svg_fill_geometry_v3",
-        "qt_svg_fill_geometry_v3",
+        "qt_svg_fill_stroke_geometry_v4",
+        "qt_svg_fill_stroke_geometry_v4",
     ]
 
 

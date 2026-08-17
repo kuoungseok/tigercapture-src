@@ -23,9 +23,9 @@ THIRD_PARTY_INCLUDES_END
 namespace
 {
 constexpr const TCHAR* StaticVectorBakeSchema =
-    TEXT("tigerstudio.umg.static_vector_bake.v2");
+    TEXT("tigerstudio.umg.static_vector_bake.v3");
 constexpr const TCHAR* StaticVectorBakeRenderer =
-    TEXT("qt_svg_fill_geometry_v3");
+    TEXT("qt_svg_fill_stroke_geometry_v4");
 constexpr const TCHAR* StaticVectorBakeGate =
     TEXT("figma_vector_geometry_requires_deterministic_bake");
 constexpr int32 StaticVectorBakeMaxSubpaths = 256;
@@ -4885,7 +4885,7 @@ TArray<FString> ValidateMaterializedBakedLayer(
     FString CanonicalSource;
     FString ComputedSourceHash;
     if (!Source
-        || Source->Values.Num() != 9
+        || Source->Values.Num() != 11
         || !AppendCanonicalJson(
             MakeShared<FJsonValueObject>(Source),
             TEXT("source"),
@@ -4895,33 +4895,68 @@ TArray<FString> ValidateMaterializedBakedLayer(
     {
         Reasons.Add(TEXT("baked_static_vector_source_hash_mismatch"));
     }
-    const TArray<TSharedPtr<FJsonValue>>* FillRgba = nullptr;
-    bool bFillValid = Source
-        && Source->TryGetArrayField(TEXT("fill_rgba"), FillRgba)
-        && FillRgba
-        && FillRgba->Num() == 4;
-    if (bFillValid)
+    const auto ValidateRgbaChannels = [](
+        const TArray<TSharedPtr<FJsonValue>>* Rgba,
+        double& OutAlpha)
     {
-        for (int32 Index = 0; Index < FillRgba->Num(); ++Index)
+        OutAlpha = -1.0;
+        bool bValid = Rgba && Rgba->Num() == 4;
+        if (bValid)
         {
-            const TSharedPtr<FJsonValue>& Channel = (*FillRgba)[Index];
-            const double Value = Channel && Channel->Type == EJson::Number
-                ? Channel->AsNumber()
-                : -1.0;
-            if (!FMath::IsNearlyEqual(
-                    Value,
-                    FMath::RoundToDouble(Value),
-                    0.000001)
-                || Value < 0.0
-                || Value > 255.0
-                || (Index == 3 && Value <= 0.0))
+            for (int32 Index = 0; Index < Rgba->Num(); ++Index)
             {
-                bFillValid = false;
-                break;
+                const TSharedPtr<FJsonValue>& Channel = (*Rgba)[Index];
+                const double Value = Channel && Channel->Type == EJson::Number
+                    ? Channel->AsNumber()
+                    : -1.0;
+                if (!FMath::IsNearlyEqual(
+                        Value,
+                        FMath::RoundToDouble(Value),
+                        0.000001)
+                    || Value < 0.0
+                    || Value > 255.0)
+                {
+                    bValid = false;
+                    break;
+                }
+                if (Index == 3)
+                {
+                    OutAlpha = Value;
+                }
             }
         }
-    }
+        return bValid;
+    };
+    const TArray<TSharedPtr<FJsonValue>>* FillRgba = nullptr;
+    double FillAlpha = -1.0;
+    bool bFillValid = Source
+        && Source->TryGetArrayField(TEXT("fill_rgba"), FillRgba)
+        && ValidateRgbaChannels(FillRgba, FillAlpha);
     if (!bFillValid)
+    {
+        Reasons.Add(TEXT("baked_static_vector_fill_invalid"));
+    }
+    // A stroke-only decoration (transparent fill, visible stroke -- e.g. a
+    // plain outlined square) has nothing for the fill to contribute, but the
+    // stroke itself is real content, so the fill's own alpha is not required
+    // to be positive here; only the joint check below rejects a bake with
+    // neither.
+    const TArray<TSharedPtr<FJsonValue>>* StrokeRgba = nullptr;
+    double StrokeAlpha = -1.0;
+    bool bStrokeValid = Source
+        && Source->TryGetArrayField(TEXT("stroke_rgba"), StrokeRgba)
+        && ValidateRgbaChannels(StrokeRgba, StrokeAlpha);
+    double StrokeWidth = -1.0;
+    bStrokeValid = bStrokeValid
+        && Source->TryGetNumberField(TEXT("stroke_width"), StrokeWidth)
+        && FMath::IsFinite(StrokeWidth)
+        && StrokeWidth >= 0.0
+        && (StrokeWidth > 0.0) == (StrokeAlpha > 0.0);
+    if (!bStrokeValid)
+    {
+        Reasons.Add(TEXT("baked_static_vector_stroke_invalid"));
+    }
+    if (bFillValid && bStrokeValid && FillAlpha <= 0.0 && StrokeAlpha <= 0.0)
     {
         Reasons.Add(TEXT("baked_static_vector_fill_invalid"));
     }

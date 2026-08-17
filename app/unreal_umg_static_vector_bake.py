@@ -28,7 +28,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 
-STATIC_VECTOR_BAKE_SCHEMA = "tigerstudio.umg.static_vector_bake.v2"
+STATIC_VECTOR_BAKE_SCHEMA = "tigerstudio.umg.static_vector_bake.v3"
 STATIC_VECTOR_BAKE_PADDING = 2
 STATIC_VECTOR_BAKE_MAX_DIMENSION = 4096
 STATIC_VECTOR_BAKE_MAX_PIXELS = 16 * 1024 * 1024
@@ -38,7 +38,7 @@ STATIC_VECTOR_BAKE_MAX_PATH_BYTES = 1024 * 1024
 STATIC_VECTOR_BAKE_MAX_PATH_TOKENS = 100_000
 STATIC_VECTOR_BAKE_PROBE_DIMENSION = 256
 STATIC_VECTOR_BAKE_BOUNDS_EPSILON = 0.0001
-STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_geometry_v3"
+STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_stroke_geometry_v4"
 STATIC_VECTOR_BAKE_COLOR_CONTRACT = {
     "color_space": "sRGB",
     "alpha_mode": "straight",
@@ -616,12 +616,64 @@ def plan_static_vector_bake(
             reasons.append("figma_vector_static_bake_fill_blend_unsupported")
     if isinstance(style.get("fill_gradient"), Mapping):
         reasons.append("figma_vector_static_bake_requires_solid_fill")
+    modern_strokes = _visible_rows(style.get("strokes"))
     legacy_stroke_active = (
         float(style.get("stroke_width") or 0.0) > 0.0001
         and _rgba(style.get("stroke"), "#00000000")[3] > 0
     )
-    if _visible_rows(style.get("strokes")) or legacy_stroke_active:
-        reasons.append("figma_vector_static_bake_stroke_unsupported")
+    stroke_rgba: tuple[int, int, int, int] = (0, 0, 0, 0)
+    stroke_width_value = 0.0
+    if modern_strokes or legacy_stroke_active:
+        if len(modern_strokes) > 1 or style.get("stroke_dash"):
+            reasons.append("figma_vector_static_bake_stroke_unsupported")
+        else:
+            stroke_paint = modern_strokes[0] if modern_strokes else {}
+            candidate_type = (
+                str(stroke_paint.get("type") or "solid").casefold()
+                if modern_strokes
+                else "solid"
+            )
+            candidate_align = str(
+                (
+                    stroke_paint.get("align")
+                    if modern_strokes
+                    else style.get("stroke_align")
+                )
+                or "center"
+            ).casefold()
+            candidate_blend_ok = (
+                str(stroke_paint.get("blend_mode") or "normal").casefold()
+                == "normal"
+                if modern_strokes
+                else True
+            )
+            candidate_width = (
+                float(stroke_paint.get("width") or 0.0)
+                if modern_strokes
+                else float(style.get("stroke_width") or 0.0)
+            )
+            candidate_rgba = _rgba(
+                stroke_paint.get("color") if modern_strokes else style.get("stroke"),
+                "#00000000",
+            )
+            if (
+                candidate_type != "solid"
+                or not candidate_blend_ok
+                # Only a center-aligned stroke can be composited onto the
+                # existing fill-only SVG render without an inset/outset path
+                # offset this bake has no way to compute deterministically.
+                or candidate_align != "center"
+                or candidate_width <= 0.0001
+                # A center stroke straddles the shape's own edge by half its
+                # width; STATIC_VECTOR_BAKE_PADDING is the only margin the
+                # final raster has to hold it without clipping.
+                or candidate_width / 2.0 > STATIC_VECTOR_BAKE_PADDING
+                or candidate_rgba[3] <= 0
+            ):
+                reasons.append("figma_vector_static_bake_stroke_unsupported")
+            else:
+                stroke_rgba = candidate_rgba
+                stroke_width_value = candidate_width
     effects = _visible_rows(style.get("effects"))
     if effects or isinstance(style.get("shadow"), Mapping):
         reasons.append("figma_vector_static_bake_effect_unsupported")
@@ -677,7 +729,10 @@ def plan_static_vector_bake(
         min(1.0, float(selected_paint.get("opacity", 1.0) or 0.0)),
     )
     fill_rgba = (*fill_rgba[:3], int(round(fill_rgba[3] * paint_opacity)))
-    if fill_rgba[3] <= 0:
+    # A stroke-only decoration (transparent fill, visible stroke -- e.g. a
+    # plain outlined square) has nothing for the fill to contribute, but the
+    # stroke itself is real content, so only reject when *neither* paints.
+    if fill_rgba[3] <= 0 and stroke_rgba[3] <= 0:
         return {
             "status": "unsafe",
             "available": False,
@@ -687,6 +742,8 @@ def plan_static_vector_bake(
         "schema": STATIC_VECTOR_BAKE_SCHEMA,
         "geometry": fill_geometry,
         "fill_rgba": list(fill_rgba),
+        "stroke_rgba": list(stroke_rgba),
+        "stroke_width": stroke_width_value,
         "color_contract": copy.deepcopy(STATIC_VECTOR_BAKE_COLOR_CONTRACT),
         "logical_size": {"width": width, "height": height},
         "padding": STATIC_VECTOR_BAKE_PADDING,
@@ -800,6 +857,7 @@ def _svg_renderer(
     *,
     geometry: list[Mapping[str, Any]] | None = None,
     element_ids: bool = False,
+    include_stroke: bool = True,
 ) -> QSvgRenderer:
     logical = source["logical_size"]
     width = float(logical["width"])
@@ -807,11 +865,33 @@ def _svg_renderer(
     red, green, blue, alpha = source["fill_rgba"]
     fill = QColor(int(red), int(green), int(blue), int(alpha))
     rows = geometry if geometry is not None else source["geometry"]
+    # Subpath-bounds isolation (see _derive_subpath_contract) always renders
+    # with include_stroke=False: that check validates the FILL geometry stays
+    # within its own declared logical box, a concern the stroke -- which by
+    # design straddles that same box's edge -- must not perturb.
+    stroke_rgba = source.get("stroke_rgba")
+    stroke_width = float(source.get("stroke_width") or 0.0)
+    stroke_attrs = 'stroke="none"'
+    if (
+        include_stroke
+        and isinstance(stroke_rgba, list)
+        and len(stroke_rgba) == 4
+        and int(stroke_rgba[3]) > 0
+        and stroke_width > 0.0
+    ):
+        stroke_red, stroke_green, stroke_blue, stroke_alpha = stroke_rgba
+        stroke = QColor(
+            int(stroke_red), int(stroke_green), int(stroke_blue), int(stroke_alpha)
+        )
+        stroke_attrs = (
+            f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.8f}" '
+            f'stroke-width="{stroke_width:.8f}"'
+        )
     markup = "".join(
         f'<path {f"id=\"subpath_{index}\" " if element_ids else ""}'
         f'd="{html.escape(str(item["path"]), quote=True)}" '
         f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.8f}" '
-        f'fill-rule="{item["winding_rule"]}" stroke="none"/>'
+        f'fill-rule="{item["winding_rule"]}" {stroke_attrs}/>'
         for index, item in enumerate(rows)
     )
     svg = (
@@ -878,6 +958,7 @@ def _derive_subpath_contract(
                 source,
                 geometry=isolated_geometry,
                 element_ids=True,
+                include_stroke=False,
             )
             bounds = renderer.boundsOnElement("subpath_0")
         except (TypeError, ValueError):
@@ -1020,8 +1101,30 @@ def _validated_materialization_plan(
         or len(rgba) != 4
         or any(isinstance(value, bool) or not isinstance(value, int) for value in rgba)
         or any(value < 0 or value > 255 for value in rgba)
-        or rgba[3] <= 0
     ):
+        raise ValueError("Static vector bake fill color is invalid")
+    stroke_rgba = source.get("stroke_rgba")
+    if (
+        not isinstance(stroke_rgba, list)
+        or len(stroke_rgba) != 4
+        or any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in stroke_rgba
+        )
+        or any(value < 0 or value > 255 for value in stroke_rgba)
+    ):
+        raise ValueError("Static vector bake stroke color is invalid")
+    stroke_width = source.get("stroke_width")
+    if (
+        isinstance(stroke_width, bool)
+        or not isinstance(stroke_width, (int, float))
+        or not math.isfinite(float(stroke_width))
+        or float(stroke_width) < 0.0
+        or (float(stroke_width) > 0.0) != (int(stroke_rgba[3]) > 0)
+    ):
+        raise ValueError("Static vector bake stroke width is invalid")
+    # A stroke-only decoration has no fill; only reject when neither paints.
+    if rgba[3] <= 0 and int(stroke_rgba[3]) <= 0:
         raise ValueError("Static vector bake fill color is invalid")
     logical = source.get("logical_size")
     if not isinstance(logical, Mapping):
