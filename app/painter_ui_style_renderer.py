@@ -505,13 +505,22 @@ def draw_ui_vector_paths(
         and isinstance(stroke_geometry.get("viewport"), Mapping)
         else {}
     )
+    # ``vector_fill_geometry``/``vector_paths`` are authored-document-space
+    # coordinates (e.g. a 386x335 hexagon), not screen pixels. ``rect`` is
+    # already view-scaled, so at 100% zoom the two happen to match and this
+    # was invisible - but a pane fit to a much smaller/larger zoom (like the
+    # UMG Widget View preview, fit to its own panel rather than 1:1) declared
+    # a viewBox of the SCREEN rect while the path data still spans the full
+    # document size, inflating every boolean-result shape by 1/scale.
+    fallback_width = rect.width() / max(0.0001, float(scale))
+    fallback_height = rect.height() / max(0.0001, float(scale))
     source_width = max(
         0.0001,
-        float(source_viewport.get("width", rect.width()) or rect.width()),
+        float(source_viewport.get("width", fallback_width) or fallback_width),
     )
     source_height = max(
         0.0001,
-        float(source_viewport.get("height", rect.height()) or rect.height()),
+        float(source_viewport.get("height", fallback_height) or fallback_height),
     )
     expanded_stroke_rows = (
         [row for row in stroke_rows if "z" in row["path"].casefold()]
