@@ -4111,9 +4111,9 @@ class PainterUIDesignOverlay(QWidget):
             # representation, so resolving the editable Boolean can be empty.
             # Paint the pinned host geometry in that case instead of hiding
             # both the operands and the visible Boolean result.
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         elif use_figma_stroke_geometry:
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         elif kind == "ellipse":
             painter.drawEllipse(rect)
         elif kind == "line":
@@ -4184,7 +4184,7 @@ class PainterUIDesignOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawPath(image_shape)
         elif kind == "path":
-            draw_ui_vector_paths(painter, rect, content, style)
+            draw_ui_vector_paths(painter, rect, content, style, scale=scale)
         else:
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
