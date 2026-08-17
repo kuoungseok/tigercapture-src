@@ -865,6 +865,183 @@ def _umg_disposition(
     return "Blocked", sorted(set(reasons))
 
 
+def _resolve_and_drop_mask_groups(document: dict[str, Any]) -> dict[str, Any]:
+    """Bake a Figma ``isMask`` layer's targets into one leaf vector shape.
+
+    Unlike a Boolean operation, Figma never flattens a mask/target
+    relationship into a node's own fillGeometry, so it always hit the
+    unconditional ``painter_ui_mask_requires_umg_material_or_bake`` blocker.
+    Most masks are a plain rectangle clipping a group of vector siblings
+    (e.g. a hatch-line pattern clipped to its background bar); that case is
+    just as bakeable as a Boolean result once resolved. Attach the resolved,
+    clipped union to the mask's primary target as leaf ``vector_fill_geometry``
+    (so the ordinary static-vector-bake path picks it up), then drop the mask
+    row and every target's own children.
+    """
+    from PySide6.QtCore import QRectF
+
+    from app.painter_ui_boolean_geometry import (
+        qpath_to_closed_svg_path,
+        resolve_ui_mask_clip_path,
+    )
+    from app.painter_ui_style_renderer import ui_color
+
+    rows = list(document.get("objects") or [])
+    by_id = {str(row.get("id") or ""): row for row in rows}
+    children_by_parent: dict[str, list[str]] = {}
+    for row in rows:
+        parent_id = str(row.get("parent_id") or "")
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(
+                str(row.get("id") or "")
+            )
+
+    def descendant_ids(root_id: str) -> set[str]:
+        result: set[str] = set()
+        stack = list(children_by_parent.get(root_id, ()))
+        while stack:
+            current = stack.pop()
+            if current in result:
+                continue
+            result.add(current)
+            stack.extend(children_by_parent.get(current, ()))
+        return result
+
+    def rect_for(candidate: Mapping[str, Any]) -> QRectF:
+        return QRectF(
+            float(candidate.get("x") or 0.0),
+            float(candidate.get("y") or 0.0),
+            float(candidate.get("width") or 0.0),
+            float(candidate.get("height") or 0.0),
+        )
+
+    def first_visible_color(root_id: str) -> str:
+        # The union already flattens fill and stroke geometry into one
+        # shape, so the baked leaf needs one solid colour to paint it with.
+        # Real-world masks like this are single-coloured (e.g. a hatch
+        # pattern's lines), so the first visible fill or stroke found by a
+        # plain traversal is representative, not just a fallback.
+        stack = [root_id]
+        seen: set[str] = set()
+        while stack:
+            current_id = stack.pop(0)
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+            candidate = by_id.get(current_id)
+            if candidate is not None:
+                candidate_style = candidate.get("style") or {}
+                fills = candidate_style.get("fills")
+                if isinstance(fills, list):
+                    for paint in fills:
+                        if (
+                            isinstance(paint, Mapping)
+                            and bool(paint.get("visible", True))
+                            and str(paint.get("type") or "solid") == "solid"
+                            and ui_color(
+                                paint.get("color"), "#00000000"
+                            ).alpha()
+                            > 0
+                        ):
+                            return str(paint.get("color") or "#000000FF")
+                strokes = candidate_style.get("strokes")
+                if isinstance(strokes, list):
+                    for paint in strokes:
+                        if (
+                            isinstance(paint, Mapping)
+                            and bool(paint.get("visible", True))
+                            and str(paint.get("type") or "solid") == "solid"
+                            and ui_color(
+                                paint.get("color"), "#00000000"
+                            ).alpha()
+                            > 0
+                        ):
+                            return str(paint.get("color") or "#000000FF")
+            stack.extend(children_by_parent.get(current_id, ()))
+        return "#000000FF"
+
+    drop_ids: set[str] = set()
+    replacements: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        row_id = str(row.get("id") or "")
+        mask = row.get("mask")
+        if not isinstance(mask, Mapping) or not mask.get("enabled"):
+            continue
+        target_ids = [
+            str(item) for item in mask.get("target_ids") or [] if str(item or "")
+        ]
+        if not target_ids or row_id in drop_ids:
+            continue
+        path = resolve_ui_mask_clip_path(rows, row, rect_for)
+        if path is None or path.isEmpty():
+            continue
+        bounds = path.boundingRect()
+        if bounds.width() <= 0.0 or bounds.height() <= 0.0:
+            continue
+        primary_id = target_ids[0]
+        primary = by_id.get(primary_id)
+        if primary is None:
+            continue
+        local_path = path.translated(-bounds.left(), -bounds.top())
+        content = dict(primary.get("content") or {})
+        content["vector_fill_geometry"] = [
+            {
+                "path": qpath_to_closed_svg_path(local_path),
+                "winding_rule": "nonzero",
+            }
+        ]
+        content["vector_paths"] = []
+        content["vector_stroke_geometry"] = None
+        content["vector_render_path"] = ""
+        content["figma_type"] = "VECTOR"
+        content.pop("boolean", None)
+        content.pop("figma_mask", None)
+        color = first_visible_color(primary_id)
+        style = dict(primary.get("style") or {})
+        style["fill"] = color
+        style["fills"] = [
+            {
+                "type": "solid",
+                "visible": True,
+                "opacity": 1.0,
+                "color": color,
+                "blend_mode": "normal",
+            }
+        ]
+        style["stroke"] = "#00000000"
+        style["stroke_width"] = 0.0
+        style["strokes"] = []
+        replacements[primary_id] = {
+            **primary,
+            "kind": "path",
+            "mask": {
+                "enabled": False,
+                "inverted": False,
+                "outline": False,
+                "target_ids": [],
+            },
+            "x": float(bounds.left()),
+            "y": float(bounds.top()),
+            "width": max(1.0, float(bounds.width())),
+            "height": max(1.0, float(bounds.height())),
+            "content": content,
+            "style": style,
+        }
+        drop_ids.add(row_id)
+        drop_ids.update(descendant_ids(primary_id))
+        for extra_target_id in target_ids[1:]:
+            drop_ids.add(extra_target_id)
+            drop_ids.update(descendant_ids(extra_target_id))
+    if not drop_ids and not replacements:
+        return document
+    document["objects"] = [
+        replacements.get(str(row.get("id") or ""), row)
+        for row in rows
+        if str(row.get("id") or "") not in drop_ids
+    ]
+    return document
+
+
 def _prepare_painter_umg_conversion(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -881,6 +1058,7 @@ def _prepare_painter_umg_conversion(
     # their reusable meaning separately; resolving here is not a flattening
     # substitute, it is the static value used for exact preview/export.
     document = resolve_ui_component_document(document, normalize=False)
+    document = _resolve_and_drop_mask_groups(dict(document))
     from app.painter_ui_umg_auto_layout import (
         painter_umg_auto_layout_contract,
     )

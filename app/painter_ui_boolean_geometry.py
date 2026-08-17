@@ -5,7 +5,6 @@ from typing import Any, Callable, Iterable, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QColor,
     QFont,
     QFontMetricsF,
     QPainterPath,
@@ -13,10 +12,27 @@ from PySide6.QtGui import (
     QTransform,
 )
 
+from app.painter_ui_style_renderer import ui_color
+
+# See the guard in resolve_ui_mask_clip_path: real-world masks past this many
+# targets have crashed Qt's native path-boolean engine (no Python exception),
+# so this is a measured safety cap, not a design limit.
+_MASK_CLIP_MAX_TARGETS = 3
+
 
 def boolean_operand_ids(rows: Iterable[Mapping[str, Any]]) -> set[str]:
+    """Every object a boolean operation consumes, including nested ones.
+
+    ``operand_ids`` names the operation's direct children, but a boolean
+    consumes its whole subtree - a group operand contributes its contents, not
+    itself.  Stopping at the direct children left those descendants painting on
+    their own, which is how imported Figma booleans showed their operands'
+    placeholder colours on top of the resolved shape.
+    """
+
+    objects = list(rows)
     result: set[str] = set()
-    for row in rows:
+    for row in objects:
         boolean = (row.get("content") or {}).get("boolean")
         if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
             continue
@@ -25,6 +41,20 @@ def boolean_operand_ids(rows: Iterable[Mapping[str, Any]]) -> set[str]:
             for item in boolean.get("operand_ids", [])
             if str(item or "")
         )
+    if not result:
+        return result
+    children: dict[str, list[str]] = {}
+    for row in objects:
+        parent = str(row.get("parent_id") or "")
+        if parent:
+            children.setdefault(parent, []).append(str(row.get("id") or ""))
+    stack = list(result)
+    while stack:
+        current = stack.pop()
+        for child in children.get(current, ()):
+            if child and child not in result:
+                result.add(child)
+                stack.append(child)
     return result
 
 
@@ -148,18 +178,18 @@ def ui_object_shape_path(
             from app.painter_ui_vector_network import local_svg_path_to_qpath
 
             fill_rows = [
-                row
-                for row in content.get("vector_fill_geometry") or []
-                if isinstance(row, Mapping) and str(row.get("path") or "")
+                fill_row
+                for fill_row in content.get("vector_fill_geometry") or []
+                if isinstance(fill_row, Mapping) and str(fill_row.get("path") or "")
             ] or [
-                {"path": row}
-                for row in content.get("vector_paths") or []
-                if str(row or "")
+                {"path": fill_row}
+                for fill_row in content.get("vector_paths") or []
+                if str(fill_row or "")
             ]
             path = QPainterPath()
-            for row in fill_rows:
+            for fill_row in fill_rows:
                 piece = local_svg_path_to_qpath(
-                    row.get("path"),
+                    fill_row.get("path"),
                     rect,
                     geometry_scale=geometry_scale,
                 )
@@ -187,7 +217,10 @@ def ui_object_shape_path(
         )
         transform = QTransform()
         transform.translate(pivot.x(), pivot.y())
-        transform.rotate(rotation)
+        # row["rotation"] is stored in Figma's raw convention; every other
+        # paint-time rotation in the workspace negates it for Qt, so this
+        # must too or a Boolean operand spins the opposite way.
+        transform.rotate(-rotation)
         transform.translate(-pivot.x(), -pivot.y())
         path = transform.map(path)
     return path
@@ -200,13 +233,17 @@ def _paint_is_visible(paint: Mapping[str, Any]) -> bool:
         return False
     if str(paint.get("type") or "solid").casefold() != "solid":
         return True
-    return QColor(str(paint.get("color") or "#00000000")).alpha() > 0
+    # ``ui_color`` parses these as CSS-style #RRGGBBAA; raw QColor(str)
+    # reads 8-hex-digit strings as Qt's native #AARRGGBB instead, so an
+    # opaque black "#000000FF" read as alpha=0x00 (fully transparent) and
+    # every stroke-only shape using this hex order was treated as invisible.
+    return ui_color(paint.get("color"), "#00000000").alpha() > 0
 
 
 def _fill_is_visible(row: Mapping[str, Any]) -> bool:
     style = row.get("style") or {}
     if row.get("kind") == "text":
-        return QColor(str(style.get("text_color") or "#000000FF")).alpha() > 0
+        return ui_color(style.get("text_color"), "#000000FF").alpha() > 0
     paints = style.get("fills")
     if isinstance(paints, list):
         return any(
@@ -216,7 +253,7 @@ def _fill_is_visible(row: Mapping[str, Any]) -> bool:
         )
     if "fill" not in style:
         return True
-    return QColor(str(style.get("fill") or "#00000000")).alpha() > 0
+    return ui_color(style.get("fill"), "#00000000").alpha() > 0
 
 
 def _stroke_paints(row: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -230,7 +267,7 @@ def _stroke_paints(row: Mapping[str, Any]) -> list[dict[str, Any]]:
         ]
     width = max(0.0, float(style.get("stroke_width") or 0.0))
     color = str(style.get("stroke") or "#00000000")
-    if width <= 0.0 or QColor(color).alpha() <= 0:
+    if width <= 0.0 or ui_color(color, "#00000000").alpha() <= 0:
         return []
     return [
         {
@@ -425,6 +462,113 @@ def resolve_ui_boolean_path(
     return resolve(boolean_row, set())
 
 
+def resolve_ui_mask_clip_path(
+    rows: Iterable[Mapping[str, Any]],
+    mask_row: Mapping[str, Any],
+    rect_for_object: Callable[[Mapping[str, Any]], QRectF],
+    *,
+    geometry_scale_for_object: (
+        Callable[[Mapping[str, Any]], float] | None
+    ) = None,
+) -> QPainterPath | None:
+    """Union a Figma ``isMask`` layer's targets, then clip to the mask's shape.
+
+    Unlike a Boolean operation, Figma never flattens this combination into
+    one node's own fillGeometry - the mask/target relationship only exists
+    as a render-time instruction, so nothing upstream resolves it for us.
+    """
+    mask = mask_row.get("mask")
+    if not isinstance(mask, Mapping) or not mask.get("enabled"):
+        return None
+    target_ids = [
+        str(item) for item in mask.get("target_ids") or [] if str(item or "")
+    ]
+    if not target_ids or len(target_ids) > _MASK_CLIP_MAX_TARGETS:
+        # Real-world masks with many heterogeneous targets (annotation
+        # overlays combining icon groups, dashed outlines, etc.) have
+        # crashed Qt's native path-boolean engine outright - no Python
+        # exception, the process just dies. A simple rectangle clipping a
+        # handful of siblings (the common case: a hatch pattern clipped to
+        # its background bar) stays well under this, so bail out instead
+        # of risking the whole export on a case this function was never
+        # validated against.
+        return None
+    by_id = {str(row["id"]): row for row in rows}
+    children_by_parent: dict[str, list[Mapping[str, Any]]] = {}
+    for row in by_id.values():
+        parent_id = str(row.get("parent_id") or "")
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(row)
+
+    def union_shape(
+        row: Mapping[str, Any],
+        visiting: set[str],
+    ) -> QPainterPath:
+        row_id = str(row.get("id") or "")
+        if not row_id or row_id in visiting:
+            return QPainterPath()
+        children = children_by_parent.get(row_id)
+        if children and str(row.get("kind") or "") in {"frame", "group"}:
+            next_visiting = set(visiting)
+            next_visiting.add(row_id)
+            combined = QPainterPath()
+            for child in children:
+                if not bool(child.get("visible", True)):
+                    continue
+                piece = union_shape(child, next_visiting)
+                combined = (
+                    combined.united(piece) if not combined.isEmpty() else piece
+                )
+            return combined
+        boolean = (row.get("content") or {}).get("boolean")
+        if isinstance(boolean, Mapping) and boolean.get("enabled") and boolean.get(
+            "group"
+        ):
+            nested = resolve_ui_boolean_path(
+                by_id.values(),
+                row,
+                rect_for_object,
+                geometry_scale_for_object=geometry_scale_for_object,
+            )
+            return nested if nested is not None else QPainterPath()
+        scale = (
+            float(geometry_scale_for_object(row))
+            if geometry_scale_for_object is not None
+            else 1.0
+        )
+        return ui_object_boolean_geometry_path(
+            row,
+            rect_for_object(row),
+            geometry_scale=scale,
+        )
+
+    combined = QPainterPath()
+    for target_id in target_ids:
+        target_row = by_id.get(target_id)
+        if target_row is None or not bool(target_row.get("visible", True)):
+            continue
+        piece = union_shape(target_row, set())
+        combined = combined.united(piece) if not combined.isEmpty() else piece
+    if combined.isEmpty():
+        return combined
+    mask_scale = (
+        float(geometry_scale_for_object(mask_row))
+        if geometry_scale_for_object is not None
+        else 1.0
+    )
+    mask_shape = ui_object_boolean_geometry_path(
+        mask_row,
+        rect_for_object(mask_row),
+        geometry_scale=mask_scale,
+    )
+    result = (
+        combined.subtracted(mask_shape)
+        if bool(mask.get("inverted"))
+        else combined.intersected(mask_shape)
+    )
+    return result.simplified()
+
+
 def qpath_to_svg_path(path: QPainterPath) -> str:
     commands: list[str] = []
     index = 0
@@ -445,6 +589,40 @@ def qpath_to_svg_path(path: QPainterPath) -> str:
             )
             index += 2
         index += 1
+    return " ".join(commands)
+
+
+def qpath_to_closed_svg_path(path: QPainterPath) -> str:
+    """Serialize with an explicit ``Z`` on every subpath.
+
+    ``qpath_to_svg_path`` leaves subpaths open (fine for the editable vector
+    network it feeds), but the static-vector-bake pipeline requires every
+    subpath to end in ``Z`` to treat it as a closed fill region.
+    """
+    commands: list[str] = []
+    count = path.elementCount()
+    index = 0
+    while index < count:
+        element = path.elementAt(index)
+        if element.isMoveTo():
+            if commands and not commands[-1] == "Z":
+                commands.append("Z")
+            commands.append(f"M {element.x:.6f} {element.y:.6f}")
+        elif element.isLineTo():
+            commands.append(f"L {element.x:.6f} {element.y:.6f}")
+        elif element.isCurveTo() and index + 2 < count:
+            control_2 = path.elementAt(index + 1)
+            endpoint = path.elementAt(index + 2)
+            commands.append(
+                "C "
+                f"{element.x:.6f} {element.y:.6f} "
+                f"{control_2.x:.6f} {control_2.y:.6f} "
+                f"{endpoint.x:.6f} {endpoint.y:.6f}"
+            )
+            index += 2
+        index += 1
+    if commands and commands[-1] != "Z":
+        commands.append("Z")
     return " ".join(commands)
 
 
