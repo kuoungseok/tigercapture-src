@@ -835,7 +835,24 @@ def _umg_disposition(
             reasons.append("fill_blend_mode_requires_deterministic_bake")
     active_strokes = _active_strokes(style)
     individual_stroke_weights = style.get("individual_stroke_weights")
-    if isinstance(individual_stroke_weights, Mapping):
+    if (
+        active_strokes
+        and isinstance(individual_stroke_weights, Mapping)
+        and individual_stroke_weights
+        and len(
+            {
+                round(float(value or 0.0), 4)
+                for value in individual_stroke_weights.values()
+            }
+        )
+        > 1
+    ):
+        # Painter/Figma import always attaches individual_stroke_weights,
+        # even for an object with a single uniform stroke weight (or no
+        # visible stroke at all) -- the same "structurally present but not
+        # actually authored" shape as the corner-radii mirroring case. Only
+        # a genuinely different per-side weight needs the deterministic
+        # bake UMG's uniform BorderPadding can't reproduce.
         reasons.append(
             "figma_individual_stroke_weights_require_deterministic_bake"
         )
