@@ -2879,6 +2879,9 @@ bool GenerateComponentBlueprint(
     UCanvasPanelSlot* GeneratedSlot = Root->AddChildToCanvas(GeneratedPanel);
     GeneratedSlot->SetAnchors(FAnchors(0.0, 0.0, 1.0, 1.0));
     GeneratedSlot->SetOffsets(FMargin(0.0));
+    // A Figma component's own master frame clips its own content the same
+    // way an artboard does -- see the matching comment on TigerGeneratedRoot.
+    GeneratedPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
 
     TMap<FString, const FTigerStudioUMGLayerRecord*> LayersById;
     TMap<FString, int32> LayerOrders;
@@ -3565,6 +3568,14 @@ UTigerStudioUMGImportSubsystem::GenerateDocumentFile(
     UCanvasPanelSlot* GeneratedSlot = RootCanvas->AddChildToCanvas(GeneratedPanel);
     GeneratedSlot->SetAnchors(FAnchors(0.0, 0.0, 1.0, 1.0));
     GeneratedSlot->SetOffsets(FMargin(0.0));
+    // A Figma artboard always clips its own direct content -- unlike a
+    // regular frame, this is not conditional on an authored clip_content
+    // flag, so it is not read from any layer's payload. Every generated
+    // layer attaches under this panel (see ParentPanels below), so clipping
+    // it once here reproduces the artboard boundary for all of them without
+    // depending on the per-layer clip_content Unreal already honors deeper
+    // in the tree (see SetClipping(bClipContent ...) below).
+    GeneratedPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
 
     TMap<FString, UPanelWidget*> ParentPanels;
     TMap<FString, UPanelWidget*> FixedParentPanels;
