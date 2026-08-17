@@ -28,7 +28,7 @@ from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 
-STATIC_VECTOR_BAKE_SCHEMA = "tigerstudio.umg.static_vector_bake.v3"
+STATIC_VECTOR_BAKE_SCHEMA = "tigerstudio.umg.static_vector_bake.v4"
 STATIC_VECTOR_BAKE_PADDING = 2
 STATIC_VECTOR_BAKE_MAX_DIMENSION = 4096
 STATIC_VECTOR_BAKE_MAX_PIXELS = 16 * 1024 * 1024
@@ -38,7 +38,7 @@ STATIC_VECTOR_BAKE_MAX_PATH_BYTES = 1024 * 1024
 STATIC_VECTOR_BAKE_MAX_PATH_TOKENS = 100_000
 STATIC_VECTOR_BAKE_PROBE_DIMENSION = 256
 STATIC_VECTOR_BAKE_BOUNDS_EPSILON = 0.0001
-STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_stroke_geometry_v4"
+STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_stroke_geometry_v5"
 STATIC_VECTOR_BAKE_COLOR_CONTRACT = {
     "color_space": "sRGB",
     "alpha_mode": "straight",
@@ -626,6 +626,7 @@ def plan_static_vector_bake(
     )
     stroke_rgba: tuple[int, int, int, int] = (0, 0, 0, 0)
     stroke_width_value = 0.0
+    stroke_inset = False
     if modern_strokes or legacy_stroke_active:
         if len(modern_strokes) > 1 or style.get("stroke_dash"):
             reasons.append("figma_vector_static_bake_stroke_unsupported")
@@ -659,24 +660,31 @@ def plan_static_vector_bake(
                 stroke_paint.get("color") if modern_strokes else style.get("stroke"),
                 "#00000000",
             )
+            # A center stroke straddles the shape's own edge by half its
+            # width, and STATIC_VECTOR_BAKE_PADDING is the only margin the
+            # final raster has to hold it without clipping. An inside stroke
+            # never leaves the shape's own bounds at all (it is clipped to
+            # the fill's own region -- see _svg_renderer's stroke_inset
+            # branch), so that padding limit does not apply to it. Outside
+            # alignment would need the inverse clip (the raster minus the
+            # shape), which is not implemented, so it still falls back.
+            candidate_overflows_padding = (
+                candidate_align == "center"
+                and candidate_width / 2.0 > STATIC_VECTOR_BAKE_PADDING
+            )
             if (
                 candidate_type != "solid"
                 or not candidate_blend_ok
-                # Only a center-aligned stroke can be composited onto the
-                # existing fill-only SVG render without an inset/outset path
-                # offset this bake has no way to compute deterministically.
-                or candidate_align != "center"
+                or candidate_align not in {"center", "inside"}
                 or candidate_width <= 0.0001
-                # A center stroke straddles the shape's own edge by half its
-                # width; STATIC_VECTOR_BAKE_PADDING is the only margin the
-                # final raster has to hold it without clipping.
-                or candidate_width / 2.0 > STATIC_VECTOR_BAKE_PADDING
+                or candidate_overflows_padding
                 or candidate_rgba[3] <= 0
             ):
                 reasons.append("figma_vector_static_bake_stroke_unsupported")
             else:
                 stroke_rgba = candidate_rgba
                 stroke_width_value = candidate_width
+                stroke_inset = candidate_align == "inside"
     effects = _visible_rows(style.get("effects"))
     if effects or isinstance(style.get("shadow"), Mapping):
         reasons.append("figma_vector_static_bake_effect_unsupported")
@@ -747,6 +755,7 @@ def plan_static_vector_bake(
         "fill_rgba": list(fill_rgba),
         "stroke_rgba": list(stroke_rgba),
         "stroke_width": stroke_width_value,
+        "stroke_inset": stroke_inset,
         "color_contract": copy.deepcopy(STATIC_VECTOR_BAKE_COLOR_CONTRACT),
         "logical_size": {"width": width, "height": height},
         "padding": STATIC_VECTOR_BAKE_PADDING,
@@ -868,39 +877,74 @@ def _svg_renderer(
     red, green, blue, alpha = source["fill_rgba"]
     fill = QColor(int(red), int(green), int(blue), int(alpha))
     rows = geometry if geometry is not None else source["geometry"]
+    fill_paths = "".join(
+        f'<path {f"id=\"subpath_{index}\" " if element_ids else ""}'
+        f'd="{html.escape(str(item["path"]), quote=True)}" '
+        f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.8f}" '
+        f'fill-rule="{item["winding_rule"]}" stroke="none"/>'
+        for index, item in enumerate(rows)
+    )
     # Subpath-bounds isolation (see _derive_subpath_contract) always renders
     # with include_stroke=False: that check validates the FILL geometry stays
     # within its own declared logical box, a concern the stroke -- which by
-    # design straddles that same box's edge -- must not perturb.
+    # design straddles or sits against that same box's edge -- must not
+    # perturb.
     stroke_rgba = source.get("stroke_rgba")
     stroke_width = float(source.get("stroke_width") or 0.0)
-    stroke_attrs = 'stroke="none"'
-    if (
+    stroke_active = (
         include_stroke
         and isinstance(stroke_rgba, list)
         and len(stroke_rgba) == 4
         and int(stroke_rgba[3]) > 0
         and stroke_width > 0.0
-    ):
+    )
+    body = fill_paths
+    if stroke_active:
         stroke_red, stroke_green, stroke_blue, stroke_alpha = stroke_rgba
         stroke = QColor(
             int(stroke_red), int(stroke_green), int(stroke_blue), int(stroke_alpha)
         )
-        stroke_attrs = (
-            f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.8f}" '
-            f'stroke-width="{stroke_width:.8f}"'
-        )
-    markup = "".join(
-        f'<path {f"id=\"subpath_{index}\" " if element_ids else ""}'
-        f'd="{html.escape(str(item["path"]), quote=True)}" '
-        f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.8f}" '
-        f'fill-rule="{item["winding_rule"]}" {stroke_attrs}/>'
-        for index, item in enumerate(rows)
-    )
+        if bool(source.get("stroke_inset")):
+            # SVG strokes are always center-aligned, with no native "inside"
+            # mode. Stroke each path at twice the authored width, then clip
+            # that stroke to the fill's own region (same paths/winding
+            # rules): only the inner half of the doubled, still-centered
+            # stroke survives the clip, landing exactly on the inside band
+            # Figma's "inside" alignment paints.
+            clip_paths = "".join(
+                f'<path d="{html.escape(str(item["path"]), quote=True)}" '
+                f'fill-rule="{item["winding_rule"]}"/>'
+                for item in rows
+            )
+            stroke_paths = "".join(
+                f'<path d="{html.escape(str(item["path"]), quote=True)}" '
+                f'fill="none" stroke="{stroke.name()}" '
+                f'stroke-opacity="{stroke.alphaF():.8f}" '
+                f'stroke-width="{stroke_width * 2.0:.8f}"/>'
+                for item in rows
+            )
+            body = (
+                f'<defs><clipPath id="strokeInsetClip">{clip_paths}'
+                f"</clipPath></defs>"
+                f"{fill_paths}"
+                f'<g clip-path="url(#strokeInsetClip)">{stroke_paths}</g>'
+            )
+        else:
+            stroke_attrs = (
+                f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.8f}" '
+                f'stroke-width="{stroke_width:.8f}"'
+            )
+            body = "".join(
+                f'<path {f"id=\"subpath_{index}\" " if element_ids else ""}'
+                f'd="{html.escape(str(item["path"]), quote=True)}" '
+                f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.8f}" '
+                f'fill-rule="{item["winding_rule"]}" {stroke_attrs}/>'
+                for index, item in enumerate(rows)
+            )
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" overflow="visible" '
         f'width="{width:.8f}" height="{height:.8f}" '
-        f'viewBox="0 0 {width:.8f} {height:.8f}">{markup}</svg>'
+        f'viewBox="0 0 {width:.8f} {height:.8f}">{body}</svg>'
     )
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     if not renderer.isValid():
@@ -1126,6 +1170,8 @@ def _validated_materialization_plan(
         or (float(stroke_width) > 0.0) != (int(stroke_rgba[3]) > 0)
     ):
         raise ValueError("Static vector bake stroke width is invalid")
+    if not isinstance(source.get("stroke_inset"), bool):
+        raise ValueError("Static vector bake stroke inset flag is invalid")
     # A stroke-only decoration has no fill; only reject when neither paints.
     if rgba[3] <= 0 and int(stroke_rgba[3]) <= 0:
         raise ValueError("Static vector bake fill color is invalid")

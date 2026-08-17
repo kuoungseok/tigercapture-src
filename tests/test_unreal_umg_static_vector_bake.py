@@ -611,7 +611,7 @@ def test_manifest_keeps_renderer_source_pixel_hash_and_baked_provenance(
     )
 
     assert len(manifest["pixel_rgba_sha256"]) == 64
-    assert manifest["source"]["renderer"]["id"] == "qt_svg_fill_stroke_geometry_v4"
+    assert manifest["source"]["renderer"]["id"] == "qt_svg_fill_stroke_geometry_v5"
     assert manifest["source"]["geometry"][0]["path"].endswith("Z")
     assert manifest["origin_disposition"] == "Baked"
     assert manifest["satisfied_gate"] == (
@@ -973,8 +973,8 @@ def test_unreal_qa_requires_schema_16_background_and_two_materialized_baked_laye
         "materialized",
     ]
     assert [row["renderer_id"] for row in evidence["payloads"]] == [
-        "qt_svg_fill_stroke_geometry_v4",
-        "qt_svg_fill_stroke_geometry_v4",
+        "qt_svg_fill_stroke_geometry_v5",
+        "qt_svg_fill_stroke_geometry_v5",
     ]
 
 

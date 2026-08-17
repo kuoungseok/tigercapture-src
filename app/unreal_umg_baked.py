@@ -592,6 +592,7 @@ def _validate_static_vector_source(
         "fill_rgba",
         "stroke_rgba",
         "stroke_width",
+        "stroke_inset",
         "color_contract",
         "logical_size",
         "padding",
@@ -661,6 +662,8 @@ def _validate_static_vector_source(
         or not stroke_channels_valid
         or (stroke_width_number > 0.0) != (int(stroke_rgba[3]) > 0)
     ):
+        reasons.append("baked_static_vector_stroke_invalid")
+    if not isinstance(source.get("stroke_inset"), bool):
         reasons.append("baked_static_vector_stroke_invalid")
     # A stroke-only decoration has no fill; only reject when neither paints.
     if (

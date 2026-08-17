@@ -23,9 +23,9 @@ THIRD_PARTY_INCLUDES_END
 namespace
 {
 constexpr const TCHAR* StaticVectorBakeSchema =
-    TEXT("tigerstudio.umg.static_vector_bake.v3");
+    TEXT("tigerstudio.umg.static_vector_bake.v4");
 constexpr const TCHAR* StaticVectorBakeRenderer =
-    TEXT("qt_svg_fill_stroke_geometry_v4");
+    TEXT("qt_svg_fill_stroke_geometry_v5");
 constexpr const TCHAR* StaticVectorBakeGate =
     TEXT("figma_vector_geometry_requires_deterministic_bake");
 constexpr int32 StaticVectorBakeMaxSubpaths = 256;
@@ -4885,7 +4885,7 @@ TArray<FString> ValidateMaterializedBakedLayer(
     FString CanonicalSource;
     FString ComputedSourceHash;
     if (!Source
-        || Source->Values.Num() != 11
+        || Source->Values.Num() != 12
         || !AppendCanonicalJson(
             MakeShared<FJsonValueObject>(Source),
             TEXT("source"),
@@ -4952,6 +4952,10 @@ TArray<FString> ValidateMaterializedBakedLayer(
         && FMath::IsFinite(StrokeWidth)
         && StrokeWidth >= 0.0
         && (StrokeWidth > 0.0) == (StrokeAlpha > 0.0);
+    bool bStrokeInset = false;
+    bStrokeValid = bStrokeValid
+        && Source->TryGetBoolField(TEXT("stroke_inset"), bStrokeInset);
+    (void)bStrokeInset;
     if (!bStrokeValid)
     {
         Reasons.Add(TEXT("baked_static_vector_stroke_invalid"));

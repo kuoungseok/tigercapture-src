@@ -250,7 +250,7 @@ class PainterUIFloatingToolbar(QFrame):
 
         self.quick_actions_button = self._icon_button(
             "Quick Actions (Ctrl+/)",
-            "search",
+            "spark",
         )
         self.quick_actions_button.clicked.connect(
             self.quick_actions_requested
