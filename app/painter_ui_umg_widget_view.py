@@ -5,7 +5,7 @@ import copy
 from typing import Any, Mapping
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QTimer, Signal, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QRegion
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -160,6 +160,7 @@ class _UMGAnchorPreviewOverlay(PainterUIDesignOverlay):
         self._umg_clicked_button_id = ""
         self._umg_last_button_id = ""
         self._umg_button_last_event = "ready"
+        self._umg_artboard_mask_rect = None
         self.setMouseTracking(self._umg_button_testing_enabled)
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
@@ -1127,7 +1128,48 @@ class _UMGAnchorPreviewOverlay(PainterUIDesignOverlay):
                     QPointF(tip.x() + 3.0, tip.y()),
                 )
 
+    def _update_umg_artboard_clip_mask(self) -> None:
+        """Clip this pane's rendered pixels to the artboard's own bounds.
+
+        A Figma artboard always clips its own direct content, but nothing in
+        the exported UMG document represents that boundary as a JSON layer
+        with a ``clip_content`` flag -- it is an implicit container (see the
+        matching fix on the Unreal generation side, TigerGeneratedRoot). The
+        "target"/UMG Widgets pane draws the same document-projection rows as
+        "source"/Source Design, so a layer whose own bounds spread outside
+        the artboard (e.g. a tall auto-layout stack mostly scrolled off
+        screen) painted at full, unclipped size here -- reading as wildly
+        oversized and, for a shape that is not rotationally symmetric, as if
+        it had been rotated relative to Source Design's Figma-accurate
+        clipped rendering.
+
+        A window-system-level widget mask clips every pixel this widget ever
+        paints without touching the document's object tree at all, so it
+        cannot perturb parent-relative geometry math (constraint_parent_geometry
+        and the anchor-drag gizmos both assume an untouched parent chain).
+        """
+
+        if self._umg_surface != "target":
+            return
+        try:
+            artboard = self._active_artboard()
+        except (KeyError, StopIteration, IndexError):
+            artboard = None
+        if not artboard:
+            self.clearMask()
+            return
+        viewport, _scale = self._artboard_viewport(artboard)
+        rect = viewport.intersected(QRectF(self.rect())).toAlignedRect()
+        if rect.isEmpty():
+            self.clearMask()
+            return
+        if self._umg_artboard_mask_rect == rect:
+            return
+        self._umg_artboard_mask_rect = rect
+        self.setMask(QRegion(rect))
+
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self._update_umg_artboard_clip_mask()
         document_selection = None
         effective_selection = None
         if self._umg_selection_enabled:
