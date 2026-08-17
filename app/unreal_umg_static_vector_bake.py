@@ -38,6 +38,16 @@ STATIC_VECTOR_BAKE_MAX_PATH_BYTES = 1024 * 1024
 STATIC_VECTOR_BAKE_MAX_PATH_TOKENS = 100_000
 STATIC_VECTOR_BAKE_PROBE_DIMENSION = 256
 STATIC_VECTOR_BAKE_BOUNDS_EPSILON = 0.0001
+# plan_static_vector_bake snaps a genuinely fractional logical_size to the
+# nearest integer for hash determinism (see its round() calls), which can
+# leave the actual geometry extending up to half a pixel past that rounded
+# box -- not a real error, just where the snap landed. Half a pixel is not
+# visually distinguishable in a baked UI decoration, so the *outside-bounds*
+# check tolerates it. This is deliberately a separate, looser constant from
+# STATIC_VECTOR_BAKE_BOUNDS_EPSILON: that one also gates degenerate-subpath
+# detection, where a genuinely thin (e.g. a clamped 0.5px stroke quad) but
+# real subpath must not be misread as zero-area.
+STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK = 0.5001
 STATIC_VECTOR_BAKE_RENDERER = "qt_svg_fill_stroke_geometry_v5"
 STATIC_VECTOR_BAKE_COLOR_CONTRACT = {
     "color_space": "sRGB",
@@ -1028,12 +1038,12 @@ def _derive_subpath_contract(
         ):
             return {}, "figma_vector_static_bake_subpath_degenerate"
         if (
-            bounds.left() < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
-            or bounds.top() < -STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            bounds.left() < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
+            or bounds.top() < -STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
             or bounds.right()
-            > logical_width + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            > logical_width + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
             or bounds.bottom()
-            > logical_height + STATIC_VECTOR_BAKE_BOUNDS_EPSILON
+            > logical_height + STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK
         ):
             return {}, "figma_vector_static_bake_subpath_outside_logical_bounds"
         isolated_source = dict(source)
@@ -1059,7 +1069,7 @@ def _derive_subpath_contract(
     return {
         "count": len(items),
         "max_count": STATIC_VECTOR_BAKE_MAX_SUBPATHS,
-        "logical_bounds_epsilon": STATIC_VECTOR_BAKE_BOUNDS_EPSILON,
+        "logical_bounds_epsilon": STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK,
         "items": items,
     }, ""
 
@@ -1382,6 +1392,7 @@ def expand_umg_layer_for_static_bake(
 __all__ = [
     "STATIC_VECTOR_BAKE_BOUNDS_EPSILON",
     "STATIC_VECTOR_BAKE_COLOR_CONTRACT",
+    "STATIC_VECTOR_BAKE_LOGICAL_BOUNDS_SLACK",
     "STATIC_VECTOR_BAKE_MAX_DIMENSION",
     "STATIC_VECTOR_BAKE_MAX_PIXELS",
     "STATIC_VECTOR_BAKE_MAX_SUBPATHS",

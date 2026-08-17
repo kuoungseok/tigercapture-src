@@ -30,6 +30,15 @@ constexpr const TCHAR* StaticVectorBakeGate =
     TEXT("figma_vector_geometry_requires_deterministic_bake");
 constexpr int32 StaticVectorBakeMaxSubpaths = 256;
 constexpr double StaticVectorBakeBoundsEpsilon = 0.0001;
+// A fractional logical_size gets snapped to the nearest integer for hash
+// determinism (see plan_static_vector_bake's round() calls in Python), which
+// can leave the actual geometry extending up to half a pixel past that
+// rounded box. Not visually distinguishable in a baked UI decoration, so the
+// *outside-logical-bounds* check tolerates it. Deliberately separate from
+// StaticVectorBakeBoundsEpsilon, which also gates degenerate-subpath
+// detection, where a genuinely thin (e.g. a clamped 0.5px stroke quad) but
+// real subpath must not be misread as zero-area.
+constexpr double StaticVectorBakeLogicalBoundsSlack = 0.5001;
 constexpr const TCHAR* StaticAppearanceBakeSchema =
     TEXT("tigerstudio.umg.static_appearance_bake.v1");
 constexpr const TCHAR* StaticAppearanceBakeKind =
@@ -5244,7 +5253,7 @@ TArray<FString> ValidateMaterializedBakedLayer(
             BoundsEpsilon)
         && FMath::IsNearlyEqual(
             BoundsEpsilon,
-            StaticVectorBakeBoundsEpsilon,
+            StaticVectorBakeLogicalBoundsSlack,
             0.000000001)
         && SubpathContract->TryGetArrayField(
             TEXT("items"),
@@ -5298,12 +5307,12 @@ TArray<FString> ValidateMaterializedBakedLayer(
                 && FMath::IsFinite(Height)
                 && Width > StaticVectorBakeBoundsEpsilon
                 && Height > StaticVectorBakeBoundsEpsilon
-                && X >= -StaticVectorBakeBoundsEpsilon
-                && Y >= -StaticVectorBakeBoundsEpsilon
+                && X >= -StaticVectorBakeLogicalBoundsSlack
+                && Y >= -StaticVectorBakeLogicalBoundsSlack
                 && X + Width
-                    <= LogicalWidth + StaticVectorBakeBoundsEpsilon
+                    <= LogicalWidth + StaticVectorBakeLogicalBoundsSlack
                 && Y + Height
-                    <= LogicalHeight + StaticVectorBakeBoundsEpsilon;
+                    <= LogicalHeight + StaticVectorBakeLogicalBoundsSlack;
             if (!bSubpathsValid)
             {
                 break;
