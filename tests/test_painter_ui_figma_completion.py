@@ -729,12 +729,18 @@ def test_m1b7_nested_figma_boolean_import_hierarchy_and_export_order(
     assert "result.setSharedPluginData('tigerstudio','stable_id',row.id)" in code
 
 
-def test_m1b7_umg_preflight_keeps_boolean_explicitly_blocked() -> None:
+def test_m1b7_umg_export_drops_boolean_operands_and_keeps_only_the_group() -> None:
+    """A Painter-authored Boolean group's operands never paint on their own.
+
+    Painter does not compute a real resolved geometry for its own live
+    Boolean composition (unlike an imported Figma Boolean, whose row already
+    carries Figma's own baked fill geometry), so the group's own row simply
+    has nothing to paint here -- but it must classify on its own merits, not
+    be blocked purely for content.boolean.enabled, and its operands must not
+    appear as their own layers painting on top of it.
+    """
     from app.painter_ui_boolean import compose_ui_boolean
-    from app.painter_ui_umg_adapter import (
-        painter_ui_to_umg_document,
-        preflight_painter_umg,
-    )
+    from app.painter_ui_umg_adapter import painter_ui_to_umg_document
 
     document, _mask, first, second, _text = _document()
     document, group = compose_ui_boolean(
@@ -743,19 +749,13 @@ def test_m1b7_umg_preflight_keeps_boolean_explicitly_blocked() -> None:
         [first["id"], second["id"]],
     )
 
-    report = preflight_painter_umg(document)
-    blocker = next(
-        row for row in report["blockers"] if row["object_id"] == group["id"]
-    )
     umg_document = painter_ui_to_umg_document(document)
+    layer_ids = {row["Id"] for row in umg_document["Layers"]}
+    assert first["id"] not in layer_ids
+    assert second["id"] not in layer_ids
     layer = next(row for row in umg_document["Layers"] if row["Id"] == group["id"])
-    assert report["ok"] is False
-    assert blocker["reasons"] == [
-        "painter_ui_boolean_requires_deterministic_bake"
-    ]
-    assert layer["Disposition"] == "Blocked"
-    assert layer["BlockReasons"] == blocker["reasons"]
-    assert layer["PayloadJson"]
+    assert layer["Disposition"] == "Native"
+    assert layer["BlockReasons"] == []
 
 
 def test_object_removal_cleans_mask_boolean_and_section_references() -> None:

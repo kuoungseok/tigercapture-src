@@ -44,6 +44,12 @@ _SEGMENT = struct.Struct("<IIffIff")
 _UINT = struct.Struct("<I")
 
 _WINDING_RULES = {0: "NONZERO", 1: "EVENODD"}
+# The .fig binary schema's own enum name for the even-odd rule is "ODD" (see
+# fig_command_geometry below, which reads a baked commandsBlob entry's
+# windingRule field straight from that raw message) -- distinct from the
+# SVG-standard "EVENODD" name every downstream consumer (the static vector
+# bake, the SVG renderer) actually expects.
+_WINDING_RULE_ALIASES = {"ODD": "EVENODD"}
 
 # Guards against a misread length prefix allocating unbounded memory.
 _MAX_ELEMENTS = 1 << 22
@@ -408,12 +414,13 @@ def fig_command_geometry(
             warning = f"fig_command_path_unparsed:{exc}"
             continue
         if path:
+            raw_winding_rule = str(entry.get("windingRule") or "NONZERO").upper()
             rows.append(
                 {
                     "path": path,
-                    "windingRule": str(
-                        entry.get("windingRule") or "NONZERO"
-                    ).upper(),
+                    "windingRule": _WINDING_RULE_ALIASES.get(
+                        raw_winding_rule, raw_winding_rule
+                    ),
                 }
             )
     return rows, warning

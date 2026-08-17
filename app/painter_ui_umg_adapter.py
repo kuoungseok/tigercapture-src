@@ -730,9 +730,12 @@ def _umg_disposition(
             reasons.append(
                 "figma_mask_raster_alpha_requires_deterministic_bake"
             )
-    boolean = dict(content.get("boolean") or {})
-    if boolean.get("enabled"):
-        reasons.append("painter_ui_boolean_requires_deterministic_bake")
+    # A resolved Boolean operation's own row carries its already-computed
+    # fill geometry (see _drop_consumed_boolean_operands, which also removes
+    # its operands from the document so only this row paints); the usual
+    # vector-bake/appearance gates below already validate that geometry on
+    # its own merits, so content.boolean.enabled is not an independent
+    # blocker here.
     if content.get("text_ranges"):
         reasons.append("mixed_text_ranges_require_rich_text_conversion")
     if content.get("flip_x") or content.get("flip_y"):
@@ -1069,6 +1072,30 @@ def _split_painted_containers(document: dict[str, Any]) -> dict[str, Any]:
     return normalize_ui_document(document)
 
 
+def _drop_consumed_boolean_operands(document: dict[str, Any]) -> dict[str, Any]:
+    """Remove every object a resolved Boolean operation has consumed.
+
+    Figma (and Painter) keep a Boolean group's operands in the document tree
+    so they stay editable, but only the operation's own resolved geometry is
+    ever meant to paint -- the operands themselves are never independently
+    visible. Left in the exported document, they painted their own leftover
+    style on top of (or instead of) the resolved shape. Dropping them here
+    also makes the operation's own row a genuine leaf, which is what lets its
+    resolved ``vector_fill_geometry`` take the ordinary leaf bake path.
+    """
+
+    from app.painter_ui_boolean_geometry import boolean_operand_ids
+
+    rows = list(document.get("objects") or [])
+    consumed = boolean_operand_ids(rows)
+    if not consumed:
+        return document
+    document["objects"] = [
+        row for row in rows if str(row.get("id") or "") not in consumed
+    ]
+    return document
+
+
 def _prepare_painter_umg_conversion(
     value: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -1085,6 +1112,7 @@ def _prepare_painter_umg_conversion(
     # their reusable meaning separately; resolving here is not a flattening
     # substitute, it is the static value used for exact preview/export.
     document = resolve_ui_component_document(document, normalize=False)
+    document = _drop_consumed_boolean_operands(dict(document))
     document = _split_painted_containers(dict(document))
     from app.painter_ui_umg_auto_layout import (
         painter_umg_auto_layout_contract,

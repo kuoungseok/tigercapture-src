@@ -598,8 +598,11 @@ def plan_static_vector_bake(
         reasons.append("figma_vector_static_bake_semantic_recovery_unsupported")
     if bool((row.get("mask") or {}).get("enabled")):
         reasons.append("figma_vector_static_bake_mask_unsupported")
-    if bool((content.get("boolean") or {}).get("enabled")):
-        reasons.append("figma_vector_static_bake_boolean_unsupported")
+    # A resolved Boolean operation's own vector_fill_geometry is already the
+    # complete visual result (its operands are dropped from the document
+    # before this runs -- see _drop_consumed_boolean_operands), so it is
+    # validated like any other leaf vector geometry rather than blocked
+    # outright.
     if content.get("figma_unsupported_paints"):
         reasons.append("figma_vector_static_bake_paint_unsupported")
     if content.get("flip_x") or content.get("flip_y"):

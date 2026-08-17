@@ -370,7 +370,6 @@ def test_static_bake_mutation_changes_identity_and_collision_never_overwrites(
         ("stroke", "figma_vector_static_bake_stroke_unsupported"),
         ("effect", "figma_vector_static_bake_effect_unsupported"),
         ("mask", "figma_vector_static_bake_mask_unsupported"),
-        ("boolean", "figma_vector_static_bake_boolean_unsupported"),
         ("child", "figma_vector_static_bake_requires_leaf"),
         ("gap", "figma_vector_static_bake_geometry_incomplete"),
     ],
@@ -399,8 +398,6 @@ def test_unsafe_vector_cases_remain_explicitly_blocked(
         ]
     elif mutation == "mask":
         row["mask"] = {"enabled": True}
-    elif mutation == "boolean":
-        row["content"]["boolean"] = {"enabled": True, "operation": "union"}
     elif mutation == "child":
         document, _child = add_ui_object(
             document,
@@ -423,6 +420,23 @@ def test_unsafe_vector_cases_remain_explicitly_blocked(
     )
     assert reason in blocker["reasons"]
     assert "figma_vector_geometry_requires_deterministic_bake" in blocker["reasons"]
+
+
+def test_boolean_operation_with_resolved_geometry_bakes_like_any_other_leaf() -> None:
+    """A Boolean operation's own row carries its resolved fill geometry.
+
+    content.boolean.enabled is no longer an independent block reason -- it is
+    validated exactly like any other leaf vector geometry.
+    """
+    from app.painter_ui_umg_adapter import preflight_painter_umg
+
+    document = _vector_document()
+    row = document["objects"][0]
+    row["content"]["boolean"] = {"enabled": True, "operation": "union"}
+
+    report = preflight_painter_umg(document)
+    assert report["ok"] is True
+    assert not any(item["object_id"] == row["id"] for item in report["blockers"])
 
 
 def test_stretched_vector_plan_stays_blocked_and_layout_expansion_rejects_stretch() -> None:
