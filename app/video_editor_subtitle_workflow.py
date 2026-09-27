@@ -742,6 +742,54 @@ class AISubtitleWorkflow:
             self.message_box.information(editor, "AI Subtitles", f"Generated {count} subtitle rows.")
         return count
 
+    def generate_headless(
+        self,
+        editor: Any,
+        *,
+        source_path: str | None = None,
+        language: str = "",
+        model_size: str = "small",
+    ) -> dict[str, Any]:
+        """Transcribe and apply subtitles without opening WhisperDialog.
+
+        Blocks the caller on a nested QEventLoop while the transcription
+        QThread runs, so the editor's Qt event loop keeps pumping (GUI stays
+        responsive, other automation requests keep being served) instead of
+        freezing for the full transcription duration.
+        """
+        if not self.availability_checker():
+            return {"ok": False, "error": "whisper_not_installed", "count": 0}
+
+        path = Path(source_path) if source_path else self.resolve_video_path(editor)
+        if path is None or not path.exists():
+            return {"ok": False, "error": "no_source_video", "count": 0}
+
+        from PySide6.QtCore import QEventLoop
+
+        worker = WhisperTranscriber(path, language, model_size, editor)
+        loop = QEventLoop()
+        outcome: dict[str, Any] = {}
+
+        def _on_ready(segments: list[dict[str, Any]]) -> None:
+            outcome["segments"] = segments
+            loop.quit()
+
+        def _on_failed(reason: str) -> None:
+            outcome["error"] = reason
+            loop.quit()
+
+        worker.ready.connect(_on_ready)
+        worker.failed.connect(_on_failed)
+        worker.start()
+        loop.exec()
+        worker.wait(5000)
+
+        if "error" in outcome:
+            return {"ok": False, "error": outcome["error"], "count": 0}
+
+        count = self.apply_segments(editor, outcome.get("segments") or [])
+        return {"ok": True, "error": "", "count": count, "source_path": str(path)}
+
 
 class VideoEditorSubtitleWorkflow:
     """Editor-facing facade with method names matching the old window hooks."""
@@ -812,3 +860,15 @@ def on_subtitle_lane_edit(editor: Any, idx: int) -> bool:
 
 def generate_ai_subtitles(editor: Any) -> int:
     return VideoEditorSubtitleWorkflow(editor).generate_ai_subtitles()
+
+
+def generate_ai_subtitles_headless(
+    editor: Any,
+    *,
+    source_path: str | None = None,
+    language: str = "",
+    model_size: str = "small",
+) -> dict[str, Any]:
+    return AISubtitleWorkflow().generate_headless(
+        editor, source_path=source_path, language=language, model_size=model_size
+    )

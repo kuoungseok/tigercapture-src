@@ -58,5 +58,9 @@ class VideoEditorWindow(QWidget):
         trace_video_editor_phase(self, "video_editor.init.project_settings_done")
         build_editor_ui_and_finish_startup(self, source_path)
 
+        from app.automation_bridge_server import start_automation_bridge_server
+
+        self._automation_bridge_server = start_automation_bridge_server(self)
+
 
 install_video_editor_window_delegates(VideoEditorWindow)

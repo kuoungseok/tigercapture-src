@@ -281,6 +281,12 @@ class ActionRegistry:
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)
+        from app.actions.orchestration_namespace import register_orchestration_actions
+
+        register_orchestration_actions(self)
+        from app.actions.subtitle_ai_namespace import register_subtitle_ai_actions
+
+        register_subtitle_ai_actions(self)
 
     def _dry_result(self, action: str, params: Mapping[str, Any], summary: str) -> ActionResult:
         return ok_result(

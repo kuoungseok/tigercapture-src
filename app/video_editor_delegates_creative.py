@@ -44,6 +44,7 @@ _BINDINGS = (
     ('_on_subtitles_changed', 'app.video_editor_subtitle_workflow', 'on_subtitles_changed', False),
     ('_on_subtitle_lane_edit', 'app.video_editor_subtitle_workflow', 'on_subtitle_lane_edit', False),
     ('_generate_ai_subtitles', 'app.video_editor_subtitle_workflow', 'generate_ai_subtitles', False),
+    ('generate_ai_subtitles_headless', 'app.video_editor_subtitle_workflow', 'generate_ai_subtitles_headless', False),
     ('_apply_creator_assist_bundle', 'app.video_editor_screenstudio_workflow', '_apply_creator_assist_bundle', False),
     ('_apply_creator_assist_markers', 'app.video_editor_screenstudio_workflow', '_apply_creator_assist_markers', False),
     ('_apply_creator_assist_quick_create', 'app.video_editor_screenstudio_workflow', '_apply_creator_assist_quick_create', False),
