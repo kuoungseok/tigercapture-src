@@ -1431,3 +1431,103 @@ adapter, then expose only registered actions to MCP and AI clients. This keeps
 the system powerful enough for full studio automation while preserving the
 current safety rule: no arbitrary Python, no arbitrary shell, and no direct
 external access to editor internals.
+
+## AI Operator Map (added 2026-09-28)
+
+This section is for an AI agent about to drive the app through the registered
+`tiger-studio` MCP tools. It records what a fresh audit found so the next agent
+doesn't have to re-derive it from scratch.
+
+### Connecting
+
+- `tools/automation_mcp_server.py --stdio` (the process Claude Code's
+  `tiger-studio` MCP entry launches) is owner-less by itself — see the
+  docstring at the top of that file. As of this addendum it first tries to
+  connect to a loopback bridge at `127.0.0.1:8765`
+  (`app/automation_bridge_server.py`) that the running `VideoEditorWindow`
+  starts (`app/video_editor_window_core.py`, right after
+  `build_editor_ui_and_finish_startup`). If the app (launched with
+  `python main.py --studio`, i.e. Tiger Studio, not plain TigerCapture) is
+  running, actions execute against the live project. If it is not running,
+  the stdio process falls back to an owner-less registry: ~85% of actions
+  (`requires_owner=True`, 1110 of 1301 as of this writing) will return
+  `{"ok": false, "error": "no editor owner"}`. Check `app.status` or
+  `tigercapture_ping` first if actions are unexpectedly failing that way.
+- Port/host are overridable via `TIGER_STUDIO_AUTOMATION_PORT` (both sides) and
+  disabled entirely via `TIGER_STUDIO_DISABLE_AUTOMATION_BRIDGE=1` (app side).
+
+### Discover → plan → execute → verify
+
+- Discover: `tigercapture_list_actions`, `tigercapture_get_action_schema`.
+- Preview a single action without mutating: `tigercapture_preview_action`
+  (only works for actions with `supports_dry_run: true`).
+- Execute one step: `tigercapture_execute_action`.
+- Execute several steps and stop at the first failure:
+  `tigercapture_execute_sequence`.
+- Execute several steps, optionally continue past failures, and get a
+  post-plan status snapshot in the same round trip:
+  `orchestrate.execute_plan` (`app/actions/orchestration_namespace.py`),
+  called through `tigercapture_execute_action`. Pass
+  `{"steps": [...], "continue_on_error": true, "verify": {"action": "timeline.summary"}}`.
+  Good `verify` candidates (all `requires_owner: true` but read-only,
+  `app/actions/readonly_namespace.py`): `app.status`, `project.snapshot`,
+  `timeline.summary`, `timeline.range`, `selection.summary`, `media.summary`.
+
+### Namespace scale (from a live `tigercapture_list_actions`, 2026-09-28)
+
+`paint` 441, `motion` 380, `timeline` 96, `ppt` 64, `music` 32, `vtuber` 31,
+`audio` 31, `clip` 28, `tts` 23, `mmd` 21, `ar_pbr` 21, `broadcast` 14,
+`nle` 12, `selection` 11, `project_bin` 11, `ui` 10, `capture` 9, `track` 8,
+`source_record` 6, `midi` 6, `source_monitor` 5, `node` 5, `media` 4,
+`record_monitor` 4, `actor` 4, `project` 3, `character` 3, `history` 2,
+`transition` 2, `text` 2, `color` 2, `subtitle` 2, plus several
+single-action namespaces (`app`, `selected`, `creative_layer`, `unreal`,
+`preset`, `render`, `review`, `orchestrate`).
+
+### Standalone sub-tool windows: data model vs. window dependency
+
+Tiger Studio hosts several standalone `QMainWindow`/top-level `QWidget` tools
+(AR/PBR Texture Lab, AR/PBR Asset Preview, MMD Player, Motion Designer, PPT
+Generator, Spine Editor, Live2D Editor, Composer, TTS Lab, Color Page, GIF
+Editor, Sound Editor — the last two also exist standalone under TigerCapture,
+out of Studio's scope). A 2026-09-28 audit found the corresponding action
+namespaces mostly read/write a plain data model on the owner
+(`owner._motion_compositions`, `owner._mmd_tracks`, `owner._music_compositions`,
+TTS provider state, timeline actor-clip dicts, `owner._project_settings`) and
+do **not** require the matching window to ever have been opened — the window
+classes are secondary human-facing viewers/editors, not the source of truth an
+action needs to touch. Exceptions found so far:
+
+- `ar_pbr.preview.view.get`/`.set` require an open `ArPbrAssetPreviewWindow`
+  and used to raise `"AR/PBR preview window not found"` if a human hadn't
+  opened one first. Fixed by adding `ar_pbr.preview.open`
+  (`app/actions/editor_adapter_ar_pbr_preview.py`,
+  `app/actions/ar_pbr_preview_namespace.py`) — call it with `path` or
+  `track_id` before `view.get`/`view.set`.
+- `ar_pbr.texture_lab_open` (`app/actions/editor_adapter_ar_pbr_texture_lab.py`)
+  already self-constructs `ArPbrTextureMapLabWindow` on demand — no gap there.
+- `MMDPlayerWindow`, `GifEditorWindow`, and the standalone `SoundEditorWindow`
+  construction paths have **no** action touchpoint at all (verified by
+  grepping `app/actions/*.py`); they are either TigerCapture-only or
+  genuinely unreachable from automation today. Not fixed as part of this pass
+  — flag before assuming any action can drive them.
+- Spine/Live2D standalone editor windows and `ComposerWindow`/`TtsLabWindow`
+  can be raised via `focus_ui_surface(surface=..., open_aux_window=true)`
+  (`app/actions/editor_adapter_editing_review.py`) or
+  `tts.voice_lab.open`, but the content-editing actions (`actor.*`, `music.*`/
+  `midi.*`, `tts.*`) still act on the data model regardless of whether that
+  window is open.
+
+### Known non-goals / inherent limits
+
+- Live hardware MIDI-input recording (`composer_panel.py`
+  `_on_midi_record_toggled`) is a live-capture UI path with no headless
+  equivalent by nature — do not treat its absence as a bug.
+- `subtitle.transcribe_whisper` (`app/actions/subtitle_ai_namespace.py`) blocks
+  the calling action on a nested `QEventLoop` while Whisper transcribes on a
+  worker thread (keeps the app responsive but the action call itself can take
+  from several seconds to minutes depending on video length and model size —
+  do not assume it returns immediately). `subtitle.import_srt` is fast by
+  comparison. `clip.set_color_grade`'s `grade` param is now typed against the
+  `ColorGrade` dataclass fields (`app/color_grading.py`) instead of an opaque
+  object — see `app/actions/creative_namespace.py`.
