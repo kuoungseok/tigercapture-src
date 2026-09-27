@@ -46,5 +46,33 @@ def register_subtitle_ai_actions(registry: Any) -> None:
 
     registry.register(spec, _handler)
 
+    import_spec = ActionSpec(
+        "subtitle.import_srt",
+        "Import an SRT file using Screen Studio subtitle defaults and append it to the timeline.",
+        "subtitle",
+        params_schema=schema_object(
+            {"srt_path": {"type": "string"}},
+            required=("srt_path",),
+        ),
+        mutating=True,
+        destructive=False,
+        requires_owner=True,
+        supports_dry_run=False,
+    )
+
+    def _import_handler(params: Mapping[str, Any], dry_run: bool) -> ActionResult:
+        owner = registry.owner
+        if owner is None:
+            return error_result("subtitle.import_srt", "no editor owner")
+        srt_path = str(params.get("srt_path") or "").strip()
+        if not srt_path:
+            return error_result("subtitle.import_srt", "missing params: srt_path")
+        outcome = owner.import_screenstudio_srt_subtitles_headless(srt_path)
+        if not outcome.get("ok"):
+            return error_result("subtitle.import_srt", str(outcome.get("error") or "import_failed"))
+        return ok_result("subtitle.import_srt", outcome, changed=bool(outcome.get("count")))
+
+    registry.register(import_spec, _import_handler)
+
 
 __all__ = ["register_subtitle_ai_actions"]

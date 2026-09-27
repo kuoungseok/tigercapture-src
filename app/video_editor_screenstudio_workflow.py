@@ -1590,6 +1590,70 @@ def _import_screenstudio_srt_subtitles(self) -> None:
         self._flash_status(f"Imported {len(imported)} Screen Studio subtitles")
 
 
+def import_screenstudio_srt_subtitles_headless(self, srt_path: str) -> dict:
+    """Import an SRT file into subtitles without a file dialog, for automation."""
+    path = Path(str(srt_path or ""))
+    if not path.exists():
+        return {"ok": False, "error": "srt_file_not_found", "count": 0}
+    text = ""
+    for encoding in ("utf-8-sig", "utf-8", "cp949"):
+        try:
+            text = path.read_text(encoding=encoding)
+            break
+        except Exception:
+            text = ""
+    if not text:
+        return {"ok": False, "error": "srt_unreadable", "count": 0}
+
+    from app.screenstudio_parity import screenstudio_subtitle_rows_from_srt_text
+
+    try:
+        plan = screenstudio_subtitle_rows_from_srt_text(text, getattr(self, "_project_settings", {}) or {})
+    except Exception as exc:
+        return {"ok": False, "error": f"srt_parse_failed: {exc}", "count": 0}
+    rows = list(plan.get("subtitle_rows", []) or [])
+    if not rows:
+        return {"ok": True, "error": "", "count": 0}
+
+    imported: list[Subtitle] = []
+    for row in rows:
+        try:
+            imported.append(
+                Subtitle(
+                    text=str(row.get("text") or ""),
+                    start_ms=int(row.get("start_ms", 0) or 0),
+                    end_ms=int(row.get("end_ms", 0) or 0),
+                    show_box=bool(row.get("show_box", True)),
+                    style=dict(row.get("style", {}) or {}),
+                )
+            )
+        except Exception:
+            continue
+    if not imported:
+        return {"ok": True, "error": "", "count": 0}
+
+    layer = self._subtitle_panel.layer
+    layer.replace_all([*layer.items(), *imported])
+    try:
+        self._subtitle_panel._refresh_list()
+    except Exception:
+        pass
+    try:
+        self._subtitle_panel.subtitles_changed.emit()
+    except Exception:
+        pass
+    settings = dict(getattr(self, "_project_settings", {}) or {})
+    settings["screenstudio_transcript_last_import"] = {
+        "path": str(path),
+        "subtitle_rows": len(imported),
+        "style_preset_id": plan.get("subtitle_style_preset_id"),
+    }
+    self._project_settings = settings
+    if hasattr(self._player, "set_project_settings"):
+        self._player.set_project_settings(settings)
+    return {"ok": True, "error": "", "count": len(imported), "srt_path": str(path)}
+
+
 def _screenstudio_candidate_interaction(self, phase: str, nx: float, ny: float, event: QMouseEvent) -> bool:
         dlg = getattr(self, "_screenstudio_polish_dialog", None)
         canvas = getattr(self, "_drawing_canvas", None)
