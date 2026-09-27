@@ -38,6 +38,20 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
         dry_summary="AR/PBR preview diagnostics would be returned",
     )
     registry.register_adapter_action(
+        "ar_pbr.preview.open",
+        "Open (or reuse) the AR/PBR 3D asset preview window for a file path or an existing AR/PBR track, so view.get/view.set have a window to target.",
+        "ar_pbr",
+        "ar_pbr_preview_open",
+        params_schema=schema_object({
+            "path": {"type": "string", "description": "Asset file path to preview."},
+            "track_id": {"type": "string", "description": "Existing AR/PBR track id to preview instead of an explicit path."},
+        }),
+        mutating=False,
+        changed=False,
+        async_kind="ui",
+        dry_summary="AR/PBR preview window would open",
+    )
+    registry.register_adapter_action(
         "ar_pbr.preview.view.get",
         "Return the open AR/PBR asset preview camera framing, including rotation, zoom, camera distance, and pan.",
         "ar_pbr",

@@ -7,6 +7,22 @@ from app.actions.editor_adapter_ar_pbr_base import ArPbrBaseAdapterMixin
 
 
 class ArPbrPreviewAdapterMixin(ArPbrBaseAdapterMixin):
+    def ar_pbr_preview_open(self, *, path: str = "", track_id: str = "") -> dict[str, Any]:
+        owner = self._require_owner()
+        if track_id:
+            track = self._ar_pbr_find_track(track_id)
+            if track is None:
+                raise ValueError(f"unknown ar_pbr track: {track_id}")
+            owner._open_ar_pbr_track_model_view(track)
+        elif path:
+            owner._open_ar_pbr_asset_preview(path)
+        else:
+            raise ValueError("either path or track_id is required")
+        window = self._latest_ar_pbr_preview_window()
+        if window is None:
+            raise ValueError("AR/PBR preview window failed to open")
+        return {"window": "ar_pbr_preview", "opened": True}
+
     def ar_pbr_preview_view_get(self) -> dict[str, Any]:
         window = self._latest_ar_pbr_preview_window()
         if window is None:
